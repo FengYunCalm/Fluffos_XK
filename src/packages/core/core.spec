@@ -162,8 +162,10 @@ int crc32(string OR_BUFFER);
 /* commands operating on files */
 
 mixed read_buffer(string | buffer, void | int, void | int);
+mixed read_json(string);
 int write_buffer(string | buffer, int, string | buffer | int);
 int write_file(string, string, int default:0);
+int write_json(string, mixed);
 int rename(string, string);
 int write_bytes(string, int, string);
 

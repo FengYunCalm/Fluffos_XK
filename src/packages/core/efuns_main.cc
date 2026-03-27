@@ -1735,6 +1735,15 @@ void f_read_file() {
 }
 #endif
 
+#ifdef F_READ_JSON
+void f_read_json() {
+  svalue_t result = read_json(sp->u.string);
+
+  free_string_svalue(sp);
+  *sp = result;
+}
+#endif
+
 #ifdef F_RECEIVE
 void f_receive() {
   if (sp->type == T_STRING) {
@@ -3136,6 +3145,16 @@ void f_write_file() {
   free_string_svalue(sp--);
   free_string_svalue(sp);
   put_number(flags);
+}
+#endif
+
+#ifdef F_WRITE_JSON
+void f_write_json() {
+  int result = write_json((sp - 1)->u.string, sp);
+
+  free_svalue(sp--, "f_write_json");
+  free_string_svalue(sp);
+  put_number(result);
 }
 #endif
 
