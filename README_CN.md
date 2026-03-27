@@ -66,6 +66,11 @@ v2017 是旧版，使用 autoconf 构建系统，支持在 CentOS/Ubuntu 和 Win
 ------------
 参见 <https://www.fluffos.info/build.html>
 
+许可
+----
+当前 FluffOS 版本采用 MIT 许可，见 LICENSE。历史 LPmud/MudOS 组件仍受 Copyright 中的限制；第三方依赖的许可见
+src/thirdparty，对应详情见 NOTICE。
+
 捆绑的第三方依赖
 ----------------------
 - libwebsockets: <https://libwebsockets.org/>

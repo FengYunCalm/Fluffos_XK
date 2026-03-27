@@ -71,6 +71,11 @@ How to Build
 ------------
 see <https://www.fluffos.info/build.html>
 
+License
+-------
+Current FluffOS release is MIT-licensed; see LICENSE. Historical LPmud/MudOS restrictions apply to legacy components;
+see Copyright. Bundled third-party components carry their own licenses under src/thirdparty; see NOTICE.
+
 Bundled Third-party Dependencies
 ----------------------
 - libwebsockets: <https://libwebsockets.org/>

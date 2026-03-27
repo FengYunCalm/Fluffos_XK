@@ -1,0 +1,30 @@
+FluffOS licensing notice
+========================
+
+This repository follows the "License & Copyright" section in docs/index.md.
+The current FluffOS release is MIT-licensed (see LICENSE).
+
+Historical / legacy code
+------------------------
+The file "Copyright" at the repository root records historical LPmud/MudOS
+copyright restrictions, including a "no monetary gain" restriction. Those
+restrictions apply to legacy LPmud/MudOS-derived components as stated there.
+
+Third-party dependencies
+------------------------
+Bundled third-party components under src/thirdparty carry their own licenses.
+See the relevant LICENSE/COPYING/AUTHORS files, for example:
+
+- src/thirdparty/backward-cpp/LICENSE.txt
+- src/thirdparty/filesystem/LICENSE
+- src/thirdparty/fmt/LICENSE.rst
+- src/thirdparty/json/LICENSE.MIT
+- src/thirdparty/libevent/LICENSE
+- src/thirdparty/libtelnet/COPYING
+- src/thirdparty/libtelnet/AUTHORS
+- src/thirdparty/libwebsockets/LICENSE
+- src/thirdparty/utf8_decoder_dfa/LICENSE
+- src/thirdparty/utfcpp/LICENSE
+- src/thirdparty/widecharwidth/LICENSE
+- src/thirdparty/scope_guard/scope_guard.hpp (MIT header)
+- src/thirdparty/crypt/README (source from musl 1.1.24)
