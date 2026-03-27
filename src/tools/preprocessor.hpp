@@ -289,7 +289,15 @@ static void handle_define() {
     }
     *--q = 0;
     add_define(namebuf, arg, mtext);
-  } else if (isspace(*tmp) || (!*tmp && (*(tmp + 1) = '\0', *tmp = ' '))) {
+  } else {
+    if (!*tmp) {
+      *(tmp + 1) = '\0';
+      *tmp = ' ';
+    }
+    if (!isspace(*tmp)) {
+      yyerror("Illegal macro symbol");
+      return;
+    }
     end = mtext + MLEN - 2;
     for (q = mtext; *tmp;) {
       *q = *tmp++;
@@ -305,8 +313,6 @@ static void handle_define() {
     }
     *q = 0;
     add_define(namebuf, -1, mtext);
-  } else {
-    yyerror("Illegal macro symbol");
   }
   return;
 }

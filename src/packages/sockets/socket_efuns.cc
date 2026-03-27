@@ -1123,6 +1123,7 @@ int socket_write(int fd, svalue_t *message, const char *name) {
               should_continue = true;
               break;
           }
+          [[fallthrough]];
         default:
           debug(sockets, "ssl_write: lpc socket %d (real fd %" FMT_SOCKET_FD ") error: %s.\n",
                 fd, lpc_socks[fd].fd, ERR_error_string(e, nullptr));
@@ -1300,7 +1301,7 @@ void socket_read_select_handler(int fd) {
       call_callback(fd, S_READ_FP, 1);
       return;
 
-    case STATE_HANDSHAKE: {
+    case STATE_HANDSHAKE:
       switch (lpc_socks[fd].mode) {
         case STREAM_TLS:
         case STREAM_TLS_BINARY: {
@@ -1315,7 +1316,7 @@ void socket_read_select_handler(int fd) {
           debug(sockets, ("read_socket_handler: STATE_HANDSHAKE unsupported mode.\n"));
           break;
       }
-    }
+      [[fallthrough]];
 
     case STATE_DATA_XFER:
       switch (lpc_socks[fd].mode) {
@@ -1491,8 +1492,8 @@ void socket_read_select_handler(int fd) {
     case STREAM:
       if (cc == -1) {
         auto e = evutil_socket_geterror(lpc_socks[fd].fd);
-        debug(sockets, "read_socket_handler: %d (fd %d), error: (%d) %s.\n", fd, lpc_socks[fd].fd,
-              e, evutil_socket_error_to_string(e));
+        debug(sockets, "read_socket_handler: %d (fd %" FMT_SOCKET_FD "), error: (%d) %s.\n",
+              fd, lpc_socks[fd].fd, e, evutil_socket_error_to_string(e));
         switch (e) {
           case ERR(ECONNREFUSED):
             /* Evidentally, on Linux 1.2.1, ECONNREFUSED gets returned

@@ -3,6 +3,7 @@
 #include "scratchpad.h"
 
 #include <cstdlib>
+#include <cstring>
 
 // FIXME: figure out where this is
 extern void yywarn(const char *, ...);
@@ -53,7 +54,7 @@ extern void yywarn(const char *, ...);
 #define S2 ((unsigned char *)s2)
 #define Scratch_large_alloc(x) ((unsigned char *)scratch_large_alloc(x))
 #define Strlen(x) (strlen((char *)x))
-#define Strcpy(x, y) (strcpy((char *)x, (char *)y))
+#define Strcpy(x, y) (memcpy((char *)x, (char *)y, strlen((char *)y) + 1))
 #define Strncpy(x, y, z) (strncpy((char *)x, (char *)y, z))
 
 /* not strictly ANSI, but should always work ... */
@@ -196,7 +197,7 @@ char *scratch_realloc(char *ptr, int size) {
       char *res;
       SDEBUG(printf("copy off ... "));
       res = scratch_large_alloc(size);
-      strcpy(res, ptr);
+      memcpy(res, ptr, strlen(ptr) + 1);
       scratch_free_last();
       return res;
     }
@@ -228,7 +229,7 @@ char *scratch_realloc(char *ptr, int size) {
     } else {
       SDEBUG(printf("copy off ... "));
       res = scratch_large_alloc(size);
-      strcpy(res, ptr);
+      memcpy(res, ptr, strlen(ptr) + 1);
     }
     *ptr = 0; /* free the old version */
     return res;
@@ -262,7 +263,7 @@ char *scratch_join(char *s1, char *s2) {
                 "argument 2 to scratch_join was not a scratchpad string.\n");
 
     res = scratch_realloc(s1, l + strlen(s2) + 1);
-    strcpy(res + l, s2);
+    memcpy(res + l, s2, strlen(s2) + 1);
     scratch_free(s2);
     return res;
   } else {
@@ -283,8 +284,8 @@ char *scratch_join(char *s1, char *s2) {
       return s1;
     } else {
       char *ret = scratch_large_alloc(tmp);
-      strcpy(ret, s1);
-      strcpy(ret + (scr_last - S1) - 2, s2);
+      memcpy(ret, s1, strlen(s1) + 1);
+      memcpy(ret + (scr_last - S1) - 2, s2, strlen(s2) + 1);
       scratch_free(s1);
       scratch_free(s2);
       return ret;

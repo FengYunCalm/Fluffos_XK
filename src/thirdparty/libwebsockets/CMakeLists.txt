@@ -64,6 +64,12 @@ endif()
 
 # it's at this point any toolchain file is brought in
 project(libwebsockets C CXX)
+
+if (MSVC)
+	add_compile_options(/w)
+elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
+	add_compile_options(-w)
+endif()
 include(CTest)
 
 if (ESP_PLATFORM)
@@ -1062,6 +1068,10 @@ install(FILES
 if (LWS_WITH_EXPORT_LWSTARGETS)
     install(EXPORT LibwebsocketsTargets
             DESTINATION "${LWS_INSTALL_CMAKE_DIR}" COMPONENT dev)
+endif()
+
+if (TARGET websockets)
+	set_property(TARGET websockets PROPERTY INTERPROCEDURAL_OPTIMIZATION FALSE)
 endif()
 
 # build subdir is not part of sources

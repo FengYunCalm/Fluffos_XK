@@ -117,7 +117,6 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL
     "-Werror=format-security"
     $<$<COMPILE_LANGUAGE:C>:-Werror=implicit-function-declaration>
     # Turn off some warnings from GCC.
-    "-Wno-unknown-warning-option"
     "-Wno-char-subscripts"
     "-Wno-sign-compare"
     "-Wno-unused-function"
@@ -133,6 +132,10 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL
     # Less undefined behavior
     "-fsigned-char"
     "-fwrapv")
+
+  if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL "AppleClang")
+    add_compile_options("-Wno-unknown-warning-option")
+  endif ()
 endif ()
 
 # LTO on release builds
@@ -336,19 +339,28 @@ if (${BISON_FOUND})
   BISON_TARGET(Grammar "${CMAKE_CURRENT_SOURCE_DIR}/compiler/internal/grammar.y"
           ${CMAKE_CURRENT_BINARY_DIR}/grammar.autogen.cc
           DEFINES_FILE "${CMAKE_CURRENT_BINARY_DIR}/grammar.autogen.h"
-          COMPILE_FLAGS "-Wall --color=auto -rall"
+          COMPILE_FLAGS "-Wall --color=auto -rall --warnings=none"
           VERBOSE REPORT_FILE "${CMAKE_CURRENT_BINARY_DIR}/grammar.report"
           )
   set(GENERATRED_GRAMMAR_FILES
           "${BISON_Grammar_OUTPUT_SOURCE}"
           "${BISON_Grammar_OUTPUT_HEADER}"
           )
+  if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
+    set_source_files_properties("${BISON_Grammar_OUTPUT_SOURCE}" PROPERTIES
+            COMPILE_OPTIONS "-Wno-empty-body;-Wno-implicit-fallthrough")
+  endif ()
 else()
   message(STATUS "BISON: version too low, using pre-generated source.")
   set(GENERATRED_GRAMMAR_FILES
           "${CMAKE_CURRENT_SOURCE_DIR}/compiler/internal/grammar.autogen.cc"
           "${CMAKE_CURRENT_SOURCE_DIR}/compiler/internal/grammar.autogen.h")
+  if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
+    set_source_files_properties("compiler/internal/grammar.autogen.cc" PROPERTIES
+            COMPILE_OPTIONS "-Wno-empty-body;-Wno-implicit-fallthrough")
+  endif ()
 endif()
+
 
 set(SRC
   "backend.cc"
@@ -407,6 +419,11 @@ set(SRC
   "vm/internal/trace.cc"
   "vm/internal/vm.cc"
   )
+
+if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
+  set_source_files_properties("compiler/internal/scratchpad.cc" PROPERTIES
+          COMPILE_OPTIONS "-Wno-stringop-overflow")
+endif ()
 
 set(TEST_SRC
   "vm/internal/otable_test.cc"

@@ -51,6 +51,12 @@ set(EVENT__LIBRARY_TYPE DEFAULT CACHE STRING
 
 project(libevent C)
 
+if (MSVC)
+    add_compile_options(/w)
+elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    add_compile_options(-w)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/")
 string(REGEX MATCH "SunOS" SOLARIS "${CMAKE_SYSTEM_NAME}")
 
@@ -1702,6 +1708,12 @@ if (NOT TARGET uninstall)
 	add_custom_target(uninstall
 					  COMMAND ${CMAKE_COMMAND} -P ${PROJECT_BINARY_DIR}/Uninstall.cmake)
 endif()
+
+foreach(event_target event_core_static event_extra_static event_openssl_static)
+    if (TARGET ${event_target})
+        set_property(TARGET ${event_target} PROPERTY INTERPROCEDURAL_OPTIMIZATION FALSE)
+    endif()
+endforeach()
 
 message(STATUS "")
 message(STATUS "        ---( Libevent " ${EVENT_VERSION} " )---")

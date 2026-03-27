@@ -1,5 +1,11 @@
 project(crypt CXX)
 
+if (MSVC)
+  add_compile_options(/w)
+elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
+  add_compile_options(-w)
+endif ()
+
 set(SOURCE
   "include/crypt.h"
   "crypt.h"
@@ -15,3 +21,7 @@ set(SOURCE
 )
 
 add_library(crypt STATIC ${SOURCE})
+
+if (TARGET crypt)
+  set_property(TARGET crypt PROPERTY INTERPROCEDURAL_OPTIMIZATION FALSE)
+endif ()
