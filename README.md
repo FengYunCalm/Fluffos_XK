@@ -11,22 +11,19 @@ This repository is a fork of FluffOS focused on build reliability and compiler w
 - **Third-party warning control**: warning suppression and IPO disabled where needed in libevent/crypt/libwebsockets; filesystem CMake minimum version aligned for compatibility.
 - **License alignment**: LICENSE/NOTICE added and README updated to reference official FluffOS license sources.
 
-## Build
+## Get the code
 
-- Official build guide: https://www.fluffos.info/build.html
-- Quick build:
+```bash
+git clone https://github.com/FengYunCalm/fluffos-src.git
+cd fluffos-src
+```
 
-  ```bash
-  rm -rf build && mkdir build && cd build
-  cmake ..
-  cmake --build . --target install
-  ```
-
-- Windows/MSYS2 note: ensure `bash` is available in your environment; the install step relies on it for safe binary replacement.
+This README stays at source-repository scope. It does not claim any packaged distribution or hosted deployment path.
 
 ## Documentation
 
 - Official docs: https://www.fluffos.info
+- Official build guide: https://www.fluffos.info/build.html
 - Local docs entry: `docs/index.md`
 - Changelog for this fork: `CHANGELOG.md`
 - For full feature lists and historical notes, see upstream documentation.
