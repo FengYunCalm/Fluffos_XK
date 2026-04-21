@@ -2,7 +2,17 @@
 
 English | [简体中文](README_CN.md)
 
+<<<<<<< HEAD
 This repository is a fork of FluffOS focused on build reliability and compiler warning cleanup for modern toolchains, with special attention to Windows/MSYS2 installations.
+=======
+This repository is a fork of FluffOS focused on build reliability and compiler warning cleanup for modern toolchains,
+with special attention to Windows/MSYS2 installations.
+
+## Repository Role
+
+- Keeps source-level FluffOS fork changes used by downstream MUD runtime trees
+- Focuses on build reliability and targeted compiler cleanup rather than feature divergence
+- Tracks upstream separately from the game repositories that consume the driver
 
 ## What this fork changes
 
