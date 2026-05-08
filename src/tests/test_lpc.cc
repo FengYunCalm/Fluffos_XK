@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
+#include <string>
 #include "base/package_api.h"
 
 #include "mainlib.h"
 
 #include "compiler/internal/compiler.h"
+#include "packages/gateway/gateway.h"
+#include "vm/internal/simulate.h"
 
 // Test fixture class
 class DriverTest : public ::testing::Test {
@@ -151,4 +154,72 @@ TEST_F(DriverTest, TestLPC_FunctionInherit) {
     }
     pop_context(&econ);
 
+}
+
+namespace {
+
+svalue_t *call_lpc_method(object_t *ob, const char *method, int num_args = 0) {
+  save_command_giver(ob);
+  set_eval(max_eval_cost);
+  auto *ret = safe_apply(method, ob, num_args, ORIGIN_DRIVER);
+  restore_command_giver();
+  return ret;
+}
+
+object_t *create_gateway_session_for_test(const char *session_id, const char *login_file) {
+  svalue_t data{};
+  data.type = T_MAPPING;
+  data.u.map = allocate_mapping(1);
+  add_mapping_string(data.u.map, "ip", "127.0.0.1");
+  copy_and_push_string(login_file);
+  safe_apply("set_test_login_ob", master_ob, 1, ORIGIN_DRIVER);
+  auto *ob = gateway_create_session_internal(session_id, &data, "127.0.0.1", 6040, -1);
+  safe_apply("reset_test_login_ob", master_ob, 0, ORIGIN_DRIVER);
+  free_svalue(&data, "create_gateway_session_for_test");
+  return ob;
+}
+
+}  // namespace
+
+TEST_F(DriverTest, TestGatewaySessionDestroyCallsGatewayDisconnected) {
+  auto *ob = create_gateway_session_for_test("gw-test-destroy", "/clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  ASSERT_NE(ob->interactive, nullptr);
+  ASSERT_TRUE(gateway_is_session(ob));
+
+  add_ref(ob, "TestGatewaySessionDestroyCallsGatewayDisconnected");
+
+  ASSERT_EQ(gateway_destroy_session_internal("gw-test-destroy", "client_close", "bye"), 1);
+  ASSERT_EQ(ob->interactive, nullptr);
+
+  auto *code = call_lpc_method(ob, "query_last_disconnect_code");
+  ASSERT_NE(code, nullptr);
+  ASSERT_EQ(code->type, T_STRING);
+  ASSERT_STREQ(code->u.string, "client_close");
+
+  auto *text = call_lpc_method(ob, "query_last_disconnect_text");
+  ASSERT_NE(text, nullptr);
+  ASSERT_EQ(text->type, T_STRING);
+  ASSERT_STREQ(text->u.string, "bye");
+
+  destruct_object(ob);
+  free_object(&ob, "TestGatewaySessionDestroyCallsGatewayDisconnected");
+}
+
+TEST_F(DriverTest, TestGatewaySessionExecLogonKeepsSessionLookupWorking) {
+  auto *ob = create_gateway_session_for_test("gw-test-exec", "/clone/gateway_login_exec_example");
+  ASSERT_NE(ob, nullptr);
+  ASSERT_NE(ob->interactive, nullptr);
+  ASSERT_TRUE(gateway_is_session(ob));
+  ASSERT_NE(std::string(ob->obname).find("clone/gateway_exec_user"), std::string::npos);
+
+  auto *info = call_lpc_method(ob, "query_gateway_session_snapshot");
+  ASSERT_NE(info, nullptr);
+  ASSERT_EQ(info->type, T_MAPPING);
+
+  add_ref(ob, "TestGatewaySessionExecLogonKeepsSessionLookupWorking");
+  ASSERT_EQ(gateway_destroy_session_internal("gw-test-exec", "test_done", "done"), 1);
+  ASSERT_EQ(ob->interactive, nullptr);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewaySessionExecLogonKeepsSessionLookupWorking");
 }

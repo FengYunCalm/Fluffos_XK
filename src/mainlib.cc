@@ -37,6 +37,10 @@
 #include "backend.h"                             // for backend();
 #include "thirdparty/backward-cpp/backward.hpp"  // for backtracing
 
+#ifdef PACKAGE_GATEWAY
+#include "packages/gateway/gateway.h"
+#endif
+
 // from lex.cc
 extern void print_all_predefines();
 
@@ -435,6 +439,10 @@ int driver_main(int argc, char **argv) {
   if (!init_user_conn()) {
     exit(1);
   }
+
+#ifdef PACKAGE_GATEWAY
+  init_gateway();
+#endif
 
   debug_message("Initializations complete.\n\n");
   setup_signal_handlers();

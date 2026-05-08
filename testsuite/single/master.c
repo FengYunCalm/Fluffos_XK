@@ -7,6 +7,7 @@ inherit "/inherit/master/valid";
 
 nosave int has_error = 0;
 nosave string last_error = "";
+nosave string test_login_ob = 0;
 
 public string clear_last_error() {
   last_error = "";
@@ -28,6 +29,14 @@ public string get_last_error() {
     return sprintf("%O", trace_to_last_assert());
   }
   return last_error;
+}
+
+public void set_test_login_ob(string path) {
+  test_login_ob = path;
+}
+
+public void reset_test_login_ob() {
+  test_login_ob = 0;
 }
 
 void flag(string str) {
@@ -69,8 +78,9 @@ object connect()
 {
   object login_ob;
   mixed err;
+  string login_path = test_login_ob || LOGIN_OB;
 
-  err = catch(login_ob = new(LOGIN_OB));
+  err = catch(login_ob = new(login_path));
 
   if (err) {
     write("It looks like someone is working on the player object.\n");

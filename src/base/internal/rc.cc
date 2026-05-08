@@ -104,6 +104,10 @@ const FlagEntry INT_FLAGS[] = {
     {"enable mssp", __RC_ENABLE_MSSP__, 1},
     {"enable msp", __RC_ENABLE_MSP__, 1},
     {"enable msdp", __RC_ENABLE_MSDP__, 0},
+    {"gateway port", __RC_GATEWAY_PORT__, 0},
+    {"gateway external", __RC_GATEWAY_EXTERNAL__, 0},
+    {"gateway debug", __RC_GATEWAY_DEBUG__, 0},
+    {"gateway packet size", __RC_GATEWAY_PACKET_SIZE__, 1048576, 1024, 16 * 1024 * 1024},
 };
 
 /*

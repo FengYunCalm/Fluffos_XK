@@ -36,6 +36,7 @@
 #define USING_COMPRESS 0x40000     /* we've negotiated compress */
 #define USING_MSP 0x80000          /* we've negotiated msp */
 #define USING_MSDP 0x100000 /* we've negotiated msdp */
+#define GATEWAY_SESSION 0x200000 /* this is a gateway-backed virtual session */
 
 // from ICU
 struct UConverter;
@@ -87,6 +88,12 @@ struct interactive_t {
 
   // TLS context
   SSL *ssl;
+
+  // Gateway session fields (reserved for driver-level gateway integration)
+  char *gateway_session_id;
+  char *gateway_real_ip;
+  int gateway_real_port;
+  int gateway_master_fd;
 };
 
 #endif /* INTERACTIVE_H */

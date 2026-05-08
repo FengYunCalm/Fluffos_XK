@@ -23,6 +23,13 @@ int replace_interactive(object_t *ob, object_t *obfrom) {
     set_command_giver(ob);
   }
 
+#ifdef PACKAGE_GATEWAY
+  if (ob->interactive && (ob->interactive->iflags & GATEWAY_SESSION)) {
+    extern void gateway_session_exec_update(object_t *new_ob, object_t *old_ob);
+    gateway_session_exec_update(ob, obfrom);
+  }
+#endif
+
   free_object(&obfrom, "exec");
   return (1);
 } /* replace_interactive() */

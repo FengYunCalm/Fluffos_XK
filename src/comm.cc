@@ -561,6 +561,25 @@ void add_message(object_t *who, const char *data, int len) {
   inet_packets++;
 
   auto *ip = who->interactive;
+
+#ifdef PACKAGE_GATEWAY
+  if ((ip->iflags & GATEWAY_SESSION) && ip->gateway_session_id) {
+    extern int gateway_send_to_session(const char *session_id, const char *data, size_t len);
+    gateway_send_to_session(ip->gateway_session_id, data, len);
+#ifdef SHADOW_CATCH_MESSAGE
+    if (shadow_catch_message(who, data)) {
+      if (CONFIG_INT(__RC_SNOOP_SHADOWED__)) {
+        handle_snoop(data, len, ip);
+      }
+      return;
+    }
+#endif
+    handle_snoop(data, len, ip);
+    add_message_calls++;
+    return;
+  }
+#endif
+
   switch (ip->connection_type) {
     case PORT_TYPE_ASCII:
     case PORT_TYPE_TELNET: {
@@ -639,6 +658,12 @@ int flush_message(interactive_t *ip) {
     debug(connections, ("flush_message: invalid target!\n"));
     return 0;
   }
+
+#ifdef PACKAGE_GATEWAY
+  if ((ip->iflags & GATEWAY_SESSION) && ip->gateway_session_id) {
+    return 1;
+  }
+#endif
 
   // Currently only support Libevent based connections, for websocket based connections, they use
   // ip->lws.
@@ -1344,6 +1369,22 @@ void remove_interactive(object_t *ob, int dested) {
     ip->carryover = nullptr;
     ip->num_carry = 0;
     ip->input_to = nullptr;
+  }
+#endif
+
+#ifdef PACKAGE_GATEWAY
+  if (ip->iflags & GATEWAY_SESSION) {
+    extern void gateway_handle_remove_interactive(interactive_t *ip);
+    gateway_handle_remove_interactive(ip);
+
+    if (ip->gateway_session_id) {
+      FREE_MSTR(ip->gateway_session_id);
+      ip->gateway_session_id = nullptr;
+    }
+    if (ip->gateway_real_ip) {
+      FREE_MSTR(ip->gateway_real_ip);
+      ip->gateway_real_ip = nullptr;
+    }
   }
 #endif
 
