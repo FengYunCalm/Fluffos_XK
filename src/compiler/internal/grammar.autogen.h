@@ -35,8 +35,8 @@
    especially those whose name start with YY_ or yy_.  They are
    private implementation details that can be changed or removed.  */
 
-#ifndef YY_YY_HOME_MECHREVO_PROJECTS_FLUFFOS_SRC_BUILD_SRC_GRAMMAR_AUTOGEN_H_INCLUDED
-# define YY_YY_HOME_MECHREVO_PROJECTS_FLUFFOS_SRC_BUILD_SRC_GRAMMAR_AUTOGEN_H_INCLUDED
+#ifndef YY_YY_HOME_MECHREVO_PROJECTS_FLUFFOS_VMCONTEXT_BUILD_PROD_SRC_GRAMMAR_AUTOGEN_H_INCLUDED
+# define YY_YY_HOME_MECHREVO_PROJECTS_FLUFFOS_VMCONTEXT_BUILD_PROD_SRC_GRAMMAR_AUTOGEN_H_INCLUDED
 /* Debug traces.  */
 #ifndef YYDEBUG
 # define YYDEBUG 0
@@ -117,7 +117,7 @@ extern int yydebug;
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 union YYSTYPE
 {
-#line 131 "/home/mechrevo/projects/fluffos-src/src/compiler/internal/grammar.y"
+#line 131 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
 
   LPC_INT number; /* 8 */
   LPC_FLOAT real; /* 8 */
@@ -138,7 +138,7 @@ union YYSTYPE
     uint16_t save_exact_types;
   } func_block; /* 8 */
 
-#line 142 "/home/mechrevo/projects/fluffos-src/build/src/grammar.autogen.h"
+#line 142 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.h"
 
 };
 typedef union YYSTYPE YYSTYPE;
@@ -153,4 +153,4 @@ extern YYSTYPE yylval;
 int yyparse (void);
 
 
-#endif /* !YY_YY_HOME_MECHREVO_PROJECTS_FLUFFOS_SRC_BUILD_SRC_GRAMMAR_AUTOGEN_H_INCLUDED  */
+#endif /* !YY_YY_HOME_MECHREVO_PROJECTS_FLUFFOS_VMCONTEXT_BUILD_PROD_SRC_GRAMMAR_AUTOGEN_H_INCLUDED  */

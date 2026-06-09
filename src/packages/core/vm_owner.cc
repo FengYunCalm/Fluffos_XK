@@ -41,3 +41,32 @@ void f_vm_owner_status() {
   sp->u.map = status;
 }
 #endif
+
+#ifdef F_VM_OWNER_ENQUEUE
+void f_vm_owner_enqueue() {
+  auto *task_key = sp;
+  auto *task_type = sp - 1;
+  auto *owner_id = sp - 2;
+  auto task_id = vm_owner_enqueue_task(owner_id->u.string, task_type->u.string, task_key->u.string);
+  pop_n_elems(3);
+  push_number(static_cast<long>(task_id));
+}
+#endif
+
+#ifdef F_VM_OWNER_DRAIN
+void f_vm_owner_drain() {
+  auto limit = sp->u.number;
+  auto *owner_id = sp - 1;
+  auto *result = vm_owner_drain_mailbox(owner_id->u.string, static_cast<int>(limit));
+  pop_2_elems();
+  push_refed_mapping(result);
+}
+#endif
+
+#ifdef F_VM_OWNER_MAILBOX_STATUS
+void f_vm_owner_mailbox_status() {
+  auto *result = vm_owner_mailbox_status(sp->u.string);
+  pop_stack();
+  push_refed_mapping(result);
+}
+#endif

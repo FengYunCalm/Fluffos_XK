@@ -380,3 +380,6 @@ string vm_owner_id(object default: F__THIS_OBJECT);
 int vm_set_owner_id(object, string);
 int vm_owner_check(object, string);
 mapping vm_owner_status(object default: F__THIS_OBJECT);
+int vm_owner_enqueue(string, string, string);
+mapping vm_owner_drain(string, int);
+mapping vm_owner_mailbox_status(string);

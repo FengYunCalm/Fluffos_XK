@@ -3,14 +3,71 @@
 #include "vm/owner.h"
 
 #include <atomic>
+#include <deque>
+#include <string>
+#include <unordered_map>
 
 namespace {
 constexpr const char *kDefaultOwnerId = "owner/global";
 std::atomic<uint64_t> total_checks{0};
 std::atomic<uint64_t> mismatch_checks{0};
+std::atomic<uint64_t> next_mailbox_task_id{1};
+std::atomic<uint64_t> total_enqueued{0};
+std::atomic<uint64_t> total_drained{0};
+
+struct OwnerMailboxTask {
+  uint64_t task_id;
+  uint64_t sequence;
+  std::string owner_id;
+  std::string task_type;
+  std::string task_key;
+};
+
+std::unordered_map<std::string, std::deque<OwnerMailboxTask>> owner_mailboxes;
 
 bool valid_owner_id(const char *owner_id) {
   return owner_id && owner_id[0] != '\0';
+}
+
+const char *normalize_owner_id(const char *owner_id) {
+  return valid_owner_id(owner_id) ? owner_id : kDefaultOwnerId;
+}
+
+const char *normalize_task_text(const char *text, const char *fallback) {
+  return text && text[0] != '\0' ? text : fallback;
+}
+
+long owner_mailbox_depth(const std::string &owner_id) {
+  auto it = owner_mailboxes.find(owner_id);
+  return it == owner_mailboxes.end() ? 0 : static_cast<long>(it->second.size());
+}
+
+long owner_mailbox_total_depth() {
+  long depth = 0;
+  for (const auto &entry : owner_mailboxes) {
+    depth += static_cast<long>(entry.second.size());
+  }
+  return depth;
+}
+
+long owner_mailbox_active_owners() {
+  long owners = 0;
+  for (const auto &entry : owner_mailboxes) {
+    if (!entry.second.empty()) {
+      owners++;
+    }
+  }
+  return owners;
+}
+
+mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
+  auto *map = allocate_mapping(5);
+  add_mapping_pair(map, "task_id", static_cast<long>(task.task_id));
+  add_mapping_pair(map, "sequence", static_cast<long>(task.sequence));
+  add_mapping_string(map, "owner_id", task.owner_id.c_str());
+  add_mapping_string(map, "task_type", task.task_type.c_str());
+  add_mapping_string(map, "task_key", task.task_key.c_str());
+  return map;
 }
 }  // namespace
 
@@ -74,5 +131,60 @@ mapping_t *vm_owner_status(object_t *object) {
     add_mapping_string(map, "object", "");
   }
   add_mapping_pair(map, "has_explicit_owner", object && object->vm_owner_id ? 1 : 0);
+  return map;
+}
+
+uint64_t vm_owner_enqueue_task(const char *owner_id, const char *task_type, const char *task_key) {
+  OwnerMailboxTask task;
+  task.task_id = next_mailbox_task_id.fetch_add(1, std::memory_order_relaxed);
+  task.sequence = total_enqueued.fetch_add(1, std::memory_order_relaxed) + 1;
+  task.owner_id = normalize_owner_id(owner_id);
+  task.task_type = normalize_task_text(task_type, "generic");
+  task.task_key = normalize_task_text(task_key, "");
+  owner_mailboxes[task.owner_id].push_back(std::move(task));
+  return task.task_id;
+}
+
+mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
+  std::string normalized_owner_id = normalize_owner_id(owner_id);
+  auto &queue = owner_mailboxes[normalized_owner_id];
+  auto requested = limit <= 0 || static_cast<size_t>(limit) > queue.size() ? queue.size() : static_cast<size_t>(limit);
+  auto *tasks = allocate_array(static_cast<int>(requested));
+
+  for (size_t i = 0; i < requested; i++) {
+    auto task = queue.front();
+    queue.pop_front();
+    auto *task_map = owner_mailbox_task_mapping(task);
+    tasks->item[i].type = T_MAPPING;
+    tasks->item[i].subtype = 0;
+    tasks->item[i].u.map = task_map;
+  }
+  if (queue.empty()) {
+    owner_mailboxes.erase(normalized_owner_id);
+  }
+  total_drained.fetch_add(requested, std::memory_order_relaxed);
+
+  auto *map = allocate_mapping(7);
+  add_mapping_pair(map, "success", 1);
+  add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
+  add_mapping_pair(map, "drained", static_cast<long>(requested));
+  add_mapping_pair(map, "remaining", owner_mailbox_depth(normalized_owner_id));
+  add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "total_drained", static_cast<long>(total_drained.load(std::memory_order_relaxed)));
+  add_mapping_array(map, "tasks", tasks);
+  free_array(tasks);
+  return map;
+}
+
+mapping_t *vm_owner_mailbox_status(const char *owner_id) {
+  std::string normalized_owner_id = normalize_owner_id(owner_id);
+  auto *map = allocate_mapping(7);
+  add_mapping_pair(map, "success", 1);
+  add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
+  add_mapping_pair(map, "owner_queue_depth", owner_mailbox_depth(normalized_owner_id));
+  add_mapping_pair(map, "queue_depth", owner_mailbox_total_depth());
+  add_mapping_pair(map, "active_owners", owner_mailbox_active_owners());
+  add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "total_drained", static_cast<long>(total_drained.load(std::memory_order_relaxed)));
   return map;
 }

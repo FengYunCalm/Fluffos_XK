@@ -85,6 +85,54 @@ TEST_F(DriverTest, TestVmOwnerMetadataDefaultsAndChecks) {
   ASSERT_STREQ(vm_owner_default_id(), vm_owner_id(obj));
 }
 
+TEST_F(DriverTest, TestVmOwnerMailboxDrainsOwnerFifo) {
+  const char* owner_id = "owner/test/mailbox";
+  auto first_id = vm_owner_enqueue_task(owner_id, "command", "first");
+  auto second_id = vm_owner_enqueue_task(owner_id, "command", "second");
+  ASSERT_LT(first_id, second_id);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* status = vm_owner_mailbox_status(owner_id);
+  ASSERT_EQ(mapping_number(status, "owner_queue_depth"), 2);
+  free_mapping(status);
+
+  auto* first_drain = vm_owner_drain_mailbox(owner_id, 1);
+  ASSERT_EQ(mapping_number(first_drain, "drained"), 1);
+  ASSERT_EQ(mapping_number(first_drain, "remaining"), 1);
+  auto* first_tasks = find_string_in_mapping(first_drain, "tasks");
+  ASSERT_NE(first_tasks, nullptr);
+  ASSERT_EQ(first_tasks->type, T_ARRAY);
+  ASSERT_EQ(first_tasks->u.arr->size, 1);
+  ASSERT_EQ(first_tasks->u.arr->item[0].type, T_MAPPING);
+  ASSERT_EQ(mapping_number(first_tasks->u.arr->item[0].u.map, "task_id"), static_cast<long>(first_id));
+  ASSERT_STREQ(mapping_string(first_tasks->u.arr->item[0].u.map, "task_key"), "first");
+  free_mapping(first_drain);
+
+  auto* second_drain = vm_owner_drain_mailbox(owner_id, 0);
+  ASSERT_EQ(mapping_number(second_drain, "drained"), 1);
+  ASSERT_EQ(mapping_number(second_drain, "remaining"), 0);
+  auto* second_tasks = find_string_in_mapping(second_drain, "tasks");
+  ASSERT_NE(second_tasks, nullptr);
+  ASSERT_EQ(second_tasks->type, T_ARRAY);
+  ASSERT_EQ(second_tasks->u.arr->size, 1);
+  ASSERT_EQ(second_tasks->u.arr->item[0].type, T_MAPPING);
+  ASSERT_EQ(mapping_number(second_tasks->u.arr->item[0].u.map, "task_id"), static_cast<long>(second_id));
+  ASSERT_STREQ(mapping_string(second_tasks->u.arr->item[0].u.map, "task_key"), "second");
+  free_mapping(second_drain);
+}
+
 TEST_F(DriverTest, TestVmWorkerRunsTasksInParallel) {
   auto result = vm_worker_benchmark(4, 80);
   ASSERT_GE(result.worker_count, 1);
