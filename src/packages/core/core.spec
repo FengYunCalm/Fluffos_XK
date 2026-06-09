@@ -376,3 +376,7 @@ mapping vm_worker_actor_bench(int, int, int);
 mapping vm_worker_status();
 mapping vm_worker_submit(string, mapping, mapping);
 mapping vm_worker_poll(int);
+string vm_owner_id(object default: F__THIS_OBJECT);
+int vm_set_owner_id(object, string);
+int vm_owner_check(object, string);
+mapping vm_owner_status(object default: F__THIS_OBJECT);

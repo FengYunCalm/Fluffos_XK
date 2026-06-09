@@ -115,8 +115,9 @@ struct object_t {
 #ifdef PACKAGE_PARSER
   struct parse_info_s *pinfo;
 #endif
+  const char *vm_owner_id; /* owner-thread metadata; variables must stay last */
   svalue_t variables[1]; /* All variables to this program */
-                         /* The variables MUST come last in the struct */
+                          /* The variables MUST come last in the struct */
 };
 
 typedef int (*get_objectsfn_t)(object_t *, void *);

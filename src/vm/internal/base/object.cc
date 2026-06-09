@@ -18,6 +18,7 @@
 #include "base/internal/strutils.h"  // for startsWith, endsWith
 #include "comm.h"                    // add_message FIXME: reverse API
 #include "vm/context.h"
+#include "vm/owner.h"
 #include "vm/internal/apply.h"
 #include "vm/internal/base/machine.h"
 #include "vm/internal/eval_limit.h"
@@ -1856,6 +1857,7 @@ void dealloc_object(object_t *ob, const char *from) {
     FREE_MSTR(ob->replaced_program);
     ob->replaced_program = nullptr;
   }
+  vm_owner_clear_id(ob);
 #ifdef PRIVS
   if (ob->privs) {
     free_string(ob->privs);

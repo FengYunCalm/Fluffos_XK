@@ -10,6 +10,7 @@
 #include "packages/gateway/gateway.h"
 #include "vm/context.h"
 #include "vm/internal/simulate.h"
+#include "vm/owner.h"
 #include "vm/worker.h"
 
 // Test fixture class
@@ -62,6 +63,26 @@ TEST_F(DriverTest, TestVmContextTracksTopLevelState) {
   ASSERT_EQ(vm_context().execution.caller_type, 0);
   ASSERT_EQ(vm_context().object_store.objects, obj_list);
   ASSERT_EQ(vm_context().object_store.destructed_objects, obj_list_destruct);
+}
+
+TEST_F(DriverTest, TestVmOwnerMetadataDefaultsAndChecks) {
+  current_object = master_ob;
+  object_t* obj = find_object("single/master.c");
+  ASSERT_NE(obj, nullptr);
+
+  ASSERT_STREQ(vm_owner_default_id(), vm_owner_id(obj));
+  vm_owner_set_id(obj, "owner/test");
+  ASSERT_STREQ("owner/test", vm_owner_id(obj));
+  ASSERT_TRUE(vm_owner_matches(obj, "owner/test"));
+
+  auto before_total = vm_owner_total_checks();
+  auto before_mismatch = vm_owner_mismatch_checks();
+  vm_owner_record_check(obj, "owner/other", false);
+  ASSERT_EQ(vm_owner_total_checks(), before_total + 1);
+  ASSERT_EQ(vm_owner_mismatch_checks(), before_mismatch + 1);
+
+  vm_owner_clear_id(obj);
+  ASSERT_STREQ(vm_owner_default_id(), vm_owner_id(obj));
 }
 
 TEST_F(DriverTest, TestVmWorkerRunsTasksInParallel) {
