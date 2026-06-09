@@ -63,6 +63,14 @@ std::string mapping_string(mapping_t *map, const char *key, const char *fallback
   return fallback ? fallback : "";
 }
 
+mapping_t *mapping_mapping(mapping_t *map, const char *key) {
+  auto *value = find_string_in_mapping(map, key);
+  if (value && value->type == T_MAPPING) {
+    return value->u.map;
+  }
+  return nullptr;
+}
+
 void append_counted_string(std::string *out, const char *value) {
   auto length = value ? std::strlen(value) : 0;
   out->append(std::to_string(length));
@@ -156,6 +164,20 @@ void add_snapshot_digest_result(mapping_t *map, const VMWorkerSnapshotDigestResu
   add_mapping_pair(map, "checksum", static_cast<long>(result.checksum));
 }
 
+void add_actor_score_result(mapping_t *map, const VMWorkerActorScoreResult &result) {
+  add_mapping_string(map, "type", "actor_score");
+  add_mapping_string(map, "owner_key", result.owner_key.c_str());
+  add_mapping_pair(map, "worker_count", result.worker_count);
+  add_mapping_pair(map, "elapsed_ms", result.elapsed_ms);
+  add_mapping_pair(map, "hp_pct_bp", result.hp_pct_bp);
+  add_mapping_pair(map, "mp_pct_bp", result.mp_pct_bp);
+  add_mapping_pair(map, "ep_pct_bp", result.ep_pct_bp);
+  add_mapping_pair(map, "survival_score", result.survival_score);
+  add_mapping_pair(map, "resource_score", result.resource_score);
+  add_mapping_pair(map, "total_score", result.total_score);
+  add_mapping_string(map, "state", result.state.c_str());
+}
+
 mapping_t *worker_failure_response(const char *error) {
   auto *map = allocate_mapping(2);
   add_mapping_pair(map, "success", 0);
@@ -235,6 +257,38 @@ mapping_t *worker_snapshot_digest_response(svalue_t *snapshot, mapping_t *option
   auto result = vm_worker_snapshot_digest(owner_key, std::move(snapshot_text), repeat);
   auto *result_spec = allocate_mapping(7);
   add_snapshot_digest_result(result_spec, result);
+
+  auto *response = allocate_mapping(2);
+  add_mapping_pair(response, "success", 1);
+  add_mapping_mapping(response, "result_spec", result_spec);
+  free_mapping(result_spec);
+  return response;
+}
+
+mapping_t *worker_actor_score_response(svalue_t *snapshot, mapping_t *options) {
+  if (snapshot->type != T_MAPPING) {
+    return worker_failure_response("actor_score snapshot must be a mapping");
+  }
+
+  auto *snapshot_map = snapshot->u.map;
+  auto *combat = mapping_mapping(snapshot_map, "combat");
+  if (!combat) {
+    return worker_failure_response("actor_score snapshot combat mapping is required");
+  }
+
+  auto fallback_owner_key = mapping_string(snapshot_map, "owner_key", "global");
+  auto owner_key = mapping_string(options, "owner_key", fallback_owner_key.c_str());
+  VMWorkerActorScoreInput input;
+  input.hp = mapping_number(combat, "hp", 0);
+  input.max_hp = mapping_number(combat, "max_hp", 0);
+  input.mp = mapping_number(combat, "mp", 0);
+  input.max_mp = mapping_number(combat, "max_mp", 0);
+  input.ep = mapping_number(combat, "ep", 0);
+  input.max_ep = mapping_number(combat, "max_ep", 0);
+
+  auto result = vm_worker_actor_score(owner_key, input);
+  auto *result_spec = allocate_mapping(11);
+  add_actor_score_result(result_spec, result);
 
   auto *response = allocate_mapping(2);
   add_mapping_pair(response, "success", 1);
@@ -352,6 +406,8 @@ void f_vm_worker_task() {
     response = worker_actor_bench_response(options->u.map);
   } else if (task_name == "snapshot_digest") {
     response = worker_snapshot_digest_response(snapshot, options->u.map);
+  } else if (task_name == "actor_score") {
+    response = worker_actor_score_response(snapshot, options->u.map);
   } else {
     response = worker_failure_response("unknown worker task");
   }

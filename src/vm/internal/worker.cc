@@ -44,6 +44,27 @@ void update_max(std::atomic<int> &target, int value) {
   }
 }
 
+int ratio_bp(int value, int max_value) {
+  if (max_value <= 0 || value <= 0) {
+    return 0;
+  }
+  value = std::min(value, max_value);
+  return static_cast<int>((static_cast<int64_t>(value) * 10000) / max_value);
+}
+
+std::string actor_state_from_score(int total_score) {
+  if (total_score >= 8000) {
+    return "stable";
+  }
+  if (total_score >= 5000) {
+    return "strained";
+  }
+  if (total_score > 0) {
+    return "critical";
+  }
+  return "down";
+}
+
 class VMWorkerRuntime {
  public:
   ~VMWorkerRuntime() { stop(); }
@@ -257,6 +278,33 @@ class VMWorkerRuntime {
     auto stats = this->stats();
     return VMWorkerSnapshotDigestResult{owner_key, stats.worker_count, elapsed.count(),
                                         input_bytes, repeat, checksum->load()};
+  }
+
+  VMWorkerActorScoreResult actor_score(std::string owner_key, VMWorkerActorScoreInput input) {
+    if (owner_key.empty()) {
+      owner_key = "global";
+    }
+    start(0);
+
+    auto result = std::make_shared<VMWorkerActorScoreResult>();
+    result->owner_key = owner_key;
+    auto start_time = std::chrono::steady_clock::now();
+    auto future = submit_keyed(owner_key, [result, input] {
+      result->hp_pct_bp = ratio_bp(input.hp, input.max_hp);
+      result->mp_pct_bp = ratio_bp(input.mp, input.max_mp);
+      result->ep_pct_bp = ratio_bp(input.ep, input.max_ep);
+      result->survival_score = result->hp_pct_bp;
+      result->resource_score = (result->mp_pct_bp + result->ep_pct_bp) / 2;
+      result->total_score = (result->survival_score * 7 + result->resource_score * 3) / 10;
+      result->state = actor_state_from_score(result->total_score);
+    });
+    future.get();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_time);
+    auto stats = this->stats();
+    result->worker_count = stats.worker_count;
+    result->elapsed_ms = elapsed.count();
+    return *result;
   }
 
   uint64_t submit_benchmark(int tasks, int millis) {
@@ -486,6 +534,11 @@ VMWorkerSnapshotDigestResult vm_worker_snapshot_digest(std::string owner_key,
                                                        std::string snapshot_text,
                                                        int repeat) {
   return runtime().snapshot_digest(std::move(owner_key), std::move(snapshot_text), repeat);
+}
+
+VMWorkerActorScoreResult vm_worker_actor_score(std::string owner_key,
+                                               VMWorkerActorScoreInput input) {
+  return runtime().actor_score(std::move(owner_key), input);
 }
 
 uint64_t vm_worker_submit_benchmark(int tasks, int millis) {

@@ -39,6 +39,28 @@ struct VMWorkerSnapshotDigestResult {
   uint64_t checksum{0};
 };
 
+struct VMWorkerActorScoreInput {
+  int hp{0};
+  int max_hp{0};
+  int mp{0};
+  int max_mp{0};
+  int ep{0};
+  int max_ep{0};
+};
+
+struct VMWorkerActorScoreResult {
+  std::string owner_key;
+  int worker_count{0};
+  int64_t elapsed_ms{0};
+  int hp_pct_bp{0};
+  int mp_pct_bp{0};
+  int ep_pct_bp{0};
+  int survival_score{0};
+  int resource_score{0};
+  int total_score{0};
+  std::string state;
+};
+
 struct VMWorkerStats {
   int worker_count{0};
   uint64_t submitted{0};
@@ -68,6 +90,8 @@ VMWorkerActorBenchResult vm_worker_actor_benchmark(int owners, int tasks_per_own
 VMWorkerSnapshotDigestResult vm_worker_snapshot_digest(std::string owner_key,
                                                        std::string snapshot_text,
                                                        int repeat);
+VMWorkerActorScoreResult vm_worker_actor_score(std::string owner_key,
+                                               VMWorkerActorScoreInput input);
 uint64_t vm_worker_submit_benchmark(int tasks, int millis);
 VMWorkerTaskResult vm_worker_poll_task(uint64_t task_id);
 

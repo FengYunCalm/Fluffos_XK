@@ -115,6 +115,27 @@ TEST_F(DriverTest, TestVmWorkerSnapshotDigestUsesOwnerKey) {
   ASSERT_GT(result.checksum, 0u);
 }
 
+TEST_F(DriverTest, TestVmWorkerActorScoreUsesSnapshotValues) {
+  VMWorkerActorScoreInput input;
+  input.hp = 80;
+  input.max_hp = 100;
+  input.mp = 50;
+  input.max_mp = 100;
+  input.ep = 100;
+  input.max_ep = 100;
+
+  auto result = vm_worker_actor_score("actor/score", input);
+  ASSERT_EQ(result.owner_key, "actor/score");
+  ASSERT_GE(result.worker_count, 1);
+  ASSERT_EQ(result.hp_pct_bp, 8000);
+  ASSERT_EQ(result.mp_pct_bp, 5000);
+  ASSERT_EQ(result.ep_pct_bp, 10000);
+  ASSERT_EQ(result.survival_score, 8000);
+  ASSERT_EQ(result.resource_score, 7500);
+  ASSERT_EQ(result.total_score, 7850);
+  ASSERT_EQ(result.state, "strained");
+}
+
 TEST_F(DriverTest, TestInMemoryCompileFile) {
   program_t* prog = nullptr;
 
