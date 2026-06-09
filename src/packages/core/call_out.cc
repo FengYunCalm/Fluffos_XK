@@ -183,8 +183,9 @@ LPC_INT new_call_out(object_t *ob, svalue_t *fun, std::chrono::milliseconds dela
  * be living objects.
  */
 void call_out(pending_call_t *cop) {
-  current_interactive = nullptr;
-  vm_context_sync_execution(vm_context());
+  auto callout_execution = vm_context_capture_execution();
+  callout_execution.current_interactive = nullptr;
+  VMExecutionScope callout_scope(vm_context(), callout_execution);
 
   object_t *ob, *new_command_giver;
   ob = (cop->ob ? cop->ob : cop->function.f->hdr.owner);

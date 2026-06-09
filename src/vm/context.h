@@ -37,7 +37,22 @@ void vm_context_set_boot_time(VMContext &context, time_t boot_time);
 void vm_context_set_event_base(VMContext &context, event_base *base);
 void vm_context_set_current_gametick(VMContext &context, uint64_t gametick);
 void vm_context_reset_execution(VMContext &context);
+VMExecutionState vm_context_capture_execution();
+void vm_context_apply_execution(VMContext &context, const VMExecutionState &execution);
 void vm_context_sync_execution(VMContext &context);
 void vm_context_sync_object_store(VMContext &context);
+
+class VMExecutionScope {
+ public:
+  VMExecutionScope(VMContext &context, const VMExecutionState &execution);
+  ~VMExecutionScope();
+
+  VMExecutionScope(const VMExecutionScope &) = delete;
+  VMExecutionScope &operator=(const VMExecutionScope &) = delete;
+
+ private:
+  VMContext &context_;
+  VMExecutionState saved_;
+};
 
 #endif /* SRC_VM_CONTEXT_H_ */

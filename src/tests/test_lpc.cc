@@ -66,6 +66,56 @@ TEST_F(DriverTest, TestVmContextTracksTopLevelState) {
   ASSERT_EQ(vm_context().object_store.destructed_objects, obj_list_destruct);
 }
 
+TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
+  current_object = master_ob;
+  command_giver = nullptr;
+  current_interactive = nullptr;
+  previous_ob = nullptr;
+  current_prog = nullptr;
+  caller_type = 0;
+  vm_context_sync_execution(vm_context());
+
+  object_t* obj = find_object("single/master.c");
+  ASSERT_NE(obj, nullptr);
+
+  VMExecutionState scoped = vm_context_capture_execution();
+  scoped.current_object = obj;
+  scoped.command_giver = obj;
+  scoped.current_interactive = obj;
+  scoped.previous_ob = obj;
+  scoped.current_prog = obj->prog;
+  scoped.caller_type = 42;
+
+  {
+    VMExecutionScope scope(vm_context(), scoped);
+    ASSERT_EQ(current_object, obj);
+    ASSERT_EQ(command_giver, obj);
+    ASSERT_EQ(current_interactive, obj);
+    ASSERT_EQ(previous_ob, obj);
+    ASSERT_EQ(current_prog, obj->prog);
+    ASSERT_EQ(caller_type, 42);
+    ASSERT_EQ(vm_context().execution.current_object, obj);
+    ASSERT_EQ(vm_context().execution.command_giver, obj);
+    ASSERT_EQ(vm_context().execution.current_interactive, obj);
+    ASSERT_EQ(vm_context().execution.previous_ob, obj);
+    ASSERT_EQ(vm_context().execution.current_prog, obj->prog);
+    ASSERT_EQ(vm_context().execution.caller_type, 42);
+  }
+
+  ASSERT_EQ(current_object, master_ob);
+  ASSERT_EQ(command_giver, nullptr);
+  ASSERT_EQ(current_interactive, nullptr);
+  ASSERT_EQ(previous_ob, nullptr);
+  ASSERT_EQ(current_prog, nullptr);
+  ASSERT_EQ(caller_type, 0);
+  ASSERT_EQ(vm_context().execution.current_object, master_ob);
+  ASSERT_EQ(vm_context().execution.command_giver, nullptr);
+  ASSERT_EQ(vm_context().execution.current_interactive, nullptr);
+  ASSERT_EQ(vm_context().execution.previous_ob, nullptr);
+  ASSERT_EQ(vm_context().execution.current_prog, nullptr);
+  ASSERT_EQ(vm_context().execution.caller_type, 0);
+}
+
 TEST_F(DriverTest, TestVmOwnerMetadataDefaultsAndChecks) {
   current_object = master_ob;
   object_t* obj = find_object("single/master.c");

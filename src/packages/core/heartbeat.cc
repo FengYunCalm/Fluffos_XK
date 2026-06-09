@@ -97,14 +97,12 @@ void call_heart_beat() {
 #ifdef PACKAGE_MUDLIB_STATS
     add_heart_beats(&ob->stats, 1);
 #endif
-    save_command_giver(new_command_giver);
 
-    // note, NOT same as new_command_giver
-    current_interactive = nullptr;
-    if (ob->interactive) {
-      current_interactive = ob;
-    }
-    vm_context_sync_execution(vm_context());
+    auto heartbeat_execution = vm_context_capture_execution();
+    heartbeat_execution.current_interactive = ob->interactive ? ob : nullptr;
+    VMExecutionScope heartbeat_scope(vm_context(), heartbeat_execution);
+
+    save_command_giver(new_command_giver);
 
     g_current_heartbeat_obj = ob;
 
@@ -122,8 +120,6 @@ void call_heart_beat() {
     pop_context(&econ);
 
     restore_command_giver();
-    current_interactive = nullptr;
-    vm_context_sync_execution(vm_context());
     g_current_heartbeat_obj = nullptr;
     curr_hb = nullptr;
   }
