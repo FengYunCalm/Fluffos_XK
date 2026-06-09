@@ -383,3 +383,4 @@ mapping vm_owner_status(object default: F__THIS_OBJECT);
 int vm_owner_enqueue(string, string, string);
 mapping vm_owner_drain(string, int);
 mapping vm_owner_mailbox_status(string);
+mapping vm_owner_schedule(int);

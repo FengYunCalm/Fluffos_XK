@@ -133,6 +133,42 @@ TEST_F(DriverTest, TestVmOwnerMailboxDrainsOwnerFifo) {
   free_mapping(second_drain);
 }
 
+TEST_F(DriverTest, TestVmOwnerScheduleRoundsOwnersAndKeepsOwnerFifo) {
+  const char* owner_a = "owner/test/schedule/a";
+  const char* owner_b = "owner/test/schedule/b";
+  auto a_first = vm_owner_enqueue_task(owner_a, "command", "a-first");
+  auto a_second = vm_owner_enqueue_task(owner_a, "command", "a-second");
+  auto b_first = vm_owner_enqueue_task(owner_b, "heartbeat", "b-first");
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* result = vm_owner_schedule(3);
+  ASSERT_EQ(mapping_number(result, "dispatched"), 3);
+  ASSERT_EQ(mapping_number(result, "remaining"), 0);
+  auto* tasks = find_string_in_mapping(result, "tasks");
+  ASSERT_NE(tasks, nullptr);
+  ASSERT_EQ(tasks->type, T_ARRAY);
+  ASSERT_EQ(tasks->u.arr->size, 3);
+  ASSERT_EQ(mapping_number(tasks->u.arr->item[0].u.map, "task_id"), static_cast<long>(a_first));
+  ASSERT_STREQ(mapping_string(tasks->u.arr->item[0].u.map, "task_key"), "a-first");
+  ASSERT_EQ(mapping_number(tasks->u.arr->item[1].u.map, "task_id"), static_cast<long>(b_first));
+  ASSERT_STREQ(mapping_string(tasks->u.arr->item[1].u.map, "task_key"), "b-first");
+  ASSERT_EQ(mapping_number(tasks->u.arr->item[2].u.map, "task_id"), static_cast<long>(a_second));
+  ASSERT_STREQ(mapping_string(tasks->u.arr->item[2].u.map, "task_key"), "a-second");
+  free_mapping(result);
+}
+
 TEST_F(DriverTest, TestVmWorkerRunsTasksInParallel) {
   auto result = vm_worker_benchmark(4, 80);
   ASSERT_GE(result.worker_count, 1);

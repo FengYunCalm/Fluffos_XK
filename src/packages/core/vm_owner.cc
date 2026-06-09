@@ -70,3 +70,11 @@ void f_vm_owner_mailbox_status() {
   push_refed_mapping(result);
 }
 #endif
+
+#ifdef F_VM_OWNER_SCHEDULE
+void f_vm_owner_schedule() {
+  auto *result = vm_owner_schedule(static_cast<int>(sp->u.number));
+  pop_stack();
+  push_refed_mapping(result);
+}
+#endif

@@ -104,7 +104,7 @@ int func_present;
 int yyparse (void);
 
 
-#line 108 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 108 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
 
 # ifndef YY_CAST
 #  ifdef __cplusplus
@@ -2367,55 +2367,55 @@ yyreduce:
   case 2: /* all: program  */
 #line 219 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
           { rule_program((yyval.node)); }
-#line 2371 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2371 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 3: /* program: program def possible_semi_colon  */
 #line 223 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
                                   { CREATE_TWO_VALUES((yyval.node), 0, (yyvsp[-2].node), (yyvsp[-1].node)); }
-#line 2377 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2377 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 4: /* program: %empty  */
 #line 224 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
                         { (yyval.node) = 0; }
-#line 2383 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2383 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 6: /* possible_semi_colon: ';'  */
 #line 229 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
         { yywarn("Extra ';'. Ignored."); }
-#line 2389 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2389 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 7: /* inheritance: type_modifier_list L_INHERIT string_con1 ';'  */
 #line 233 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
                                                { if (rule_inheritence(&(yyval.node), (yyvsp[-3].number), (yyvsp[-1].string))) { YYACCEPT; } }
-#line 2395 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2395 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 8: /* real: L_REAL  */
 #line 237 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
          { CREATE_REAL((yyval.node), (yyvsp[0].real)); }
-#line 2401 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2401 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 9: /* number: L_NUMBER  */
 #line 241 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
            { CREATE_NUMBER((yyval.node), (yyvsp[0].number)); }
-#line 2407 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2407 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 10: /* optional_star: %empty  */
 #line 245 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
                         { (yyval.number) = 0; }
-#line 2413 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2413 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 11: /* optional_star: '*'  */
 #line 246 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
                 { (yyval.number) = TYPE_MOD_ARRAY; }
-#line 2419 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2419 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 12: /* block_or_semi: block  */
@@ -2426,43 +2426,43 @@ yyreduce:
               CREATE_RETURN((yyval.node), 0);
             }
           }
-#line 2430 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2430 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 13: /* block_or_semi: ';'  */
 #line 257 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
           { (yyval.node) = 0; }
-#line 2436 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2436 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 14: /* block_or_semi: error  */
 #line 258 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
           { (yyval.node) = 0; }
-#line 2442 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2442 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 15: /* identifier: L_DEFINED_NAME  */
 #line 262 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
                                   { (yyval.string) = scratch_copy((yyvsp[0].ihe)->name); }
-#line 2448 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2448 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 17: /* $@1: %empty  */
 #line 267 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
                                   { (yyvsp[-2].number) = rule_func_type((yyvsp[-2].number), (yyvsp[-1].number), (yyvsp[0].string)); }
-#line 2454 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2454 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 18: /* @2: %empty  */
 #line 268 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
                                   { (yyval.number) = rule_func_proto((yyvsp[-6].number), (yyvsp[-5].number), &(yyvsp[-4].string), (yyvsp[-1].argument)); }
-#line 2460 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2460 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 19: /* function: type optional_star identifier $@1 '(' argument ')' @2 block_or_semi  */
 #line 269 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
                                   { rule_func(&(yyval.node), (yyvsp[-8].number), (yyvsp[-7].number), (yyvsp[-6].string), (yyvsp[-3].argument), &(yyvsp[-1].number), &(yyvsp[0].node)); }
-#line 2466 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2466 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 21: /* def: type name_list ';'  */
@@ -2472,7 +2472,7 @@ yyreduce:
                                       yyerror("Missing type for global variable declaration");
                                     (yyval.node) = 0;
                                   }
-#line 2476 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2476 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 25: /* modifier_change: type_modifier_list ':'  */
@@ -2490,7 +2490,7 @@ yyreduce:
                                     global_modifiers = (yyvsp[-1].number);
                                     (yyval.node) = 0;
                                   }
-#line 2494 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2494 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 26: /* member_name: optional_star identifier  */
@@ -2504,25 +2504,25 @@ yyreduce:
                                     add_local_name((yyvsp[0].string), current_type | (yyvsp[-1].number));
                                     scratch_free((yyvsp[0].string));
                                   }
-#line 2508 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2508 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 30: /* $@3: %empty  */
 #line 322 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
                            { current_type = (yyvsp[0].number); }
-#line 2514 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2514 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 32: /* @4: %empty  */
 #line 327 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
                                              { (yyvsp[-2].ihe) = rule_define_class(&(yyval.number), (yyvsp[-1].string)); }
-#line 2520 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2520 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 33: /* type_decl: type_modifier_list L_CLASS identifier '{' @4 member_list '}'  */
 #line 328 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
                                              { rule_define_class_members((yyvsp[-5].ihe), (yyvsp[-2].number)); (yyval.node) = 0; }
-#line 2526 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2526 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 35: /* new_local_name: L_DEFINED_NAME  */
@@ -2533,7 +2533,7 @@ yyreduce:
                                               }
                                               (yyval.string) = scratch_copy((yyvsp[0].ihe)->name);
                                             }
-#line 2537 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2537 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 37: /* atomic_type: L_CLASS L_DEFINED_NAME  */
@@ -2546,7 +2546,7 @@ yyreduce:
                                                 (yyval.number) = (yyvsp[0].ihe)->dn.class_num | TYPE_MOD_CLASS;
                                               }
                                             }
-#line 2550 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2550 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 38: /* atomic_type: L_CLASS L_IDENTIFIER  */
@@ -2555,31 +2555,31 @@ yyreduce:
                                               yyerror("Undefined class '%s'", (yyvsp[0].string));
                                               (yyval.number) = TYPE_ANY;
                                             }
-#line 2559 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2559 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 40: /* opt_atomic_type: %empty  */
 #line 362 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
                         { (yyval.number) = TYPE_ANY; }
-#line 2565 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2565 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 42: /* basic_type: opt_atomic_type L_ARRAY  */
 #line 367 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
                             { (yyval.number) = (yyvsp[-1].number) | TYPE_MOD_ARRAY; }
-#line 2571 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2571 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 44: /* arg_type: basic_type ref  */
 #line 372 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
                    { (yyval.number) = (yyvsp[-1].number) | LOCAL_MOD_REF; }
-#line 2577 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2577 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 45: /* optional_default_arg_value: %empty  */
 #line 376 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
          { (yyval.node) = 0; }
-#line 2583 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2583 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 46: /* optional_default_arg_value: ':' L_FUNCTION_OPEN comma_expr ':' ')'  */
@@ -2603,7 +2603,7 @@ yyreduce:
     (yyval.node)->v.number = FP_FUNCTIONAL + 0 /* args */;
     pop_function_context();
 }
-#line 2607 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2607 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 47: /* new_arg: arg_type optional_star  */
@@ -2613,7 +2613,7 @@ yyreduce:
                                                 if ((yyvsp[-1].number) != TYPE_VOID)
                                                   add_local_name("", (yyvsp[-1].number) | (yyvsp[0].number));
                                               }
-#line 2617 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2617 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 48: /* new_arg: arg_type optional_star new_local_name optional_default_arg_value  */
@@ -2625,7 +2625,7 @@ yyreduce:
                                                 scratch_free((yyvsp[-1].string));
                                                 (yyval.number) = (yyvsp[-3].number) | (yyvsp[-2].number);
                                               }
-#line 2629 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2629 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 49: /* new_arg: new_local_name  */
@@ -2638,7 +2638,7 @@ yyreduce:
                                                 scratch_free((yyvsp[0].string));
                                                 (yyval.number) = TYPE_ANY;
                                               }
-#line 2642 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2642 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 50: /* argument: %empty  */
@@ -2647,7 +2647,7 @@ yyreduce:
       (yyval.argument).num_arg = 0;
       (yyval.argument).flags = 0;
     }
-#line 2651 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2651 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 52: /* argument: argument_list L_DOT_DOT_DOT  */
@@ -2666,7 +2666,7 @@ yyreduce:
       if (lt != TYPE_ANY && !(lt & TYPE_MOD_ARRAY))
         yywarn("Variable to hold remainder of arguments should be an array.");
     }
-#line 2670 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2670 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 53: /* argument_list: new_arg  */
@@ -2681,7 +2681,7 @@ yyreduce:
       }
       (yyval.argument).flags = 0;
     }
-#line 2685 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2685 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 54: /* argument_list: argument_list ',' new_arg  */
@@ -2695,7 +2695,7 @@ yyreduce:
       (yyval.argument) = (yyvsp[-2].argument);
       (yyval.argument).num_arg++;
     }
-#line 2699 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2699 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 55: /* type_modifier_list: %empty  */
@@ -2703,7 +2703,7 @@ yyreduce:
             {
       (yyval.number) = 0;
     }
-#line 2707 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2707 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 56: /* type_modifier_list: L_TYPE_MODIFIER type_modifier_list  */
@@ -2721,7 +2721,7 @@ yyreduce:
       }
 #endif
     }
-#line 2725 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2725 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 57: /* type: type_modifier_list opt_basic_type  */
@@ -2730,7 +2730,7 @@ yyreduce:
       (yyval.number) = ((yyvsp[-1].number) << 16) | (yyvsp[0].number);
       current_type = (yyval.number);
     }
-#line 2734 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2734 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 58: /* cast: '(' basic_type optional_star ')'  */
@@ -2738,7 +2738,7 @@ yyreduce:
     {
       (yyval.number) = (yyvsp[-2].number) | (yyvsp[-1].number);
     }
-#line 2742 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2742 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 60: /* opt_basic_type: %empty  */
@@ -2746,7 +2746,7 @@ yyreduce:
             {
       (yyval.number) = TYPE_UNKNOWN;
     }
-#line 2750 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2750 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 63: /* new_name: optional_star identifier  */
@@ -2775,7 +2775,7 @@ yyreduce:
       define_new_variable((yyvsp[0].string), current_type | (yyvsp[-1].number));
       scratch_free((yyvsp[0].string));
     }
-#line 2779 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2779 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 64: /* new_name: optional_star identifier L_ASSIGN expr0  */
@@ -2831,13 +2831,13 @@ yyreduce:
           newnode, expr);
       scratch_free((yyvsp[-2].string));
     }
-#line 2835 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2835 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 65: /* @5: %empty  */
 #line 602 "/home/mechrevo/projects/fluffos-vmcontext/src/compiler/internal/grammar.y"
     { (yyval.number) = current_number_of_locals; }
-#line 2841 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2841 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 66: /* block: '{' @5 block_statements '}'  */
@@ -2846,7 +2846,7 @@ yyreduce:
       (yyval.decl).node = (yyvsp[-1].decl).node;
       (yyval.decl).num = current_number_of_locals - (yyvsp[-2].number);  /* calculate locals declared in this block */
     }
-#line 2850 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2850 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 70: /* local_declarations: %empty  */
@@ -2855,7 +2855,7 @@ yyreduce:
       (yyval.decl).node = 0;
       (yyval.decl).num = 0;
     }
-#line 2859 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2859 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 71: /* $@6: %empty  */
@@ -2868,7 +2868,7 @@ yyreduce:
        */
       current_type = (yyvsp[0].number);
     }
-#line 2872 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2872 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 72: /* local_declarations: local_declarations basic_type $@6 local_name_list ';'  */
@@ -2879,7 +2879,7 @@ yyreduce:
       } else (yyval.decl).node = ((yyvsp[-4].decl).node ? (yyvsp[-4].decl).node : (yyvsp[-1].decl).node);
       (yyval.decl).num = (yyvsp[-4].decl).num + (yyvsp[-1].decl).num;
     }
-#line 2883 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2883 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 73: /* new_local_def: optional_star new_local_name  */
@@ -2894,7 +2894,7 @@ yyreduce:
       scratch_free((yyvsp[0].string));
       (yyval.node) = 0;
     }
-#line 2898 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2898 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 74: /* new_local_def: optional_star new_local_name L_ASSIGN expr0  */
@@ -2929,7 +2929,7 @@ yyreduce:
           add_local_name((yyvsp[-2].string), current_type | (yyvsp[-3].number) | LOCAL_MOD_UNUSED));
       scratch_free((yyvsp[-2].string));
     }
-#line 2933 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2933 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 75: /* single_new_local_def: arg_type optional_star new_local_name  */
@@ -2941,7 +2941,7 @@ yyreduce:
       (yyval.number) = add_local_name((yyvsp[0].string), (yyvsp[-2].number) | (yyvsp[-1].number));
       scratch_free((yyvsp[0].string));
     }
-#line 2945 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2945 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 76: /* single_new_local_def_with_init: single_new_local_def L_ASSIGN expr0  */
@@ -2974,7 +2974,7 @@ yyreduce:
       CREATE_BINARY_OP((yyval.node), F_ASSIGN, 0, (yyvsp[0].node), 0);
       CREATE_OPCODE_1((yyval.node)->r.expr, F_LOCAL_LVALUE, 0, (yyvsp[-2].number));
     }
-#line 2978 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2978 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 77: /* local_name_list: new_local_def  */
@@ -2983,7 +2983,7 @@ yyreduce:
       (yyval.decl).node = (yyvsp[0].node);
       (yyval.decl).num = 1;
     }
-#line 2987 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2987 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 78: /* local_name_list: new_local_def ',' local_name_list  */
@@ -2994,7 +2994,7 @@ yyreduce:
       } else (yyval.decl).node = ((yyvsp[-2].node) ? (yyvsp[-2].node) : (yyvsp[0].decl).node);
       (yyval.decl).num = 1 + (yyvsp[0].decl).num;
     }
-#line 2998 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 2998 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 79: /* $@7: %empty  */
@@ -3004,7 +3004,7 @@ yyreduce:
         yyerror("Illegal to declare local variable of type void.");
       current_type = (yyvsp[0].number);
     }
-#line 3008 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3008 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 80: /* local_declaration_statement: basic_type $@7 local_name_list ';'  */
@@ -3013,7 +3013,7 @@ yyreduce:
       (yyval.decl).node = (yyvsp[-1].decl).node;
       (yyval.decl).num = (yyvsp[-1].decl).num;
     }
-#line 3017 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3017 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 81: /* block_statements: %empty  */
@@ -3022,7 +3022,7 @@ yyreduce:
       (yyval.decl).node = 0;
       (yyval.decl).num = 0;
     }
-#line 3026 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3026 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 82: /* block_statements: statement block_statements  */
@@ -3033,7 +3033,7 @@ yyreduce:
       } else (yyval.decl).node = ((yyvsp[-1].node) ? (yyvsp[-1].node) : (yyvsp[0].decl).node);
       (yyval.decl).num = (yyvsp[0].decl).num;
     }
-#line 3037 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3037 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 83: /* block_statements: local_declaration_statement block_statements  */
@@ -3044,7 +3044,7 @@ yyreduce:
       } else (yyval.decl).node = ((yyvsp[-1].decl).node ? (yyvsp[-1].decl).node : (yyvsp[0].decl).node);
       (yyval.decl).num = (yyvsp[-1].decl).num + (yyvsp[0].decl).num;
     }
-#line 3048 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3048 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 84: /* block_statements: error ';' block_statements  */
@@ -3053,7 +3053,7 @@ yyreduce:
       (yyval.decl).node = (yyvsp[0].decl).node;
       (yyval.decl).num = (yyvsp[0].decl).num;
     }
-#line 3057 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3057 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 85: /* statement: comma_expr ';'  */
@@ -3069,7 +3069,7 @@ yyreduce:
       }
 #endif
     }
-#line 3073 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3073 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 91: /* statement: decl_block  */
@@ -3078,7 +3078,7 @@ yyreduce:
       (yyval.node) = (yyvsp[0].decl).node;
       pop_n_locals((yyvsp[0].decl).num);
     }
-#line 3082 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3082 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 92: /* statement: ';'  */
@@ -3086,7 +3086,7 @@ yyreduce:
     {
       (yyval.node) = 0;
     }
-#line 3090 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3090 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 93: /* statement: L_BREAK ';'  */
@@ -3112,7 +3112,7 @@ yyreduce:
             (yyval.node) = 0;
           }
     }
-#line 3116 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3116 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 94: /* statement: L_CONTINUE ';'  */
@@ -3125,7 +3125,7 @@ yyreduce:
           yyerror("continue statement outside loop");
       CREATE_CONTROL_JUMP((yyval.node), CJ_CONTINUE);
     }
-#line 3129 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3129 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 95: /* $@8: %empty  */
@@ -3134,7 +3134,7 @@ yyreduce:
       (yyvsp[-3].number) = context;
       context = LOOP_CONTEXT;
     }
-#line 3138 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3138 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 96: /* while: L_WHILE '(' comma_expr ')' $@8 statement  */
@@ -3143,7 +3143,7 @@ yyreduce:
       CREATE_LOOP((yyval.node), 1, (yyvsp[0].node), 0, optimize_loop_test((yyvsp[-3].node)));
       context = (yyvsp[-5].number);
     }
-#line 3147 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3147 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 97: /* $@9: %empty  */
@@ -3152,7 +3152,7 @@ yyreduce:
       (yyvsp[0].number) = context;
       context = LOOP_CONTEXT;
     }
-#line 3156 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3156 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 98: /* do: L_DO $@9 statement L_WHILE '(' comma_expr ')' ';'  */
@@ -3161,7 +3161,7 @@ yyreduce:
       CREATE_LOOP((yyval.node), 0, (yyvsp[-5].node), 0, optimize_loop_test((yyvsp[-2].node)));
       context = (yyvsp[-7].number);
     }
-#line 3165 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3165 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 99: /* $@10: %empty  */
@@ -3171,7 +3171,7 @@ yyreduce:
       (yyvsp[-7].number) = context;
       context = LOOP_CONTEXT;
     }
-#line 3175 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3175 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 100: /* for: L_FOR '(' first_for_expr ';' for_expr ';' for_expr ')' $@10 statement  */
@@ -3191,7 +3191,7 @@ yyreduce:
 
       context = (yyvsp[-9].number);
     }
-#line 3195 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3195 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 101: /* foreach_var: L_DEFINED_NAME  */
@@ -3216,7 +3216,7 @@ yyreduce:
         }
       (yyval.decl).num = 0;
     }
-#line 3220 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3220 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 102: /* foreach_var: single_new_local_def  */
@@ -3230,7 +3230,7 @@ yyreduce:
       }
       (yyval.decl).num = 1;
     }
-#line 3234 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3234 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 103: /* foreach_var: L_IDENTIFIER  */
@@ -3248,7 +3248,7 @@ yyreduce:
       scratch_free((yyvsp[0].string));
       (yyval.decl).num = 0;
     }
-#line 3252 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3252 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 104: /* foreach_vars: foreach_var  */
@@ -3257,7 +3257,7 @@ yyreduce:
       CREATE_FOREACH((yyval.decl).node, (yyvsp[0].decl).node, 0);
       (yyval.decl).num = (yyvsp[0].decl).num;
     }
-#line 3261 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3261 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 105: /* foreach_vars: foreach_var ',' foreach_var  */
@@ -3268,7 +3268,7 @@ yyreduce:
       if ((yyvsp[-2].decl).node->v.number == F_REF_LVALUE)
         yyerror("Mapping key may not be a reference in foreach()");
     }
-#line 3272 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3272 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 106: /* $@11: %empty  */
@@ -3278,7 +3278,7 @@ yyreduce:
       (yyvsp[-5].number) = context;
       context = LOOP_CONTEXT | LOOP_FOREACH;
     }
-#line 3282 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3282 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 107: /* foreach: L_FOREACH '(' foreach_vars L_IN expr0 ')' $@11 statement  */
@@ -3292,7 +3292,7 @@ yyreduce:
 
       context = (yyvsp[-7].number);
     }
-#line 3296 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3296 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 108: /* for_expr: %empty  */
@@ -3300,7 +3300,7 @@ yyreduce:
             {
       (yyval.node) = 0;
     }
-#line 3304 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3304 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 110: /* first_for_expr: for_expr  */
@@ -3309,7 +3309,7 @@ yyreduce:
       (yyval.decl).node = (yyvsp[0].node);
       (yyval.decl).num = 0;
     }
-#line 3313 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3313 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 111: /* first_for_expr: single_new_local_def_with_init  */
@@ -3318,7 +3318,7 @@ yyreduce:
       (yyval.decl).node = (yyvsp[0].node);
       (yyval.decl).num = 1;
     }
-#line 3322 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3322 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 112: /* $@12: %empty  */
@@ -3329,7 +3329,7 @@ yyreduce:
       context |= SWITCH_CONTEXT;
       (yyvsp[-2].number) = mem_block[A_CASES].current_size;
     }
-#line 3333 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3333 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 113: /* switch: L_SWITCH '(' comma_expr ')' $@12 '{' local_declarations case switch_block '}'  */
@@ -3362,7 +3362,7 @@ yyreduce:
         (yyval.node) = node2;
         pop_n_locals((yyvsp[-3].decl).num);
       }
-#line 3366 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3366 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 114: /* switch_block: case switch_block  */
@@ -3372,7 +3372,7 @@ yyreduce:
         CREATE_STATEMENTS((yyval.node), (yyvsp[-1].node), (yyvsp[0].node));
       } else (yyval.node) = (yyvsp[-1].node);
     }
-#line 3376 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3376 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 115: /* switch_block: statement switch_block  */
@@ -3382,7 +3382,7 @@ yyreduce:
         CREATE_STATEMENTS((yyval.node), (yyvsp[-1].node), (yyvsp[0].node));
       } else (yyval.node) = (yyvsp[-1].node);
     }
-#line 3386 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3386 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 116: /* switch_block: %empty  */
@@ -3390,7 +3390,7 @@ yyreduce:
             {
       (yyval.node) = 0;
     }
-#line 3394 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3394 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 117: /* case: L_CASE case_label ':'  */
@@ -3401,7 +3401,7 @@ yyreduce:
 
       add_to_mem_block(A_CASES, (char *)&((yyvsp[-1].node)), sizeof((yyvsp[-1].node)));
     }
-#line 3405 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3405 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 118: /* case: L_CASE case_label L_RANGE case_label ':'  */
@@ -3419,7 +3419,7 @@ yyreduce:
 
       add_to_mem_block(A_CASES, (char *)&((yyvsp[-3].node)), sizeof((yyvsp[-3].node)));
     }
-#line 3423 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3423 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 119: /* case: L_CASE case_label L_RANGE ':'  */
@@ -3437,7 +3437,7 @@ yyreduce:
 
       add_to_mem_block(A_CASES, (char *)&((yyvsp[-2].node)), sizeof((yyvsp[-2].node)));
     }
-#line 3441 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3441 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 120: /* case: L_CASE L_RANGE case_label ':'  */
@@ -3454,7 +3454,7 @@ yyreduce:
 
       add_to_mem_block(A_CASES, (char *)&((yyval.node)), sizeof((yyval.node)));
     }
-#line 3458 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3458 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 121: /* case: L_DEFAULT ':'  */
@@ -3471,7 +3471,7 @@ yyreduce:
       add_to_mem_block(A_CASES, (char *)&((yyval.node)), sizeof((yyval.node)));
       context |= SWITCH_DEFAULT;
     }
-#line 3475 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3475 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 122: /* case_label: constant  */
@@ -3489,7 +3489,7 @@ yyreduce:
       (yyval.node)->kind = NODE_CASE_NUMBER;
       (yyval.node)->r.number = (LPC_INT)(yyvsp[0].number);
     }
-#line 3493 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3493 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 123: /* case_label: string_con1  */
@@ -3505,7 +3505,7 @@ yyreduce:
       (yyval.node)->kind = NODE_CASE_STRING;
       (yyval.node)->r.number = (LPC_INT)str;
     }
-#line 3509 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3509 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 124: /* constant: constant '|' constant  */
@@ -3513,7 +3513,7 @@ yyreduce:
     {
       (yyval.number) = (yyvsp[-2].number) | (yyvsp[0].number);
     }
-#line 3517 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3517 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 125: /* constant: constant '^' constant  */
@@ -3521,7 +3521,7 @@ yyreduce:
     {
       (yyval.number) = (yyvsp[-2].number) ^ (yyvsp[0].number);
     }
-#line 3525 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3525 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 126: /* constant: constant '&' constant  */
@@ -3529,7 +3529,7 @@ yyreduce:
     {
       (yyval.number) = (yyvsp[-2].number) & (yyvsp[0].number);
     }
-#line 3533 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3533 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 127: /* constant: constant L_EQ constant  */
@@ -3537,7 +3537,7 @@ yyreduce:
     {
       (yyval.number) = (yyvsp[-2].number) == (yyvsp[0].number);
     }
-#line 3541 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3541 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 128: /* constant: constant L_NE constant  */
@@ -3545,7 +3545,7 @@ yyreduce:
     {
       (yyval.number) = (yyvsp[-2].number) != (yyvsp[0].number);
     }
-#line 3549 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3549 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 129: /* constant: constant L_ORDER constant  */
@@ -3557,7 +3557,7 @@ yyreduce:
         case F_GT: (yyval.number) = (yyvsp[-2].number) >  (yyvsp[0].number); break;
       }
     }
-#line 3561 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3561 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 130: /* constant: constant '<' constant  */
@@ -3565,7 +3565,7 @@ yyreduce:
     {
       (yyval.number) = (yyvsp[-2].number) < (yyvsp[0].number);
     }
-#line 3569 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3569 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 131: /* constant: constant L_LSH constant  */
@@ -3573,7 +3573,7 @@ yyreduce:
     {
       (yyval.number) = (yyvsp[-2].number) << (yyvsp[0].number);
     }
-#line 3577 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3577 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 132: /* constant: constant L_RSH constant  */
@@ -3581,7 +3581,7 @@ yyreduce:
     {
       (yyval.number) = (yyvsp[-2].number) >> (yyvsp[0].number);
     }
-#line 3585 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3585 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 133: /* constant: constant '+' constant  */
@@ -3589,7 +3589,7 @@ yyreduce:
     {
       (yyval.number) = (yyvsp[-2].number) + (yyvsp[0].number);
     }
-#line 3593 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3593 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 134: /* constant: constant '-' constant  */
@@ -3597,7 +3597,7 @@ yyreduce:
     {
       (yyval.number) = (yyvsp[-2].number) - (yyvsp[0].number);
     }
-#line 3601 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3601 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 135: /* constant: constant '*' constant  */
@@ -3605,7 +3605,7 @@ yyreduce:
     {
       (yyval.number) = (yyvsp[-2].number) * (yyvsp[0].number);
     }
-#line 3609 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3609 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 136: /* constant: constant '%' constant  */
@@ -3613,7 +3613,7 @@ yyreduce:
     {
       if ((yyvsp[0].number)) (yyval.number) = (yyvsp[-2].number) % (yyvsp[0].number); else yyerror("Modulo by zero");
     }
-#line 3617 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3617 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 137: /* constant: constant '/' constant  */
@@ -3621,7 +3621,7 @@ yyreduce:
     {
       if ((yyvsp[0].number)) (yyval.number) = (yyvsp[-2].number) / (yyvsp[0].number); else yyerror("Division by zero");
     }
-#line 3625 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3625 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 138: /* constant: '(' constant ')'  */
@@ -3629,7 +3629,7 @@ yyreduce:
     {
       (yyval.number) = (yyvsp[-1].number);
     }
-#line 3633 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3633 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 139: /* constant: L_NUMBER  */
@@ -3637,7 +3637,7 @@ yyreduce:
     {
       (yyval.number) = (yyvsp[0].number);
     }
-#line 3641 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3641 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 140: /* constant: '-' L_NUMBER  */
@@ -3645,7 +3645,7 @@ yyreduce:
     {
       (yyval.number) = -(yyvsp[0].number);
     }
-#line 3649 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3649 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 141: /* constant: L_NOT L_NUMBER  */
@@ -3653,7 +3653,7 @@ yyreduce:
     {
       (yyval.number) = !(yyvsp[0].number);
     }
-#line 3657 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3657 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 142: /* constant: '~' L_NUMBER  */
@@ -3661,7 +3661,7 @@ yyreduce:
     {
       (yyval.number) = ~(yyvsp[0].number);
     }
-#line 3665 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3665 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 143: /* comma_expr: expr0  */
@@ -3669,7 +3669,7 @@ yyreduce:
     {
       (yyval.node) = (yyvsp[0].node);
     }
-#line 3673 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3673 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 144: /* comma_expr: comma_expr ',' expr0  */
@@ -3677,7 +3677,7 @@ yyreduce:
     {
       CREATE_TWO_VALUES((yyval.node), (yyvsp[0].node)->type, pop_value((yyvsp[-2].node)), (yyvsp[0].node));
     }
-#line 3681 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3681 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 146: /* expr0: ref lvalue  */
@@ -3708,7 +3708,7 @@ yyreduce:
       }
       CREATE_UNARY_OP_1((yyval.node), F_MAKE_REF, TYPE_ANY, (yyvsp[0].node), op);
     }
-#line 3712 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3712 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 147: /* expr0: lvalue L_ASSIGN expr0  */
@@ -3752,7 +3752,7 @@ yyreduce:
           (yyval.node)->l.expr = do_promotions(r, l->type);
       }
     }
-#line 3756 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3756 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 148: /* expr0: error L_ASSIGN expr0  */
@@ -3761,7 +3761,7 @@ yyreduce:
       yyerror("Illegal LHS");
       CREATE_ERROR((yyval.node));
     }
-#line 3765 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3765 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 149: /* expr0: expr0 '?' expr0 ':' expr0  */
@@ -3789,7 +3789,7 @@ yyreduce:
       }
       (yyval.node)->type = ((p1->type == p2->type) ? p1->type : TYPE_ANY);
     }
-#line 3793 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3793 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 150: /* expr0: expr0 L_QUESTION_QUESTION expr0  */
@@ -3799,7 +3799,7 @@ yyreduce:
        * Return left if defined, otherwise return right */
       CREATE_NULLISH((yyval.node), (yyvsp[-2].node), (yyvsp[0].node));
     }
-#line 3803 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3803 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 151: /* expr0: expr0 L_LOR expr0  */
@@ -3809,7 +3809,7 @@ yyreduce:
       if (IS_NODE((yyvsp[-2].node), NODE_LAND_LOR, F_LOR))
         (yyvsp[-2].node)->kind = NODE_BRANCH_LINK;
     }
-#line 3813 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3813 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 152: /* expr0: expr0 L_LAND expr0  */
@@ -3819,7 +3819,7 @@ yyreduce:
       if (IS_NODE((yyvsp[-2].node), NODE_LAND_LOR, F_LAND))
         (yyvsp[-2].node)->kind = NODE_BRANCH_LINK;
     }
-#line 3823 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3823 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 153: /* expr0: expr0 '|' expr0  */
@@ -3848,7 +3848,7 @@ yyreduce:
       }
       else (yyval.node) = binary_int_op((yyvsp[-2].node), (yyvsp[0].node), F_OR, "|");
     }
-#line 3852 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3852 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 154: /* expr0: expr0 '^' expr0  */
@@ -3856,7 +3856,7 @@ yyreduce:
     {
       (yyval.node) = binary_int_op((yyvsp[-2].node), (yyvsp[0].node), F_XOR, "^");
     }
-#line 3860 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3860 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 155: /* expr0: expr0 '&' expr0  */
@@ -3883,7 +3883,7 @@ yyreduce:
         CREATE_BINARY_OP((yyval.node), F_AND, t1, (yyvsp[-2].node), (yyvsp[0].node));
       } else (yyval.node) = binary_int_op((yyvsp[-2].node), (yyvsp[0].node), F_AND, "&");
     }
-#line 3887 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3887 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 156: /* expr0: expr0 L_EQ expr0  */
@@ -3909,7 +3909,7 @@ yyreduce:
           CREATE_BINARY_OP((yyval.node), F_EQ, TYPE_NUMBER, (yyvsp[-2].node), (yyvsp[0].node));
         }
     }
-#line 3913 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3913 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 157: /* expr0: expr0 L_NE expr0  */
@@ -3927,7 +3927,7 @@ yyreduce:
       }
       CREATE_BINARY_OP((yyval.node), F_NE, TYPE_NUMBER, (yyvsp[-2].node), (yyvsp[0].node));
     }
-#line 3931 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3931 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 158: /* expr0: expr0 L_ORDER expr0  */
@@ -3975,7 +3975,7 @@ yyreduce:
       }
       CREATE_BINARY_OP((yyval.node), (yyvsp[-1].number), TYPE_NUMBER, (yyvsp[-2].node), (yyvsp[0].node));
     }
-#line 3979 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 3979 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 159: /* expr0: expr0 '<' expr0  */
@@ -4016,7 +4016,7 @@ yyreduce:
       }
       CREATE_BINARY_OP((yyval.node), F_LT, TYPE_NUMBER, (yyvsp[-2].node), (yyvsp[0].node));
     }
-#line 4020 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4020 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 160: /* expr0: expr0 L_LSH expr0  */
@@ -4024,7 +4024,7 @@ yyreduce:
     {
       (yyval.node) = binary_int_op((yyvsp[-2].node), (yyvsp[0].node), F_LSH, "<<");
     }
-#line 4028 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4028 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 161: /* expr0: expr0 L_RSH expr0  */
@@ -4032,7 +4032,7 @@ yyreduce:
     {
       (yyval.node) = binary_int_op((yyvsp[-2].node), (yyvsp[0].node), F_RSH, ">>");
     }
-#line 4036 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4036 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 162: /* expr0: expr0 '+' expr0  */
@@ -4206,7 +4206,7 @@ yyreduce:
           break;
       }
     }
-#line 4210 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4210 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 163: /* expr0: expr0 '-' expr0  */
@@ -4304,7 +4304,7 @@ yyreduce:
           CREATE_BINARY_OP((yyval.node), F_SUBTRACT, result_type, (yyvsp[-2].node), (yyvsp[0].node));
       }
     }
-#line 4308 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4308 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 164: /* expr0: expr0 '*' expr0  */
@@ -4388,7 +4388,7 @@ yyreduce:
           CREATE_BINARY_OP((yyval.node), F_MULTIPLY, result_type, (yyvsp[-2].node), (yyvsp[0].node));
       }
     }
-#line 4392 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4392 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 165: /* expr0: expr0 '%' expr0  */
@@ -4396,7 +4396,7 @@ yyreduce:
     {
       (yyval.node) = binary_int_op((yyvsp[-2].node), (yyvsp[0].node), F_MOD, "%");
     }
-#line 4400 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4400 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 166: /* expr0: expr0 '/' expr0  */
@@ -4495,7 +4495,7 @@ yyreduce:
           CREATE_BINARY_OP((yyval.node), F_DIVIDE, result_type, (yyvsp[-2].node), (yyvsp[0].node));
       }
     }
-#line 4499 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4499 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 167: /* expr0: cast expr0  */
@@ -4520,7 +4520,7 @@ yyreduce:
         yyerror(buf);
       }
     }
-#line 4524 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4524 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 168: /* expr0: L_INC lvalue  */
@@ -4545,7 +4545,7 @@ yyreduce:
         }
       } else (yyval.node)->type = TYPE_ANY;
     }
-#line 4549 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4549 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 169: /* expr0: L_DEC lvalue  */
@@ -4571,7 +4571,7 @@ yyreduce:
       } else (yyval.node)->type = TYPE_ANY;
 
     }
-#line 4575 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4575 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 170: /* expr0: L_NOT expr0  */
@@ -4584,7 +4584,7 @@ yyreduce:
         CREATE_UNARY_OP((yyval.node), F_NOT, TYPE_NUMBER, (yyvsp[0].node));
       }
     }
-#line 4588 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4588 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 171: /* expr0: '~' expr0  */
@@ -4599,7 +4599,7 @@ yyreduce:
         CREATE_UNARY_OP((yyval.node), F_COMPL, TYPE_NUMBER, (yyvsp[0].node));
       }
     }
-#line 4603 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4603 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 172: /* expr0: '-' expr0  */
@@ -4627,7 +4627,7 @@ yyreduce:
           CREATE_UNARY_OP((yyval.node), F_NEGATE, result_type, (yyvsp[0].node));
       }
     }
-#line 4631 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4631 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 173: /* expr0: lvalue L_INC  */
@@ -4653,7 +4653,7 @@ yyreduce:
         }
       } else (yyval.node)->type = TYPE_ANY;
     }
-#line 4657 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4657 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 174: /* expr0: lvalue L_DEC  */
@@ -4678,7 +4678,7 @@ yyreduce:
         }
       } else (yyval.node)->type = TYPE_ANY;
     }
-#line 4682 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4682 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 181: /* return: L_RETURN ';'  */
@@ -4688,7 +4688,7 @@ yyreduce:
         yywarn("Non-void functions must return a value.");
       CREATE_RETURN((yyval.node), 0);
     }
-#line 4692 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4692 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 182: /* return: L_RETURN comma_expr ';'  */
@@ -4709,7 +4709,7 @@ yyreduce:
         CREATE_RETURN((yyval.node), (yyvsp[-1].node));
       }
     }
-#line 4713 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4713 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 183: /* expr_list: %empty  */
@@ -4717,7 +4717,7 @@ yyreduce:
             {
       CREATE_EXPR_LIST((yyval.node), 0);
     }
-#line 4721 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4721 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 184: /* expr_list: expr_list2  */
@@ -4725,7 +4725,7 @@ yyreduce:
     {
       CREATE_EXPR_LIST((yyval.node), (yyvsp[0].node));
     }
-#line 4729 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4729 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 185: /* expr_list: expr_list2 ','  */
@@ -4733,7 +4733,7 @@ yyreduce:
     {
       CREATE_EXPR_LIST((yyval.node), (yyvsp[-1].node));
     }
-#line 4737 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4737 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 186: /* expr_list_node: expr0  */
@@ -4741,7 +4741,7 @@ yyreduce:
     {
       CREATE_EXPR_NODE((yyval.node), (yyvsp[0].node), 0);
     }
-#line 4745 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4745 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 187: /* expr_list_node: expr0 L_DOT_DOT_DOT  */
@@ -4749,7 +4749,7 @@ yyreduce:
     {
       CREATE_EXPR_NODE((yyval.node), (yyvsp[-1].node), 1);
     }
-#line 4753 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4753 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 188: /* expr_list2: expr_list_node  */
@@ -4758,7 +4758,7 @@ yyreduce:
       (yyvsp[0].node)->kind = 1;
       (yyval.node) = (yyvsp[0].node);
     }
-#line 4762 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4762 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 189: /* expr_list2: expr_list2 ',' expr_list_node  */
@@ -4771,7 +4771,7 @@ yyreduce:
       (yyval.node)->l.expr->r.expr = (yyvsp[0].node);
       (yyval.node)->l.expr = (yyvsp[0].node);
     }
-#line 4775 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4775 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 190: /* expr_list3: %empty  */
@@ -4780,7 +4780,7 @@ yyreduce:
       /* this is a dummy node */
       CREATE_EXPR_LIST((yyval.node), 0);
     }
-#line 4784 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4784 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 191: /* expr_list3: expr_list4  */
@@ -4788,7 +4788,7 @@ yyreduce:
     {
       CREATE_EXPR_LIST((yyval.node), (yyvsp[0].node));
     }
-#line 4792 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4792 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 192: /* expr_list3: expr_list4 ','  */
@@ -4796,7 +4796,7 @@ yyreduce:
     {
       CREATE_EXPR_LIST((yyval.node), (yyvsp[-1].node));
     }
-#line 4800 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4800 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 193: /* expr_list4: assoc_pair  */
@@ -4810,7 +4810,7 @@ yyreduce:
       /* we keep track of the end of the chain in the left nodes */
       (yyval.node)->l.expr = (yyval.node);
     }
-#line 4814 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4814 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 194: /* expr_list4: expr_list4 ',' assoc_pair  */
@@ -4829,7 +4829,7 @@ yyreduce:
       (yyvsp[-2].node)->kind += 2;
       (yyval.node) = (yyvsp[-2].node);
     }
-#line 4833 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4833 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 195: /* assoc_pair: expr0 ':' expr0  */
@@ -4837,7 +4837,7 @@ yyreduce:
     {
       CREATE_TWO_VALUES((yyval.node), 0, (yyvsp[-2].node), (yyvsp[0].node));
     }
-#line 4841 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4841 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 196: /* lvalue: expr4  */
@@ -4954,7 +4954,7 @@ yyreduce:
           break;
       }
     }
-#line 4958 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4958 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 198: /* l_new_function_open: L_FUNCTION_OPEN efun_override  */
@@ -4962,7 +4962,7 @@ yyreduce:
     {
       (yyval.number) = ((yyvsp[0].number) << 8) | FP_EFUN;
     }
-#line 4966 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 4966 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 200: /* expr4: L_DEFINED_NAME  */
@@ -5039,7 +5039,7 @@ yyreduce:
           yyerror(buf);
         }
     }
-#line 5043 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5043 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 201: /* expr4: L_IDENTIFIER  */
@@ -5061,7 +5061,7 @@ yyreduce:
       if (current_function_context)
         current_function_context->bindable = FP_NOT_BINDABLE;
     }
-#line 5065 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5065 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 202: /* expr4: L_PARAMETER  */
@@ -5069,7 +5069,7 @@ yyreduce:
     {
       CREATE_PARAMETER((yyval.node), TYPE_ANY, (yyvsp[0].number));
     }
-#line 5073 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5073 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 203: /* @13: %empty  */
@@ -5080,7 +5080,7 @@ yyreduce:
       if (current_function_context)
         current_function_context = current_function_context->parent;
     }
-#line 5084 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5084 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 204: /* expr4: '$' '(' @13 comma_expr ')'  */
@@ -5107,7 +5107,7 @@ yyreduce:
         node->v.expr = (yyvsp[-1].node);
       }
     }
-#line 5111 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5111 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 205: /* expr4: expr4 L_ARROW identifier  */
@@ -5135,7 +5135,7 @@ yyreduce:
 
       scratch_free((yyvsp[0].string));
     }
-#line 5139 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5139 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 206: /* expr4: expr4 L_DOT identifier  */
@@ -5163,7 +5163,7 @@ yyreduce:
 
       scratch_free((yyvsp[0].string));
     }
-#line 5167 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5167 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 207: /* expr4: expr4 '[' comma_expr L_RANGE comma_expr ']'  */
@@ -5178,7 +5178,7 @@ yyreduce:
     }
       (yyval.node) = make_range_node(F_NN_RANGE, (yyvsp[-5].node), (yyvsp[-3].node), (yyvsp[-1].node));
     }
-#line 5182 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5182 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 208: /* expr4: expr4 '[' '<' comma_expr L_RANGE comma_expr ']'  */
@@ -5186,7 +5186,7 @@ yyreduce:
     {
       (yyval.node) = make_range_node(F_RN_RANGE, (yyvsp[-6].node), (yyvsp[-3].node), (yyvsp[-1].node));
     }
-#line 5190 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5190 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 209: /* expr4: expr4 '[' '<' comma_expr L_RANGE '<' comma_expr ']'  */
@@ -5197,7 +5197,7 @@ yyreduce:
       else
         (yyval.node) = make_range_node(F_RR_RANGE, (yyvsp[-7].node), (yyvsp[-4].node), (yyvsp[-1].node));
     }
-#line 5201 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5201 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 210: /* expr4: expr4 '[' comma_expr L_RANGE '<' comma_expr ']'  */
@@ -5208,7 +5208,7 @@ yyreduce:
       else
         (yyval.node) = make_range_node(F_NR_RANGE, (yyvsp[-6].node), (yyvsp[-4].node), (yyvsp[-1].node));
     }
-#line 5212 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5212 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 211: /* expr4: expr4 '[' comma_expr L_RANGE ']'  */
@@ -5216,7 +5216,7 @@ yyreduce:
     {
       (yyval.node) = make_range_node(F_NE_RANGE, (yyvsp[-4].node), (yyvsp[-2].node), 0);
     }
-#line 5220 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5220 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 212: /* expr4: expr4 '[' '<' comma_expr L_RANGE ']'  */
@@ -5224,7 +5224,7 @@ yyreduce:
     {
       (yyval.node) = make_range_node(F_RE_RANGE, (yyvsp[-5].node), (yyvsp[-2].node), 0);
     }
-#line 5228 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5228 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 213: /* expr4: expr4 '[' '<' comma_expr ']'  */
@@ -5273,7 +5273,7 @@ yyreduce:
         }
       } else (yyval.node)->type = TYPE_ANY;
     }
-#line 5277 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5277 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 214: /* expr4: expr4 '[' comma_expr ']'  */
@@ -5333,7 +5333,7 @@ yyreduce:
         }
       } else (yyval.node)->type = TYPE_ANY;
     }
-#line 5337 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5337 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 216: /* expr4: '(' comma_expr ')'  */
@@ -5341,7 +5341,7 @@ yyreduce:
     {
       (yyval.node) = (yyvsp[-1].node);
     }
-#line 5345 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5345 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 219: /* @14: %empty  */
@@ -5366,7 +5366,7 @@ yyreduce:
       exact_types = TYPE_ANY;
       context = 0;
     }
-#line 5370 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5370 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 220: /* expr4: L_BASIC_TYPE @14 '(' argument ')' block  */
@@ -5406,7 +5406,7 @@ yyreduce:
       type_of_locals_ptr -= max_num_locals;
       reactivate_current_locals();
     }
-#line 5410 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5410 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 221: /* expr4: l_new_function_open ':' ')'  */
@@ -5448,7 +5448,7 @@ yyreduce:
           break;
       }
     }
-#line 5452 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5452 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 222: /* expr4: l_new_function_open ',' expr_list2 ':' ')'  */
@@ -5547,7 +5547,7 @@ yyreduce:
                       break;
       }
     }
-#line 5551 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5551 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 223: /* expr4: L_FUNCTION_OPEN comma_expr ':' ')'  */
@@ -5574,7 +5574,7 @@ yyreduce:
         + (current_function_context->num_parameters << 8);
       pop_function_context();
     }
-#line 5578 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5578 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 224: /* expr4: L_MAPPING_OPEN expr_list3 ']' ')'  */
@@ -5587,7 +5587,7 @@ yyreduce:
       }
       CREATE_CALL((yyval.node), F_AGGREGATE_ASSOC, TYPE_MAPPING, (yyvsp[-2].node));
     }
-#line 5591 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5591 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 225: /* expr4: L_ARRAY_OPEN expr_list '}' ')'  */
@@ -5600,7 +5600,7 @@ yyreduce:
       }
       CREATE_CALL((yyval.node), F_AGGREGATE, TYPE_ANY | TYPE_MOD_ARRAY, (yyvsp[-2].node));
     }
-#line 5604 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5604 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 226: /* expr_or_block: block  */
@@ -5608,7 +5608,7 @@ yyreduce:
     {
       (yyval.node) = (yyvsp[0].decl).node;
     }
-#line 5612 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5612 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 227: /* expr_or_block: '(' comma_expr ')'  */
@@ -5616,7 +5616,7 @@ yyreduce:
     {
       (yyval.node) = insert_pop_value((yyvsp[-1].node));
     }
-#line 5620 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5620 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 228: /* @15: %empty  */
@@ -5625,7 +5625,7 @@ yyreduce:
       (yyval.number) = context;
       context = SPECIAL_CONTEXT;
     }
-#line 5629 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5629 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 229: /* catch: L_CATCH @15 expr_or_block  */
@@ -5634,7 +5634,7 @@ yyreduce:
       CREATE_CATCH((yyval.node), (yyvsp[0].node));
       context = (yyvsp[-1].number);
     }
-#line 5638 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5638 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 230: /* tree: L_TREE block  */
@@ -5645,7 +5645,7 @@ yyreduce:
       lpc_tree_form((yyvsp[0].decl).node, (yyval.node));
 #endif
     }
-#line 5649 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5649 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 231: /* tree: L_TREE '(' comma_expr ')'  */
@@ -5656,7 +5656,7 @@ yyreduce:
       lpc_tree_form((yyvsp[-1].node), (yyval.node));
 #endif
     }
-#line 5660 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5660 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 232: /* sscanf: L_SSCANF '(' expr0 ',' expr0 lvalue_list ')'  */
@@ -5666,7 +5666,7 @@ yyreduce:
       CREATE_LVALUE_EFUN((yyval.node), TYPE_NUMBER, (yyvsp[-1].node));
       CREATE_BINARY_OP_1((yyval.node)->l.expr, F_SSCANF, 0, (yyvsp[-4].node), (yyvsp[-2].node), p);
     }
-#line 5670 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5670 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 233: /* parse_command: L_PARSE_COMMAND '(' expr0 ',' expr0 ',' expr0 lvalue_list ')'  */
@@ -5677,7 +5677,7 @@ yyreduce:
       CREATE_TERNARY_OP_1((yyval.node)->l.expr, F_PARSE_COMMAND, 0,
           (yyvsp[-6].node), (yyvsp[-4].node), (yyvsp[-2].node), p);
     }
-#line 5681 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5681 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 234: /* @16: %empty  */
@@ -5686,7 +5686,7 @@ yyreduce:
       (yyval.number) = context;
       context = SPECIAL_CONTEXT;
     }
-#line 5690 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5690 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 235: /* time_expression: L_TIME_EXPRESSION @16 expr_or_block  */
@@ -5695,7 +5695,7 @@ yyreduce:
       CREATE_TIME_EXPRESSION((yyval.node), (yyvsp[0].node));
       context = (yyvsp[-1].number);
     }
-#line 5699 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5699 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 236: /* lvalue_list: %empty  */
@@ -5705,7 +5705,7 @@ yyreduce:
       (yyval.node)->r.expr = 0;
       (yyval.node)->v.number = 0;
     }
-#line 5709 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5709 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 237: /* lvalue_list: ',' lvalue lvalue_list  */
@@ -5720,7 +5720,7 @@ yyreduce:
       (yyvsp[0].node)->r.expr = insert;
       (yyval.node)->v.number++;
     }
-#line 5724 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5724 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 238: /* string: string_con2  */
@@ -5729,7 +5729,7 @@ yyreduce:
       CREATE_STRING((yyval.node), (yyvsp[0].string));
       scratch_free((yyvsp[0].string));
     }
-#line 5733 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5733 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 240: /* string_con1: '(' string_con1 ')'  */
@@ -5737,7 +5737,7 @@ yyreduce:
     {
       (yyval.string) = (yyvsp[-1].string);
     }
-#line 5741 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5741 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 241: /* string_con1: string_con1 '+' string_con1  */
@@ -5745,7 +5745,7 @@ yyreduce:
     {
       (yyval.string) = scratch_join((yyvsp[-2].string), (yyvsp[0].string));
     }
-#line 5749 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5749 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 243: /* string_con2: string_con2 L_STRING  */
@@ -5753,7 +5753,7 @@ yyreduce:
     {
       (yyval.string) = scratch_join((yyvsp[-1].string), (yyvsp[0].string));
     }
-#line 5757 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5757 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 244: /* class_init: identifier ':' expr0  */
@@ -5764,7 +5764,7 @@ yyreduce:
       (yyval.node)->v.expr = (yyvsp[0].node);
       (yyval.node)->r.expr = 0;
     }
-#line 5768 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5768 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 245: /* opt_class_init: %empty  */
@@ -5772,7 +5772,7 @@ yyreduce:
             {
       (yyval.node) = 0;
     }
-#line 5776 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5776 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 246: /* opt_class_init: opt_class_init ',' class_init  */
@@ -5781,7 +5781,7 @@ yyreduce:
       (yyval.node) = (yyvsp[0].node);
       (yyval.node)->r.expr = (yyvsp[-2].node);
     }
-#line 5785 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5785 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 247: /* @17: %empty  */
@@ -5791,7 +5791,7 @@ yyreduce:
       (yyvsp[0].number) = num_refs;
       context |= ARG_LIST;
     }
-#line 5795 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5795 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 248: /* function_call: efun_override '(' @17 expr_list ')'  */
@@ -5802,7 +5802,7 @@ yyreduce:
       (yyval.node) = check_refs(num_refs - (yyvsp[-3].number), (yyvsp[-1].node), (yyval.node));
       num_refs = (yyvsp[-3].number);
     }
-#line 5806 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5806 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 249: /* @18: %empty  */
@@ -5812,7 +5812,7 @@ yyreduce:
       (yyvsp[0].number) = num_refs;
       context |= ARG_LIST;
     }
-#line 5816 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5816 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 250: /* function_call: L_NEW '(' @18 expr_list ')'  */
@@ -5841,7 +5841,7 @@ yyreduce:
       (yyval.node) = check_refs(num_refs - (yyvsp[-3].number), (yyvsp[-1].node), (yyval.node));
       num_refs = (yyvsp[-3].number);
     }
-#line 5845 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5845 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 251: /* function_call: L_NEW '(' L_CLASS L_DEFINED_NAME opt_class_init ')'  */
@@ -5880,7 +5880,7 @@ yyreduce:
         }
       }
     }
-#line 5884 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5884 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 252: /* function_call: L_NEW '(' L_CLASS L_IDENTIFIER opt_class_init ')'  */
@@ -5902,7 +5902,7 @@ yyreduce:
         node = node->r.expr;
       }
     }
-#line 5906 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5906 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 253: /* @19: %empty  */
@@ -5912,7 +5912,7 @@ yyreduce:
       (yyvsp[0].number) = num_refs;
       context |= ARG_LIST;
     }
-#line 5916 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 5916 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 254: /* function_call: L_DEFINED_NAME '(' @19 expr_list ')'  */
@@ -6045,7 +6045,7 @@ yyreduce:
       (yyval.node) = check_refs(num_refs - (yyvsp[-3].number), (yyvsp[-1].node), (yyval.node));
       num_refs = (yyvsp[-3].number);
     }
-#line 6049 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6049 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 255: /* @20: %empty  */
@@ -6055,7 +6055,7 @@ yyreduce:
       (yyvsp[0].number) = num_refs;
       context |= ARG_LIST;
     }
-#line 6059 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6059 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 256: /* function_call: function_name '(' @20 expr_list ')'  */
@@ -6121,7 +6121,7 @@ yyreduce:
       num_refs = (yyvsp[-3].number);
       scratch_free(name);
     }
-#line 6125 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6125 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 257: /* @21: %empty  */
@@ -6131,7 +6131,7 @@ yyreduce:
       (yyvsp[0].number) = num_refs;
       context |= ARG_LIST;
     }
-#line 6135 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6135 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 258: /* function_call: expr4 '[' comma_expr ']' '(' @21 expr_list ')'  */
@@ -6180,7 +6180,7 @@ yyreduce:
       (yyval.node) = check_refs(num_refs - (yyvsp[-3].number), (yyvsp[-1].node), (yyval.node));
       num_refs = (yyvsp[-3].number);
     }
-#line 6184 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6184 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 259: /* @22: %empty  */
@@ -6190,7 +6190,7 @@ yyreduce:
       (yyvsp[0].number) = num_refs;
       context |= ARG_LIST;
     }
-#line 6194 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6194 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 260: /* function_call: expr4 L_ARROW identifier '(' @22 expr_list ')'  */
@@ -6239,7 +6239,7 @@ yyreduce:
       (yyval.node) = check_refs(num_refs - (yyvsp[-3].number), (yyvsp[-1].node), (yyval.node));
       num_refs = (yyvsp[-3].number);
     }
-#line 6243 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6243 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 261: /* @23: %empty  */
@@ -6249,7 +6249,7 @@ yyreduce:
       (yyvsp[0].number) = num_refs;
       context |= ARG_LIST;
     }
-#line 6253 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6253 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 262: /* function_call: '(' '*' comma_expr ')' '(' @23 expr_list ')'  */
@@ -6275,7 +6275,7 @@ yyreduce:
       (yyval.node) = check_refs(num_refs - (yyvsp[-3].number), (yyvsp[-1].node), (yyval.node));
       num_refs = (yyvsp[-3].number);
     }
-#line 6279 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6279 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 263: /* efun_override: L_EFUN L_COLON_COLON identifier  */
@@ -6299,7 +6299,7 @@ yyreduce:
       }
       scratch_free((yyvsp[0].string));
     }
-#line 6303 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6303 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 264: /* efun_override: L_EFUN L_COLON_COLON L_NEW  */
@@ -6316,7 +6316,7 @@ yyreduce:
         (yyval.number) = -1;
       } else (yyval.number) = new_efun;
     }
-#line 6320 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6320 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 266: /* function_name: L_COLON_COLON identifier  */
@@ -6334,7 +6334,7 @@ yyreduce:
         *(p+3) = *p;
       strncpy((yyval.string), ":::", 3);
     }
-#line 6338 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6338 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 267: /* function_name: L_BASIC_TYPE L_COLON_COLON identifier  */
@@ -6353,7 +6353,7 @@ yyreduce:
       (yyval.string)[z-2] = ':';
       (yyval.string)[z-1] = ':';
     }
-#line 6357 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6357 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 268: /* function_name: identifier L_COLON_COLON identifier  */
@@ -6369,7 +6369,7 @@ yyreduce:
       scratch_free((yyvsp[-2].string));
       scratch_free((yyvsp[0].string));
     }
-#line 6373 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6373 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 269: /* cond: L_IF '(' comma_expr ')' statement optional_else_part  */
@@ -6404,7 +6404,7 @@ yyreduce:
       }
       CREATE_IF((yyval.node), (yyvsp[-3].node), (yyvsp[-1].node), (yyvsp[0].node));
     }
-#line 6408 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6408 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 270: /* optional_else_part: %empty  */
@@ -6412,7 +6412,7 @@ yyreduce:
     {
       (yyval.node) = 0;
     }
-#line 6416 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6416 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
   case 271: /* optional_else_part: L_ELSE statement  */
@@ -6420,11 +6420,11 @@ yyreduce:
     {
       (yyval.node) = (yyvsp[0].node);
     }
-#line 6424 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6424 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
     break;
 
 
-#line 6428 "/home/mechrevo/projects/fluffos-vmcontext/build-prod/src/grammar.autogen.cc"
+#line 6428 "/home/mechrevo/projects/fluffos-vmcontext/build/src/grammar.autogen.cc"
 
         default: break;
       }

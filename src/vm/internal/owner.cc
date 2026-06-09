@@ -6,6 +6,7 @@
 #include <deque>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace {
 constexpr const char *kDefaultOwnerId = "owner/global";
@@ -24,6 +25,8 @@ struct OwnerMailboxTask {
 };
 
 std::unordered_map<std::string, std::deque<OwnerMailboxTask>> owner_mailboxes;
+std::deque<std::string> schedulable_owners;
+std::unordered_set<std::string> schedulable_owner_set;
 
 bool valid_owner_id(const char *owner_id) {
   return owner_id && owner_id[0] != '\0';
@@ -68,6 +71,12 @@ mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
   add_mapping_string(map, "task_type", task.task_type.c_str());
   add_mapping_string(map, "task_key", task.task_key.c_str());
   return map;
+}
+
+void mark_owner_schedulable(const std::string &owner_id) {
+  if (schedulable_owner_set.insert(owner_id).second) {
+    schedulable_owners.push_back(owner_id);
+  }
 }
 }  // namespace
 
@@ -141,7 +150,13 @@ uint64_t vm_owner_enqueue_task(const char *owner_id, const char *task_type, cons
   task.owner_id = normalize_owner_id(owner_id);
   task.task_type = normalize_task_text(task_type, "generic");
   task.task_key = normalize_task_text(task_key, "");
-  owner_mailboxes[task.owner_id].push_back(std::move(task));
+  auto normalized_owner_id = task.owner_id;
+  auto &queue = owner_mailboxes[normalized_owner_id];
+  auto was_empty = queue.empty();
+  queue.push_back(std::move(task));
+  if (was_empty) {
+    mark_owner_schedulable(normalized_owner_id);
+  }
   return task.task_id;
 }
 
@@ -161,6 +176,7 @@ mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
   }
   if (queue.empty()) {
     owner_mailboxes.erase(normalized_owner_id);
+    schedulable_owner_set.erase(normalized_owner_id);
   }
   total_drained.fetch_add(requested, std::memory_order_relaxed);
 
@@ -169,6 +185,54 @@ mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
   add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
   add_mapping_pair(map, "drained", static_cast<long>(requested));
   add_mapping_pair(map, "remaining", owner_mailbox_depth(normalized_owner_id));
+  add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "total_drained", static_cast<long>(total_drained.load(std::memory_order_relaxed)));
+  add_mapping_array(map, "tasks", tasks);
+  free_array(tasks);
+  return map;
+}
+
+mapping_t *vm_owner_schedule(int limit) {
+  auto requested = limit <= 0 ? static_cast<size_t>(owner_mailbox_total_depth()) : static_cast<size_t>(limit);
+  auto *tasks = allocate_array(static_cast<int>(requested));
+  size_t dispatched = 0;
+
+  while (dispatched < requested && !schedulable_owners.empty()) {
+    auto owner_id = schedulable_owners.front();
+    schedulable_owners.pop_front();
+    if (schedulable_owner_set.erase(owner_id) == 0) {
+      continue;
+    }
+
+    auto it = owner_mailboxes.find(owner_id);
+    if (it == owner_mailboxes.end() || it->second.empty()) {
+      owner_mailboxes.erase(owner_id);
+      continue;
+    }
+
+    auto task = it->second.front();
+    it->second.pop_front();
+    auto *task_map = owner_mailbox_task_mapping(task);
+    tasks->item[dispatched].type = T_MAPPING;
+    tasks->item[dispatched].subtype = 0;
+    tasks->item[dispatched].u.map = task_map;
+    dispatched++;
+
+    if (it->second.empty()) {
+      owner_mailboxes.erase(it);
+    } else {
+      mark_owner_schedulable(owner_id);
+    }
+  }
+
+  tasks->size = static_cast<int>(dispatched);
+  total_drained.fetch_add(dispatched, std::memory_order_relaxed);
+
+  auto *map = allocate_mapping(7);
+  add_mapping_pair(map, "success", 1);
+  add_mapping_pair(map, "dispatched", static_cast<long>(dispatched));
+  add_mapping_pair(map, "remaining", owner_mailbox_total_depth());
+  add_mapping_pair(map, "active_owners", owner_mailbox_active_owners());
   add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "total_drained", static_cast<long>(total_drained.load(std::memory_order_relaxed)));
   add_mapping_array(map, "tasks", tasks);
