@@ -95,12 +95,34 @@ void f_vm_owner_enqueue_epoch() {
 }
 #endif
 
+#ifdef F_VM_OWNER_RECORD
+void f_vm_owner_record() {
+  auto *state = sp;
+  auto owner_epoch = (sp - 1)->u.number;
+  auto *task_key = sp - 2;
+  auto *task_type = sp - 3;
+  auto *owner_id = sp - 4;
+  auto trace_id = vm_owner_record_task_trace(owner_id->u.string, task_type->u.string, task_key->u.string,
+                                            static_cast<uint64_t>(owner_epoch), state->u.string);
+  pop_n_elems(5);
+  push_number(static_cast<long>(trace_id));
+}
+#endif
+
 #ifdef F_VM_OWNER_DRAIN
 void f_vm_owner_drain() {
   auto limit = sp->u.number;
   auto *owner_id = sp - 1;
   auto *result = vm_owner_drain_mailbox(owner_id->u.string, static_cast<int>(limit));
   pop_2_elems();
+  push_refed_mapping(result);
+}
+#endif
+
+#ifdef F_VM_OWNER_TRACE
+void f_vm_owner_trace() {
+  auto *result = vm_owner_task_trace(static_cast<int>(sp->u.number));
+  pop_stack();
   push_refed_mapping(result);
 }
 #endif

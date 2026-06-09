@@ -220,6 +220,43 @@ TEST_F(DriverTest, TestVmOwnerPurgeRemovesOwnerQueueBeforeSchedule) {
   free_mapping(scheduled);
 }
 
+TEST_F(DriverTest, TestVmOwnerTaskTraceRecordsObservedAndDispatchedEvents) {
+  const char* owner = "owner/test/trace";
+  auto trace_id = vm_owner_record_task_trace(owner, "command", "look", 7, "observed");
+  auto task_id = vm_owner_enqueue_task_epoch(owner, "command", "inventory", 7);
+  ASSERT_GT(trace_id, 0u);
+  ASSERT_GT(task_id, 0u);
+
+  auto* scheduled = vm_owner_schedule(1);
+  free_mapping(scheduled);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* trace = vm_owner_task_trace(3);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  ASSERT_EQ(events->u.arr->size, 3);
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "state"), "observed");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "task_key"), "look");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[1].u.map, "state"), "queued");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[2].u.map, "state"), "dispatched");
+  ASSERT_EQ(mapping_number(events->u.arr->item[2].u.map, "task_id"), static_cast<long>(task_id));
+  ASSERT_STREQ(mapping_string(events->u.arr->item[2].u.map, "owner_id"), owner);
+  free_mapping(trace);
+}
+
 TEST_F(DriverTest, TestVmOwnerScheduleRoundsOwnersAndKeepsOwnerFifo) {
   const char* owner_a = "owner/test/schedule/a";
   const char* owner_b = "owner/test/schedule/b";
