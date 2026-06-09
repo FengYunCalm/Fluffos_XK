@@ -94,6 +94,18 @@ TEST_F(DriverTest, TestVmWorkerAsyncBenchmarkPollsResult) {
   ASSERT_EQ(vm_worker_poll_task(task_id).state, VMWorkerTaskState::kUnknown);
 }
 
+TEST_F(DriverTest, TestVmWorkerActorKeysSerializePerOwner) {
+  auto result = vm_worker_actor_benchmark(4, 2, 80);
+  ASSERT_EQ(result.owners, 4);
+  ASSERT_EQ(result.tasks_per_owner, 2);
+  ASSERT_EQ(result.total_tasks, 8);
+  ASSERT_GE(result.worker_count, 1);
+  ASSERT_GE(result.max_parallel, std::min(2, result.worker_count));
+  ASSERT_EQ(result.max_owner_parallel, 1);
+  ASSERT_GT(result.checksum, 0u);
+  ASSERT_LT(result.elapsed_ms, 360);
+}
+
 TEST_F(DriverTest, TestInMemoryCompileFile) {
   program_t* prog = nullptr;
 

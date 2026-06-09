@@ -12,6 +12,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "base/internal/tracing.h"
@@ -84,18 +85,43 @@ class VMWorkerRuntime {
       if (!stopping_) {
         accepted = true;
         submitted_++;
-        tasks_.push_back([this, task = std::move(task), promise] {
-          active_++;
-          try {
-            task();
-            promise->set_value();
-          } catch (...) {
-            promise->set_exception(std::current_exception());
-          }
-          active_--;
-          completed_++;
-        });
+        tasks_.push_back(wrap_task(std::move(task), promise));
         update_queue_high_watermark(tasks_.size());
+      }
+    }
+    if (!accepted) {
+      try {
+        throw std::runtime_error("VM worker runtime is stopping");
+      } catch (...) {
+        promise->set_exception(std::current_exception());
+      }
+      return future;
+    }
+    cv_.notify_one();
+    return future;
+  }
+
+  std::future<void> submit_keyed(std::string owner_key, std::function<void()> task) {
+    if (owner_key.empty()) {
+      return submit(std::move(task));
+    }
+
+    auto promise = std::make_shared<std::promise<void>>();
+    auto future = promise->get_future();
+    auto accepted = false;
+    auto wrapped = wrap_task(std::move(task), promise, owner_key);
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (!stopping_) {
+        accepted = true;
+        submitted_++;
+        if (running_owner_keys_.count(owner_key) == 0) {
+          running_owner_keys_.insert(owner_key);
+          tasks_.push_back(std::move(wrapped));
+          update_queue_high_watermark(tasks_.size());
+        } else {
+          owner_queues_[owner_key].push_back(std::move(wrapped));
+        }
       }
     }
     if (!accepted) {
@@ -119,6 +145,8 @@ class VMWorkerRuntime {
       stats.completed = completed_.load();
       stats.queue_depth = tasks_.size();
       stats.queue_high_watermark = queue_high_watermark_.load();
+      stats.owner_queue_depth = owner_queue_depth_locked();
+      stats.active_owners = static_cast<int>(running_owner_keys_.size());
       stats.active = active_.load();
     }
     {
@@ -140,6 +168,64 @@ class VMWorkerRuntime {
       }
     }
     return stats;
+  }
+
+  VMWorkerActorBenchResult actor_benchmark(int owners, int tasks_per_owner, int millis) {
+    owners = std::clamp(owners, 1, 64);
+    tasks_per_owner = std::clamp(tasks_per_owner, 1, 64);
+    millis = std::clamp(millis, 1, 5000);
+    start(0);
+
+    auto stats = this->stats();
+    auto total_tasks = owners * tasks_per_owner;
+    auto start_barrier = std::make_shared<std::atomic<bool>>(false);
+    auto active = std::make_shared<std::atomic<int>>(0);
+    auto max_parallel = std::make_shared<std::atomic<int>>(0);
+    auto checksum = std::make_shared<std::atomic<uint64_t>>(0);
+    auto owner_active = std::make_shared<std::vector<std::atomic<int>>>(owners);
+    auto max_owner_parallel = std::make_shared<std::atomic<int>>(0);
+    std::vector<std::future<void>> futures;
+    futures.reserve(total_tasks);
+
+    auto start_time = std::chrono::steady_clock::now();
+    for (int owner = 0; owner < owners; owner++) {
+      for (int index = 0; index < tasks_per_owner; index++) {
+        auto owner_key = std::string("actor/") + std::to_string(owner);
+        futures.push_back(submit_keyed(owner_key, [=] {
+          while (!start_barrier->load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+          }
+          auto running = active->fetch_add(1) + 1;
+          update_max(*max_parallel, running);
+          auto same_owner_running = (*owner_active)[owner].fetch_add(1) + 1;
+          update_max(*max_owner_parallel, same_owner_running);
+          auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(millis);
+          uint64_t local = static_cast<uint64_t>((owner + 1) * 1000 + index + 1);
+          while (std::chrono::steady_clock::now() < end) {
+            local = local * 2862933555777941757ULL + 3037000493ULL;
+          }
+          checksum->fetch_add(local);
+          (*owner_active)[owner].fetch_sub(1);
+          active->fetch_sub(1);
+        }));
+      }
+    }
+
+    start_barrier->store(true, std::memory_order_release);
+    for (auto &future : futures) {
+      future.get();
+    }
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_time);
+    stats = this->stats();
+    return VMWorkerActorBenchResult{owners,
+                                    tasks_per_owner,
+                                    total_tasks,
+                                    stats.worker_count,
+                                    max_parallel->load(),
+                                    max_owner_parallel->load(),
+                                    elapsed.count(),
+                                    checksum->load()};
   }
 
   uint64_t submit_benchmark(int tasks, int millis) {
@@ -187,6 +273,51 @@ class VMWorkerRuntime {
   }
 
  private:
+  std::function<void()> wrap_task(std::function<void()> task,
+                                  std::shared_ptr<std::promise<void>> promise,
+                                  std::string owner_key = "") {
+    return [this, task = std::move(task), promise, owner_key = std::move(owner_key)] {
+      active_++;
+      try {
+        task();
+        promise->set_value();
+      } catch (...) {
+        promise->set_exception(std::current_exception());
+      }
+      active_--;
+      completed_++;
+      if (!owner_key.empty()) {
+        release_owner_key(owner_key);
+      }
+    };
+  }
+
+  void release_owner_key(const std::string &owner_key) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      auto queue = owner_queues_.find(owner_key);
+      if (queue != owner_queues_.end() && !queue->second.empty()) {
+        tasks_.push_back(std::move(queue->second.front()));
+        queue->second.pop_front();
+        if (queue->second.empty()) {
+          owner_queues_.erase(queue);
+        }
+        update_queue_high_watermark(tasks_.size());
+      } else {
+        running_owner_keys_.erase(owner_key);
+      }
+    }
+    cv_.notify_one();
+  }
+
+  uint64_t owner_queue_depth_locked() const {
+    uint64_t depth = 0;
+    for (const auto &entry : owner_queues_) {
+      depth += entry.second.size();
+    }
+    return depth;
+  }
+
   void run() {
     Tracer::setThreadName("VM worker");
     while (true) {
@@ -243,6 +374,8 @@ class VMWorkerRuntime {
   std::condition_variable cv_;
   bool stopping_{false};
   std::deque<std::function<void()>> tasks_;
+  std::unordered_map<std::string, std::deque<std::function<void()>>> owner_queues_;
+  std::unordered_set<std::string> running_owner_keys_;
   std::vector<std::thread> workers_;
   std::atomic<uint64_t> submitted_{0};
   std::atomic<uint64_t> completed_{0};
@@ -312,6 +445,10 @@ VMWorkerBenchResult vm_worker_benchmark(int tasks, int millis) {
   stats = vm_worker_stats();
   return VMWorkerBenchResult{tasks, stats.worker_count, max_parallel->load(), elapsed.count(),
                              checksum->load()};
+}
+
+VMWorkerActorBenchResult vm_worker_actor_benchmark(int owners, int tasks_per_owner, int millis) {
+  return runtime().actor_benchmark(owners, tasks_per_owner, millis);
 }
 
 uint64_t vm_worker_submit_benchmark(int tasks, int millis) {

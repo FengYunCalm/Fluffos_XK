@@ -50,6 +50,18 @@ int mapping_number(mapping_t *map, const char *key, int fallback) {
   return fallback;
 }
 
+void add_actor_bench_result(mapping_t *map, const VMWorkerActorBenchResult &result) {
+  add_mapping_string(map, "type", "actor_bench");
+  add_mapping_pair(map, "owners", result.owners);
+  add_mapping_pair(map, "tasks_per_owner", result.tasks_per_owner);
+  add_mapping_pair(map, "total_tasks", result.total_tasks);
+  add_mapping_pair(map, "worker_count", result.worker_count);
+  add_mapping_pair(map, "max_parallel", result.max_parallel);
+  add_mapping_pair(map, "max_owner_parallel", result.max_owner_parallel);
+  add_mapping_pair(map, "elapsed_ms", result.elapsed_ms);
+  add_mapping_pair(map, "checksum", static_cast<long>(result.checksum));
+}
+
 mapping_t *worker_failure_response(const char *error) {
   auto *map = allocate_mapping(2);
   add_mapping_pair(map, "success", 0);
@@ -106,9 +118,24 @@ mapping_t *worker_bench_response(mapping_t *options) {
   return response;
 }
 
+mapping_t *worker_actor_bench_response(mapping_t *options) {
+  auto owners = mapping_number(options, "owners", 4);
+  auto tasks_per_owner = mapping_number(options, "tasks_per_owner", 2);
+  auto millis = mapping_number(options, "millis", 100);
+  auto result = vm_worker_actor_benchmark(owners, tasks_per_owner, millis);
+  auto *result_spec = allocate_mapping(9);
+  add_actor_bench_result(result_spec, result);
+
+  auto *response = allocate_mapping(2);
+  add_mapping_pair(response, "success", 1);
+  add_mapping_mapping(response, "result_spec", result_spec);
+  free_mapping(result_spec);
+  return response;
+}
+
 mapping_t *worker_status_response() {
   auto stats = vm_worker_stats();
-  auto *map = allocate_mapping(10);
+  auto *map = allocate_mapping(12);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "worker_count", stats.worker_count);
   add_mapping_pair(map, "submitted", static_cast<long>(stats.submitted));
@@ -116,6 +143,8 @@ mapping_t *worker_status_response() {
   add_mapping_pair(map, "active", stats.active);
   add_mapping_pair(map, "queue_depth", static_cast<long>(stats.queue_depth));
   add_mapping_pair(map, "queue_high_watermark", static_cast<long>(stats.queue_high_watermark));
+  add_mapping_pair(map, "owner_queue_depth", static_cast<long>(stats.owner_queue_depth));
+  add_mapping_pair(map, "active_owners", stats.active_owners);
   add_mapping_pair(map, "async_pending", static_cast<long>(stats.async_pending));
   add_mapping_pair(map, "async_ready", static_cast<long>(stats.async_ready));
   add_mapping_pair(map, "async_failed", static_cast<long>(stats.async_failed));
@@ -209,12 +238,29 @@ void f_vm_worker_task() {
   std::string task_name(task->u.string);
   if (task_name == "bench") {
     response = worker_bench_response(options->u.map);
+  } else if (task_name == "actor_bench") {
+    response = worker_actor_bench_response(options->u.map);
   } else {
     response = worker_failure_response("unknown worker task");
   }
 
   pop_3_elems();
   push_refed_mapping(response);
+}
+#endif
+
+#ifdef F_VM_WORKER_ACTOR_BENCH
+void f_vm_worker_actor_bench() {
+  auto millis = sp->u.number;
+  auto tasks_per_owner = (sp - 1)->u.number;
+  auto owners = (sp - 2)->u.number;
+  pop_3_elems();
+
+  auto result = vm_worker_actor_benchmark(static_cast<int>(owners), static_cast<int>(tasks_per_owner),
+                                          static_cast<int>(millis));
+  auto *map = allocate_mapping(9);
+  add_actor_bench_result(map, result);
+  push_refed_mapping(map);
 }
 #endif
 
