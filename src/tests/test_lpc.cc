@@ -106,6 +106,15 @@ TEST_F(DriverTest, TestVmWorkerActorKeysSerializePerOwner) {
   ASSERT_LT(result.elapsed_ms, 360);
 }
 
+TEST_F(DriverTest, TestVmWorkerSnapshotDigestUsesOwnerKey) {
+  auto result = vm_worker_snapshot_digest("actor/test", "{\"hp\":100,\"room\":\"test\"}", 16);
+  ASSERT_EQ(result.owner_key, "actor/test");
+  ASSERT_GE(result.worker_count, 1);
+  ASSERT_EQ(result.input_bytes, 24u);
+  ASSERT_EQ(result.repeat, 16);
+  ASSERT_GT(result.checksum, 0u);
+}
+
 TEST_F(DriverTest, TestInMemoryCompileFile) {
   program_t* prog = nullptr;
 

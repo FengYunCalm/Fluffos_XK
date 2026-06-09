@@ -1,6 +1,11 @@
 #include "base/package_api.h"
 
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "vm/worker.h"
 
@@ -50,6 +55,85 @@ int mapping_number(mapping_t *map, const char *key, int fallback) {
   return fallback;
 }
 
+std::string mapping_string(mapping_t *map, const char *key, const char *fallback) {
+  auto *value = find_string_in_mapping(map, key);
+  if (value && value->type == T_STRING) {
+    return value->u.string ? value->u.string : "";
+  }
+  return fallback ? fallback : "";
+}
+
+void append_counted_string(std::string *out, const char *value) {
+  auto length = value ? std::strlen(value) : 0;
+  out->append(std::to_string(length));
+  out->push_back(':');
+  if (length > 0) {
+    out->append(value, length);
+  }
+}
+
+void append_snapshot_value(const svalue_t *value, int depth, std::string *out) {
+  if (depth > 8) {
+    out->append("depth");
+    return;
+  }
+
+  switch (value->type) {
+    case T_NUMBER:
+      out->append("i");
+      out->append(std::to_string(value->u.number));
+      return;
+    case T_REAL: {
+      char buffer[64];
+      std::snprintf(buffer, sizeof(buffer), "%.17g", value->u.real);
+      out->append("f");
+      out->append(buffer);
+      return;
+    }
+    case T_STRING:
+      out->append("s");
+      append_counted_string(out, value->u.string);
+      return;
+    case T_ARRAY:
+      out->append("a");
+      out->append(std::to_string(value->u.arr->size));
+      out->push_back('[');
+      for (int i = 0; i < value->u.arr->size; i++) {
+        append_snapshot_value(&value->u.arr->item[i], depth + 1, out);
+        out->push_back(';');
+      }
+      out->push_back(']');
+      return;
+    case T_MAPPING: {
+      std::vector<std::pair<std::string, std::string>> entries;
+      for (unsigned int i = 0; i < value->u.map->table_size; i++) {
+        for (auto *node = value->u.map->table[i]; node; node = node->next) {
+          std::string encoded;
+          append_snapshot_value(&node->values[1], depth + 1, &encoded);
+          entries.emplace_back(node->values[0].u.string ? node->values[0].u.string : "", std::move(encoded));
+        }
+      }
+      std::sort(entries.begin(), entries.end(), [](const auto &left, const auto &right) {
+        return left.first < right.first;
+      });
+      out->append("m");
+      out->append(std::to_string(entries.size()));
+      out->push_back('{');
+      for (const auto &entry : entries) {
+        append_counted_string(out, entry.first.c_str());
+        out->push_back('=');
+        out->append(entry.second);
+        out->push_back(';');
+      }
+      out->push_back('}');
+      return;
+    }
+    default:
+      out->append("unsupported");
+      return;
+  }
+}
+
 void add_actor_bench_result(mapping_t *map, const VMWorkerActorBenchResult &result) {
   add_mapping_string(map, "type", "actor_bench");
   add_mapping_pair(map, "owners", result.owners);
@@ -59,6 +143,16 @@ void add_actor_bench_result(mapping_t *map, const VMWorkerActorBenchResult &resu
   add_mapping_pair(map, "max_parallel", result.max_parallel);
   add_mapping_pair(map, "max_owner_parallel", result.max_owner_parallel);
   add_mapping_pair(map, "elapsed_ms", result.elapsed_ms);
+  add_mapping_pair(map, "checksum", static_cast<long>(result.checksum));
+}
+
+void add_snapshot_digest_result(mapping_t *map, const VMWorkerSnapshotDigestResult &result) {
+  add_mapping_string(map, "type", "snapshot_digest");
+  add_mapping_string(map, "owner_key", result.owner_key.c_str());
+  add_mapping_pair(map, "worker_count", result.worker_count);
+  add_mapping_pair(map, "elapsed_ms", result.elapsed_ms);
+  add_mapping_pair(map, "input_bytes", static_cast<long>(result.input_bytes));
+  add_mapping_pair(map, "repeat", result.repeat);
   add_mapping_pair(map, "checksum", static_cast<long>(result.checksum));
 }
 
@@ -125,6 +219,22 @@ mapping_t *worker_actor_bench_response(mapping_t *options) {
   auto result = vm_worker_actor_benchmark(owners, tasks_per_owner, millis);
   auto *result_spec = allocate_mapping(9);
   add_actor_bench_result(result_spec, result);
+
+  auto *response = allocate_mapping(2);
+  add_mapping_pair(response, "success", 1);
+  add_mapping_mapping(response, "result_spec", result_spec);
+  free_mapping(result_spec);
+  return response;
+}
+
+mapping_t *worker_snapshot_digest_response(svalue_t *snapshot, mapping_t *options) {
+  auto owner_key = mapping_string(options, "owner_key", "global");
+  auto repeat = mapping_number(options, "repeat", 1);
+  std::string snapshot_text;
+  append_snapshot_value(snapshot, 0, &snapshot_text);
+  auto result = vm_worker_snapshot_digest(owner_key, std::move(snapshot_text), repeat);
+  auto *result_spec = allocate_mapping(7);
+  add_snapshot_digest_result(result_spec, result);
 
   auto *response = allocate_mapping(2);
   add_mapping_pair(response, "success", 1);
@@ -240,6 +350,8 @@ void f_vm_worker_task() {
     response = worker_bench_response(options->u.map);
   } else if (task_name == "actor_bench") {
     response = worker_actor_bench_response(options->u.map);
+  } else if (task_name == "snapshot_digest") {
+    response = worker_snapshot_digest_response(snapshot, options->u.map);
   } else {
     response = worker_failure_response("unknown worker task");
   }

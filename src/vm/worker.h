@@ -30,6 +30,15 @@ struct VMWorkerActorBenchResult {
   uint64_t checksum{0};
 };
 
+struct VMWorkerSnapshotDigestResult {
+  std::string owner_key;
+  int worker_count{0};
+  int64_t elapsed_ms{0};
+  uint64_t input_bytes{0};
+  int repeat{0};
+  uint64_t checksum{0};
+};
+
 struct VMWorkerStats {
   int worker_count{0};
   uint64_t submitted{0};
@@ -56,6 +65,9 @@ void vm_worker_stop();
 VMWorkerStats vm_worker_stats();
 VMWorkerBenchResult vm_worker_benchmark(int tasks, int millis);
 VMWorkerActorBenchResult vm_worker_actor_benchmark(int owners, int tasks_per_owner, int millis);
+VMWorkerSnapshotDigestResult vm_worker_snapshot_digest(std::string owner_key,
+                                                       std::string snapshot_text,
+                                                       int repeat);
 uint64_t vm_worker_submit_benchmark(int tasks, int millis);
 VMWorkerTaskResult vm_worker_poll_task(uint64_t task_id);
 

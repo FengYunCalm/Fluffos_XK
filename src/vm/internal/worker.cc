@@ -13,6 +13,7 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "base/internal/tracing.h"
@@ -226,6 +227,36 @@ class VMWorkerRuntime {
                                     max_owner_parallel->load(),
                                     elapsed.count(),
                                     checksum->load()};
+  }
+
+  VMWorkerSnapshotDigestResult snapshot_digest(std::string owner_key, std::string snapshot_text, int repeat) {
+    if (owner_key.empty()) {
+      owner_key = "global";
+    }
+    repeat = std::clamp(repeat, 1, 10000);
+    start(0);
+
+    auto input_bytes = static_cast<uint64_t>(snapshot_text.size());
+    auto checksum = std::make_shared<std::atomic<uint64_t>>(0);
+    auto start_time = std::chrono::steady_clock::now();
+    auto future = submit_keyed(owner_key, [snapshot_text = std::move(snapshot_text), checksum, repeat] {
+      uint64_t local = 1469598103934665603ULL;
+      for (int i = 0; i < repeat; i++) {
+        for (auto ch : snapshot_text) {
+          local ^= static_cast<unsigned char>(ch);
+          local *= 1099511628211ULL;
+        }
+        local ^= static_cast<uint64_t>(i + 1);
+        local *= 1099511628211ULL;
+      }
+      checksum->store(local);
+    });
+    future.get();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_time);
+    auto stats = this->stats();
+    return VMWorkerSnapshotDigestResult{owner_key, stats.worker_count, elapsed.count(),
+                                        input_bytes, repeat, checksum->load()};
   }
 
   uint64_t submit_benchmark(int tasks, int millis) {
@@ -449,6 +480,12 @@ VMWorkerBenchResult vm_worker_benchmark(int tasks, int millis) {
 
 VMWorkerActorBenchResult vm_worker_actor_benchmark(int owners, int tasks_per_owner, int millis) {
   return runtime().actor_benchmark(owners, tasks_per_owner, millis);
+}
+
+VMWorkerSnapshotDigestResult vm_worker_snapshot_digest(std::string owner_key,
+                                                       std::string snapshot_text,
+                                                       int repeat) {
+  return runtime().snapshot_digest(std::move(owner_key), std::move(snapshot_text), repeat);
 }
 
 uint64_t vm_worker_submit_benchmark(int tasks, int millis) {
