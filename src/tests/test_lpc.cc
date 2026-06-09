@@ -7,6 +7,7 @@
 #include "mainlib.h"
 
 #include "compiler/internal/compiler.h"
+#include "packages/core/heartbeat.h"
 #include "packages/gateway/gateway.h"
 #include "vm/context.h"
 #include "vm/internal/simulate.h"
@@ -255,6 +256,33 @@ TEST_F(DriverTest, TestVmOwnerTaskTraceRecordsObservedAndDispatchedEvents) {
   ASSERT_EQ(mapping_number(events->u.arr->item[2].u.map, "task_id"), static_cast<long>(task_id));
   ASSERT_STREQ(mapping_string(events->u.arr->item[2].u.map, "owner_id"), owner);
   free_mapping(trace);
+}
+
+TEST_F(DriverTest, TestVmOwnerHeartbeatTraceRecordsScheduledEvent) {
+  current_object = master_ob;
+  object_t* obj = find_object("single/master.c");
+  ASSERT_NE(obj, nullptr);
+  vm_owner_set_id(obj, "owner/test/heartbeat");
+
+  ASSERT_EQ(set_heart_beat(obj, 1), 1);
+
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+  auto* trace = vm_owner_task_trace(1);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  ASSERT_EQ(events->u.arr->size, 1);
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "task_type"), "heartbeat");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "state"), "scheduled");
+  free_mapping(trace);
+
+  set_heart_beat(obj, 0);
+  vm_owner_clear_id(obj);
 }
 
 TEST_F(DriverTest, TestVmOwnerScheduleRoundsOwnersAndKeepsOwnerFifo) {

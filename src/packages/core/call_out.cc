@@ -3,8 +3,10 @@
 #include "packages/core/call_out.h"
 
 #include "vm/context.h"
+#include "vm/owner.h"
 
 #include <chrono>
+#include <cstring>
 #include <functional>
 #include <cmath>
 #include <unordered_map>
@@ -63,6 +65,10 @@ static void free_called_call(pending_call_t *cop) {
       free_object(&cop->command_giver, "free_call");
       cop->command_giver = nullptr;
     }
+  }
+  if (cop->owner_id) {
+    free_string(cop->owner_id);
+    cop->owner_id = nullptr;
   }
   if (cop->tick_event != nullptr) {
     cop->tick_event->valid = false;  // Will be freed by tick loop itself.
@@ -139,6 +145,12 @@ LPC_INT new_call_out(object_t *ob, svalue_t *fun, std::chrono::milliseconds dela
   }
   DBG_CALLOUT("  handle: %" LPC_INT_FMTSTR_P "\n", cop->handle);
 
+  object_t *owner_ob = cop->ob ? cop->ob : fun->u.fp->hdr.owner;
+  cop->owner_id = make_shared_string(vm_owner_id(owner_ob));
+  cop->owner_epoch = vm_owner_epoch(owner_ob);
+  vm_owner_record_task_trace(cop->owner_id, "call_out", fun->type == T_STRING ? fun->u.string : "<function>",
+                             cop->owner_epoch, "scheduled");
+
   g_callout_handle_map.insert(std::make_pair(cop->handle, cop));
   g_callout_object_handle_map.insert(
       std::make_pair(cop->ob ? cop->ob : fun->u.fp->hdr.owner, cop->handle));
@@ -196,9 +208,18 @@ void call_out(pending_call_t *cop) {
 
   if (!ob || (ob->flags & O_DESTRUCTED)) {
     DBG_CALLOUT("  ob destructed, ignored.\n");
+    vm_owner_record_task_trace(cop->owner_id ? cop->owner_id : vm_owner_default_id(), "call_out", "<destructed>",
+                               cop->owner_epoch, "destructed");
     free_call(cop);
     return;
   }
+
+  if ((cop->owner_id && strcmp(cop->owner_id, vm_owner_id(ob)) != 0) || cop->owner_epoch != vm_owner_epoch(ob)) {
+    vm_owner_record_task_trace(vm_owner_id(ob), "call_out", cop->ob ? cop->function.s : "<function>",
+                               vm_owner_epoch(ob), "stale");
+  }
+  vm_owner_record_task_trace(vm_owner_id(ob), "call_out", cop->ob ? cop->function.s : "<function>",
+                             vm_owner_epoch(ob), "dispatched");
 
   // FIXME: Figure out why this is useful. Maybe a security thing.
   if (cop->ob && cop->function.s[0] == APPLY___INIT_SPECIAL_CHAR) {

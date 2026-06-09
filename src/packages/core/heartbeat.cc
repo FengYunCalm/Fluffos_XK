@@ -7,16 +7,20 @@
 #include "packages/core/heartbeat.h"
 
 #include "vm/context.h"
+#include "vm/owner.h"
 
 #include <algorithm>
 #include <deque>
 #include <set>
+#include <string>
 #include <vector>
 
 struct heart_beat_t {
   object_t *ob;              // nullptr also means deleted entries.
   short heart_beat_ticks;    // remaining ticks
   short time_to_heart_beat;  // interval
+  uint64_t owner_epoch;
+  std::string owner_id;
 };
 
 // Global pointer to current object executing heartbeat.
@@ -71,6 +75,11 @@ void call_heart_beat() {
     if (ob->prog->heart_beat == 0) {
       continue;
     }
+
+    if (curr_hb->owner_id != vm_owner_id(ob) || curr_hb->owner_epoch != vm_owner_epoch(ob)) {
+      vm_owner_record_task_trace(vm_owner_id(ob), "heartbeat", "heart_beat", vm_owner_epoch(ob), "stale");
+    }
+    vm_owner_record_task_trace(vm_owner_id(ob), "heartbeat", "heart_beat", vm_owner_epoch(ob), "dispatched");
 
     object_t *new_command_giver;
 
@@ -165,6 +174,7 @@ int set_heart_beat(object_t *ob, int to) {
   // Removal: set the flag and hb will be deleted in next round.
   if (to == 0) {
     ob->flags &= ~O_HEART_BEAT;
+    vm_owner_record_task_trace(vm_owner_id(ob), "heartbeat", "heart_beat", vm_owner_epoch(ob), "disabled");
 
     bool found = false;
     for (auto &hb : heartbeats) {
@@ -202,12 +212,20 @@ int set_heart_beat(object_t *ob, int to) {
     target_hb->ob = ob;
     target_hb->time_to_heart_beat = to;
     target_hb->heart_beat_ticks = to;
+    target_hb->owner_id = vm_owner_id(ob);
+    target_hb->owner_epoch = vm_owner_epoch(ob);
+    vm_owner_record_task_trace(target_hb->owner_id.c_str(), "heartbeat", "heart_beat", target_hb->owner_epoch,
+                               "scheduled");
     return 1;
   } else {
     // Modifying: target_hb is found.
     target_hb->ob = ob;
     target_hb->time_to_heart_beat = to;
     target_hb->heart_beat_ticks = to;
+    target_hb->owner_id = vm_owner_id(ob);
+    target_hb->owner_epoch = vm_owner_epoch(ob);
+    vm_owner_record_task_trace(target_hb->owner_id.c_str(), "heartbeat", "heart_beat", target_hb->owner_epoch,
+                               "scheduled");
     return 1;
   }
 }

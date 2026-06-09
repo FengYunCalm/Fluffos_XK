@@ -6,6 +6,7 @@
  */
 
 #include <chrono>
+#include <cstdint>
 #ifdef TIME_WITH_SYS_TIME
 #include <sys/time.h>
 #include <time.h>
@@ -23,6 +24,8 @@ typedef struct pending_call_s {
   object_t *ob;
   array_t *vs;
   object_t *command_giver;
+  const char *owner_id;
+  uint64_t owner_epoch;
   LPC_INT handle;
   struct TickEvent *tick_event;
   bool is_walltime;
