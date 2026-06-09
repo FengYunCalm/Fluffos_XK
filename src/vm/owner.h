@@ -24,10 +24,12 @@ uint64_t vm_owner_enqueue_task_epoch(const char *owner_id, const char *task_type
                                      uint64_t owner_epoch);
 uint64_t vm_owner_record_task_trace(const char *owner_id, const char *task_type, const char *task_key,
                                     uint64_t owner_epoch, const char *state);
+uint64_t vm_owner_record_access(object_t *source, object_t *target, const char *operation);
 mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit);
 mapping_t *vm_owner_purge_mailbox(const char *owner_id);
 mapping_t *vm_owner_mailbox_status(const char *owner_id);
 mapping_t *vm_owner_schedule(int limit);
 mapping_t *vm_owner_task_trace(int limit);
+mapping_t *vm_owner_access_trace(int limit);
 
 #endif /* SRC_VM_OWNER_H_ */

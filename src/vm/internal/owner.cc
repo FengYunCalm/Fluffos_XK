@@ -11,6 +11,7 @@
 namespace {
 constexpr const char *kDefaultOwnerId = "owner/global";
 constexpr size_t kOwnerTraceLimit = 256;
+constexpr size_t kOwnerAccessTraceLimit = 256;
 std::atomic<uint64_t> total_checks{0};
 std::atomic<uint64_t> mismatch_checks{0};
 std::atomic<uint64_t> next_mailbox_task_id{1};
@@ -18,6 +19,9 @@ std::atomic<uint64_t> next_trace_id{1};
 std::atomic<uint64_t> total_enqueued{0};
 std::atomic<uint64_t> total_drained{0};
 std::atomic<uint64_t> total_traced{0};
+std::atomic<uint64_t> next_access_trace_id{1};
+std::atomic<uint64_t> total_access_traced{0};
+std::atomic<uint64_t> total_cross_owner_accesses{0};
 
 struct OwnerMailboxTask {
   uint64_t task_id;
@@ -39,10 +43,24 @@ struct OwnerTaskTrace {
   std::string state;
 };
 
+struct OwnerAccessTrace {
+  uint64_t access_id;
+  uint64_t sequence;
+  uint64_t source_owner_epoch;
+  uint64_t target_owner_epoch;
+  bool cross_owner;
+  std::string source_owner_id;
+  std::string target_owner_id;
+  std::string source_object;
+  std::string target_object;
+  std::string operation;
+};
+
 std::unordered_map<std::string, std::deque<OwnerMailboxTask>> owner_mailboxes;
 std::deque<std::string> schedulable_owners;
 std::unordered_set<std::string> schedulable_owner_set;
 std::deque<OwnerTaskTrace> owner_task_traces;
+std::deque<OwnerAccessTrace> owner_access_traces;
 
 bool valid_owner_id(const char *owner_id) {
   return owner_id && owner_id[0] != '\0';
@@ -100,6 +118,25 @@ mapping_t *owner_task_trace_mapping(const OwnerTaskTrace &trace) {
   add_mapping_string(map, "task_type", trace.task_type.c_str());
   add_mapping_string(map, "task_key", trace.task_key.c_str());
   add_mapping_string(map, "state", trace.state.c_str());
+  return map;
+}
+
+const char *owner_object_name(object_t *object) {
+  return object && object->obname ? object->obname : "";
+}
+
+mapping_t *owner_access_trace_mapping(const OwnerAccessTrace &trace) {
+  auto *map = allocate_mapping(10);
+  add_mapping_pair(map, "access_id", static_cast<long>(trace.access_id));
+  add_mapping_pair(map, "sequence", static_cast<long>(trace.sequence));
+  add_mapping_pair(map, "source_owner_epoch", static_cast<long>(trace.source_owner_epoch));
+  add_mapping_pair(map, "target_owner_epoch", static_cast<long>(trace.target_owner_epoch));
+  add_mapping_pair(map, "cross_owner", trace.cross_owner ? 1 : 0);
+  add_mapping_string(map, "source_owner_id", trace.source_owner_id.c_str());
+  add_mapping_string(map, "target_owner_id", trace.target_owner_id.c_str());
+  add_mapping_string(map, "source_object", trace.source_object.c_str());
+  add_mapping_string(map, "target_object", trace.target_object.c_str());
+  add_mapping_string(map, "operation", trace.operation.c_str());
   return map;
 }
 
@@ -284,6 +321,29 @@ uint64_t vm_owner_record_task_trace(const char *owner_id, const char *task_type,
                                  normalize_task_text(task_type, "generic"), normalize_task_text(task_key, ""), state);
 }
 
+uint64_t vm_owner_record_access(object_t *source, object_t *target, const char *operation) {
+  OwnerAccessTrace trace;
+  trace.access_id = next_access_trace_id.fetch_add(1, std::memory_order_relaxed);
+  trace.sequence = total_access_traced.load(std::memory_order_relaxed) + 1;
+  trace.source_owner_epoch = vm_owner_epoch(source);
+  trace.target_owner_epoch = vm_owner_epoch(target);
+  trace.source_owner_id = vm_owner_id(source);
+  trace.target_owner_id = vm_owner_id(target);
+  trace.source_object = owner_object_name(source);
+  trace.target_object = owner_object_name(target);
+  trace.operation = normalize_task_text(operation, "access");
+  trace.cross_owner = trace.source_owner_id != trace.target_owner_id;
+  if (trace.cross_owner) {
+    total_cross_owner_accesses.fetch_add(1, std::memory_order_relaxed);
+  }
+  owner_access_traces.push_back(std::move(trace));
+  while (owner_access_traces.size() > kOwnerAccessTraceLimit) {
+    owner_access_traces.pop_front();
+  }
+  total_access_traced.fetch_add(1, std::memory_order_relaxed);
+  return owner_access_traces.back().access_id;
+}
+
 mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
   std::string normalized_owner_id = normalize_owner_id(owner_id);
   auto &queue = owner_mailboxes[normalized_owner_id];
@@ -420,6 +480,29 @@ mapping_t *vm_owner_task_trace(int limit) {
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "returned", static_cast<long>(requested));
   add_mapping_pair(map, "total_traced", static_cast<long>(total_traced.load(std::memory_order_relaxed)));
+  add_mapping_array(map, "events", events);
+  free_array(events);
+  return map;
+}
+
+mapping_t *vm_owner_access_trace(int limit) {
+  auto available = owner_access_traces.size();
+  auto requested = limit <= 0 || static_cast<size_t>(limit) > available ? available : static_cast<size_t>(limit);
+  auto *events = allocate_array(static_cast<int>(requested));
+  auto start = available - requested;
+
+  for (size_t i = 0; i < requested; i++) {
+    auto *event_map = owner_access_trace_mapping(owner_access_traces[start + i]);
+    events->item[i].type = T_MAPPING;
+    events->item[i].subtype = 0;
+    events->item[i].u.map = event_map;
+  }
+
+  auto *map = allocate_mapping(5);
+  add_mapping_pair(map, "success", 1);
+  add_mapping_pair(map, "returned", static_cast<long>(requested));
+  add_mapping_pair(map, "total_traced", static_cast<long>(total_access_traced.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "cross_owner", static_cast<long>(total_cross_owner_accesses.load(std::memory_order_relaxed)));
   add_mapping_array(map, "events", events);
   free_array(events);
   return map;

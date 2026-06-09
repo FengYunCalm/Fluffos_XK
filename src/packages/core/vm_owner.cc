@@ -109,6 +109,17 @@ void f_vm_owner_record() {
 }
 #endif
 
+#ifdef F_VM_OWNER_RECORD_ACCESS
+void f_vm_owner_record_access() {
+  auto *operation = sp;
+  auto *target = sp - 1;
+  auto *source = sp - 2;
+  auto access_id = vm_owner_record_access(source->u.ob, target->u.ob, operation->u.string);
+  pop_n_elems(3);
+  push_number(static_cast<long>(access_id));
+}
+#endif
+
 #ifdef F_VM_OWNER_DRAIN
 void f_vm_owner_drain() {
   auto limit = sp->u.number;
@@ -122,6 +133,14 @@ void f_vm_owner_drain() {
 #ifdef F_VM_OWNER_TRACE
 void f_vm_owner_trace() {
   auto *result = vm_owner_task_trace(static_cast<int>(sp->u.number));
+  pop_stack();
+  push_refed_mapping(result);
+}
+#endif
+
+#ifdef F_VM_OWNER_ACCESS_TRACE
+void f_vm_owner_access_trace() {
+  auto *result = vm_owner_access_trace(static_cast<int>(sp->u.number));
   pop_stack();
   push_refed_mapping(result);
 }
