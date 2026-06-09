@@ -15,6 +15,7 @@ void vm_owner_record_check(object_t *object, const char *expected_owner_id, bool
 uint64_t vm_owner_total_checks();
 uint64_t vm_owner_mismatch_checks();
 mapping_t *vm_owner_status(object_t *object);
+mapping_t *vm_owner_guard(object_t *object, const char *expected_owner_id);
 uint64_t vm_owner_enqueue_task(const char *owner_id, const char *task_type, const char *task_key);
 mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit);
 mapping_t *vm_owner_mailbox_status(const char *owner_id);

@@ -169,6 +169,40 @@ TEST_F(DriverTest, TestVmOwnerScheduleRoundsOwnersAndKeepsOwnerFifo) {
   free_mapping(result);
 }
 
+TEST_F(DriverTest, TestVmOwnerGuardFailsFastOnMismatch) {
+  current_object = master_ob;
+  object_t* obj = find_object("single/master.c");
+  ASSERT_NE(obj, nullptr);
+
+  vm_owner_set_id(obj, "owner/test/guard");
+  auto before_total = vm_owner_total_checks();
+  auto before_mismatch = vm_owner_mismatch_checks();
+
+  auto* result = vm_owner_guard(obj, "owner/test/guard");
+  ASSERT_NE(result, nullptr);
+  auto* success = find_string_in_mapping(result, "success");
+  ASSERT_NE(success, nullptr);
+  ASSERT_EQ(success->type, T_NUMBER);
+  ASSERT_EQ(success->u.number, 1);
+  free_mapping(result);
+  ASSERT_EQ(vm_owner_total_checks(), before_total + 1);
+  ASSERT_EQ(vm_owner_mismatch_checks(), before_mismatch);
+
+  error_context_t econ{};
+  save_context(&econ);
+  try {
+    vm_owner_guard(obj, "owner/test/other");
+    pop_context(&econ);
+    FAIL() << "vm_owner_guard should reject owner mismatch";
+  } catch (...) {
+    restore_context(&econ);
+  }
+
+  ASSERT_EQ(vm_owner_total_checks(), before_total + 2);
+  ASSERT_EQ(vm_owner_mismatch_checks(), before_mismatch + 1);
+  vm_owner_clear_id(obj);
+}
+
 TEST_F(DriverTest, TestVmWorkerRunsTasksInParallel) {
   auto result = vm_worker_benchmark(4, 80);
   ASSERT_GE(result.worker_count, 1);

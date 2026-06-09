@@ -42,6 +42,16 @@ void f_vm_owner_status() {
 }
 #endif
 
+#ifdef F_VM_OWNER_GUARD
+void f_vm_owner_guard() {
+  auto *expected_owner_id = sp;
+  auto *object = sp - 1;
+  auto *result = vm_owner_guard(object->u.ob, expected_owner_id->u.string);
+  pop_2_elems();
+  push_refed_mapping(result);
+}
+#endif
+
 #ifdef F_VM_OWNER_ENQUEUE
 void f_vm_owner_enqueue() {
   auto *task_key = sp;

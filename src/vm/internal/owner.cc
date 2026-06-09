@@ -143,6 +143,27 @@ mapping_t *vm_owner_status(object_t *object) {
   return map;
 }
 
+mapping_t *vm_owner_guard(object_t *object, const char *expected_owner_id) {
+  const char *normalized_owner_id = normalize_owner_id(expected_owner_id);
+  auto matched = vm_owner_matches(object, normalized_owner_id);
+  vm_owner_record_check(object, normalized_owner_id, matched);
+  if (!matched) {
+    error("vm_owner_guard(): owner mismatch: object owner '%s', expected '%s'.\n", vm_owner_id(object),
+          normalized_owner_id);
+  }
+
+  auto *map = allocate_mapping(4);
+  add_mapping_pair(map, "success", 1);
+  add_mapping_string(map, "owner_id", vm_owner_id(object));
+  add_mapping_string(map, "expected_owner_id", normalized_owner_id);
+  if (object && object->obname) {
+    add_mapping_string(map, "object", object->obname);
+  } else {
+    add_mapping_string(map, "object", "");
+  }
+  return map;
+}
+
 uint64_t vm_owner_enqueue_task(const char *owner_id, const char *task_type, const char *task_key) {
   OwnerMailboxTask task;
   task.task_id = next_mailbox_task_id.fetch_add(1, std::memory_order_relaxed);
