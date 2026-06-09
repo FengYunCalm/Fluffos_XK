@@ -57,6 +57,20 @@ mapping_t *worker_failure_response(const char *error) {
   return map;
 }
 
+const char *worker_task_state_name(VMWorkerTaskState state) {
+  switch (state) {
+    case VMWorkerTaskState::kPending:
+      return "pending";
+    case VMWorkerTaskState::kSucceeded:
+      return "succeeded";
+    case VMWorkerTaskState::kFailed:
+      return "failed";
+    case VMWorkerTaskState::kUnknown:
+      return "unknown";
+  }
+  return "unknown";
+}
+
 void add_mapping_mapping(mapping_t *map, const char *key_name, mapping_t *value) {
   auto key = const0u;
   key.type = T_STRING;
@@ -86,6 +100,69 @@ mapping_t *worker_bench_response(mapping_t *options) {
   add_mapping_pair(result_spec, "active", stats.active);
 
   auto *response = allocate_mapping(2);
+  add_mapping_pair(response, "success", 1);
+  add_mapping_mapping(response, "result_spec", result_spec);
+  free_mapping(result_spec);
+  return response;
+}
+
+mapping_t *worker_status_response() {
+  auto stats = vm_worker_stats();
+  auto *map = allocate_mapping(10);
+  add_mapping_pair(map, "success", 1);
+  add_mapping_pair(map, "worker_count", stats.worker_count);
+  add_mapping_pair(map, "submitted", static_cast<long>(stats.submitted));
+  add_mapping_pair(map, "completed", static_cast<long>(stats.completed));
+  add_mapping_pair(map, "active", stats.active);
+  add_mapping_pair(map, "queue_depth", static_cast<long>(stats.queue_depth));
+  add_mapping_pair(map, "queue_high_watermark", static_cast<long>(stats.queue_high_watermark));
+  add_mapping_pair(map, "async_pending", static_cast<long>(stats.async_pending));
+  add_mapping_pair(map, "async_ready", static_cast<long>(stats.async_ready));
+  add_mapping_pair(map, "async_failed", static_cast<long>(stats.async_failed));
+  return map;
+}
+
+mapping_t *worker_submit_response(const char *task_name, mapping_t *options) {
+  if (std::string(task_name) != "bench") {
+    return worker_failure_response("unknown worker task");
+  }
+
+  auto tasks = mapping_number(options, "tasks", 4);
+  auto millis = mapping_number(options, "millis", 100);
+  auto task_id = vm_worker_submit_benchmark(tasks, millis);
+  auto *response = allocate_mapping(4);
+  add_mapping_pair(response, "success", 1);
+  add_mapping_string(response, "status", "submitted");
+  add_mapping_pair(response, "task_id", static_cast<long>(task_id));
+  add_mapping_string(response, "task", task_name);
+  return response;
+}
+
+mapping_t *worker_poll_response(uint64_t task_id) {
+  auto result = vm_worker_poll_task(task_id);
+  auto *response = allocate_mapping(5);
+  add_mapping_pair(response, "task_id", static_cast<long>(task_id));
+  add_mapping_string(response, "status", worker_task_state_name(result.state));
+
+  if (result.state == VMWorkerTaskState::kUnknown || result.state == VMWorkerTaskState::kFailed) {
+    add_mapping_pair(response, "success", 0);
+    add_mapping_string(response, "error", result.error.empty() ? "worker task failed" : result.error.c_str());
+    return response;
+  }
+
+  if (result.state == VMWorkerTaskState::kPending) {
+    add_mapping_pair(response, "success", 0);
+    add_mapping_string(response, "error", "worker task is still pending");
+    return response;
+  }
+
+  auto *result_spec = allocate_mapping(6);
+  add_mapping_string(result_spec, "type", "bench");
+  add_mapping_pair(result_spec, "tasks", result.bench.tasks);
+  add_mapping_pair(result_spec, "worker_count", result.bench.worker_count);
+  add_mapping_pair(result_spec, "max_parallel", result.bench.max_parallel);
+  add_mapping_pair(result_spec, "elapsed_ms", result.bench.elapsed_ms);
+  add_mapping_pair(result_spec, "checksum", static_cast<long>(result.bench.checksum));
   add_mapping_pair(response, "success", 1);
   add_mapping_mapping(response, "result_spec", result_spec);
   free_mapping(result_spec);
@@ -138,5 +215,37 @@ void f_vm_worker_task() {
 
   pop_3_elems();
   push_refed_mapping(response);
+}
+#endif
+
+#ifdef F_VM_WORKER_STATUS
+void f_vm_worker_status() { push_refed_mapping(worker_status_response()); }
+#endif
+
+#ifdef F_VM_WORKER_SUBMIT
+void f_vm_worker_submit() {
+  auto *options = sp;
+  auto *snapshot = sp - 1;
+  auto *task = sp - 2;
+  std::string error;
+  mapping_t *response = nullptr;
+
+  if (!is_json_safe_value(snapshot, 0, &error) || !is_json_safe_value(options, 0, &error)) {
+    pop_3_elems();
+    push_refed_mapping(worker_failure_response(error.c_str()));
+    return;
+  }
+
+  response = worker_submit_response(task->u.string, options->u.map);
+  pop_3_elems();
+  push_refed_mapping(response);
+}
+#endif
+
+#ifdef F_VM_WORKER_POLL
+void f_vm_worker_poll() {
+  auto task_id = static_cast<uint64_t>(sp->u.number);
+  pop_stack();
+  push_refed_mapping(worker_poll_response(task_id));
 }
 #endif

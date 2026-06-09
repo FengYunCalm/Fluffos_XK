@@ -2,6 +2,14 @@
 #define SRC_VM_WORKER_H_
 
 #include <cstdint>
+#include <string>
+
+enum class VMWorkerTaskState {
+  kUnknown,
+  kPending,
+  kSucceeded,
+  kFailed,
+};
 
 struct VMWorkerBenchResult {
   int tasks{0};
@@ -15,12 +23,26 @@ struct VMWorkerStats {
   int worker_count{0};
   uint64_t submitted{0};
   uint64_t completed{0};
+  uint64_t async_pending{0};
+  uint64_t async_ready{0};
+  uint64_t async_failed{0};
+  uint64_t queue_depth{0};
+  uint64_t queue_high_watermark{0};
   int active{0};
+};
+
+struct VMWorkerTaskResult {
+  uint64_t task_id{0};
+  VMWorkerTaskState state{VMWorkerTaskState::kUnknown};
+  VMWorkerBenchResult bench;
+  std::string error;
 };
 
 void vm_worker_start(int requested_workers = 0);
 void vm_worker_stop();
 VMWorkerStats vm_worker_stats();
 VMWorkerBenchResult vm_worker_benchmark(int tasks, int millis);
+uint64_t vm_worker_submit_benchmark(int tasks, int millis);
+VMWorkerTaskResult vm_worker_poll_task(uint64_t task_id);
 
 #endif /* SRC_VM_WORKER_H_ */

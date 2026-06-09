@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
+#include <chrono>
 #include <string>
+#include <thread>
 #include "base/package_api.h"
 
 #include "mainlib.h"
@@ -68,6 +70,28 @@ TEST_F(DriverTest, TestVmWorkerRunsTasksInParallel) {
   ASSERT_GE(result.max_parallel, std::min(2, result.worker_count));
   ASSERT_GT(result.checksum, 0u);
   ASSERT_LT(result.elapsed_ms, 260);
+}
+
+TEST_F(DriverTest, TestVmWorkerAsyncBenchmarkPollsResult) {
+  auto task_id = vm_worker_submit_benchmark(4, 80);
+  ASSERT_GT(task_id, 0u);
+
+  VMWorkerTaskResult result;
+  for (int i = 0; i < 100; i++) {
+    result = vm_worker_poll_task(task_id);
+    ASSERT_NE(result.state, VMWorkerTaskState::kUnknown);
+    if (result.state == VMWorkerTaskState::kSucceeded) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  ASSERT_EQ(result.state, VMWorkerTaskState::kSucceeded);
+  ASSERT_GE(result.bench.worker_count, 1);
+  ASSERT_GE(result.bench.max_parallel, std::min(2, result.bench.worker_count));
+  ASSERT_GT(result.bench.checksum, 0u);
+  ASSERT_LT(result.bench.elapsed_ms, 300);
+  ASSERT_EQ(vm_worker_poll_task(task_id).state, VMWorkerTaskState::kUnknown);
 }
 
 TEST_F(DriverTest, TestInMemoryCompileFile) {

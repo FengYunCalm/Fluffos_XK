@@ -8,12 +8,39 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
+#include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "base/internal/tracing.h"
 
 namespace {
+
+struct AsyncRecord {
+  VMWorkerTaskState state{VMWorkerTaskState::kPending};
+  VMWorkerBenchResult bench;
+  std::string error;
+};
+
+struct AsyncBenchmarkState {
+  uint64_t task_id{0};
+  int tasks{0};
+  int worker_count{0};
+  std::chrono::steady_clock::time_point started;
+  std::shared_ptr<std::atomic<bool>> start_barrier;
+  std::shared_ptr<std::atomic<int>> active;
+  std::shared_ptr<std::atomic<int>> max_parallel;
+  std::shared_ptr<std::atomic<int>> remaining;
+  std::shared_ptr<std::atomic<uint64_t>> checksum;
+};
+
+void update_max(std::atomic<int> &target, int value) {
+  auto current = target.load();
+  while (value > current && !target.compare_exchange_weak(current, value)) {
+  }
+}
 
 class VMWorkerRuntime {
  public:
@@ -51,29 +78,112 @@ class VMWorkerRuntime {
   std::future<void> submit(std::function<void()> task) {
     auto promise = std::make_shared<std::promise<void>>();
     auto future = promise->get_future();
+    auto accepted = false;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      submitted_++;
-      tasks_.push_back([this, task = std::move(task), promise] {
-        active_++;
-        try {
-          task();
-          promise->set_value();
-        } catch (...) {
-          promise->set_exception(std::current_exception());
-        }
-        active_--;
-        completed_++;
-      });
+      if (!stopping_) {
+        accepted = true;
+        submitted_++;
+        tasks_.push_back([this, task = std::move(task), promise] {
+          active_++;
+          try {
+            task();
+            promise->set_value();
+          } catch (...) {
+            promise->set_exception(std::current_exception());
+          }
+          active_--;
+          completed_++;
+        });
+        update_queue_high_watermark(tasks_.size());
+      }
+    }
+    if (!accepted) {
+      try {
+        throw std::runtime_error("VM worker runtime is stopping");
+      } catch (...) {
+        promise->set_exception(std::current_exception());
+      }
+      return future;
     }
     cv_.notify_one();
     return future;
   }
 
   VMWorkerStats stats() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return VMWorkerStats{static_cast<int>(workers_.size()), submitted_.load(), completed_.load(),
-                         active_.load()};
+    VMWorkerStats stats;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      stats.worker_count = static_cast<int>(workers_.size());
+      stats.submitted = submitted_.load();
+      stats.completed = completed_.load();
+      stats.queue_depth = tasks_.size();
+      stats.queue_high_watermark = queue_high_watermark_.load();
+      stats.active = active_.load();
+    }
+    {
+      std::lock_guard<std::mutex> lock(results_mutex_);
+      for (const auto &entry : async_results_) {
+        switch (entry.second.state) {
+          case VMWorkerTaskState::kPending:
+            stats.async_pending++;
+            break;
+          case VMWorkerTaskState::kSucceeded:
+            stats.async_ready++;
+            break;
+          case VMWorkerTaskState::kFailed:
+            stats.async_failed++;
+            break;
+          case VMWorkerTaskState::kUnknown:
+            break;
+        }
+      }
+    }
+    return stats;
+  }
+
+  uint64_t submit_benchmark(int tasks, int millis) {
+    tasks = std::clamp(tasks, 1, 64);
+    millis = std::clamp(millis, 1, 5000);
+    start(0);
+
+    auto id = next_task_id_++;
+    auto stats = this->stats();
+    auto state = std::make_shared<AsyncBenchmarkState>();
+    state->task_id = id;
+    state->tasks = tasks;
+    state->worker_count = stats.worker_count;
+    state->started = std::chrono::steady_clock::now();
+    state->start_barrier = std::make_shared<std::atomic<bool>>(false);
+    state->active = std::make_shared<std::atomic<int>>(0);
+    state->max_parallel = std::make_shared<std::atomic<int>>(0);
+    state->remaining = std::make_shared<std::atomic<int>>(tasks);
+    state->checksum = std::make_shared<std::atomic<uint64_t>>(0);
+
+    {
+      std::lock_guard<std::mutex> lock(results_mutex_);
+      async_results_[id] = AsyncRecord{};
+    }
+
+    for (int i = 0; i < tasks; i++) {
+      submit([this, state, millis, i] { run_async_benchmark_slice(state, millis, i); });
+    }
+    state->start_barrier->store(true, std::memory_order_release);
+    return id;
+  }
+
+  VMWorkerTaskResult poll(uint64_t task_id) {
+    std::lock_guard<std::mutex> lock(results_mutex_);
+    auto it = async_results_.find(task_id);
+    if (it == async_results_.end()) {
+      return VMWorkerTaskResult{task_id, VMWorkerTaskState::kUnknown, {}, "unknown worker task id"};
+    }
+
+    VMWorkerTaskResult result{task_id, it->second.state, it->second.bench, it->second.error};
+    if (result.state == VMWorkerTaskState::kSucceeded || result.state == VMWorkerTaskState::kFailed) {
+      async_results_.erase(it);
+    }
+    return result;
   }
 
  private:
@@ -94,6 +204,41 @@ class VMWorkerRuntime {
     }
   }
 
+  void update_queue_high_watermark(uint64_t value) {
+    auto current = queue_high_watermark_.load();
+    while (value > current && !queue_high_watermark_.compare_exchange_weak(current, value)) {
+    }
+  }
+
+  void run_async_benchmark_slice(std::shared_ptr<AsyncBenchmarkState> state, int millis, int index) {
+    while (!state->start_barrier->load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+
+    auto running = state->active->fetch_add(1) + 1;
+    update_max(*state->max_parallel, running);
+    auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(millis);
+    uint64_t local = static_cast<uint64_t>(index + 1);
+    while (std::chrono::steady_clock::now() < end) {
+      local = local * 2862933555777941757ULL + 3037000493ULL;
+    }
+    state->checksum->fetch_add(local);
+    state->active->fetch_sub(1);
+
+    if (state->remaining->fetch_sub(1) == 1) {
+      auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - state->started);
+      VMWorkerBenchResult bench{state->tasks, state->worker_count, state->max_parallel->load(),
+                                elapsed.count(), state->checksum->load()};
+      std::lock_guard<std::mutex> lock(results_mutex_);
+      auto it = async_results_.find(state->task_id);
+      if (it != async_results_.end()) {
+        it->second.state = VMWorkerTaskState::kSucceeded;
+        it->second.bench = bench;
+      }
+    }
+  }
+
   mutable std::mutex mutex_;
   std::condition_variable cv_;
   bool stopping_{false};
@@ -101,18 +246,16 @@ class VMWorkerRuntime {
   std::vector<std::thread> workers_;
   std::atomic<uint64_t> submitted_{0};
   std::atomic<uint64_t> completed_{0};
+  std::atomic<uint64_t> queue_high_watermark_{0};
   std::atomic<int> active_{0};
+  std::atomic<uint64_t> next_task_id_{1};
+  mutable std::mutex results_mutex_;
+  std::unordered_map<uint64_t, AsyncRecord> async_results_;
 };
 
 VMWorkerRuntime &runtime() {
   static VMWorkerRuntime instance;
   return instance;
-}
-
-void update_max(std::atomic<int> &target, int value) {
-  auto current = target.load();
-  while (value > current && !target.compare_exchange_weak(current, value)) {
-  }
 }
 
 }  // namespace
@@ -170,3 +313,9 @@ VMWorkerBenchResult vm_worker_benchmark(int tasks, int millis) {
   return VMWorkerBenchResult{tasks, stats.worker_count, max_parallel->load(), elapsed.count(),
                              checksum->load()};
 }
+
+uint64_t vm_worker_submit_benchmark(int tasks, int millis) {
+  return runtime().submit_benchmark(tasks, millis);
+}
+
+VMWorkerTaskResult vm_worker_poll_task(uint64_t task_id) { return runtime().poll(task_id); }
