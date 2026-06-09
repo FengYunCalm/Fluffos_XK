@@ -105,6 +105,14 @@ void f_vm_owner_drain() {
 }
 #endif
 
+#ifdef F_VM_OWNER_PURGE
+void f_vm_owner_purge() {
+  auto *result = vm_owner_purge_mailbox(sp->u.string);
+  pop_stack();
+  push_refed_mapping(result);
+}
+#endif
+
 #ifdef F_VM_OWNER_MAILBOX_STATUS
 void f_vm_owner_mailbox_status() {
   auto *result = vm_owner_mailbox_status(sp->u.string);

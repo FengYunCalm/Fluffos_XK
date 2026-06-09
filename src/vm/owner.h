@@ -23,6 +23,7 @@ uint64_t vm_owner_enqueue_task(const char *owner_id, const char *task_type, cons
 uint64_t vm_owner_enqueue_task_epoch(const char *owner_id, const char *task_type, const char *task_key,
                                      uint64_t owner_epoch);
 mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit);
+mapping_t *vm_owner_purge_mailbox(const char *owner_id);
 mapping_t *vm_owner_mailbox_status(const char *owner_id);
 mapping_t *vm_owner_schedule(int limit);
 

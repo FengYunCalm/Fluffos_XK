@@ -181,6 +181,45 @@ TEST_F(DriverTest, TestVmOwnerEpochRejectsStaleTask) {
   vm_owner_clear_id(obj);
 }
 
+TEST_F(DriverTest, TestVmOwnerPurgeRemovesOwnerQueueBeforeSchedule) {
+  const char* owner = "owner/test/purge";
+  const char* other = "owner/test/purge-other";
+  vm_owner_enqueue_task(owner, "command", "first");
+  vm_owner_enqueue_task(owner, "command", "second");
+  auto other_task = vm_owner_enqueue_task(other, "command", "other");
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* purged = vm_owner_purge_mailbox(owner);
+  ASSERT_EQ(mapping_number(purged, "purged"), 2);
+  ASSERT_EQ(mapping_number(purged, "remaining"), 0);
+  free_mapping(purged);
+
+  auto* status = vm_owner_mailbox_status(owner);
+  ASSERT_EQ(mapping_number(status, "owner_queue_depth"), 0);
+  free_mapping(status);
+
+  auto* scheduled = vm_owner_schedule(1);
+  auto* tasks = find_string_in_mapping(scheduled, "tasks");
+  ASSERT_NE(tasks, nullptr);
+  ASSERT_EQ(tasks->type, T_ARRAY);
+  ASSERT_EQ(tasks->u.arr->size, 1);
+  ASSERT_EQ(mapping_number(tasks->u.arr->item[0].u.map, "task_id"), static_cast<long>(other_task));
+  ASSERT_STREQ(mapping_string(tasks->u.arr->item[0].u.map, "owner_id"), other);
+  free_mapping(scheduled);
+}
+
 TEST_F(DriverTest, TestVmOwnerScheduleRoundsOwnersAndKeepsOwnerFifo) {
   const char* owner_a = "owner/test/schedule/a";
   const char* owner_b = "owner/test/schedule/b";

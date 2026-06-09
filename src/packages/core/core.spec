@@ -386,5 +386,6 @@ mapping vm_owner_guard_epoch(object, string, int);
 int vm_owner_enqueue(string, string, string);
 int vm_owner_enqueue_epoch(string, string, string, int);
 mapping vm_owner_drain(string, int);
+mapping vm_owner_purge(string);
 mapping vm_owner_mailbox_status(string);
 mapping vm_owner_schedule(int);

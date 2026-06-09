@@ -255,6 +255,24 @@ mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
   return map;
 }
 
+mapping_t *vm_owner_purge_mailbox(const char *owner_id) {
+  std::string normalized_owner_id = normalize_owner_id(owner_id);
+  auto purged = owner_mailbox_depth(normalized_owner_id);
+  owner_mailboxes.erase(normalized_owner_id);
+  schedulable_owner_set.erase(normalized_owner_id);
+  total_drained.fetch_add(purged, std::memory_order_relaxed);
+
+  auto *map = allocate_mapping(7);
+  add_mapping_pair(map, "success", 1);
+  add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
+  add_mapping_pair(map, "purged", purged);
+  add_mapping_pair(map, "remaining", owner_mailbox_depth(normalized_owner_id));
+  add_mapping_pair(map, "queue_depth", owner_mailbox_total_depth());
+  add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "total_drained", static_cast<long>(total_drained.load(std::memory_order_relaxed)));
+  return map;
+}
+
 mapping_t *vm_owner_schedule(int limit) {
   auto requested = limit <= 0 ? static_cast<size_t>(owner_mailbox_total_depth()) : static_cast<size_t>(limit);
   auto *tasks = allocate_array(static_cast<int>(requested));
