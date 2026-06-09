@@ -71,8 +71,10 @@ TEST_F(DriverTest, TestVmOwnerMetadataDefaultsAndChecks) {
   ASSERT_NE(obj, nullptr);
 
   ASSERT_STREQ(vm_owner_default_id(), vm_owner_id(obj));
+  auto default_epoch = vm_owner_epoch(obj);
   vm_owner_set_id(obj, "owner/test");
   ASSERT_STREQ("owner/test", vm_owner_id(obj));
+  ASSERT_EQ(vm_owner_epoch(obj), default_epoch + 1);
   ASSERT_TRUE(vm_owner_matches(obj, "owner/test"));
 
   auto before_total = vm_owner_total_checks();
@@ -83,6 +85,7 @@ TEST_F(DriverTest, TestVmOwnerMetadataDefaultsAndChecks) {
 
   vm_owner_clear_id(obj);
   ASSERT_STREQ(vm_owner_default_id(), vm_owner_id(obj));
+  ASSERT_EQ(vm_owner_epoch(obj), default_epoch + 2);
 }
 
 TEST_F(DriverTest, TestVmOwnerMailboxDrainsOwnerFifo) {
@@ -117,6 +120,7 @@ TEST_F(DriverTest, TestVmOwnerMailboxDrainsOwnerFifo) {
   ASSERT_EQ(first_tasks->u.arr->size, 1);
   ASSERT_EQ(first_tasks->u.arr->item[0].type, T_MAPPING);
   ASSERT_EQ(mapping_number(first_tasks->u.arr->item[0].u.map, "task_id"), static_cast<long>(first_id));
+  ASSERT_EQ(mapping_number(first_tasks->u.arr->item[0].u.map, "owner_epoch"), 0);
   ASSERT_STREQ(mapping_string(first_tasks->u.arr->item[0].u.map, "task_key"), "first");
   free_mapping(first_drain);
 
@@ -131,6 +135,50 @@ TEST_F(DriverTest, TestVmOwnerMailboxDrainsOwnerFifo) {
   ASSERT_EQ(mapping_number(second_tasks->u.arr->item[0].u.map, "task_id"), static_cast<long>(second_id));
   ASSERT_STREQ(mapping_string(second_tasks->u.arr->item[0].u.map, "task_key"), "second");
   free_mapping(second_drain);
+}
+
+TEST_F(DriverTest, TestVmOwnerEpochRejectsStaleTask) {
+  current_object = master_ob;
+  object_t* obj = find_object("single/master.c");
+  ASSERT_NE(obj, nullptr);
+
+  vm_owner_set_id(obj, "owner/test/epoch-a");
+  auto epoch_a = vm_owner_epoch(obj);
+  auto stale_task = vm_owner_enqueue_task_epoch("owner/test/epoch-a", "command", "stale", epoch_a);
+  vm_owner_set_id(obj, "owner/test/epoch-b");
+  auto epoch_b = vm_owner_epoch(obj);
+  ASSERT_GT(epoch_b, epoch_a);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto* scheduled = vm_owner_schedule(1);
+  auto* tasks = find_string_in_mapping(scheduled, "tasks");
+  ASSERT_NE(tasks, nullptr);
+  ASSERT_EQ(tasks->type, T_ARRAY);
+  ASSERT_EQ(tasks->u.arr->size, 1);
+  ASSERT_EQ(mapping_number(tasks->u.arr->item[0].u.map, "task_id"), static_cast<long>(stale_task));
+  ASSERT_EQ(mapping_number(tasks->u.arr->item[0].u.map, "owner_epoch"), static_cast<long>(epoch_a));
+  free_mapping(scheduled);
+
+  error_context_t econ{};
+  save_context(&econ);
+  try {
+    vm_owner_guard_epoch(obj, "owner/test/epoch-a", epoch_a);
+    pop_context(&econ);
+    FAIL() << "vm_owner_guard_epoch should reject stale owner task";
+  } catch (...) {
+    restore_context(&econ);
+  }
+
+  auto* guarded = vm_owner_guard_epoch(obj, "owner/test/epoch-b", epoch_b);
+  ASSERT_NE(guarded, nullptr);
+  ASSERT_EQ(mapping_number(guarded, "owner_epoch"), static_cast<long>(epoch_b));
+  free_mapping(guarded);
+  vm_owner_clear_id(obj);
 }
 
 TEST_F(DriverTest, TestVmOwnerScheduleRoundsOwnersAndKeepsOwnerFifo) {

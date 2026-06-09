@@ -11,6 +11,14 @@ void f_vm_owner_id() {
 }
 #endif
 
+#ifdef F_VM_OWNER_EPOCH
+void f_vm_owner_epoch() {
+  auto epoch = vm_owner_epoch(sp->u.ob);
+  free_object(&sp->u.ob, "f_vm_owner_epoch");
+  put_number(static_cast<long>(epoch));
+}
+#endif
+
 #ifdef F_VM_SET_OWNER_ID
 void f_vm_set_owner_id() {
   auto *owner_id = sp;
@@ -52,6 +60,17 @@ void f_vm_owner_guard() {
 }
 #endif
 
+#ifdef F_VM_OWNER_GUARD_EPOCH
+void f_vm_owner_guard_epoch() {
+  auto expected_epoch = sp->u.number;
+  auto *expected_owner_id = sp - 1;
+  auto *object = sp - 2;
+  auto *result = vm_owner_guard_epoch(object->u.ob, expected_owner_id->u.string, static_cast<uint64_t>(expected_epoch));
+  pop_n_elems(3);
+  push_refed_mapping(result);
+}
+#endif
+
 #ifdef F_VM_OWNER_ENQUEUE
 void f_vm_owner_enqueue() {
   auto *task_key = sp;
@@ -59,6 +78,19 @@ void f_vm_owner_enqueue() {
   auto *owner_id = sp - 2;
   auto task_id = vm_owner_enqueue_task(owner_id->u.string, task_type->u.string, task_key->u.string);
   pop_n_elems(3);
+  push_number(static_cast<long>(task_id));
+}
+#endif
+
+#ifdef F_VM_OWNER_ENQUEUE_EPOCH
+void f_vm_owner_enqueue_epoch() {
+  auto owner_epoch = sp->u.number;
+  auto *task_key = sp - 1;
+  auto *task_type = sp - 2;
+  auto *owner_id = sp - 3;
+  auto task_id = vm_owner_enqueue_task_epoch(owner_id->u.string, task_type->u.string, task_key->u.string,
+                                            static_cast<uint64_t>(owner_epoch));
+  pop_n_elems(4);
   push_number(static_cast<long>(task_id));
 }
 #endif

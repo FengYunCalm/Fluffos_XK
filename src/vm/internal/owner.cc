@@ -19,6 +19,7 @@ std::atomic<uint64_t> total_drained{0};
 struct OwnerMailboxTask {
   uint64_t task_id;
   uint64_t sequence;
+  uint64_t owner_epoch;
   std::string owner_id;
   std::string task_type;
   std::string task_key;
@@ -64,9 +65,10 @@ long owner_mailbox_active_owners() {
 }
 
 mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
-  auto *map = allocate_mapping(5);
+  auto *map = allocate_mapping(6);
   add_mapping_pair(map, "task_id", static_cast<long>(task.task_id));
   add_mapping_pair(map, "sequence", static_cast<long>(task.sequence));
+  add_mapping_pair(map, "owner_epoch", static_cast<long>(task.owner_epoch));
   add_mapping_string(map, "owner_id", task.owner_id.c_str());
   add_mapping_string(map, "task_type", task.task_type.c_str());
   add_mapping_string(map, "task_key", task.task_key.c_str());
@@ -89,6 +91,8 @@ const char *vm_owner_id(object_t *object) {
   return object->vm_owner_id;
 }
 
+uint64_t vm_owner_epoch(object_t *object) { return object ? object->vm_owner_epoch : 0; }
+
 void vm_owner_set_id(object_t *object, const char *owner_id) {
   if (!object) {
     return;
@@ -101,12 +105,14 @@ void vm_owner_set_id(object_t *object, const char *owner_id) {
   }
   vm_owner_clear_id(object);
   object->vm_owner_id = make_shared_string(owner_id);
+  object->vm_owner_epoch++;
 }
 
 void vm_owner_clear_id(object_t *object) {
   if (object && object->vm_owner_id) {
     free_string(object->vm_owner_id);
     object->vm_owner_id = nullptr;
+    object->vm_owner_epoch++;
   }
 }
 
@@ -115,6 +121,10 @@ bool vm_owner_matches(object_t *object, const char *expected_owner_id) {
     expected_owner_id = kDefaultOwnerId;
   }
   return std::strcmp(vm_owner_id(object), expected_owner_id) == 0;
+}
+
+bool vm_owner_epoch_matches(object_t *object, const char *expected_owner_id, uint64_t expected_epoch) {
+  return vm_owner_matches(object, expected_owner_id) && vm_owner_epoch(object) == expected_epoch;
 }
 
 void vm_owner_record_check(object_t *object, const char *expected_owner_id, bool matched) {
@@ -129,8 +139,9 @@ uint64_t vm_owner_total_checks() { return total_checks.load(std::memory_order_re
 uint64_t vm_owner_mismatch_checks() { return mismatch_checks.load(std::memory_order_relaxed); }
 
 mapping_t *vm_owner_status(object_t *object) {
-  auto *map = allocate_mapping(6);
+  auto *map = allocate_mapping(7);
   add_mapping_string(map, "owner_id", vm_owner_id(object));
+  add_mapping_pair(map, "owner_epoch", static_cast<long>(vm_owner_epoch(object)));
   add_mapping_string(map, "default_owner_id", kDefaultOwnerId);
   add_mapping_pair(map, "total_checks", static_cast<long>(vm_owner_total_checks()));
   add_mapping_pair(map, "mismatch_checks", static_cast<long>(vm_owner_mismatch_checks()));
@@ -152,9 +163,10 @@ mapping_t *vm_owner_guard(object_t *object, const char *expected_owner_id) {
           normalized_owner_id);
   }
 
-  auto *map = allocate_mapping(4);
+  auto *map = allocate_mapping(5);
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "owner_id", vm_owner_id(object));
+  add_mapping_pair(map, "owner_epoch", static_cast<long>(vm_owner_epoch(object)));
   add_mapping_string(map, "expected_owner_id", normalized_owner_id);
   if (object && object->obname) {
     add_mapping_string(map, "object", object->obname);
@@ -164,10 +176,40 @@ mapping_t *vm_owner_guard(object_t *object, const char *expected_owner_id) {
   return map;
 }
 
+mapping_t *vm_owner_guard_epoch(object_t *object, const char *expected_owner_id, uint64_t expected_epoch) {
+  const char *normalized_owner_id = normalize_owner_id(expected_owner_id);
+  auto matched = vm_owner_epoch_matches(object, normalized_owner_id, expected_epoch);
+  vm_owner_record_check(object, normalized_owner_id, matched);
+  if (!matched) {
+    error("vm_owner_guard_epoch(): owner epoch mismatch: object owner '%s' epoch %llu, expected '%s' epoch %llu.\n",
+          vm_owner_id(object), static_cast<unsigned long long>(vm_owner_epoch(object)), normalized_owner_id,
+          static_cast<unsigned long long>(expected_epoch));
+  }
+
+  auto *map = allocate_mapping(6);
+  add_mapping_pair(map, "success", 1);
+  add_mapping_string(map, "owner_id", vm_owner_id(object));
+  add_mapping_pair(map, "owner_epoch", static_cast<long>(vm_owner_epoch(object)));
+  add_mapping_string(map, "expected_owner_id", normalized_owner_id);
+  add_mapping_pair(map, "expected_owner_epoch", static_cast<long>(expected_epoch));
+  if (object && object->obname) {
+    add_mapping_string(map, "object", object->obname);
+  } else {
+    add_mapping_string(map, "object", "");
+  }
+  return map;
+}
+
 uint64_t vm_owner_enqueue_task(const char *owner_id, const char *task_type, const char *task_key) {
+  return vm_owner_enqueue_task_epoch(owner_id, task_type, task_key, 0);
+}
+
+uint64_t vm_owner_enqueue_task_epoch(const char *owner_id, const char *task_type, const char *task_key,
+                                     uint64_t owner_epoch) {
   OwnerMailboxTask task;
   task.task_id = next_mailbox_task_id.fetch_add(1, std::memory_order_relaxed);
   task.sequence = total_enqueued.fetch_add(1, std::memory_order_relaxed) + 1;
+  task.owner_epoch = owner_epoch;
   task.owner_id = normalize_owner_id(owner_id);
   task.task_type = normalize_task_text(task_type, "generic");
   task.task_key = normalize_task_text(task_key, "");

@@ -116,6 +116,7 @@ struct object_t {
   struct parse_info_s *pinfo;
 #endif
   const char *vm_owner_id; /* owner-thread metadata; variables must stay last */
+  uint64_t vm_owner_epoch;
   svalue_t variables[1]; /* All variables to this program */
                           /* The variables MUST come last in the struct */
 };
