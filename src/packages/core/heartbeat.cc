@@ -6,6 +6,8 @@
 
 #include "packages/core/heartbeat.h"
 
+#include "vm/context.h"
+
 #include <algorithm>
 #include <deque>
 #include <set>
@@ -93,6 +95,7 @@ void call_heart_beat() {
     if (ob->interactive) {
       current_interactive = ob;
     }
+    vm_context_sync_execution(vm_context());
 
     g_current_heartbeat_obj = ob;
 
@@ -111,6 +114,7 @@ void call_heart_beat() {
 
     restore_command_giver();
     current_interactive = nullptr;
+    vm_context_sync_execution(vm_context());
     g_current_heartbeat_obj = nullptr;
     curr_hb = nullptr;
   }

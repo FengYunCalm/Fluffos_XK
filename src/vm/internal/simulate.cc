@@ -21,6 +21,7 @@
 #include "backend.h"      // for clear_tick_events , FIXME
 #include "user.h"         // for users_foreach, FIXME
 #include "interactive.h"  // for interactive_t, FIXME
+#include "vm/context.h"
 #include "vm/internal/apply.h"
 #include "vm/internal/base/machine.h"
 #include "vm/internal/base/debug.h"
@@ -53,6 +54,7 @@ void db_cleanup(void);  // FIXME
 #include "comm.h"  // FIXME
 
 #include "vm/internal/trace.h"  // for dump_trace && get_svalue_trace
+#include "vm/worker.h"
 /*
  * This one is called from HUP.
  */
@@ -74,6 +76,7 @@ void shutdownMudOS(int exit_code) {
 #ifdef PACKAGE_ASYNC
   complete_all_asyncio();
 #endif
+  vm_worker_stop();
 
 #ifdef PACKAGE_DB
   db_cleanup();
@@ -556,6 +559,7 @@ object_t *load_object(const char *lname, int callcreate) {
     obj_list->prev_all = ob;
   }
   obj_list = ob;
+  vm_context_sync_object_store(vm_context());
   ObjectTable::instance().insert(ob->obname, ob); /* add name to fast object lookup table */
   save_command_giver(command_giver);
   push_object(ob);
@@ -652,6 +656,7 @@ object_t *clone_object(const char *str1, int num_arg) {
   obj_list->prev_all = new_ob;
   new_ob->prev_all = nullptr;
   obj_list = new_ob;
+  vm_context_sync_object_store(vm_context());
   ObjectTable::instance().insert(new_ob->obname, new_ob); /* Add name to fast object lookup table */
   init_object(new_ob);
 
@@ -1077,6 +1082,7 @@ void destruct_object(object_t *ob) {
   obj_list_dangling = ob;
   ob->prev_all = 0;
 #endif
+  vm_context_sync_object_store(vm_context());
 }
 
 /*

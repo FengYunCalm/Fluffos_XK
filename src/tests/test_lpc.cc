@@ -6,7 +6,9 @@
 
 #include "compiler/internal/compiler.h"
 #include "packages/gateway/gateway.h"
+#include "vm/context.h"
 #include "vm/internal/simulate.h"
+#include "vm/worker.h"
 
 // Test fixture class
 class DriverTest : public ::testing::Test {
@@ -45,6 +47,27 @@ TEST_F(DriverTest, TestCompileDumpProgWorks) {
   dump_prog(obj->prog, stdout, 1 | 2);
 
   free_object(&obj, "DriverTest::TestCompileDumpProgWorks");
+}
+
+TEST_F(DriverTest, TestVmContextTracksTopLevelState) {
+  ASSERT_EQ(vm_context().event_loop, g_event_base);
+  ASSERT_EQ(vm_context().current_gametick, g_current_gametick);
+  ASSERT_EQ(vm_context().execution.current_object, nullptr);
+  ASSERT_EQ(vm_context().execution.command_giver, nullptr);
+  ASSERT_EQ(vm_context().execution.current_interactive, nullptr);
+  ASSERT_EQ(vm_context().execution.previous_ob, nullptr);
+  ASSERT_EQ(vm_context().execution.current_prog, nullptr);
+  ASSERT_EQ(vm_context().execution.caller_type, 0);
+  ASSERT_EQ(vm_context().object_store.objects, obj_list);
+  ASSERT_EQ(vm_context().object_store.destructed_objects, obj_list_destruct);
+}
+
+TEST_F(DriverTest, TestVmWorkerRunsTasksInParallel) {
+  auto result = vm_worker_benchmark(4, 80);
+  ASSERT_GE(result.worker_count, 1);
+  ASSERT_GE(result.max_parallel, std::min(2, result.worker_count));
+  ASSERT_GT(result.checksum, 0u);
+  ASSERT_LT(result.elapsed_ms, 260);
 }
 
 TEST_F(DriverTest, TestInMemoryCompileFile) {

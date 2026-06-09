@@ -11,6 +11,7 @@
 #include "base/internal/tracing.h"
 #include "comm.h"  // add_vmessage FIXME: reverse API
 #include "thirdparty/scope_guard/scope_guard.hpp"
+#include "vm/context.h"
 #include "vm/internal/base/debug.h"
 #include "vm/internal/apply.h"
 #include "vm/internal/base/apply_cache.h"
@@ -1339,6 +1340,7 @@ void pop_control_stack() {
   current_prog = csp->prog;
   previous_ob = csp->prev_ob;
   caller_type = csp->caller_type;
+  vm_context_sync_execution(vm_context());
   pc = csp->pc;
   fp = csp->fp;
   function_index_offset = csp->function_index_offset;
@@ -1546,6 +1548,7 @@ function_t *setup_new_frame(int findex) {
     function_index_offset += current_prog->inherit[low].function_index_offset;
     variable_index_offset += current_prog->inherit[low].variable_index_offset;
     current_prog = current_prog->inherit[low].prog;
+    vm_context_sync_execution(vm_context());
   }
 
   flags = current_prog->function_flags[findex];
@@ -1594,6 +1597,7 @@ function_t *setup_inherited_frame(int findex) {
     function_index_offset += current_prog->inherit[low].function_index_offset;
     variable_index_offset += current_prog->inherit[low].variable_index_offset;
     current_prog = current_prog->inherit[low].prog;
+    vm_context_sync_execution(vm_context());
   }
 
   flags = current_prog->function_flags[findex];
@@ -1658,6 +1662,7 @@ void setup_fake_frame(funptr_t *fun) {
   current_prog = &fake_prog;
   previous_ob = current_object;
   current_object = fun->hdr.owner;
+  vm_context_sync_execution(vm_context());
 }
 
 /* Remove a fake frame added by setup_fake_frame().  Basically just a
@@ -1669,6 +1674,7 @@ void remove_fake_frame() {
   current_prog = csp->prog;
   previous_ob = csp->prev_ob;
   caller_type = csp->caller_type;
+  vm_context_sync_execution(vm_context());
   pc = csp->pc;
   fp = csp->fp;
   function_index_offset = csp->function_index_offset;
@@ -3156,6 +3162,7 @@ void eval_instruction(char *p) {
               csp->num_local_variables = 0;
               csp->fr.table_index = funcp->default_args_findex[i];
               current_prog = progp;
+              vm_context_sync_execution(vm_context());
               call_program(progp, default_funcp->address);
 
               DEBUG_CHECK((sp - current_sp != 1) && dump_vm_state(),
@@ -3194,6 +3201,7 @@ void eval_instruction(char *p) {
         current_prog = current_object->prog;
 
         caller_type = ORIGIN_LOCAL;
+        vm_context_sync_execution(vm_context());
         /*
          * If it is an inherited function, search for the real
          * definition.
@@ -3219,6 +3227,7 @@ void eval_instruction(char *p) {
         current_prog = temp_prog;
 
         caller_type = ORIGIN_LOCAL;
+        vm_context_sync_execution(vm_context());
 
         csp->num_local_variables = EXTRACT_UCHAR(pc++) + num_varargs;
         num_varargs = 0;
@@ -4348,6 +4357,7 @@ void call_direct(object_t *ob, int offset, int origin, int num_arg) {
   current_prog = prog;
   previous_ob = current_object;
   current_object = ob;
+  vm_context_sync_execution(vm_context());
   funp = setup_new_frame(offset);
   call_program(current_prog, funp->address);
 }

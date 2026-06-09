@@ -2,6 +2,8 @@
 
 #include "packages/core/call_out.h"
 
+#include "vm/context.h"
+
 #include <chrono>
 #include <functional>
 #include <cmath>
@@ -170,6 +172,7 @@ LPC_INT new_call_out(object_t *ob, svalue_t *fun, std::chrono::milliseconds dela
  */
 void call_out(pending_call_t *cop) {
   current_interactive = nullptr;
+  vm_context_sync_execution(vm_context());
 
   object_t *ob, *new_command_giver;
   ob = (cop->ob ? cop->ob : cop->function.f->hdr.owner);

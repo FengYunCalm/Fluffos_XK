@@ -1,6 +1,7 @@
 #include "base/std.h"
 
 #include "base/internal/tracing.h"
+#include "vm/context.h"
 #include "vm/vm.h"
 #include "vm/internal/base/machine.h"
 #include "compiler/internal/lex.h"  // for instrs, FIXME
@@ -301,6 +302,7 @@ svalue_t *call_function_pointer(funptr_t *funp, int num_arg) {
       current_prog = funp->hdr.owner->prog;
 
       caller_type = ORIGIN_LOCAL;
+      vm_context_sync_execution(vm_context());
 
       csp->num_local_variables = num_arg;
       func = setup_new_frame(funp->f.local.index);
@@ -316,6 +318,7 @@ svalue_t *call_function_pointer(funptr_t *funp, int num_arg) {
       csp->fr.funp = funp;
 
       caller_type = ORIGIN_FUNCTIONAL;
+      vm_context_sync_execution(vm_context());
 
       setup_variables(num_arg, funp->f.functional.num_local, funp->f.functional.num_arg);
 

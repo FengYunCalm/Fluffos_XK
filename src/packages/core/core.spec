@@ -370,3 +370,5 @@ int time_ns();
 
 mixed *sys_network_ports();
 void sys_reload_tls(int);
+mapping vm_worker_bench(int, int);
+mapping vm_worker_task(string, mapping, mapping);

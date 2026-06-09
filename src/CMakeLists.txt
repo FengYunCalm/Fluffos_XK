@@ -411,6 +411,7 @@ set(SRC
   "vm/internal/base/program.cc"
   "vm/internal/base/svalue.cc"
   "vm/internal/apply.cc"
+  "vm/internal/context.cc"
   "vm/internal/eval_limit.cc"
   "vm/internal/posix_timers.cc"
   "vm/internal/master.cc"
@@ -419,6 +420,7 @@ set(SRC
   "vm/internal/simulate.cc"
   "vm/internal/trace.cc"
   "vm/internal/vm.cc"
+  "vm/internal/worker.cc"
   )
 
 if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
