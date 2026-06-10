@@ -7,9 +7,18 @@
 
 namespace {
 VMContext main_vm_context;
+thread_local VMContext *thread_vm_context = &main_vm_context;
 }
 
-VMContext &vm_context() { return main_vm_context; }
+VMContext &vm_context() { return *thread_vm_context; }
+
+VMContext &vm_main_context() { return main_vm_context; }
+
+VMContext *vm_context_bind_thread(VMContext *context) {
+  auto *previous = thread_vm_context;
+  thread_vm_context = context ? context : &main_vm_context;
+  return previous;
+}
 
 void vm_context_set_boot_time(VMContext &context, time_t boot_time) { context.boot_time = boot_time; }
 
@@ -62,3 +71,7 @@ VMExecutionScope::VMExecutionScope(VMContext &context, const VMExecutionState &e
 }
 
 VMExecutionScope::~VMExecutionScope() { vm_context_apply_execution(context_, saved_); }
+
+VMContextThreadScope::VMContextThreadScope(VMContext &context) : saved_(vm_context_bind_thread(&context)) {}
+
+VMContextThreadScope::~VMContextThreadScope() { vm_context_bind_thread(saved_); }

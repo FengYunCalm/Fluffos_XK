@@ -119,6 +119,26 @@ TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
   ASSERT_EQ(vm_context().execution.caller_type, 0);
 }
 
+TEST_F(DriverTest, TestVmContextThreadScopeBindsThreadLocalContext) {
+  auto *main_context = &vm_context();
+  ASSERT_EQ(main_context, &vm_main_context());
+
+  bool worker_bound = false;
+  uint64_t worker_gametick = 0;
+  std::thread worker([&] {
+    VMContext worker_context;
+    VMContextThreadScope scope(worker_context);
+    vm_context_set_current_gametick(vm_context(), 777);
+    worker_bound = &vm_context() == &worker_context && &vm_context() != main_context;
+    worker_gametick = worker_context.current_gametick;
+  });
+  worker.join();
+
+  ASSERT_TRUE(worker_bound);
+  ASSERT_EQ(worker_gametick, 777u);
+  ASSERT_EQ(&vm_context(), main_context);
+}
+
 TEST_F(DriverTest, TestVmOwnerMetadataDefaultsAndChecks) {
   current_object = master_ob;
   object_t* obj = find_object("single/master.c");
@@ -470,6 +490,7 @@ TEST_F(DriverTest, TestVmOwnerThreadExperimentIsOptInAndDispatchesMailboxTasks) 
   ASSERT_EQ(mapping_number(running, "enabled"), 1);
   ASSERT_EQ(mapping_number(running, "thread_count"), 1);
   ASSERT_GE(mapping_number(running, "thread_dispatched"), 1);
+  ASSERT_GE(mapping_number(running, "thread_context_bound"), 1);
   free_mapping(running);
 
   vm_owner_thread_stop();
