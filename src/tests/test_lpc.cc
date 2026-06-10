@@ -851,6 +851,77 @@ TEST_F(DriverTest, TestVmOwnerThreadExperimentIsOptInAndDispatchesMailboxTasks) 
   free_mapping(stopped);
 }
 
+TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
+  const char* owner = "owner/test/thread/safe-experiment";
+
+  vm_owner_thread_stop();
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto lpc_task = vm_owner_enqueue_task(owner, "lpc", "off-main-dummy");
+  auto state_task = vm_owner_enqueue_task(owner, "owner_state", "single-owner-state");
+  auto message_task = vm_owner_enqueue_task(owner, "owner_message", "cross-owner-message");
+  ASSERT_GT(lpc_task, 0u);
+  ASSERT_GT(state_task, lpc_task);
+  ASSERT_GT(message_task, state_task);
+
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 100; i++) {
+    auto* status = vm_owner_mailbox_status(owner);
+    auto depth = mapping_number(status, "owner_queue_depth");
+    free_mapping(status);
+    if (depth == 0) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  auto* running = vm_owner_thread_status();
+  ASSERT_GE(mapping_number(running, "thread_lpc_rejected"), 1);
+  ASSERT_GE(mapping_number(running, "thread_owner_state_guarded"), 1);
+  ASSERT_GE(mapping_number(running, "thread_message_dispatched"), 1);
+  free_mapping(running);
+
+  auto* trace = vm_owner_task_trace(12);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  int lpc_rejected = 0;
+  int state_guarded = 0;
+  int message_dispatched = 0;
+  for (int i = 0; i < events->u.arr->size; i++) {
+    auto* event = events->u.arr->item[i].u.map;
+    if (mapping_number(event, "task_id") == static_cast<long>(lpc_task) &&
+        std::string(mapping_string(event, "state")) == "thread_lpc_rejected") {
+      lpc_rejected = 1;
+    }
+    if (mapping_number(event, "task_id") == static_cast<long>(state_task) &&
+        std::string(mapping_string(event, "state")) == "thread_owner_state_guarded") {
+      state_guarded = 1;
+    }
+    if (mapping_number(event, "task_id") == static_cast<long>(message_task) &&
+        std::string(mapping_string(event, "state")) == "thread_message_dispatched") {
+      message_dispatched = 1;
+    }
+  }
+  ASSERT_EQ(lpc_rejected, 1);
+  ASSERT_EQ(state_guarded, 1);
+  ASSERT_EQ(message_dispatched, 1);
+  free_mapping(trace);
+
+  vm_owner_thread_stop();
+}
+
 TEST_F(DriverTest, TestVmOwnerGuardFailsFastOnMismatch) {
   current_object = master_ob;
   object_t* obj = find_object("single/master.c");

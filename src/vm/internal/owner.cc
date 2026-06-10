@@ -35,6 +35,9 @@ std::atomic<uint64_t> owner_thread_context_bound{0};
 std::atomic<uint64_t> owner_thread_object_store_isolated{0};
 std::atomic<uint64_t> owner_thread_owner_bound{0};
 std::atomic<uint64_t> owner_thread_owner_cleared{0};
+std::atomic<uint64_t> owner_thread_lpc_rejected{0};
+std::atomic<uint64_t> owner_thread_owner_state_guarded{0};
+std::atomic<uint64_t> owner_thread_message_dispatched{0};
 
 struct OwnerMailboxTask {
   uint64_t task_id;
@@ -242,6 +245,16 @@ void owner_thread_loop() {
           owner_thread_owner_bound.fetch_add(1, std::memory_order_relaxed);
         }
         append_owner_task_trace(task, "thread_dispatched");
+        if (task.task_type == "lpc") {
+          append_owner_task_trace(task, "thread_lpc_rejected");
+          owner_thread_lpc_rejected.fetch_add(1, std::memory_order_relaxed);
+        } else if (task.task_type == "owner_state") {
+          append_owner_task_trace(task, "thread_owner_state_guarded");
+          owner_thread_owner_state_guarded.fetch_add(1, std::memory_order_relaxed);
+        } else if (task.task_type == "owner_message") {
+          append_owner_task_trace(task, "thread_message_dispatched");
+          owner_thread_message_dispatched.fetch_add(1, std::memory_order_relaxed);
+        }
         total_drained.fetch_add(1, std::memory_order_relaxed);
         owner_thread_dispatched.fetch_add(1, std::memory_order_relaxed);
       }
@@ -650,7 +663,7 @@ void vm_owner_thread_stop() {
 
 mapping_t *vm_owner_thread_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(12);
+  auto *map = allocate_mapping(15);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
   add_mapping_pair(map, "thread_count", static_cast<long>(owner_threads.size()));
@@ -664,6 +677,12 @@ mapping_t *vm_owner_thread_status() {
                    static_cast<long>(owner_thread_owner_bound.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_owner_cleared",
                    static_cast<long>(owner_thread_owner_cleared.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_lpc_rejected",
+                   static_cast<long>(owner_thread_lpc_rejected.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_owner_state_guarded",
+                   static_cast<long>(owner_thread_owner_state_guarded.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_message_dispatched",
+                   static_cast<long>(owner_thread_message_dispatched.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_starts", static_cast<long>(owner_thread_starts.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_stops", static_cast<long>(owner_thread_stops.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "queue_depth", owner_mailbox_total_depth());
