@@ -18,6 +18,8 @@ namespace {
 constexpr const char *kDefaultOwnerId = "owner/global";
 constexpr size_t kOwnerTraceLimit = 256;
 constexpr size_t kOwnerAccessTraceLimit = 256;
+constexpr size_t kOwnerMessageTraceLimit = 256;
+constexpr size_t kOwnerCommitTraceLimit = 256;
 std::atomic<uint64_t> total_checks{0};
 std::atomic<uint64_t> mismatch_checks{0};
 std::atomic<uint64_t> next_mailbox_task_id{1};
@@ -28,6 +30,10 @@ std::atomic<uint64_t> total_traced{0};
 std::atomic<uint64_t> next_access_trace_id{1};
 std::atomic<uint64_t> total_access_traced{0};
 std::atomic<uint64_t> total_cross_owner_accesses{0};
+std::atomic<uint64_t> next_message_trace_id{1};
+std::atomic<uint64_t> total_message_traced{0};
+std::atomic<uint64_t> next_commit_trace_id{1};
+std::atomic<uint64_t> total_commit_traced{0};
 std::atomic<uint64_t> owner_thread_dispatched{0};
 std::atomic<uint64_t> owner_thread_starts{0};
 std::atomic<uint64_t> owner_thread_stops{0};
@@ -72,11 +78,35 @@ struct OwnerAccessTrace {
   std::string operation;
 };
 
+struct OwnerMessageTrace {
+  uint64_t message_id;
+  uint64_t sequence;
+  uint64_t target_task_id;
+  std::string source_owner_id;
+  std::string target_owner_id;
+  std::string message_type;
+  std::string payload_key;
+  std::string state;
+};
+
+struct OwnerCommitTrace {
+  uint64_t commit_id;
+  uint64_t sequence;
+  uint64_t message_id;
+  bool direct_write;
+  std::string source_owner_id;
+  std::string target_owner_id;
+  std::string operation;
+  std::string state;
+};
+
 std::unordered_map<std::string, std::deque<OwnerMailboxTask>> owner_mailboxes;
 std::deque<std::string> schedulable_owners;
 std::unordered_set<std::string> schedulable_owner_set;
 std::deque<OwnerTaskTrace> owner_task_traces;
 std::deque<OwnerAccessTrace> owner_access_traces;
+std::deque<OwnerMessageTrace> owner_message_traces;
+std::deque<OwnerCommitTrace> owner_commit_traces;
 std::mutex owner_runtime_mutex;
 std::condition_variable owner_runtime_cv;
 bool owner_thread_stopping{false};
@@ -157,6 +187,34 @@ mapping_t *owner_access_trace_mapping(const OwnerAccessTrace &trace) {
   add_mapping_string(map, "source_object", trace.source_object.c_str());
   add_mapping_string(map, "target_object", trace.target_object.c_str());
   add_mapping_string(map, "operation", trace.operation.c_str());
+  return map;
+}
+
+mapping_t *owner_message_trace_mapping(const OwnerMessageTrace &trace) {
+  auto *map = allocate_mapping(9);
+  add_mapping_pair(map, "message_id", static_cast<long>(trace.message_id));
+  add_mapping_pair(map, "sequence", static_cast<long>(trace.sequence));
+  add_mapping_pair(map, "target_task_id", static_cast<long>(trace.target_task_id));
+  add_mapping_string(map, "source_owner_id", trace.source_owner_id.c_str());
+  add_mapping_string(map, "target_owner_id", trace.target_owner_id.c_str());
+  add_mapping_string(map, "message_type", trace.message_type.c_str());
+  add_mapping_string(map, "payload_key", trace.payload_key.c_str());
+  add_mapping_string(map, "state", trace.state.c_str());
+  add_mapping_pair(map, "direct_cross_owner_write", 0);
+  return map;
+}
+
+mapping_t *owner_commit_trace_mapping(const OwnerCommitTrace &trace) {
+  auto *map = allocate_mapping(9);
+  add_mapping_pair(map, "commit_id", static_cast<long>(trace.commit_id));
+  add_mapping_pair(map, "sequence", static_cast<long>(trace.sequence));
+  add_mapping_pair(map, "message_id", static_cast<long>(trace.message_id));
+  add_mapping_pair(map, "direct_write", trace.direct_write ? 1 : 0);
+  add_mapping_string(map, "source_owner_id", trace.source_owner_id.c_str());
+  add_mapping_string(map, "target_owner_id", trace.target_owner_id.c_str());
+  add_mapping_string(map, "operation", trace.operation.c_str());
+  add_mapping_string(map, "state", trace.state.c_str());
+  add_mapping_pair(map, "commit_boundary_only", 1);
   return map;
 }
 
@@ -611,6 +669,127 @@ mapping_t *vm_owner_access_trace(int limit) {
   add_mapping_pair(map, "returned", static_cast<long>(requested));
   add_mapping_pair(map, "total_traced", static_cast<long>(total_access_traced.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "cross_owner", static_cast<long>(total_cross_owner_accesses.load(std::memory_order_relaxed)));
+  add_mapping_array(map, "events", events);
+  free_array(events);
+  return map;
+}
+
+mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *target_owner_id, const char *message_type,
+                                   const char *payload_key) {
+  std::string source_owner = normalize_owner_id(source_owner_id);
+  std::string target_owner = normalize_owner_id(target_owner_id);
+  std::string normalized_type = normalize_task_text(message_type, "message");
+  std::string normalized_payload = normalize_task_text(payload_key, "");
+  auto message_id = next_message_trace_id.fetch_add(1, std::memory_order_relaxed);
+  auto target_task_id = vm_owner_enqueue_task(target_owner.c_str(), "owner_message", normalized_type.c_str());
+
+  OwnerMessageTrace trace;
+  trace.message_id = message_id;
+  trace.sequence = total_message_traced.load(std::memory_order_relaxed) + 1;
+  trace.target_task_id = target_task_id;
+  trace.source_owner_id = source_owner;
+  trace.target_owner_id = target_owner;
+  trace.message_type = normalized_type;
+  trace.payload_key = normalized_payload;
+  trace.state = "message_submitted";
+  {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    owner_message_traces.push_back(std::move(trace));
+    while (owner_message_traces.size() > kOwnerMessageTraceLimit) {
+      owner_message_traces.pop_front();
+    }
+  }
+  total_message_traced.fetch_add(1, std::memory_order_relaxed);
+
+  auto *map = allocate_mapping(10);
+  add_mapping_pair(map, "success", 1);
+  add_mapping_pair(map, "message_id", static_cast<long>(message_id));
+  add_mapping_pair(map, "target_task_id", static_cast<long>(target_task_id));
+  add_mapping_string(map, "source_owner_id", source_owner.c_str());
+  add_mapping_string(map, "target_owner_id", target_owner.c_str());
+  add_mapping_string(map, "message_type", normalized_type.c_str());
+  add_mapping_string(map, "payload_key", normalized_payload.c_str());
+  add_mapping_pair(map, "requires_owner_mailbox", 1);
+  add_mapping_pair(map, "message_only_cross_owner", 1);
+  add_mapping_pair(map, "direct_cross_owner_write", 0);
+  return map;
+}
+
+mapping_t *vm_owner_message_trace(int limit) {
+  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+  auto available = owner_message_traces.size();
+  auto requested = limit <= 0 || static_cast<size_t>(limit) > available ? available : static_cast<size_t>(limit);
+  auto *events = allocate_array(static_cast<int>(requested));
+  auto start = available - requested;
+
+  for (size_t i = 0; i < requested; i++) {
+    auto *event_map = owner_message_trace_mapping(owner_message_traces[start + i]);
+    events->item[i].type = T_MAPPING;
+    events->item[i].subtype = 0;
+    events->item[i].u.map = event_map;
+  }
+
+  auto *map = allocate_mapping(4);
+  add_mapping_pair(map, "success", 1);
+  add_mapping_pair(map, "returned", static_cast<long>(requested));
+  add_mapping_pair(map, "total_traced", static_cast<long>(total_message_traced.load(std::memory_order_relaxed)));
+  add_mapping_array(map, "events", events);
+  free_array(events);
+  return map;
+}
+
+mapping_t *vm_owner_record_commit_boundary(const char *source_owner_id, const char *target_owner_id,
+                                           const char *operation, uint64_t message_id, const char *state) {
+  OwnerCommitTrace trace;
+  trace.commit_id = next_commit_trace_id.fetch_add(1, std::memory_order_relaxed);
+  trace.sequence = total_commit_traced.load(std::memory_order_relaxed) + 1;
+  trace.message_id = message_id;
+  trace.direct_write = false;
+  trace.source_owner_id = normalize_owner_id(source_owner_id);
+  trace.target_owner_id = normalize_owner_id(target_owner_id);
+  trace.operation = normalize_task_text(operation, "commit");
+  trace.state = normalize_task_text(state, "commit_guarded");
+  auto result = trace;
+  {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    owner_commit_traces.push_back(std::move(trace));
+    while (owner_commit_traces.size() > kOwnerCommitTraceLimit) {
+      owner_commit_traces.pop_front();
+    }
+  }
+  total_commit_traced.fetch_add(1, std::memory_order_relaxed);
+
+  auto *map = allocate_mapping(9);
+  add_mapping_pair(map, "success", 1);
+  add_mapping_pair(map, "commit_id", static_cast<long>(result.commit_id));
+  add_mapping_pair(map, "message_id", static_cast<long>(result.message_id));
+  add_mapping_pair(map, "direct_write", 0);
+  add_mapping_string(map, "source_owner_id", result.source_owner_id.c_str());
+  add_mapping_string(map, "target_owner_id", result.target_owner_id.c_str());
+  add_mapping_string(map, "operation", result.operation.c_str());
+  add_mapping_string(map, "state", result.state.c_str());
+  add_mapping_pair(map, "commit_boundary_only", 1);
+  return map;
+}
+
+mapping_t *vm_owner_commit_trace(int limit) {
+  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+  auto available = owner_commit_traces.size();
+  auto requested = limit <= 0 || static_cast<size_t>(limit) > available ? available : static_cast<size_t>(limit);
+  auto *events = allocate_array(static_cast<int>(requested));
+  auto start = available - requested;
+
+  for (size_t i = 0; i < requested; i++) {
+    auto *event_map = owner_commit_trace_mapping(owner_commit_traces[start + i]);
+    events->item[i].type = T_MAPPING;
+    events->item[i].subtype = 0;
+    events->item[i].u.map = event_map;
+  }
+
+  auto *map = allocate_mapping(4);
+  add_mapping_pair(map, "success", 1);
+  add_mapping_pair(map, "returned", static_cast<long>(requested));
+  add_mapping_pair(map, "total_traced", static_cast<long>(total_commit_traced.load(std::memory_order_relaxed)));
   add_mapping_array(map, "events", events);
   free_array(events);
   return map;

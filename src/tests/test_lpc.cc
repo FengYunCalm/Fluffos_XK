@@ -922,6 +922,86 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
   vm_owner_thread_stop();
 }
 
+TEST_F(DriverTest, TestVmOwnerMessageAndCommitTracesAreSpecOnly) {
+  const char* source_owner = "owner/test/message/source";
+  const char* target_owner = "owner/test/message/target";
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  free_mapping(vm_owner_purge_mailbox(target_owner));
+  auto* submitted = vm_owner_submit_message(source_owner, target_owner, "room_snapshot", "room/v1");
+  ASSERT_EQ(mapping_number(submitted, "success"), 1);
+  ASSERT_GT(mapping_number(submitted, "message_id"), 0);
+  ASSERT_GT(mapping_number(submitted, "target_task_id"), 0);
+  ASSERT_EQ(mapping_number(submitted, "requires_owner_mailbox"), 1);
+  ASSERT_EQ(mapping_number(submitted, "message_only_cross_owner"), 1);
+  ASSERT_EQ(mapping_number(submitted, "direct_cross_owner_write"), 0);
+  ASSERT_STREQ(mapping_string(submitted, "source_owner_id"), source_owner);
+  ASSERT_STREQ(mapping_string(submitted, "target_owner_id"), target_owner);
+  ASSERT_STREQ(mapping_string(submitted, "message_type"), "room_snapshot");
+
+  auto message_id = mapping_number(submitted, "message_id");
+  auto target_task_id = mapping_number(submitted, "target_task_id");
+  auto* queued = vm_owner_mailbox_status(target_owner);
+  ASSERT_EQ(mapping_number(queued, "owner_queue_depth"), 1);
+  free_mapping(queued);
+
+  auto* message_trace = vm_owner_message_trace(1);
+  auto* message_events = find_string_in_mapping(message_trace, "events");
+  ASSERT_NE(message_events, nullptr);
+  ASSERT_EQ(message_events->type, T_ARRAY);
+  ASSERT_EQ(message_events->u.arr->size, 1);
+  auto* message_event = message_events->u.arr->item[0].u.map;
+  ASSERT_EQ(mapping_number(message_event, "message_id"), message_id);
+  ASSERT_EQ(mapping_number(message_event, "target_task_id"), target_task_id);
+  ASSERT_EQ(mapping_number(message_event, "direct_cross_owner_write"), 0);
+  ASSERT_STREQ(mapping_string(message_event, "state"), "message_submitted");
+  free_mapping(message_trace);
+
+  auto* commit = vm_owner_record_commit_boundary(source_owner, target_owner, "move_object", message_id, "prepared");
+  ASSERT_EQ(mapping_number(commit, "success"), 1);
+  ASSERT_EQ(mapping_number(commit, "message_id"), message_id);
+  ASSERT_EQ(mapping_number(commit, "direct_write"), 0);
+  ASSERT_EQ(mapping_number(commit, "commit_boundary_only"), 1);
+  ASSERT_STREQ(mapping_string(commit, "operation"), "move_object");
+  ASSERT_STREQ(mapping_string(commit, "state"), "prepared");
+  free_mapping(commit);
+
+  auto* commit_trace = vm_owner_commit_trace(1);
+  auto* commit_events = find_string_in_mapping(commit_trace, "events");
+  ASSERT_NE(commit_events, nullptr);
+  ASSERT_EQ(commit_events->type, T_ARRAY);
+  ASSERT_EQ(commit_events->u.arr->size, 1);
+  auto* commit_event = commit_events->u.arr->item[0].u.map;
+  ASSERT_EQ(mapping_number(commit_event, "message_id"), message_id);
+  ASSERT_EQ(mapping_number(commit_event, "direct_write"), 0);
+  ASSERT_EQ(mapping_number(commit_event, "commit_boundary_only"), 1);
+  ASSERT_STREQ(mapping_string(commit_event, "operation"), "move_object");
+  free_mapping(commit_trace);
+
+  auto* drained = vm_owner_drain_mailbox(target_owner, 1);
+  auto* tasks = find_string_in_mapping(drained, "tasks");
+  ASSERT_NE(tasks, nullptr);
+  ASSERT_EQ(tasks->type, T_ARRAY);
+  ASSERT_EQ(tasks->u.arr->size, 1);
+  ASSERT_EQ(mapping_number(tasks->u.arr->item[0].u.map, "task_id"), target_task_id);
+  ASSERT_STREQ(mapping_string(tasks->u.arr->item[0].u.map, "task_type"), "owner_message");
+  ASSERT_STREQ(mapping_string(tasks->u.arr->item[0].u.map, "task_key"), "room_snapshot");
+  free_mapping(drained);
+  free_mapping(submitted);
+}
+
 TEST_F(DriverTest, TestVmOwnerGuardFailsFastOnMismatch) {
   current_object = master_ob;
   object_t* obj = find_object("single/master.c");

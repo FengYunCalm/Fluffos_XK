@@ -32,6 +32,12 @@ mapping_t *vm_owner_mailbox_status(const char *owner_id);
 mapping_t *vm_owner_schedule(int limit);
 mapping_t *vm_owner_task_trace(int limit);
 mapping_t *vm_owner_access_trace(int limit);
+mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *target_owner_id, const char *message_type,
+                                   const char *payload_key);
+mapping_t *vm_owner_message_trace(int limit);
+mapping_t *vm_owner_record_commit_boundary(const char *source_owner_id, const char *target_owner_id,
+                                           const char *operation, uint64_t message_id, const char *state);
+mapping_t *vm_owner_commit_trace(int limit);
 void vm_owner_thread_start(int requested_threads);
 void vm_owner_thread_stop();
 mapping_t *vm_owner_thread_status();

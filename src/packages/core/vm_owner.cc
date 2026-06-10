@@ -146,6 +146,50 @@ void f_vm_owner_access_trace() {
 }
 #endif
 
+#ifdef F_VM_OWNER_MESSAGE_SUBMIT
+void f_vm_owner_message_submit() {
+  auto *payload_key = sp;
+  auto *message_type = sp - 1;
+  auto *target_owner_id = sp - 2;
+  auto *source_owner_id = sp - 3;
+  auto *result = vm_owner_submit_message(source_owner_id->u.string, target_owner_id->u.string,
+                                        message_type->u.string, payload_key->u.string);
+  pop_n_elems(4);
+  push_refed_mapping(result);
+}
+#endif
+
+#ifdef F_VM_OWNER_MESSAGE_TRACE
+void f_vm_owner_message_trace() {
+  auto *result = vm_owner_message_trace(static_cast<int>(sp->u.number));
+  pop_stack();
+  push_refed_mapping(result);
+}
+#endif
+
+#ifdef F_VM_OWNER_COMMIT_RECORD
+void f_vm_owner_commit_record() {
+  auto *state = sp;
+  auto message_id = (sp - 1)->u.number;
+  auto *operation = sp - 2;
+  auto *target_owner_id = sp - 3;
+  auto *source_owner_id = sp - 4;
+  auto *result = vm_owner_record_commit_boundary(source_owner_id->u.string, target_owner_id->u.string,
+                                                operation->u.string, static_cast<uint64_t>(message_id),
+                                                state->u.string);
+  pop_n_elems(5);
+  push_refed_mapping(result);
+}
+#endif
+
+#ifdef F_VM_OWNER_COMMIT_TRACE
+void f_vm_owner_commit_trace() {
+  auto *result = vm_owner_commit_trace(static_cast<int>(sp->u.number));
+  pop_stack();
+  push_refed_mapping(result);
+}
+#endif
+
 #ifdef F_VM_OWNER_PURGE
 void f_vm_owner_purge() {
   auto *result = vm_owner_purge_mailbox(sp->u.string);
