@@ -169,3 +169,25 @@ void f_vm_owner_schedule() {
   push_refed_mapping(result);
 }
 #endif
+
+#ifdef F_VM_OWNER_THREAD_START
+void f_vm_owner_thread_start() {
+  vm_owner_thread_start(static_cast<int>(sp->u.number));
+  pop_stack();
+  push_number(1);
+}
+#endif
+
+#ifdef F_VM_OWNER_THREAD_STOP
+void f_vm_owner_thread_stop() {
+  vm_owner_thread_stop();
+  push_number(1);
+}
+#endif
+
+#ifdef F_VM_OWNER_THREAD_STATUS
+void f_vm_owner_thread_status() {
+  auto *result = vm_owner_thread_status();
+  push_refed_mapping(result);
+}
+#endif

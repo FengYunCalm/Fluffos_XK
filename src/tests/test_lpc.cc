@@ -27,7 +27,10 @@ class DriverTest : public ::testing::Test {
  protected:
   void SetUp() override { clear_state(); }
 
-  void TearDown() override { clear_state(); }
+  void TearDown() override {
+    vm_owner_thread_stop();
+    clear_state();
+  }
 };
 
 TEST_F(DriverTest, TestCompileDumpProgWorks) {
@@ -408,6 +411,72 @@ TEST_F(DriverTest, TestVmOwnerScheduleRoundsOwnersAndKeepsOwnerFifo) {
   ASSERT_EQ(mapping_number(tasks->u.arr->item[2].u.map, "task_id"), static_cast<long>(a_second));
   ASSERT_STREQ(mapping_string(tasks->u.arr->item[2].u.map, "task_key"), "a-second");
   free_mapping(result);
+}
+
+TEST_F(DriverTest, TestVmOwnerThreadExperimentIsOptInAndDispatchesMailboxTasks) {
+  const char* owner = "owner/test/thread";
+
+  vm_owner_thread_stop();
+  auto* initial = vm_owner_thread_status();
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+  ASSERT_EQ(mapping_number(initial, "enabled"), 0);
+  ASSERT_EQ(mapping_number(initial, "thread_count"), 0);
+  free_mapping(initial);
+
+  auto task_id = vm_owner_enqueue_task(owner, "command", "threaded-look");
+  ASSERT_GT(task_id, 0u);
+  auto* queued = vm_owner_mailbox_status(owner);
+  ASSERT_EQ(mapping_number(queued, "owner_queue_depth"), 1);
+  free_mapping(queued);
+
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 100; i++) {
+    auto* status = vm_owner_mailbox_status(owner);
+    auto depth = mapping_number(status, "owner_queue_depth");
+    free_mapping(status);
+    if (depth == 0) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  auto* drained = vm_owner_mailbox_status(owner);
+  ASSERT_EQ(mapping_number(drained, "owner_queue_depth"), 0);
+  free_mapping(drained);
+
+  auto* trace = vm_owner_task_trace(2);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  ASSERT_GE(events->u.arr->size, 2);
+  ASSERT_STREQ(mapping_string(events->u.arr->item[events->u.arr->size - 1].u.map, "state"), "thread_dispatched");
+  ASSERT_EQ(mapping_number(events->u.arr->item[events->u.arr->size - 1].u.map, "task_id"),
+            static_cast<long>(task_id));
+  ASSERT_STREQ(mapping_string(events->u.arr->item[events->u.arr->size - 1].u.map, "owner_id"), owner);
+  free_mapping(trace);
+
+  auto* running = vm_owner_thread_status();
+  ASSERT_EQ(mapping_number(running, "enabled"), 1);
+  ASSERT_EQ(mapping_number(running, "thread_count"), 1);
+  ASSERT_GE(mapping_number(running, "thread_dispatched"), 1);
+  free_mapping(running);
+
+  vm_owner_thread_stop();
+  auto* stopped = vm_owner_thread_status();
+  ASSERT_EQ(mapping_number(stopped, "enabled"), 0);
+  ASSERT_EQ(mapping_number(stopped, "thread_count"), 0);
+  free_mapping(stopped);
 }
 
 TEST_F(DriverTest, TestVmOwnerGuardFailsFastOnMismatch) {

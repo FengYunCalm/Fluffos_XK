@@ -31,5 +31,8 @@ mapping_t *vm_owner_mailbox_status(const char *owner_id);
 mapping_t *vm_owner_schedule(int limit);
 mapping_t *vm_owner_task_trace(int limit);
 mapping_t *vm_owner_access_trace(int limit);
+void vm_owner_thread_start(int requested_threads);
+void vm_owner_thread_stop();
+mapping_t *vm_owner_thread_status();
 
 #endif /* SRC_VM_OWNER_H_ */

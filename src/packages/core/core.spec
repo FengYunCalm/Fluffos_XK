@@ -393,3 +393,6 @@ mapping vm_owner_mailbox_status(string);
 mapping vm_owner_schedule(int);
 mapping vm_owner_trace(int);
 mapping vm_owner_access_trace(int);
+int vm_owner_thread_start(int);
+int vm_owner_thread_stop();
+mapping vm_owner_thread_status();
