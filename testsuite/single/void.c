@@ -11,3 +11,8 @@ int get_called() {
 void dummy()
 {
 }
+
+mixed call_target(object target)
+{
+  return call_other(target, "dummy");
+}

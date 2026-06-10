@@ -539,6 +539,212 @@ TEST_F(DriverTest, TestAllInventoryRecordsCrossOwnerAccessTrace) {
   vm_owner_clear_id(target);
 }
 
+TEST_F(DriverTest, TestPresentRecordsCrossOwnerAccessTrace) {
+  object_t* source = find_object("single/master.c");
+  object_t* target = find_object("single/simul_efun.c");
+  ASSERT_NE(source, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* before = vm_owner_access_trace(0);
+  auto before_total = mapping_number(before, "total_traced");
+  free_mapping(before);
+
+  svalue_t needle;
+  needle.type = T_STRING;
+  needle.subtype = STRING_CONSTANT;
+  needle.u.string = "nonexistent";
+  current_object = source;
+  vm_owner_set_id(source, "owner/test/present/shared");
+  vm_owner_set_id(target, "owner/test/present/shared");
+  ASSERT_EQ(object_present(&needle, target), nullptr);
+
+  auto* same_owner = vm_owner_access_trace(0);
+  ASSERT_EQ(mapping_number(same_owner, "total_traced"), before_total);
+  free_mapping(same_owner);
+
+  vm_owner_set_id(target, "owner/test/present/target");
+  ASSERT_EQ(object_present(&needle, target), nullptr);
+
+  auto* trace = vm_owner_access_trace(1);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  ASSERT_EQ(events->u.arr->size, 1);
+  ASSERT_EQ(mapping_number(events->u.arr->item[0].u.map, "cross_owner"), 1);
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "operation"), "present");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "source_owner_id"), "owner/test/present/shared");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "target_owner_id"), "owner/test/present/target");
+  free_mapping(trace);
+
+  vm_owner_clear_id(source);
+  vm_owner_clear_id(target);
+}
+
+TEST_F(DriverTest, TestMoveObjectRecordsCrossOwnerAccessTrace) {
+  object_t* item = load_object("single/void", 1);
+  object_t* dest = find_object("single/simul_efun.c");
+  ASSERT_NE(item, nullptr);
+  ASSERT_NE(dest, nullptr);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* before = vm_owner_access_trace(0);
+  auto before_total = mapping_number(before, "total_traced");
+  free_mapping(before);
+
+  vm_owner_set_id(item, "owner/test/move/shared");
+  vm_owner_set_id(dest, "owner/test/move/shared");
+  move_object(item, dest);
+
+  auto* same_owner = vm_owner_access_trace(0);
+  ASSERT_EQ(mapping_number(same_owner, "total_traced"), before_total);
+  free_mapping(same_owner);
+
+  vm_owner_set_id(dest, "owner/test/move/dest");
+  move_object(item, dest);
+
+  auto* trace = vm_owner_access_trace(1);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  ASSERT_EQ(events->u.arr->size, 1);
+  ASSERT_EQ(mapping_number(events->u.arr->item[0].u.map, "cross_owner"), 1);
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "operation"), "move_object");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "source_owner_id"), "owner/test/move/shared");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "target_owner_id"), "owner/test/move/dest");
+  free_mapping(trace);
+
+  vm_owner_clear_id(item);
+  vm_owner_clear_id(dest);
+  destruct_object(item);
+}
+
+TEST_F(DriverTest, TestDestructRecordsCrossOwnerAccessTrace) {
+  object_t* source = find_object("single/master.c");
+  object_t* target = load_object("single/on_destruct_good", 1);
+  ASSERT_NE(source, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* before = vm_owner_access_trace(0);
+  auto before_total = mapping_number(before, "total_traced");
+  free_mapping(before);
+
+  current_object = source;
+  vm_owner_set_id(source, "owner/test/destruct/shared");
+  vm_owner_set_id(target, "owner/test/destruct/shared");
+  vm_owner_record_cross_owner_access(source, target, "destruct-primer");
+
+  auto* same_owner = vm_owner_access_trace(0);
+  ASSERT_EQ(mapping_number(same_owner, "total_traced"), before_total);
+  free_mapping(same_owner);
+
+  vm_owner_set_id(target, "owner/test/destruct/target");
+  destruct_object(target);
+
+  auto* trace = vm_owner_access_trace(1);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  ASSERT_EQ(events->u.arr->size, 1);
+  ASSERT_EQ(mapping_number(events->u.arr->item[0].u.map, "cross_owner"), 1);
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "operation"), "destruct");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "source_owner_id"), "owner/test/destruct/shared");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "target_owner_id"), "owner/test/destruct/target");
+  free_mapping(trace);
+
+  vm_owner_clear_id(source);
+}
+
+TEST_F(DriverTest, TestCallOtherRecordsCrossOwnerAccessTrace) {
+  object_t* caller = load_object("single/void", 1);
+  object_t* target = load_object("single/on_destruct_good", 1);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* before = vm_owner_access_trace(0);
+  auto before_total = mapping_number(before, "total_traced");
+  free_mapping(before);
+
+  vm_owner_set_id(caller, "owner/test/call/shared");
+  vm_owner_set_id(target, "owner/test/call/shared");
+  push_object(target);
+  ASSERT_NE(safe_apply("call_target", caller, 1, ORIGIN_DRIVER), nullptr);
+
+  auto* same_owner = vm_owner_access_trace(0);
+  ASSERT_EQ(mapping_number(same_owner, "total_traced"), before_total);
+  free_mapping(same_owner);
+
+  vm_owner_set_id(target, "owner/test/call/target");
+  push_object(target);
+  ASSERT_NE(safe_apply("call_target", caller, 1, ORIGIN_DRIVER), nullptr);
+
+  auto* trace = vm_owner_access_trace(1);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  ASSERT_EQ(events->u.arr->size, 1);
+  ASSERT_EQ(mapping_number(events->u.arr->item[0].u.map, "cross_owner"), 1);
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "operation"), "call_other");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "source_owner_id"), "owner/test/call/shared");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "target_owner_id"), "owner/test/call/target");
+  free_mapping(trace);
+
+  vm_owner_clear_id(caller);
+  vm_owner_clear_id(target);
+  destruct_object(caller);
+  destruct_object(target);
+}
+
 TEST_F(DriverTest, TestVmOwnerScheduleRoundsOwnersAndKeepsOwnerFifo) {
   const char* owner_a = "owner/test/schedule/a";
   const char* owner_b = "owner/test/schedule/b";

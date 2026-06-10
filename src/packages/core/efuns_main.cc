@@ -223,6 +223,7 @@ void f__call_other() {
       error("call_other() couldn't find object '%s'.\n", arg[0].u.string);
     }
   }
+  vm_owner_record_cross_owner_access(current_object, ob, "call_other");
   /* Send the remaining arguments to the function. */
   if (apply(funcname, ob, num_arg - 2, ORIGIN_CALL_OTHER) == nullptr) { /* Function not found */
     pop_2_elems();

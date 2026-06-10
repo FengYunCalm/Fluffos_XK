@@ -54,6 +54,7 @@ void db_cleanup(void);  // FIXME
 #include "comm.h"  // FIXME
 
 #include "vm/internal/trace.h"  // for dump_trace && get_svalue_trace
+#include "vm/owner.h"
 #include "vm/worker.h"
 /*
  * This one is called from HUP.
@@ -709,6 +710,7 @@ object_t *object_present(svalue_t *v, object_t *ob) {
   if (ob->flags & O_DESTRUCTED) {
     return nullptr;
   }
+  vm_owner_record_cross_owner_access(current_object, ob, "present");
   if (v->type == T_OBJECT) {
     if (specific) {
       if (v->u.ob->super == ob) {
@@ -855,6 +857,7 @@ void destruct_object(object_t *ob) {
   if (ob->flags & O_DESTRUCTED) {
     return;
   }
+  vm_owner_record_cross_owner_access(current_object, ob, "destruct");
   remove_object_from_stack(ob);
 /*
  * If this is the first object being shadowed by another object, then
@@ -1515,6 +1518,7 @@ void move_object(object_t *item, object_t *dest) {
   object_t **pp, *ob;
 
   save_command_giver(command_giver);
+  vm_owner_record_cross_owner_access(item, dest, "move_object");
 
   /* Recursive moves are not allowed. */
   for (ob = dest; ob; ob = ob->super) {
