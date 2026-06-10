@@ -28,6 +28,7 @@
 #include "packages/core/custom_crypt.h"
 #include "packages/core/ed.h"
 #include "packages/core/heartbeat.h"
+#include "vm/owner.h"
 
 int data_size(object_t *ob);
 void reload_object(object_t *obj);
@@ -538,15 +539,20 @@ void f_disable_wizard() {
 #ifdef F_ENVIRONMENT
 void f_environment() {
   object_t *ob = nullptr;
+  object_t *target = nullptr;
 
   if (st_num_arg) {
-    if ((ob = sp->u.ob)->flags & O_DESTRUCTED) {
+    target = sp->u.ob;
+    if ((ob = target)->flags & O_DESTRUCTED) {
       error("environment() of destructed object.\n");
     }
     ob = ob->super;
+    vm_owner_record_cross_owner_access(current_object, target, "environment");
     free_object(&(sp--)->u.ob, "f_environment");
   } else {
-    ob = current_object->super;
+    target = current_object;
+    ob = target->super;
+    vm_owner_record_cross_owner_access(current_object, target, "environment");
   }
 
   if (ob && object_visible(ob)) {

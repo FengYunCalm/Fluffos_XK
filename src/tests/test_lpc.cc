@@ -437,6 +437,57 @@ TEST_F(DriverTest, TestVmOwnerAccessTraceRecordsCrossOwnerAccess) {
   vm_owner_clear_id(target);
 }
 
+TEST_F(DriverTest, TestVmOwnerCrossOwnerAccessTraceSkipsSameOwner) {
+  current_object = master_ob;
+  object_t* source = find_object("single/master.c");
+  object_t* target = find_object("single/simul_efun.c");
+  ASSERT_NE(source, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* before = vm_owner_access_trace(0);
+  auto before_total = mapping_number(before, "total_traced");
+  free_mapping(before);
+
+  vm_owner_set_id(source, "owner/test/access/shared");
+  vm_owner_set_id(target, "owner/test/access/shared");
+  ASSERT_EQ(vm_owner_record_cross_owner_access(source, target, "environment"), 0u);
+
+  auto* same_owner = vm_owner_access_trace(0);
+  ASSERT_EQ(mapping_number(same_owner, "total_traced"), before_total);
+  free_mapping(same_owner);
+
+  vm_owner_set_id(target, "owner/test/access/target");
+  auto access_id = vm_owner_record_cross_owner_access(source, target, "environment");
+  ASSERT_GT(access_id, 0u);
+
+  auto* trace = vm_owner_access_trace(1);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  ASSERT_EQ(events->u.arr->size, 1);
+  ASSERT_EQ(mapping_number(events->u.arr->item[0].u.map, "cross_owner"), 1);
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "operation"), "environment");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "source_owner_id"), "owner/test/access/shared");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "target_owner_id"), "owner/test/access/target");
+  free_mapping(trace);
+
+  vm_owner_clear_id(source);
+  vm_owner_clear_id(target);
+}
+
 TEST_F(DriverTest, TestVmOwnerScheduleRoundsOwnersAndKeepsOwnerFifo) {
   const char* owner_a = "owner/test/schedule/a";
   const char* owner_b = "owner/test/schedule/b";

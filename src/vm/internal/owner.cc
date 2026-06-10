@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstring>
 #include <deque>
 #include <mutex>
 #include <string>
@@ -439,6 +440,13 @@ uint64_t vm_owner_record_access(object_t *source, object_t *target, const char *
   }
   total_access_traced.fetch_add(1, std::memory_order_relaxed);
   return access_id;
+}
+
+uint64_t vm_owner_record_cross_owner_access(object_t *source, object_t *target, const char *operation) {
+  if (!source || !target || std::strcmp(vm_owner_id(source), vm_owner_id(target)) == 0) {
+    return 0;
+  }
+  return vm_owner_record_access(source, target, operation);
 }
 
 mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
