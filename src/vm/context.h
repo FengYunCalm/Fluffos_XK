@@ -21,6 +21,8 @@ struct VMObjectStoreState {
   object_t *objects{nullptr};
   object_t *destructed_objects{nullptr};
   object_t *debug_dangling_objects{nullptr};
+  bool main_thread_owned{false};
+  uint64_t sync_rejections{0};
 };
 
 struct VMContext {
@@ -43,6 +45,7 @@ VMExecutionState vm_context_capture_execution();
 void vm_context_apply_execution(VMContext &context, const VMExecutionState &execution);
 void vm_context_sync_execution(VMContext &context);
 void vm_context_sync_object_store(VMContext &context);
+uint64_t vm_context_object_store_sync_rejections();
 
 class VMExecutionScope {
  public:

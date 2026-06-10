@@ -5,9 +5,25 @@
 #include "vm/internal/base/machine.h"
 #include "vm/internal/simulate.h"
 
+#include <atomic>
+#include <thread>
+
 namespace {
 VMContext main_vm_context;
 thread_local VMContext *thread_vm_context = &main_vm_context;
+const std::thread::id main_vm_thread_id = std::this_thread::get_id();
+std::atomic<uint64_t> object_store_sync_rejections{0};
+
+bool can_sync_object_store_to_context(VMContext &context) {
+  return &context == &main_vm_context && std::this_thread::get_id() == main_vm_thread_id;
+}
+
+void clear_object_store_snapshot(VMObjectStoreState &object_store) {
+  object_store.objects = nullptr;
+  object_store.destructed_objects = nullptr;
+  object_store.debug_dangling_objects = nullptr;
+  object_store.main_thread_owned = false;
+}
 }
 
 VMContext &vm_context() { return *thread_vm_context; }
@@ -56,6 +72,13 @@ void vm_context_sync_execution(VMContext &context) {
 }
 
 void vm_context_sync_object_store(VMContext &context) {
+  if (!can_sync_object_store_to_context(context)) {
+    clear_object_store_snapshot(context.object_store);
+    context.object_store.sync_rejections++;
+    object_store_sync_rejections.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+
   context.object_store.objects = obj_list;
   context.object_store.destructed_objects = obj_list_destruct;
 #ifdef DEBUG
@@ -63,6 +86,11 @@ void vm_context_sync_object_store(VMContext &context) {
 #else
   context.object_store.debug_dangling_objects = nullptr;
 #endif
+  context.object_store.main_thread_owned = true;
+}
+
+uint64_t vm_context_object_store_sync_rejections() {
+  return object_store_sync_rejections.load(std::memory_order_relaxed);
 }
 
 VMExecutionScope::VMExecutionScope(VMContext &context, const VMExecutionState &execution)

@@ -139,6 +139,31 @@ TEST_F(DriverTest, TestVmContextThreadScopeBindsThreadLocalContext) {
   ASSERT_EQ(&vm_context(), main_context);
 }
 
+TEST_F(DriverTest, TestVmContextObjectStoreRemainsMainThreadOwned) {
+  auto *main_context = &vm_context();
+  vm_context_sync_object_store(*main_context);
+  ASSERT_TRUE(main_context->object_store.main_thread_owned);
+  ASSERT_EQ(main_context->object_store.objects, obj_list);
+
+  auto before_rejections = vm_context_object_store_sync_rejections();
+  bool worker_store_rejected = false;
+  uint64_t worker_rejections = 0;
+  std::thread worker([&] {
+    VMContext worker_context;
+    VMContextThreadScope scope(worker_context);
+    vm_context_sync_object_store(vm_context());
+    worker_store_rejected = !worker_context.object_store.main_thread_owned && worker_context.object_store.objects == nullptr;
+    worker_rejections = worker_context.object_store.sync_rejections;
+  });
+  worker.join();
+
+  ASSERT_TRUE(worker_store_rejected);
+  ASSERT_EQ(worker_rejections, 1u);
+  ASSERT_EQ(vm_context_object_store_sync_rejections(), before_rejections + 1);
+  ASSERT_TRUE(main_context->object_store.main_thread_owned);
+  ASSERT_EQ(main_context->object_store.objects, obj_list);
+}
+
 TEST_F(DriverTest, TestVmOwnerMetadataDefaultsAndChecks) {
   current_object = master_ob;
   object_t* obj = find_object("single/master.c");
@@ -491,6 +516,7 @@ TEST_F(DriverTest, TestVmOwnerThreadExperimentIsOptInAndDispatchesMailboxTasks) 
   ASSERT_EQ(mapping_number(running, "thread_count"), 1);
   ASSERT_GE(mapping_number(running, "thread_dispatched"), 1);
   ASSERT_GE(mapping_number(running, "thread_context_bound"), 1);
+  ASSERT_GE(mapping_number(running, "thread_object_store_isolated"), 1);
   free_mapping(running);
 
   vm_owner_thread_stop();

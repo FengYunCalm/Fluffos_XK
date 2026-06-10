@@ -31,6 +31,7 @@ std::atomic<uint64_t> owner_thread_dispatched{0};
 std::atomic<uint64_t> owner_thread_starts{0};
 std::atomic<uint64_t> owner_thread_stops{0};
 std::atomic<uint64_t> owner_thread_context_bound{0};
+std::atomic<uint64_t> owner_thread_object_store_isolated{0};
 
 struct OwnerMailboxTask {
   uint64_t task_id;
@@ -216,6 +217,9 @@ void owner_thread_loop() {
   VMContextThreadScope context_scope(owner_context);
   if (&vm_context() != &vm_main_context()) {
     owner_thread_context_bound.fetch_add(1, std::memory_order_relaxed);
+  }
+  if (!vm_context().object_store.main_thread_owned && vm_context().object_store.objects == nullptr) {
+    owner_thread_object_store_isolated.fetch_add(1, std::memory_order_relaxed);
   }
 
   while (true) {
@@ -627,7 +631,7 @@ void vm_owner_thread_stop() {
 
 mapping_t *vm_owner_thread_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(9);
+  auto *map = allocate_mapping(10);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
   add_mapping_pair(map, "thread_count", static_cast<long>(owner_threads.size()));
@@ -635,6 +639,8 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_pair(map, "thread_dispatched", static_cast<long>(owner_thread_dispatched.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_context_bound",
                    static_cast<long>(owner_thread_context_bound.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_object_store_isolated",
+                   static_cast<long>(owner_thread_object_store_isolated.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_starts", static_cast<long>(owner_thread_starts.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_stops", static_cast<long>(owner_thread_stops.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "queue_depth", owner_mailbox_total_depth());
