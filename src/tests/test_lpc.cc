@@ -164,6 +164,21 @@ TEST_F(DriverTest, TestVmContextObjectStoreRemainsMainThreadOwned) {
   ASSERT_EQ(main_context->object_store.objects, obj_list);
 }
 
+TEST_F(DriverTest, TestVmOwnerScopeBindsAndRestoresCurrentOwner) {
+  auto *context = &vm_context();
+  vm_context_set_current_owner(*context, "owner/test/original", 7);
+
+  {
+    VMOwnerScope scope(*context, "owner/test/scoped", 8);
+    ASSERT_EQ(context->owner.current_owner_id, "owner/test/scoped");
+    ASSERT_EQ(context->owner.current_owner_epoch, 8u);
+  }
+
+  ASSERT_EQ(context->owner.current_owner_id, "owner/test/original");
+  ASSERT_EQ(context->owner.current_owner_epoch, 7u);
+  vm_context_set_current_owner(*context, "", 0);
+}
+
 TEST_F(DriverTest, TestVmOwnerMetadataDefaultsAndChecks) {
   current_object = master_ob;
   object_t* obj = find_object("single/master.c");
@@ -517,6 +532,8 @@ TEST_F(DriverTest, TestVmOwnerThreadExperimentIsOptInAndDispatchesMailboxTasks) 
   ASSERT_GE(mapping_number(running, "thread_dispatched"), 1);
   ASSERT_GE(mapping_number(running, "thread_context_bound"), 1);
   ASSERT_GE(mapping_number(running, "thread_object_store_isolated"), 1);
+  ASSERT_GE(mapping_number(running, "thread_owner_bound"), 1);
+  ASSERT_GE(mapping_number(running, "thread_owner_cleared"), 1);
   free_mapping(running);
 
   vm_owner_thread_stop();

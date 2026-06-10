@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <ctime>
+#include <string>
 
 struct event_base;
 struct object_t;
@@ -25,10 +26,16 @@ struct VMObjectStoreState {
   uint64_t sync_rejections{0};
 };
 
+struct VMOwnerState {
+  std::string current_owner_id;
+  uint64_t current_owner_epoch{0};
+};
+
 struct VMContext {
   time_t boot_time{0};
   event_base *event_loop{nullptr};
   uint64_t current_gametick{0};
+  VMOwnerState owner;
   VMExecutionState execution;
   VMObjectStoreState object_store;
 };
@@ -40,6 +47,7 @@ VMContext *vm_context_bind_thread(VMContext *context);
 void vm_context_set_boot_time(VMContext &context, time_t boot_time);
 void vm_context_set_event_base(VMContext &context, event_base *base);
 void vm_context_set_current_gametick(VMContext &context, uint64_t gametick);
+void vm_context_set_current_owner(VMContext &context, const char *owner_id, uint64_t owner_epoch);
 void vm_context_reset_execution(VMContext &context);
 VMExecutionState vm_context_capture_execution();
 void vm_context_apply_execution(VMContext &context, const VMExecutionState &execution);
@@ -70,6 +78,19 @@ class VMContextThreadScope {
 
  private:
   VMContext *saved_;
+};
+
+class VMOwnerScope {
+ public:
+  VMOwnerScope(VMContext &context, const char *owner_id, uint64_t owner_epoch);
+  ~VMOwnerScope();
+
+  VMOwnerScope(const VMOwnerScope &) = delete;
+  VMOwnerScope &operator=(const VMOwnerScope &) = delete;
+
+ private:
+  VMContext &context_;
+  VMOwnerState saved_;
 };
 
 #endif /* SRC_VM_CONTEXT_H_ */
