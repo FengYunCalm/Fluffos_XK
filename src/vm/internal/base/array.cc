@@ -6,6 +6,7 @@
 
 #include "vm/internal/apply.h"
 #include "vm/internal/simulate.h"
+#include "vm/owner.h"
 
 #ifdef PACKAGE_MUDLIB_STATS
 #include "packages/mudlib_stats/mudlib_stats.h"
@@ -911,6 +912,8 @@ array_t *all_inventory(object_t *ob, int override) {
   object_t *cur;
   int cnt, res;
   int display_hidden;
+
+  vm_owner_record_cross_owner_access(current_object, ob, "all_inventory");
 
   if (override) {
     display_hidden = 1;

@@ -10,6 +10,7 @@
 #include "packages/core/heartbeat.h"
 #include "packages/gateway/gateway.h"
 #include "vm/context.h"
+#include "vm/internal/base/array.h"
 #include "vm/internal/simulate.h"
 #include "vm/owner.h"
 #include "vm/worker.h"
@@ -482,6 +483,56 @@ TEST_F(DriverTest, TestVmOwnerCrossOwnerAccessTraceSkipsSameOwner) {
   ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "operation"), "environment");
   ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "source_owner_id"), "owner/test/access/shared");
   ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "target_owner_id"), "owner/test/access/target");
+  free_mapping(trace);
+
+  vm_owner_clear_id(source);
+  vm_owner_clear_id(target);
+}
+
+TEST_F(DriverTest, TestAllInventoryRecordsCrossOwnerAccessTrace) {
+  object_t* source = find_object("single/master.c");
+  object_t* target = find_object("single/simul_efun.c");
+  ASSERT_NE(source, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* before = vm_owner_access_trace(0);
+  auto before_total = mapping_number(before, "total_traced");
+  free_mapping(before);
+
+  current_object = source;
+  vm_owner_set_id(source, "owner/test/inventory/shared");
+  vm_owner_set_id(target, "owner/test/inventory/shared");
+  ASSERT_EQ(all_inventory(target, 0), &the_null_array);
+
+  auto* same_owner = vm_owner_access_trace(0);
+  ASSERT_EQ(mapping_number(same_owner, "total_traced"), before_total);
+  free_mapping(same_owner);
+
+  vm_owner_set_id(target, "owner/test/inventory/target");
+  ASSERT_EQ(all_inventory(target, 0), &the_null_array);
+
+  auto* trace = vm_owner_access_trace(1);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  ASSERT_EQ(events->u.arr->size, 1);
+  ASSERT_EQ(mapping_number(events->u.arr->item[0].u.map, "cross_owner"), 1);
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "operation"), "all_inventory");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "source_owner_id"), "owner/test/inventory/shared");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "target_owner_id"), "owner/test/inventory/target");
   free_mapping(trace);
 
   vm_owner_clear_id(source);
