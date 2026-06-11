@@ -16,7 +16,7 @@
 #include "applies_table.autogen.h"
 
 // global static result
-svalue_t apply_ret_value;
+thread_local svalue_t apply_ret_value;
 
 int convert_type(int /*type*/);
 

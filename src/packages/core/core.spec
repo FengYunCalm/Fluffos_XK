@@ -397,6 +397,8 @@ mapping vm_owner_message_submit(string, string, string, string);
 mapping vm_owner_message_trace(int);
 mapping vm_owner_commit_record(string, string, string, int, string);
 mapping vm_owner_commit_trace(int);
+mapping vm_owner_lpc_probe(object, string, string);
 int vm_owner_thread_start(int);
 int vm_owner_thread_stop();
 mapping vm_owner_thread_status();
+int vm_context_is_main_thread();

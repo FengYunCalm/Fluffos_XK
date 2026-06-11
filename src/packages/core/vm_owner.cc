@@ -1,5 +1,6 @@
 #include "base/package_api.h"
 
+#include "vm/context.h"
 #include "vm/owner.h"
 
 #ifdef F_VM_OWNER_ID
@@ -188,6 +189,21 @@ void f_vm_owner_commit_trace() {
   pop_stack();
   push_refed_mapping(result);
 }
+#endif
+
+#ifdef F_VM_OWNER_LPC_PROBE
+void f_vm_owner_lpc_probe() {
+  auto *method = sp;
+  auto *owner_id = sp - 1;
+  auto *target = sp - 2;
+  auto *result = vm_owner_lpc_probe(target->u.ob, owner_id->u.string, method->u.string);
+  pop_n_elems(3);
+  push_refed_mapping(result);
+}
+#endif
+
+#ifdef F_VM_CONTEXT_IS_MAIN_THREAD
+void f_vm_context_is_main_thread() { push_number(vm_context_is_main_thread() ? 1 : 0); }
 #endif
 
 #ifdef F_VM_OWNER_PURGE

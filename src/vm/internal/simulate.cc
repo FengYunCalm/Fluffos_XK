@@ -108,19 +108,19 @@ void shutdownMudOS(int exit_code) {
 
 /* prevents infinite inherit loops.
  No, mark-and-sweep solution won't work.  Exercise for reader.  */
-static int num_objects_this_thread = 0;
+static thread_local int num_objects_this_thread = 0;
 
 #ifndef NO_ENVIRONMENT
-static object_t *restrict_destruct;
+static thread_local object_t *restrict_destruct;
 #endif
 
 object_t *obj_list, *obj_list_destruct;
 #ifdef DEBUG
 object_t *obj_list_dangling = 0;
 #endif
-object_t *current_object;      /* The object interpreting a function. */
-object_t *command_giver;       /* Where the current command came from. */
-object_t *current_interactive; /* The user who caused this execution */
+thread_local object_t *current_object;      /* The object interpreting a function. */
+thread_local object_t *command_giver;       /* Where the current command came from. */
+thread_local object_t *current_interactive; /* The user who caused this execution */
 
 #ifdef PRIVS
 static void init_privs_for_object(object_t *);
@@ -1716,8 +1716,8 @@ void free_sentence(sentence_t *p) {
   std::abort();
 }
 
-static int num_error = 0;
-static int num_mudlib_error = 0;
+static thread_local int num_error = 0;
+static thread_local int num_mudlib_error = 0;
 
 /*
  * Error() has been "fixed" so that users can catch and throw them.

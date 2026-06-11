@@ -36,6 +36,8 @@ VMContext *vm_context_bind_thread(VMContext *context) {
   return previous;
 }
 
+bool vm_context_is_main_thread() { return std::this_thread::get_id() == main_vm_thread_id; }
+
 void vm_context_set_boot_time(VMContext &context, time_t boot_time) { context.boot_time = boot_time; }
 
 void vm_context_set_event_base(VMContext &context, event_base *base) { context.event_loop = base; }

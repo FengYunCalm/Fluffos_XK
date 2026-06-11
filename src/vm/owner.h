@@ -36,8 +36,9 @@ mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *targ
                                    const char *payload_key);
 mapping_t *vm_owner_message_trace(int limit);
 mapping_t *vm_owner_record_commit_boundary(const char *source_owner_id, const char *target_owner_id,
-                                           const char *operation, uint64_t message_id, const char *state);
+                                            const char *operation, uint64_t message_id, const char *state);
 mapping_t *vm_owner_commit_trace(int limit);
+mapping_t *vm_owner_lpc_probe(object_t *target, const char *owner_id, const char *method);
 void vm_owner_thread_start(int requested_threads);
 void vm_owner_thread_stop();
 mapping_t *vm_owner_thread_status();

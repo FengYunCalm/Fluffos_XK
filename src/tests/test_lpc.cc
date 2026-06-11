@@ -922,6 +922,74 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
   vm_owner_thread_stop();
 }
 
+TEST_F(DriverTest, TestVmOwnerThreadRunsControlledLpcProbeOffMain) {
+  const char* owner = "owner/test/thread/lpc-probe";
+  ASSERT_TRUE(vm_context_is_main_thread());
+
+  vm_owner_thread_stop();
+  object_t* probe = load_object("single/void", 1);
+  ASSERT_NE(probe, nullptr);
+  vm_owner_set_id(probe, owner);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* submitted = vm_owner_lpc_probe(probe, owner, "owner_lpc_probe");
+  auto task_id = mapping_number(submitted, "task_id");
+  ASSERT_EQ(mapping_number(submitted, "success"), 1);
+  ASSERT_EQ(mapping_number(submitted, "requires_owner_thread"), 1);
+  ASSERT_EQ(mapping_number(submitted, "direct_cross_owner_write"), 0);
+  ASSERT_STREQ(mapping_string(submitted, "task_type"), "lpc_probe");
+  ASSERT_STREQ(mapping_string(submitted, "method"), "owner_lpc_probe");
+  free_mapping(submitted);
+
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 100; i++) {
+    auto* status = vm_owner_mailbox_status(owner);
+    auto depth = mapping_number(status, "owner_queue_depth");
+    free_mapping(status);
+    if (depth == 0) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  auto* running = vm_owner_thread_status();
+  ASSERT_GE(mapping_number(running, "thread_lpc_probe_executed"), 1);
+  ASSERT_EQ(mapping_number(running, "thread_lpc_probe_failed"), 0);
+  ASSERT_GE(mapping_number(running, "thread_context_bound"), 1);
+  ASSERT_GE(mapping_number(running, "thread_object_store_isolated"), 1);
+  free_mapping(running);
+
+  auto* trace = vm_owner_task_trace(16);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  int lpc_executed = 0;
+  for (int i = 0; i < events->u.arr->size; i++) {
+    auto* event = events->u.arr->item[i].u.map;
+    if (mapping_number(event, "task_id") == task_id &&
+        std::string(mapping_string(event, "state")) == "thread_lpc_probe_executed") {
+      lpc_executed = 1;
+    }
+  }
+  ASSERT_EQ(lpc_executed, 1);
+  free_mapping(trace);
+
+  vm_owner_thread_stop();
+  destruct_object(probe);
+}
+
 TEST_F(DriverTest, TestVmOwnerMessageAndCommitTracesAreSpecOnly) {
   const char* source_owner = "owner/test/message/source";
   const char* target_owner = "owner/test/message/target";

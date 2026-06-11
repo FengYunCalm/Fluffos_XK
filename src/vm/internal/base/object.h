@@ -140,9 +140,9 @@ typedef int (*get_objectsfn_t)(object_t *, void *);
 
 #define SETOBNAME(ob, name) (*(const char **)&(ob->obname) = (char *)name)
 
-extern object_t *previous_ob;
+extern thread_local object_t *previous_ob;
 extern int save_svalue_depth;
-extern object_t **cgsp;
+extern thread_local object_t **cgsp;
 #ifdef F_SET_HIDE
 extern int num_hidden;
 #endif

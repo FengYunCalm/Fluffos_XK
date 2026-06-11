@@ -43,6 +43,7 @@ struct VMContext {
 VMContext &vm_context();
 VMContext &vm_main_context();
 VMContext *vm_context_bind_thread(VMContext *context);
+bool vm_context_is_main_thread();
 
 void vm_context_set_boot_time(VMContext &context, time_t boot_time);
 void vm_context_set_event_base(VMContext &context, event_base *base);
