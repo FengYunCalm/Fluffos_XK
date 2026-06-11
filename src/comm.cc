@@ -5,6 +5,8 @@
 
 #include "base/std.h"
 
+#include "vm/context.h"
+
 #include "comm.h"
 
 #include <event2/buffer.h>       // for evbuffer_freeze, etc
@@ -95,6 +97,7 @@ void on_user_command(evutil_socket_t fd, short what, void *arg) {
 
   /* Has to be cleared if we jumped out of process_user_command() */
   current_interactive = nullptr;
+  vm_context_sync_execution(vm_context());
 
   // if user still have pending command, continue to schedule it.
   //
@@ -1189,6 +1192,7 @@ int process_user_command(interactive_t *ip) {
   }
 
   current_interactive = command_giver; /* this is yuck phooey, sigh */
+  vm_context_sync_execution(vm_context());
   if (ip) {
     clear_notify(ip->ob);
   }
@@ -1264,6 +1268,7 @@ exit:
   }
 
   current_interactive = nullptr;
+  vm_context_sync_execution(vm_context());
   restore_command_giver();
   return 1;
 }

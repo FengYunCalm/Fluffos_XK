@@ -4,6 +4,7 @@
 
 #include "backend.h"
 #include "base/internal/rc.h"
+#include "vm/context.h"
 
 #include <arpa/inet.h>
 #include <event2/buffer.h>
@@ -60,10 +61,12 @@ void gateway_apply_receive(object_t *user, svalue_t *data_sv) {
 
   save_command_giver(user);
   current_interactive = user;
+  vm_context_sync_execution(vm_context());
   set_eval(max_eval_cost);
   push_svalue(data_sv);
   safe_apply("gateway_receive", user, 1, ORIGIN_DRIVER);
   current_interactive = nullptr;
+  vm_context_sync_execution(vm_context());
   restore_command_giver();
 }
 

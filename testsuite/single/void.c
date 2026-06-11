@@ -11,3 +11,16 @@ int get_called() {
 void dummy()
 {
 }
+
+mixed call_target(object target)
+{
+  return call_other(target, "dummy");
+}
+
+mapping owner_lpc_probe()
+{
+  return ([
+    "off_main_thread": !vm_context_is_main_thread(),
+    "main_thread": vm_context_is_main_thread(),
+  ]);
+}

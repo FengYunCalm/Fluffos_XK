@@ -28,6 +28,7 @@
 #include "packages/core/custom_crypt.h"
 #include "packages/core/ed.h"
 #include "packages/core/heartbeat.h"
+#include "vm/owner.h"
 
 int data_size(object_t *ob);
 void reload_object(object_t *obj);
@@ -222,6 +223,7 @@ void f__call_other() {
       error("call_other() couldn't find object '%s'.\n", arg[0].u.string);
     }
   }
+  vm_owner_record_cross_owner_access(current_object, ob, "call_other");
   /* Send the remaining arguments to the function. */
   if (apply(funcname, ob, num_arg - 2, ORIGIN_CALL_OTHER) == nullptr) { /* Function not found */
     pop_2_elems();
@@ -538,15 +540,20 @@ void f_disable_wizard() {
 #ifdef F_ENVIRONMENT
 void f_environment() {
   object_t *ob = nullptr;
+  object_t *target = nullptr;
 
   if (st_num_arg) {
-    if ((ob = sp->u.ob)->flags & O_DESTRUCTED) {
+    target = sp->u.ob;
+    if ((ob = target)->flags & O_DESTRUCTED) {
       error("environment() of destructed object.\n");
     }
     ob = ob->super;
+    vm_owner_record_cross_owner_access(current_object, target, "environment");
     free_object(&(sp--)->u.ob, "f_environment");
   } else {
-    ob = current_object->super;
+    target = current_object;
+    ob = target->super;
+    vm_owner_record_cross_owner_access(current_object, target, "environment");
   }
 
   if (ob && object_visible(ob)) {

@@ -17,6 +17,8 @@
 #include "applies_table.autogen.h"
 #include "base/internal/strutils.h"  // for startsWith, endsWith
 #include "comm.h"                    // add_message FIXME: reverse API
+#include "vm/context.h"
+#include "vm/owner.h"
 #include "vm/internal/apply.h"
 #include "vm/internal/base/machine.h"
 #include "vm/internal/eval_limit.h"
@@ -39,7 +41,7 @@ namespace fs = ghc::filesystem;
 #define too_deep_save_error() \
   error("Mappings and/or arrays nested too deep (%d) for save_object\n", MAX_SAVE_SVALUE_DEPTH);
 
-object_t *previous_ob;
+thread_local object_t *previous_ob;
 
 static int restore_array(char **str, svalue_t * /*ret*/);
 static int restore_class(char **str, svalue_t * /*ret*/);
@@ -1783,6 +1785,7 @@ int restore_object(object_t *ob, const char *file, int noclear) {
   }
 
   current_object = ob;
+  vm_context_sync_execution(vm_context());
 
   /* This next bit added by Armidale@Cyberworld 1/1/93
    * If 'noclear' flag is not set, all non-static variables will be
@@ -1795,6 +1798,7 @@ int restore_object(object_t *ob, const char *file, int noclear) {
   restore_object_from_buff(ob, buf.data(), noclear);
 
   current_object = save;
+  vm_context_sync_execution(vm_context());
   debug(d_flag, "Object /%s restored from /%s.\n", ob->obname, file);
 
   return 1;
@@ -1853,6 +1857,7 @@ void dealloc_object(object_t *ob, const char *from) {
     FREE_MSTR(ob->replaced_program);
     ob->replaced_program = nullptr;
   }
+  vm_owner_clear_id(ob);
 #ifdef PRIVS
   if (ob->privs) {
     free_string(ob->privs);
@@ -1882,6 +1887,7 @@ void dealloc_object(object_t *ob, const char *from) {
   ob->next_all = 0;
   ob->prev_all = 0;
   tot_dangling_object--;
+  vm_context_sync_object_store(vm_context());
 #endif
   tot_alloc_object--;
   FREE((char *)ob);
@@ -2091,8 +2097,8 @@ void get_objects(object_t ***list, int *size, get_objectsfn_t callback, void *da
   }
 }
 
-static object_t *command_giver_stack[CFG_MAX_CALL_DEPTH];
-object_t **cgsp = command_giver_stack;
+static thread_local object_t *command_giver_stack[CFG_MAX_CALL_DEPTH];
+thread_local object_t **cgsp = command_giver_stack;
 
 #ifdef DEBUGMALLOC_EXTENSIONS
 void mark_command_giver_stack(void) {
@@ -2118,6 +2124,7 @@ void save_command_giver(object_t *ob) {
   if (command_giver) {
     add_ref(command_giver, "save_command_giver");
   }
+  vm_context_sync_execution(vm_context());
 }
 
 /* restore the saved command giver */
@@ -2127,6 +2134,7 @@ void restore_command_giver(void) {
   }
   DEBUG_CHECK(cgsp == command_giver_stack, "command_giver stack underflow");
   command_giver = *(cgsp--);
+  vm_context_sync_execution(vm_context());
 }
 
 /* set a new command giver */
@@ -2139,4 +2147,5 @@ void set_command_giver(object_t *ob) {
   if (command_giver != nullptr) {
     add_ref(command_giver, "set_command_giver");
   }
+  vm_context_sync_execution(vm_context());
 }
