@@ -178,6 +178,33 @@ void add_actor_score_result(mapping_t *map, const VMWorkerActorScoreResult &resu
   add_mapping_string(map, "state", result.state.c_str());
 }
 
+bool read_actor_score_input(svalue_t *snapshot, mapping_t *options,
+                            std::string *owner_key,
+                            VMWorkerActorScoreInput *input,
+                            std::string *error) {
+  if (snapshot->type != T_MAPPING) {
+    *error = "actor_score snapshot must be a mapping";
+    return false;
+  }
+
+  auto *snapshot_map = snapshot->u.map;
+  auto *combat = mapping_mapping(snapshot_map, "combat");
+  if (!combat) {
+    *error = "actor_score snapshot combat mapping is required";
+    return false;
+  }
+
+  auto fallback_owner_key = mapping_string(snapshot_map, "owner_key", "global");
+  *owner_key = mapping_string(options, "owner_key", fallback_owner_key.c_str());
+  input->hp = mapping_number(combat, "hp", 0);
+  input->max_hp = mapping_number(combat, "max_hp", 0);
+  input->mp = mapping_number(combat, "mp", 0);
+  input->max_mp = mapping_number(combat, "max_mp", 0);
+  input->ep = mapping_number(combat, "ep", 0);
+  input->max_ep = mapping_number(combat, "max_ep", 0);
+  return true;
+}
+
 mapping_t *worker_failure_response(const char *error) {
   auto *map = allocate_mapping(2);
   add_mapping_pair(map, "success", 0);
@@ -266,25 +293,12 @@ mapping_t *worker_snapshot_digest_response(svalue_t *snapshot, mapping_t *option
 }
 
 mapping_t *worker_actor_score_response(svalue_t *snapshot, mapping_t *options) {
-  if (snapshot->type != T_MAPPING) {
-    return worker_failure_response("actor_score snapshot must be a mapping");
-  }
-
-  auto *snapshot_map = snapshot->u.map;
-  auto *combat = mapping_mapping(snapshot_map, "combat");
-  if (!combat) {
-    return worker_failure_response("actor_score snapshot combat mapping is required");
-  }
-
-  auto fallback_owner_key = mapping_string(snapshot_map, "owner_key", "global");
-  auto owner_key = mapping_string(options, "owner_key", fallback_owner_key.c_str());
   VMWorkerActorScoreInput input;
-  input.hp = mapping_number(combat, "hp", 0);
-  input.max_hp = mapping_number(combat, "max_hp", 0);
-  input.mp = mapping_number(combat, "mp", 0);
-  input.max_mp = mapping_number(combat, "max_mp", 0);
-  input.ep = mapping_number(combat, "ep", 0);
-  input.max_ep = mapping_number(combat, "max_ep", 0);
+  std::string owner_key;
+  std::string error;
+  if (!read_actor_score_input(snapshot, options, &owner_key, &input, &error)) {
+    return worker_failure_response(error.c_str());
+  }
 
   auto result = vm_worker_actor_score(owner_key, input);
   auto *result_spec = allocate_mapping(11);
@@ -315,14 +329,32 @@ mapping_t *worker_status_response() {
   return map;
 }
 
-mapping_t *worker_submit_response(const char *task_name, mapping_t *options) {
-  if (std::string(task_name) != "bench") {
+mapping_t *worker_submit_response(const char *task_name, svalue_t *snapshot, mapping_t *options) {
+  std::string task(task_name);
+  uint64_t task_id = 0;
+
+  if (task == "bench") {
+    auto tasks = mapping_number(options, "tasks", 4);
+    auto millis = mapping_number(options, "millis", 100);
+    task_id = vm_worker_submit_benchmark(tasks, millis);
+  } else if (task == "snapshot_digest") {
+    auto owner_key = mapping_string(options, "owner_key", "global");
+    auto repeat = mapping_number(options, "repeat", 1);
+    std::string snapshot_text;
+    append_snapshot_value(snapshot, 0, &snapshot_text);
+    task_id = vm_worker_submit_snapshot_digest(owner_key, std::move(snapshot_text), repeat);
+  } else if (task == "actor_score") {
+    VMWorkerActorScoreInput input;
+    std::string owner_key;
+    std::string error;
+    if (!read_actor_score_input(snapshot, options, &owner_key, &input, &error)) {
+      return worker_failure_response(error.c_str());
+    }
+    task_id = vm_worker_submit_actor_score(owner_key, input);
+  } else {
     return worker_failure_response("unknown worker task");
   }
 
-  auto tasks = mapping_number(options, "tasks", 4);
-  auto millis = mapping_number(options, "millis", 100);
-  auto task_id = vm_worker_submit_benchmark(tasks, millis);
   auto *response = allocate_mapping(4);
   add_mapping_pair(response, "success", 1);
   add_mapping_string(response, "status", "submitted");
@@ -349,13 +381,22 @@ mapping_t *worker_poll_response(uint64_t task_id) {
     return response;
   }
 
-  auto *result_spec = allocate_mapping(6);
-  add_mapping_string(result_spec, "type", "bench");
-  add_mapping_pair(result_spec, "tasks", result.bench.tasks);
-  add_mapping_pair(result_spec, "worker_count", result.bench.worker_count);
-  add_mapping_pair(result_spec, "max_parallel", result.bench.max_parallel);
-  add_mapping_pair(result_spec, "elapsed_ms", result.bench.elapsed_ms);
-  add_mapping_pair(result_spec, "checksum", static_cast<long>(result.bench.checksum));
+  mapping_t *result_spec = nullptr;
+  if (result.type == "snapshot_digest") {
+    result_spec = allocate_mapping(7);
+    add_snapshot_digest_result(result_spec, result.snapshot_digest);
+  } else if (result.type == "actor_score") {
+    result_spec = allocate_mapping(11);
+    add_actor_score_result(result_spec, result.actor_score);
+  } else {
+    result_spec = allocate_mapping(6);
+    add_mapping_string(result_spec, "type", "bench");
+    add_mapping_pair(result_spec, "tasks", result.bench.tasks);
+    add_mapping_pair(result_spec, "worker_count", result.bench.worker_count);
+    add_mapping_pair(result_spec, "max_parallel", result.bench.max_parallel);
+    add_mapping_pair(result_spec, "elapsed_ms", result.bench.elapsed_ms);
+    add_mapping_pair(result_spec, "checksum", static_cast<long>(result.bench.checksum));
+  }
   add_mapping_pair(response, "success", 1);
   add_mapping_mapping(response, "result_spec", result_spec);
   free_mapping(result_spec);
@@ -450,7 +491,7 @@ void f_vm_worker_submit() {
     return;
   }
 
-  response = worker_submit_response(task->u.string, options->u.map);
+  response = worker_submit_response(task->u.string, snapshot, options->u.map);
   pop_3_elems();
   push_refed_mapping(response);
 }

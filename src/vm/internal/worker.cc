@@ -22,7 +22,10 @@ namespace {
 
 struct AsyncRecord {
   VMWorkerTaskState state{VMWorkerTaskState::kPending};
+  std::string type;
   VMWorkerBenchResult bench;
+  VMWorkerSnapshotDigestResult snapshot_digest;
+  VMWorkerActorScoreResult actor_score;
   std::string error;
 };
 
@@ -50,6 +53,19 @@ int ratio_bp(int value, int max_value) {
   }
   value = std::min(value, max_value);
   return static_cast<int>((static_cast<int64_t>(value) * 10000) / max_value);
+}
+
+std::string actor_state_from_score(int total_score);
+
+void fill_actor_score_result(VMWorkerActorScoreResult *result,
+                             const VMWorkerActorScoreInput &input) {
+  result->hp_pct_bp = ratio_bp(input.hp, input.max_hp);
+  result->mp_pct_bp = ratio_bp(input.mp, input.max_mp);
+  result->ep_pct_bp = ratio_bp(input.ep, input.max_ep);
+  result->survival_score = result->hp_pct_bp;
+  result->resource_score = (result->mp_pct_bp + result->ep_pct_bp) / 2;
+  result->total_score = (result->survival_score * 7 + result->resource_score * 3) / 10;
+  result->state = actor_state_from_score(result->total_score);
 }
 
 std::string actor_state_from_score(int total_score) {
@@ -290,13 +306,7 @@ class VMWorkerRuntime {
     result->owner_key = owner_key;
     auto start_time = std::chrono::steady_clock::now();
     auto future = submit_keyed(owner_key, [result, input] {
-      result->hp_pct_bp = ratio_bp(input.hp, input.max_hp);
-      result->mp_pct_bp = ratio_bp(input.mp, input.max_mp);
-      result->ep_pct_bp = ratio_bp(input.ep, input.max_ep);
-      result->survival_score = result->hp_pct_bp;
-      result->resource_score = (result->mp_pct_bp + result->ep_pct_bp) / 2;
-      result->total_score = (result->survival_score * 7 + result->resource_score * 3) / 10;
-      result->state = actor_state_from_score(result->total_score);
+      fill_actor_score_result(result.get(), input);
     });
     future.get();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -305,6 +315,41 @@ class VMWorkerRuntime {
     result->worker_count = stats.worker_count;
     result->elapsed_ms = elapsed.count();
     return *result;
+  }
+
+  uint64_t submit_actor_score(std::string owner_key, VMWorkerActorScoreInput input) {
+    if (owner_key.empty()) {
+      owner_key = "global";
+    }
+    start(0);
+
+    auto id = next_task_id_++;
+    auto started = std::chrono::steady_clock::now();
+    {
+      std::lock_guard<std::mutex> lock(results_mutex_);
+      AsyncRecord record;
+      record.type = "actor_score";
+      async_results_[id] = record;
+    }
+
+    submit_keyed(owner_key, [this, id, owner_key, input, started] {
+      VMWorkerActorScoreResult score;
+      score.owner_key = owner_key;
+      fill_actor_score_result(&score, input);
+      auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - started);
+      auto stats = this->stats();
+      score.worker_count = stats.worker_count;
+      score.elapsed_ms = elapsed.count();
+
+      std::lock_guard<std::mutex> lock(results_mutex_);
+      auto it = async_results_.find(id);
+      if (it != async_results_.end()) {
+        it->second.state = VMWorkerTaskState::kSucceeded;
+        it->second.actor_score = score;
+      }
+    });
+    return id;
   }
 
   uint64_t submit_benchmark(int tasks, int millis) {
@@ -327,7 +372,9 @@ class VMWorkerRuntime {
 
     {
       std::lock_guard<std::mutex> lock(results_mutex_);
-      async_results_[id] = AsyncRecord{};
+      AsyncRecord record;
+      record.type = "bench";
+      async_results_[id] = record;
     }
 
     for (int i = 0; i < tasks; i++) {
@@ -337,14 +384,58 @@ class VMWorkerRuntime {
     return id;
   }
 
+  uint64_t submit_snapshot_digest(std::string owner_key, std::string snapshot_text, int repeat) {
+    if (owner_key.empty()) {
+      owner_key = "global";
+    }
+    repeat = std::clamp(repeat, 1, 10000);
+    start(0);
+
+    auto id = next_task_id_++;
+    auto input_bytes = static_cast<uint64_t>(snapshot_text.size());
+    auto started = std::chrono::steady_clock::now();
+    {
+      std::lock_guard<std::mutex> lock(results_mutex_);
+      AsyncRecord record;
+      record.type = "snapshot_digest";
+      async_results_[id] = record;
+    }
+
+    submit_keyed(owner_key, [this, id, owner_key, snapshot_text = std::move(snapshot_text), repeat,
+                             input_bytes, started] {
+      uint64_t checksum = 1469598103934665603ULL;
+      for (int i = 0; i < repeat; i++) {
+        for (auto ch : snapshot_text) {
+          checksum ^= static_cast<unsigned char>(ch);
+          checksum *= 1099511628211ULL;
+        }
+        checksum ^= static_cast<uint64_t>(i + 1);
+        checksum *= 1099511628211ULL;
+      }
+      auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - started);
+      auto stats = this->stats();
+      VMWorkerSnapshotDigestResult digest{owner_key, stats.worker_count, elapsed.count(),
+                                          input_bytes, repeat, checksum};
+      std::lock_guard<std::mutex> lock(results_mutex_);
+      auto it = async_results_.find(id);
+      if (it != async_results_.end()) {
+        it->second.state = VMWorkerTaskState::kSucceeded;
+        it->second.snapshot_digest = digest;
+      }
+    });
+    return id;
+  }
+
   VMWorkerTaskResult poll(uint64_t task_id) {
     std::lock_guard<std::mutex> lock(results_mutex_);
     auto it = async_results_.find(task_id);
     if (it == async_results_.end()) {
-      return VMWorkerTaskResult{task_id, VMWorkerTaskState::kUnknown, {}, "unknown worker task id"};
+      return VMWorkerTaskResult{task_id, VMWorkerTaskState::kUnknown, "", {}, {}, {}, "unknown worker task id"};
     }
 
-    VMWorkerTaskResult result{task_id, it->second.state, it->second.bench, it->second.error};
+    VMWorkerTaskResult result{task_id, it->second.state, it->second.type, it->second.bench,
+                              it->second.snapshot_digest, it->second.actor_score, it->second.error};
     if (result.state == VMWorkerTaskState::kSucceeded || result.state == VMWorkerTaskState::kFailed) {
       async_results_.erase(it);
     }
@@ -543,6 +634,17 @@ VMWorkerActorScoreResult vm_worker_actor_score(std::string owner_key,
 
 uint64_t vm_worker_submit_benchmark(int tasks, int millis) {
   return runtime().submit_benchmark(tasks, millis);
+}
+
+uint64_t vm_worker_submit_snapshot_digest(std::string owner_key,
+                                          std::string snapshot_text,
+                                          int repeat) {
+  return runtime().submit_snapshot_digest(std::move(owner_key), std::move(snapshot_text), repeat);
+}
+
+uint64_t vm_worker_submit_actor_score(std::string owner_key,
+                                      VMWorkerActorScoreInput input) {
+  return runtime().submit_actor_score(std::move(owner_key), input);
 }
 
 VMWorkerTaskResult vm_worker_poll_task(uint64_t task_id) { return runtime().poll(task_id); }

@@ -1155,6 +1155,30 @@ TEST_F(DriverTest, TestVmWorkerSnapshotDigestUsesOwnerKey) {
   ASSERT_GT(result.checksum, 0u);
 }
 
+TEST_F(DriverTest, TestVmWorkerAsyncSnapshotDigestPollsResult) {
+  auto task_id = vm_worker_submit_snapshot_digest("actor/async", "{\"hp\":100,\"room\":\"test\"}", 16);
+  ASSERT_GT(task_id, 0u);
+
+  VMWorkerTaskResult result;
+  for (int i = 0; i < 100; i++) {
+    result = vm_worker_poll_task(task_id);
+    ASSERT_NE(result.state, VMWorkerTaskState::kUnknown);
+    if (result.state == VMWorkerTaskState::kSucceeded) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  ASSERT_EQ(result.state, VMWorkerTaskState::kSucceeded);
+  ASSERT_EQ(result.type, "snapshot_digest");
+  ASSERT_EQ(result.snapshot_digest.owner_key, "actor/async");
+  ASSERT_GE(result.snapshot_digest.worker_count, 1);
+  ASSERT_EQ(result.snapshot_digest.input_bytes, 24u);
+  ASSERT_EQ(result.snapshot_digest.repeat, 16);
+  ASSERT_GT(result.snapshot_digest.checksum, 0u);
+  ASSERT_EQ(vm_worker_poll_task(task_id).state, VMWorkerTaskState::kUnknown);
+}
+
 TEST_F(DriverTest, TestVmWorkerActorScoreUsesSnapshotValues) {
   VMWorkerActorScoreInput input;
   input.hp = 80;
@@ -1174,6 +1198,42 @@ TEST_F(DriverTest, TestVmWorkerActorScoreUsesSnapshotValues) {
   ASSERT_EQ(result.resource_score, 7500);
   ASSERT_EQ(result.total_score, 7850);
   ASSERT_EQ(result.state, "strained");
+}
+
+TEST_F(DriverTest, TestVmWorkerAsyncActorScorePollsResult) {
+  VMWorkerActorScoreInput input;
+  input.hp = 80;
+  input.max_hp = 100;
+  input.mp = 50;
+  input.max_mp = 100;
+  input.ep = 100;
+  input.max_ep = 100;
+
+  auto task_id = vm_worker_submit_actor_score("actor/score-async", input);
+  ASSERT_GT(task_id, 0u);
+
+  VMWorkerTaskResult result;
+  for (int i = 0; i < 100; i++) {
+    result = vm_worker_poll_task(task_id);
+    ASSERT_NE(result.state, VMWorkerTaskState::kUnknown);
+    if (result.state == VMWorkerTaskState::kSucceeded) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  ASSERT_EQ(result.state, VMWorkerTaskState::kSucceeded);
+  ASSERT_EQ(result.type, "actor_score");
+  ASSERT_EQ(result.actor_score.owner_key, "actor/score-async");
+  ASSERT_GE(result.actor_score.worker_count, 1);
+  ASSERT_EQ(result.actor_score.hp_pct_bp, 8000);
+  ASSERT_EQ(result.actor_score.mp_pct_bp, 5000);
+  ASSERT_EQ(result.actor_score.ep_pct_bp, 10000);
+  ASSERT_EQ(result.actor_score.survival_score, 8000);
+  ASSERT_EQ(result.actor_score.resource_score, 7500);
+  ASSERT_EQ(result.actor_score.total_score, 7850);
+  ASSERT_EQ(result.actor_score.state, "strained");
+  ASSERT_EQ(vm_worker_poll_task(task_id).state, VMWorkerTaskState::kUnknown);
 }
 
 TEST_F(DriverTest, TestInMemoryCompileFile) {

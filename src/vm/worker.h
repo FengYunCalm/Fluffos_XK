@@ -78,7 +78,10 @@ struct VMWorkerStats {
 struct VMWorkerTaskResult {
   uint64_t task_id{0};
   VMWorkerTaskState state{VMWorkerTaskState::kUnknown};
+  std::string type;
   VMWorkerBenchResult bench;
+  VMWorkerSnapshotDigestResult snapshot_digest;
+  VMWorkerActorScoreResult actor_score;
   std::string error;
 };
 
@@ -93,6 +96,11 @@ VMWorkerSnapshotDigestResult vm_worker_snapshot_digest(std::string owner_key,
 VMWorkerActorScoreResult vm_worker_actor_score(std::string owner_key,
                                                VMWorkerActorScoreInput input);
 uint64_t vm_worker_submit_benchmark(int tasks, int millis);
+uint64_t vm_worker_submit_snapshot_digest(std::string owner_key,
+                                          std::string snapshot_text,
+                                          int repeat);
+uint64_t vm_worker_submit_actor_score(std::string owner_key,
+                                      VMWorkerActorScoreInput input);
 VMWorkerTaskResult vm_worker_poll_task(uint64_t task_id);
 
 #endif /* SRC_VM_WORKER_H_ */
