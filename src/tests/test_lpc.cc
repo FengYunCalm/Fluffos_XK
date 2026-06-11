@@ -34,6 +34,22 @@ class DriverTest : public ::testing::Test {
   }
 };
 
+namespace {
+object_t* load_object_for_test(const char* path) {
+  error_context_t econ{};
+  object_t* object = nullptr;
+  save_context(&econ);
+  try {
+    object = load_object(path, 1);
+    pop_context(&econ);
+  } catch (...) {
+    restore_context(&econ);
+    ADD_FAILURE() << "load_object failed for " << path;
+  }
+  return object;
+}
+}  // namespace
+
 TEST_F(DriverTest, TestCompileDumpProgWorks) {
   current_object = master_ob;
   const char* file = "single/master.c";
@@ -594,7 +610,7 @@ TEST_F(DriverTest, TestPresentRecordsCrossOwnerAccessTrace) {
 }
 
 TEST_F(DriverTest, TestMoveObjectRecordsCrossOwnerAccessTrace) {
-  object_t* item = load_object("single/void", 1);
+  object_t* item = load_object_for_test("single/void");
   object_t* dest = find_object("single/simul_efun.c");
   ASSERT_NE(item, nullptr);
   ASSERT_NE(dest, nullptr);
@@ -645,7 +661,7 @@ TEST_F(DriverTest, TestMoveObjectRecordsCrossOwnerAccessTrace) {
 
 TEST_F(DriverTest, TestDestructRecordsCrossOwnerAccessTrace) {
   object_t* source = find_object("single/master.c");
-  object_t* target = load_object("single/on_destruct_good", 1);
+  object_t* target = load_object_for_test("single/on_destruct_good");
   ASSERT_NE(source, nullptr);
   ASSERT_NE(target, nullptr);
 
@@ -693,8 +709,8 @@ TEST_F(DriverTest, TestDestructRecordsCrossOwnerAccessTrace) {
 }
 
 TEST_F(DriverTest, TestCallOtherRecordsCrossOwnerAccessTrace) {
-  object_t* caller = load_object("single/void", 1);
-  object_t* target = load_object("single/on_destruct_good", 1);
+  object_t* caller = load_object_for_test("single/void");
+  object_t* target = load_object_for_test("single/on_destruct_good");
   ASSERT_NE(caller, nullptr);
   ASSERT_NE(target, nullptr);
 
@@ -927,7 +943,7 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsControlledLpcProbeOffMain) {
   ASSERT_TRUE(vm_context_is_main_thread());
 
   vm_owner_thread_stop();
-  object_t* probe = load_object("single/void", 1);
+  object_t* probe = load_object_for_test("single/void");
   ASSERT_NE(probe, nullptr);
   vm_owner_set_id(probe, owner);
 
