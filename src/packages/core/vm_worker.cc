@@ -178,6 +178,32 @@ void add_actor_score_result(mapping_t *map, const VMWorkerActorScoreResult &resu
   add_mapping_string(map, "state", result.state.c_str());
 }
 
+void add_combat_damage_result(mapping_t *map, const VMWorkerCombatDamageResult &result) {
+  add_mapping_string(map, "type", "combat_damage");
+  add_mapping_string(map, "owner_key", result.owner_key.c_str());
+  add_mapping_pair(map, "worker_count", result.worker_count);
+  add_mapping_pair(map, "elapsed_ms", result.elapsed_ms);
+  add_mapping_pair(map, "damage", result.damage);
+  add_mapping_pair(map, "armor_break_bp", result.armor_break_bp);
+  add_mapping_pair(map, "reduction_bp", result.reduction_bp);
+  add_mapping_pair(map, "critical_rate", result.critical_rate);
+  add_mapping_pair(map, "critical_hit", result.critical_hit);
+  add_mapping_pair(map, "input_hash", static_cast<long>(result.input_hash));
+}
+
+void add_task_envelope(mapping_t *map, const VMWorkerTaskEnvelope &envelope) {
+  add_mapping_pair(map, "task_id", static_cast<long>(envelope.task_id));
+  add_mapping_string(map, "task_type", envelope.task_type.c_str());
+  add_mapping_string(map, "owner_key", envelope.owner_key.c_str());
+  add_mapping_pair(map, "submitted_at_ms", static_cast<long>(envelope.submitted_at_ms));
+  add_mapping_pair(map, "deadline_at_ms", static_cast<long>(envelope.deadline_at_ms));
+  add_mapping_pair(map, "completed_at_ms", static_cast<long>(envelope.completed_at_ms));
+  add_mapping_pair(map, "expires_at_ms", static_cast<long>(envelope.expires_at_ms));
+  add_mapping_pair(map, "input_hash", static_cast<long>(envelope.input_hash));
+  add_mapping_pair(map, "timeout_ms", envelope.timeout_ms);
+  add_mapping_pair(map, "ttl_ms", envelope.ttl_ms);
+}
+
 bool read_actor_score_input(svalue_t *snapshot, mapping_t *options,
                             std::string *owner_key,
                             VMWorkerActorScoreInput *input,
@@ -202,6 +228,46 @@ bool read_actor_score_input(svalue_t *snapshot, mapping_t *options,
   input->max_mp = mapping_number(combat, "max_mp", 0);
   input->ep = mapping_number(combat, "ep", 0);
   input->max_ep = mapping_number(combat, "max_ep", 0);
+  return true;
+}
+
+bool read_combat_damage_input(svalue_t *snapshot, mapping_t *options,
+                              std::string *owner_key,
+                              VMWorkerCombatDamageInput *input,
+                              std::string *error) {
+  if (snapshot->type != T_MAPPING) {
+    *error = "combat_damage snapshot must be a mapping";
+    return false;
+  }
+
+  auto *snapshot_map = snapshot->u.map;
+  auto fallback_owner_key = mapping_string(snapshot_map, "owner_key", "global");
+  *owner_key = mapping_string(options, "owner_key", fallback_owner_key.c_str());
+  input->attack = mapping_number(snapshot_map, "attack", 0);
+  input->defense = mapping_number(snapshot_map, "defense", 0);
+  input->armor_break = mapping_number(snapshot_map, "armor_break", 0);
+  input->critical = mapping_number(snapshot_map, "critical", 0);
+  input->critical_resist = mapping_number(snapshot_map, "critical_resist", 0);
+  input->armor_break_defense_factor_bp = mapping_number(snapshot_map, "armor_break_defense_factor_bp", 9000);
+  input->armor_break_flat = mapping_number(snapshot_map, "armor_break_flat", 5000);
+  input->armor_break_cap_bp = mapping_number(snapshot_map, "armor_break_cap_bp", 8000);
+  input->reduction_attack_factor_bp = mapping_number(snapshot_map, "reduction_attack_factor_bp", 16000);
+  input->reduction_flat = mapping_number(snapshot_map, "reduction_flat", 8000);
+  input->reduction_min_bp = mapping_number(snapshot_map, "reduction_min_bp", 500);
+  input->reduction_max_bp = mapping_number(snapshot_map, "reduction_max_bp", 7500);
+  input->damage_base = mapping_number(snapshot_map, "damage_base", 1);
+  input->damage_skill_factor_bp = mapping_number(snapshot_map, "damage_skill_factor_bp", 10000);
+  input->damage_random_min_bp = mapping_number(snapshot_map, "damage_random_min_bp", 9500);
+  input->damage_random_max_bp = mapping_number(snapshot_map, "damage_random_max_bp", 10500);
+  input->damage_min = mapping_number(snapshot_map, "damage_min", 1);
+  input->variance_roll_bp = mapping_number(snapshot_map, "variance_roll_bp", 0);
+  input->critical_base_bp = mapping_number(snapshot_map, "critical_base_bp", 500);
+  input->critical_swing_bp = mapping_number(snapshot_map, "critical_swing_bp", 3500);
+  input->critical_flat = mapping_number(snapshot_map, "critical_flat", 6000);
+  input->critical_min = mapping_number(snapshot_map, "critical_min", 0);
+  input->critical_max = mapping_number(snapshot_map, "critical_max", 50);
+  input->critical_roll = mapping_number(snapshot_map, "critical_roll", 100);
+  input->critical_damage_factor_bp = mapping_number(snapshot_map, "critical_damage_factor_bp", 15000);
   return true;
 }
 
@@ -236,6 +302,27 @@ void add_mapping_mapping(mapping_t *map, const char *key_name, mapping_t *value)
   slot->type = T_MAPPING;
   slot->u.map = value;
   value->ref++;
+}
+
+mapping_t *worker_envelope_mapping(const VMWorkerTaskEnvelope &envelope) {
+  auto *map = allocate_mapping(10);
+  add_mapping_pair(map, "task_id", static_cast<long>(envelope.task_id));
+  add_mapping_string(map, "task_type", envelope.task_type.c_str());
+  add_mapping_string(map, "owner_key", envelope.owner_key.c_str());
+  add_mapping_pair(map, "submitted_at_ms", static_cast<long>(envelope.submitted_at_ms));
+  add_mapping_pair(map, "deadline_at_ms", static_cast<long>(envelope.deadline_at_ms));
+  add_mapping_pair(map, "completed_at_ms", static_cast<long>(envelope.completed_at_ms));
+  add_mapping_pair(map, "expires_at_ms", static_cast<long>(envelope.expires_at_ms));
+  add_mapping_pair(map, "input_hash", static_cast<long>(envelope.input_hash));
+  add_mapping_pair(map, "timeout_ms", envelope.timeout_ms);
+  add_mapping_pair(map, "ttl_ms", envelope.ttl_ms);
+  return map;
+}
+
+void add_worker_envelope(mapping_t *map, const VMWorkerTaskEnvelope &envelope) {
+  auto *envelope_map = worker_envelope_mapping(envelope);
+  add_mapping_mapping(map, "envelope", envelope_map);
+  free_mapping(envelope_map);
 }
 
 mapping_t *worker_bench_response(mapping_t *options) {
@@ -311,6 +398,25 @@ mapping_t *worker_actor_score_response(svalue_t *snapshot, mapping_t *options) {
   return response;
 }
 
+mapping_t *worker_combat_damage_response(svalue_t *snapshot, mapping_t *options) {
+  VMWorkerCombatDamageInput input;
+  std::string owner_key;
+  std::string error;
+  if (!read_combat_damage_input(snapshot, options, &owner_key, &input, &error)) {
+    return worker_failure_response(error.c_str());
+  }
+
+  auto result = vm_worker_combat_damage(owner_key, input);
+  auto *result_spec = allocate_mapping(10);
+  add_combat_damage_result(result_spec, result);
+
+  auto *response = allocate_mapping(2);
+  add_mapping_pair(response, "success", 1);
+  add_mapping_mapping(response, "result_spec", result_spec);
+  free_mapping(result_spec);
+  return response;
+}
+
 mapping_t *worker_status_response() {
   auto stats = vm_worker_stats();
   auto *map = allocate_mapping(12);
@@ -332,17 +438,20 @@ mapping_t *worker_status_response() {
 mapping_t *worker_submit_response(const char *task_name, svalue_t *snapshot, mapping_t *options) {
   std::string task(task_name);
   uint64_t task_id = 0;
+  auto timeout_ms = mapping_number(options, "timeout_ms", 0);
+  auto ttl_ms = mapping_number(options, "ttl_ms", 0);
 
   if (task == "bench") {
     auto tasks = mapping_number(options, "tasks", 4);
     auto millis = mapping_number(options, "millis", 100);
-    task_id = vm_worker_submit_benchmark(tasks, millis);
+    task_id = vm_worker_submit_benchmark_v2(tasks, millis, timeout_ms, ttl_ms);
   } else if (task == "snapshot_digest") {
     auto owner_key = mapping_string(options, "owner_key", "global");
     auto repeat = mapping_number(options, "repeat", 1);
     std::string snapshot_text;
     append_snapshot_value(snapshot, 0, &snapshot_text);
-    task_id = vm_worker_submit_snapshot_digest(owner_key, std::move(snapshot_text), repeat);
+    task_id = vm_worker_submit_snapshot_digest_v2(owner_key, std::move(snapshot_text), repeat,
+                                                  timeout_ms, ttl_ms);
   } else if (task == "actor_score") {
     VMWorkerActorScoreInput input;
     std::string owner_key;
@@ -350,24 +459,39 @@ mapping_t *worker_submit_response(const char *task_name, svalue_t *snapshot, map
     if (!read_actor_score_input(snapshot, options, &owner_key, &input, &error)) {
       return worker_failure_response(error.c_str());
     }
-    task_id = vm_worker_submit_actor_score(owner_key, input);
+    task_id = vm_worker_submit_actor_score_v2(owner_key, input, timeout_ms, ttl_ms);
+  } else if (task == "combat_damage") {
+    VMWorkerCombatDamageInput input;
+    std::string owner_key;
+    std::string error;
+    if (!read_combat_damage_input(snapshot, options, &owner_key, &input, &error)) {
+      return worker_failure_response(error.c_str());
+    }
+    task_id = vm_worker_submit_combat_damage_v2(owner_key, input, timeout_ms, ttl_ms);
   } else {
     return worker_failure_response("unknown worker task");
   }
 
-  auto *response = allocate_mapping(4);
+  auto *response = allocate_mapping(6);
   add_mapping_pair(response, "success", 1);
   add_mapping_string(response, "status", "submitted");
   add_mapping_pair(response, "task_id", static_cast<long>(task_id));
   add_mapping_string(response, "task", task_name);
+  add_mapping_pair(response, "timeout_ms", timeout_ms);
+  add_mapping_pair(response, "ttl_ms", ttl_ms);
   return response;
 }
 
 mapping_t *worker_poll_response(uint64_t task_id) {
   auto result = vm_worker_poll_task(task_id);
-  auto *response = allocate_mapping(5);
+  auto *response = allocate_mapping(8);
   add_mapping_pair(response, "task_id", static_cast<long>(task_id));
   add_mapping_string(response, "status", worker_task_state_name(result.state));
+  add_mapping_string(response, "task", result.type.c_str());
+  auto *envelope = allocate_mapping(10);
+  add_task_envelope(envelope, result.envelope);
+  add_mapping_mapping(response, "envelope", envelope);
+  free_mapping(envelope);
 
   if (result.state == VMWorkerTaskState::kUnknown || result.state == VMWorkerTaskState::kFailed) {
     add_mapping_pair(response, "success", 0);
@@ -388,6 +512,9 @@ mapping_t *worker_poll_response(uint64_t task_id) {
   } else if (result.type == "actor_score") {
     result_spec = allocate_mapping(11);
     add_actor_score_result(result_spec, result.actor_score);
+  } else if (result.type == "combat_damage") {
+    result_spec = allocate_mapping(10);
+    add_combat_damage_result(result_spec, result.combat_damage);
   } else {
     result_spec = allocate_mapping(6);
     add_mapping_string(result_spec, "type", "bench");
@@ -400,6 +527,95 @@ mapping_t *worker_poll_response(uint64_t task_id) {
   add_mapping_pair(response, "success", 1);
   add_mapping_mapping(response, "result_spec", result_spec);
   free_mapping(result_spec);
+  return response;
+}
+
+mapping_t *worker_submit_batch_response(array_t *batch) {
+  auto *results = allocate_array(batch ? batch->size : 0);
+  int accepted = 0;
+  int rejected = 0;
+
+  for (int i = 0; batch && i < batch->size; i++) {
+    mapping_t *item_map = nullptr;
+    mapping_t *options = nullptr;
+    svalue_t *task = nullptr;
+    svalue_t *snapshot = nullptr;
+    mapping_t *response = nullptr;
+    std::string error;
+
+    if (batch->item[i].type == T_MAPPING) {
+      item_map = batch->item[i].u.map;
+      task = find_string_in_mapping(item_map, "task");
+      snapshot = find_string_in_mapping(item_map, "snapshot");
+      auto *options_value = find_string_in_mapping(item_map, "options");
+      if (options_value && options_value->type == T_MAPPING) {
+        options = options_value->u.map;
+      }
+    }
+
+    if (!item_map || !task || task->type != T_STRING || !snapshot || !options) {
+      response = worker_failure_response("batch item must include task, snapshot, and options");
+      rejected++;
+    } else if (!is_json_safe_value(snapshot, 0, &error)) {
+      response = worker_failure_response(error.c_str());
+      rejected++;
+    } else {
+      response = worker_submit_response(task->u.string, snapshot, options);
+      if (find_string_in_mapping(response, "success") && find_string_in_mapping(response, "success")->u.number) {
+        accepted++;
+      } else {
+        rejected++;
+      }
+    }
+
+    results->item[i].type = T_MAPPING;
+    results->item[i].subtype = 0;
+    results->item[i].u.map = response;
+  }
+
+  auto *response = allocate_mapping(4);
+  add_mapping_pair(response, "success", rejected == 0 ? 1 : 0);
+  add_mapping_pair(response, "accepted", accepted);
+  add_mapping_pair(response, "rejected", rejected);
+  add_mapping_array(response, "results", results);
+  free_array(results);
+  return response;
+}
+
+mapping_t *worker_poll_batch_response(array_t *task_ids) {
+  auto *results = allocate_array(task_ids ? task_ids->size : 0);
+  int ready = 0;
+  int pending = 0;
+  int failed = 0;
+
+  for (int i = 0; task_ids && i < task_ids->size; i++) {
+    uint64_t task_id = 0;
+    mapping_t *result;
+
+    if (task_ids->item[i].type == T_NUMBER) {
+      task_id = static_cast<uint64_t>(task_ids->item[i].u.number);
+    }
+    result = worker_poll_response(task_id);
+    auto *status = find_string_in_mapping(result, "status");
+    if (status && status->type == T_STRING && std::strcmp(status->u.string, "succeeded") == 0) {
+      ready++;
+    } else if (status && status->type == T_STRING && std::strcmp(status->u.string, "pending") == 0) {
+      pending++;
+    } else {
+      failed++;
+    }
+    results->item[i].type = T_MAPPING;
+    results->item[i].subtype = 0;
+    results->item[i].u.map = result;
+  }
+
+  auto *response = allocate_mapping(5);
+  add_mapping_pair(response, "success", failed == 0 ? 1 : 0);
+  add_mapping_pair(response, "ready", ready);
+  add_mapping_pair(response, "pending", pending);
+  add_mapping_pair(response, "failed", failed);
+  add_mapping_array(response, "results", results);
+  free_array(results);
   return response;
 }
 
@@ -449,6 +665,8 @@ void f_vm_worker_task() {
     response = worker_snapshot_digest_response(snapshot, options->u.map);
   } else if (task_name == "actor_score") {
     response = worker_actor_score_response(snapshot, options->u.map);
+  } else if (task_name == "combat_damage") {
+    response = worker_combat_damage_response(snapshot, options->u.map);
   } else {
     response = worker_failure_response("unknown worker task");
   }
@@ -497,10 +715,38 @@ void f_vm_worker_submit() {
 }
 #endif
 
+#ifdef F_VM_WORKER_SUBMIT_BATCH
+void f_vm_worker_submit_batch() {
+  auto *batch = sp;
+  if (batch->type != T_ARRAY) {
+    pop_stack();
+    push_refed_mapping(worker_failure_response("worker submit batch expects an array"));
+    return;
+  }
+  auto *response = worker_submit_batch_response(batch->u.arr);
+  pop_stack();
+  push_refed_mapping(response);
+}
+#endif
+
 #ifdef F_VM_WORKER_POLL
 void f_vm_worker_poll() {
   auto task_id = static_cast<uint64_t>(sp->u.number);
   pop_stack();
   push_refed_mapping(worker_poll_response(task_id));
+}
+#endif
+
+#ifdef F_VM_WORKER_POLL_BATCH
+void f_vm_worker_poll_batch() {
+  auto *task_ids = sp;
+  if (task_ids->type != T_ARRAY) {
+    pop_stack();
+    push_refed_mapping(worker_failure_response("worker poll batch expects an array"));
+    return;
+  }
+  auto *response = worker_poll_batch_response(task_ids->u.arr);
+  pop_stack();
+  push_refed_mapping(response);
 }
 #endif
