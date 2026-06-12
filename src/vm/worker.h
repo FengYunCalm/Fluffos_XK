@@ -63,6 +63,7 @@ struct VMWorkerActorScoreResult {
 };
 
 struct VMWorkerCombatDamageInput {
+  int snapshot_hash{0};
   int attack{0};
   int defense{0};
   int armor_break{0};

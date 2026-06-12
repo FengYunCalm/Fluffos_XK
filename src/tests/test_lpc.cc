@@ -1261,6 +1261,7 @@ TEST_F(DriverTest, TestVmWorkerCombatDamageUsesSnapshotOnly) {
   input.critical_resist = 0;
   input.variance_roll_bp = 500;
   input.critical_roll = 100;
+  input.snapshot_hash = 424242;
 
   auto result = vm_worker_combat_damage("combat/test", input);
   ASSERT_EQ(result.owner_key, "combat/test");
@@ -1270,7 +1271,7 @@ TEST_F(DriverTest, TestVmWorkerCombatDamageUsesSnapshotOnly) {
   ASSERT_EQ(result.critical_rate, 5);
   ASSERT_EQ(result.critical_hit, 0);
   ASSERT_EQ(result.damage, 95);
-  ASSERT_GT(result.input_hash, 0u);
+  ASSERT_EQ(result.input_hash, 424242u);
 }
 
 TEST_F(DriverTest, TestVmWorkerAsyncCombatDamagePollsResult) {
@@ -1279,6 +1280,7 @@ TEST_F(DriverTest, TestVmWorkerAsyncCombatDamagePollsResult) {
   input.defense = 50;
   input.variance_roll_bp = 500;
   input.critical_roll = 100;
+  input.snapshot_hash = 31337;
 
   auto task_id = vm_worker_submit_combat_damage_v2("combat/async", input, 1000, 5000);
   ASSERT_GT(task_id, 0u);
@@ -1301,6 +1303,7 @@ TEST_F(DriverTest, TestVmWorkerAsyncCombatDamagePollsResult) {
   ASSERT_EQ(result.combat_damage.owner_key, "combat/async");
   ASSERT_EQ(result.combat_damage.damage, 95);
   ASSERT_EQ(result.combat_damage.critical_hit, 0);
+  ASSERT_EQ(result.combat_damage.input_hash, 31337u);
 }
 
 TEST_F(DriverTest, TestVmWorkerV2EnvelopeKeepsResultUntilTtl) {

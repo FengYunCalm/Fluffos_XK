@@ -87,6 +87,10 @@ int ratio_bp(int value, int max_value) {
 std::string actor_state_from_score(int total_score);
 
 uint64_t hash_combat_damage_input(const VMWorkerCombatDamageInput &input) {
+  if (input.snapshot_hash > 0) {
+    return static_cast<uint64_t>(input.snapshot_hash);
+  }
+
   uint64_t hash = 1469598103934665603ULL;
   hash = hash_mix(hash, static_cast<uint64_t>(input.attack));
   hash = hash_mix(hash, static_cast<uint64_t>(input.defense));

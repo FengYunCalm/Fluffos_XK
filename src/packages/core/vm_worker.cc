@@ -243,6 +243,7 @@ bool read_combat_damage_input(svalue_t *snapshot, mapping_t *options,
   auto *snapshot_map = snapshot->u.map;
   auto fallback_owner_key = mapping_string(snapshot_map, "owner_key", "global");
   *owner_key = mapping_string(options, "owner_key", fallback_owner_key.c_str());
+  input->snapshot_hash = mapping_number(snapshot_map, "snapshot_hash", 0);
   input->attack = mapping_number(snapshot_map, "attack", 0);
   input->defense = mapping_number(snapshot_map, "defense", 0);
   input->armor_break = mapping_number(snapshot_map, "armor_break", 0);
