@@ -173,19 +173,24 @@ int apply_low(const char *fun, object_t *ob, int num_arg) {
     local_call_origin = ORIGIN_DRIVER;
   }
   call_origin = 0;
-  ob->time_of_ref = g_current_gametick; /* Used by the swapper */
-                                        /*
-                                         * This object will now be used, and is thus a target for reset later on
-                                         * (when time due).
-                                         */
-  if (!CONFIG_INT(__RC_NO_RESETS__) && CONFIG_INT(__RC_LAZY_RESETS__)) {
-    try_reset(ob);
+  auto owner_lpc_canary = !vm_context_is_main_thread() && vm_context().owner.lpc_canary_active;
+  if (!owner_lpc_canary) {
+    ob->time_of_ref = g_current_gametick; /* Used by the swapper */
+                                          /*
+                                           * This object will now be used, and is thus a target for reset later on
+                                           * (when time due).
+                                           */
+    if (!CONFIG_INT(__RC_NO_RESETS__) && CONFIG_INT(__RC_LAZY_RESETS__)) {
+      try_reset(ob);
+    }
   }
   if (ob->flags & O_DESTRUCTED) {
     pop_n_elems(num_arg);
     return 0;
   }
-  ob->flags &= ~O_RESET_STATE;
+  if (!owner_lpc_canary) {
+    ob->flags &= ~O_RESET_STATE;
+  }
 #ifndef NO_SHADOWS
   /*
    * If there is a chain of objects shadowing, start with the first of

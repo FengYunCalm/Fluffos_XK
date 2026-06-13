@@ -506,6 +506,61 @@ TEST_F(DriverTest, TestVmOwnerCrossOwnerAccessTraceSkipsSameOwner) {
   vm_owner_clear_id(target);
 }
 
+TEST_F(DriverTest, TestVmOwnerCrossOwnerAccessTraceClassifiesPolicyModes) {
+  current_object = master_ob;
+  object_t* source = find_object("single/master.c");
+  object_t* target = find_object("single/simul_efun.c");
+  ASSERT_NE(source, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  vm_owner_set_id(source, "owner/test/access-policy/source");
+  vm_owner_set_id(target, "owner/test/access-policy/target");
+  ASSERT_GT(vm_owner_record_access(source, target, "environment"), 0u);
+  ASSERT_GT(vm_owner_record_access(source, target, "call_other"), 0u);
+  ASSERT_GT(vm_owner_record_access(source, target, "unknown_access"), 0u);
+
+  auto* trace = vm_owner_access_trace(3);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  ASSERT_EQ(events->u.arr->size, 3);
+
+  auto* snapshot_event = events->u.arr->item[0].u.map;
+  ASSERT_STREQ(mapping_string(snapshot_event, "operation"), "environment");
+  ASSERT_STREQ(mapping_string(snapshot_event, "access_mode"), "snapshot");
+  ASSERT_EQ(mapping_number(snapshot_event, "snapshot_only"), 1);
+  ASSERT_EQ(mapping_number(snapshot_event, "direct_cross_owner_write"), 0);
+
+  auto* message_event = events->u.arr->item[1].u.map;
+  ASSERT_STREQ(mapping_string(message_event, "operation"), "call_other");
+  ASSERT_STREQ(mapping_string(message_event, "access_mode"), "message");
+  ASSERT_EQ(mapping_number(message_event, "message_only_cross_owner"), 1);
+  ASSERT_EQ(mapping_number(message_event, "direct_cross_owner_write"), 0);
+
+  auto* rejected_event = events->u.arr->item[2].u.map;
+  ASSERT_STREQ(mapping_string(rejected_event, "operation"), "unknown_access");
+  ASSERT_STREQ(mapping_string(rejected_event, "access_mode"), "reject");
+  ASSERT_EQ(mapping_number(rejected_event, "rejected_by_default"), 1);
+  ASSERT_EQ(mapping_number(trace, "direct_cross_owner_write"), 0);
+  free_mapping(trace);
+
+  vm_owner_clear_id(source);
+  vm_owner_clear_id(target);
+}
+
 TEST_F(DriverTest, TestAllInventoryRecordsCrossOwnerAccessTrace) {
   object_t* source = find_object("single/master.c");
   object_t* target = find_object("single/simul_efun.c");
@@ -1003,6 +1058,156 @@ TEST_F(DriverTest, TestVmOwnerThreadGuardsControlledLpcProbeOffMain) {
   }
   ASSERT_EQ(lpc_guarded, 1);
   free_mapping(trace);
+
+  vm_owner_thread_stop();
+  destruct_object(probe);
+}
+
+TEST_F(DriverTest, TestVmOwnerThreadRunsRestrictedLpcCanaryOffMainDeferredRelease) {
+  const char* owner = "owner/test/thread/lpc-canary";
+  ASSERT_TRUE(vm_context_is_main_thread());
+
+  vm_owner_thread_stop();
+  object_t* probe = load_object_for_test("single/void");
+  ASSERT_NE(probe, nullptr);
+  vm_owner_set_id(probe, owner);
+  auto owner_epoch = vm_owner_epoch(probe);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* before = vm_owner_thread_status();
+  auto before_executed = mapping_number(before, "thread_lpc_canary_executed");
+  auto before_succeeded = mapping_number(before, "thread_lpc_canary_succeeded");
+  auto before_failed = mapping_number(before, "thread_lpc_canary_failed");
+  auto before_rejected = mapping_number(before, "thread_lpc_canary_rejected");
+  auto before_owner_cleared = mapping_number(before, "thread_owner_cleared");
+  auto before_execution_cleared = mapping_number(before, "thread_execution_cleared");
+  auto before_canary_flag_cleared = mapping_number(before, "thread_lpc_canary_flag_cleared");
+  auto before_context_leaks = mapping_number(before, "thread_context_leak_detected");
+  free_mapping(before);
+
+  auto* submitted = vm_owner_lpc_canary(probe, owner, "owner_lpc_canary");
+  auto task_id = mapping_number(submitted, "task_id");
+  ASSERT_EQ(mapping_number(submitted, "success"), 1);
+  ASSERT_EQ(mapping_number(submitted, "requires_owner_thread"), 1);
+  ASSERT_EQ(mapping_number(submitted, "direct_cross_owner_write"), 0);
+  ASSERT_EQ(mapping_number(submitted, "owner_epoch"), static_cast<long>(owner_epoch));
+  ASSERT_STREQ(mapping_string(submitted, "task_type"), "lpc_canary");
+  ASSERT_STREQ(mapping_string(submitted, "method"), "owner_lpc_canary");
+  free_mapping(submitted);
+
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 100; i++) {
+    auto* status = vm_owner_mailbox_status(owner);
+    auto depth = mapping_number(status, "owner_queue_depth");
+    free_mapping(status);
+    if (depth == 0) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  auto* running = vm_owner_thread_status();
+  ASSERT_GE(mapping_number(running, "thread_lpc_canary_executed"), before_executed + 1);
+  ASSERT_GE(mapping_number(running, "thread_lpc_canary_succeeded"), before_succeeded + 1);
+  ASSERT_EQ(mapping_number(running, "thread_lpc_canary_failed"), before_failed);
+  ASSERT_EQ(mapping_number(running, "thread_lpc_canary_rejected"), before_rejected);
+  ASSERT_GE(mapping_number(running, "thread_owner_cleared"), before_owner_cleared + 1);
+  ASSERT_GE(mapping_number(running, "thread_execution_cleared"), before_execution_cleared + 1);
+  ASSERT_GE(mapping_number(running, "thread_lpc_canary_flag_cleared"), before_canary_flag_cleared + 1);
+  ASSERT_EQ(mapping_number(running, "thread_context_leak_detected"), before_context_leaks);
+  ASSERT_GE(mapping_number(running, "thread_context_bound"), 1);
+  ASSERT_GE(mapping_number(running, "thread_object_store_isolated"), 1);
+  free_mapping(running);
+
+  auto* trace = vm_owner_task_trace(16);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  int canary_succeeded = 0;
+  for (int i = 0; i < events->u.arr->size; i++) {
+    auto* event = events->u.arr->item[i].u.map;
+    if (mapping_number(event, "task_id") == task_id &&
+        std::string(mapping_string(event, "state")) == "thread_lpc_canary_succeeded") {
+      canary_succeeded = 1;
+    }
+  }
+  ASSERT_EQ(canary_succeeded, 1);
+  free_mapping(trace);
+
+  vm_owner_thread_stop();
+  auto* stopped = vm_owner_thread_status();
+  ASSERT_EQ(mapping_number(stopped, "deferred_target_releases"), 0);
+  free_mapping(stopped);
+  ASSERT_TRUE(vm_context_is_main_thread());
+  destruct_object(probe);
+}
+
+TEST_F(DriverTest, TestVmOwnerThreadRejectsUnsafeLpcCanaryRequestsDeltas) {
+  const char* owner = "owner/test/thread/lpc-canary-reject";
+  ASSERT_TRUE(vm_context_is_main_thread());
+
+  vm_owner_thread_stop();
+  object_t* probe = load_object_for_test("single/void");
+  ASSERT_NE(probe, nullptr);
+  vm_owner_set_id(probe, owner);
+  auto stale_epoch = vm_owner_epoch(probe);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+
+  auto* before = vm_owner_thread_status();
+  auto before_succeeded = mapping_number(before, "thread_lpc_canary_succeeded");
+  auto before_rejected = mapping_number(before, "thread_lpc_canary_rejected");
+  auto before_owner_cleared = mapping_number(before, "thread_owner_cleared");
+  auto before_execution_cleared = mapping_number(before, "thread_execution_cleared");
+  auto before_canary_flag_cleared = mapping_number(before, "thread_lpc_canary_flag_cleared");
+  auto before_context_leaks = mapping_number(before, "thread_context_leak_detected");
+  free_mapping(before);
+
+  auto* wrong_method = vm_owner_lpc_canary(probe, owner, "owner_lpc_probe");
+  ASSERT_EQ(mapping_number(wrong_method, "success"), 1);
+  free_mapping(wrong_method);
+  vm_owner_set_id(probe, "owner/test/thread/lpc-canary-current");
+  ASSERT_GT(vm_owner_epoch(probe), stale_epoch);
+  auto* stale_owner = vm_owner_lpc_canary(probe, owner, "owner_lpc_canary");
+  ASSERT_EQ(mapping_number(stale_owner, "success"), 1);
+  free_mapping(stale_owner);
+
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 100; i++) {
+    auto* status = vm_owner_thread_status();
+    auto rejected = mapping_number(status, "thread_lpc_canary_rejected");
+    free_mapping(status);
+    if (rejected >= before_rejected + 2) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  auto* running = vm_owner_thread_status();
+  ASSERT_GE(mapping_number(running, "thread_lpc_canary_rejected"), before_rejected + 2);
+  ASSERT_EQ(mapping_number(running, "thread_lpc_canary_succeeded"), before_succeeded);
+  ASSERT_GE(mapping_number(running, "thread_owner_cleared"), before_owner_cleared + 2);
+  ASSERT_GE(mapping_number(running, "thread_execution_cleared"), before_execution_cleared + 2);
+  ASSERT_GE(mapping_number(running, "thread_lpc_canary_flag_cleared"), before_canary_flag_cleared + 2);
+  ASSERT_EQ(mapping_number(running, "thread_context_leak_detected"), before_context_leaks);
+  free_mapping(running);
 
   vm_owner_thread_stop();
   destruct_object(probe);

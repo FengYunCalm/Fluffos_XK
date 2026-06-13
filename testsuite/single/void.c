@@ -24,3 +24,8 @@ mapping owner_lpc_probe()
     "main_thread": vm_context_is_main_thread(),
   ]);
 }
+
+int owner_lpc_canary()
+{
+  return !vm_context_is_main_thread();
+}
