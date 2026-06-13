@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <deque>
 #include <future>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -23,9 +24,11 @@ namespace {
 struct AsyncRecord {
   VMWorkerTaskState state{VMWorkerTaskState::kPending};
   std::string type;
+  VMWorkerTaskEnvelope envelope;
   VMWorkerBenchResult bench;
   VMWorkerSnapshotDigestResult snapshot_digest;
   VMWorkerActorScoreResult actor_score;
+  VMWorkerCombatDamageResult combat_damage;
   std::string error;
 };
 
@@ -47,6 +50,33 @@ void update_max(std::atomic<int> &target, int value) {
   }
 }
 
+uint64_t now_ms() {
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+uint64_t hash_mix(uint64_t current, uint64_t value) {
+  current ^= value + 0x9e3779b97f4a7c15ULL + (current << 6) + (current >> 2);
+  return current;
+}
+
+uint64_t hash_string(uint64_t current, const std::string &value) {
+  for (auto ch : value) {
+    current ^= static_cast<unsigned char>(ch);
+    current *= 1099511628211ULL;
+  }
+  return current;
+}
+
+int normalize_timeout_ms(int timeout_ms) {
+  if (timeout_ms <= 0) {
+    return 0;
+  }
+  return std::clamp(timeout_ms, 1, 600000);
+}
+
+int normalize_ttl_ms(int ttl_ms) { return std::clamp(ttl_ms, 0, 600000); }
+
 int ratio_bp(int value, int max_value) {
   if (max_value <= 0 || value <= 0) {
     return 0;
@@ -56,6 +86,145 @@ int ratio_bp(int value, int max_value) {
 }
 
 std::string actor_state_from_score(int total_score);
+
+int clamp_int(int value, int min_value, int max_value) {
+  return std::clamp(value, min_value, max_value);
+}
+
+int clamp_i64_to_int(int64_t value, int min_value, int max_value) {
+  if (value < min_value) {
+    return min_value;
+  }
+  if (value > max_value) {
+    return max_value;
+  }
+  return static_cast<int>(value);
+}
+
+int64_t safe_denominator(int64_t value) { return value < 1 ? 1 : value; }
+
+void normalize_min_max(int *min_value, int *max_value) {
+  if (*min_value > *max_value) {
+    std::swap(*min_value, *max_value);
+  }
+}
+
+VMWorkerCombatDamageInput normalize_combat_damage_input(VMWorkerCombatDamageInput input) {
+  constexpr int kBpBase = 10000;
+  constexpr int kStatMax = 1000000000;
+  constexpr int kFactorMax = 100000;
+
+  input.snapshot_hash = clamp_int(input.snapshot_hash, 0, std::numeric_limits<int>::max());
+  input.attack = clamp_int(input.attack, 1, kStatMax);
+  input.defense = clamp_int(input.defense, 0, kStatMax);
+  input.armor_break = clamp_int(input.armor_break, 0, kStatMax);
+  input.critical = clamp_int(input.critical, 0, kStatMax);
+  input.critical_resist = clamp_int(input.critical_resist, 0, kStatMax);
+  input.armor_break_defense_factor_bp = clamp_int(input.armor_break_defense_factor_bp, 0, kFactorMax);
+  input.armor_break_flat = clamp_int(input.armor_break_flat, 0, kStatMax);
+  input.armor_break_cap_bp = clamp_int(input.armor_break_cap_bp, 0, kBpBase);
+  input.reduction_attack_factor_bp = clamp_int(input.reduction_attack_factor_bp, 0, kFactorMax);
+  input.reduction_flat = clamp_int(input.reduction_flat, 0, kStatMax);
+  input.reduction_min_bp = clamp_int(input.reduction_min_bp, 0, kBpBase);
+  input.reduction_max_bp = clamp_int(input.reduction_max_bp, 0, kBpBase);
+  normalize_min_max(&input.reduction_min_bp, &input.reduction_max_bp);
+  input.damage_base = clamp_int(input.damage_base, 0, kStatMax);
+  input.damage_skill_factor_bp = clamp_int(input.damage_skill_factor_bp, 0, kFactorMax);
+  input.damage_random_min_bp = clamp_int(input.damage_random_min_bp, 0, kFactorMax);
+  input.damage_random_max_bp = clamp_int(input.damage_random_max_bp, 0, kFactorMax);
+  normalize_min_max(&input.damage_random_min_bp, &input.damage_random_max_bp);
+  input.damage_min = clamp_int(input.damage_min, 0, kStatMax);
+  input.variance_roll_bp = clamp_int(input.variance_roll_bp, 0,
+                                     input.damage_random_max_bp - input.damage_random_min_bp);
+  input.critical_base_bp = clamp_int(input.critical_base_bp, 0, kFactorMax);
+  input.critical_swing_bp = clamp_int(input.critical_swing_bp, 0, kFactorMax);
+  input.critical_flat = clamp_int(input.critical_flat, 0, kStatMax);
+  input.critical_min = clamp_int(input.critical_min, 0, 100);
+  input.critical_max = clamp_int(input.critical_max, 0, 100);
+  normalize_min_max(&input.critical_min, &input.critical_max);
+  input.critical_roll = clamp_int(input.critical_roll, 0, 99);
+  input.critical_damage_factor_bp = clamp_int(input.critical_damage_factor_bp, 0, kFactorMax);
+  return input;
+}
+
+uint64_t hash_combat_damage_input(VMWorkerCombatDamageInput input) {
+  input = normalize_combat_damage_input(input);
+  uint64_t hash = 1469598103934665603ULL;
+  hash = hash_mix(hash, static_cast<uint64_t>(input.snapshot_hash));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.attack));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.defense));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.armor_break));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.critical));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.critical_resist));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.armor_break_defense_factor_bp));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.armor_break_flat));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.armor_break_cap_bp));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.reduction_attack_factor_bp));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.reduction_flat));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.reduction_min_bp));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.reduction_max_bp));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.damage_base));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.damage_skill_factor_bp));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.damage_random_min_bp));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.damage_random_max_bp));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.damage_min));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.variance_roll_bp));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.critical_base_bp));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.critical_swing_bp));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.critical_flat));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.critical_min));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.critical_max));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.critical_roll));
+  hash = hash_mix(hash, static_cast<uint64_t>(input.critical_damage_factor_bp));
+  return hash;
+}
+
+void fill_combat_damage_result(VMWorkerCombatDamageResult *result,
+                               const VMWorkerCombatDamageInput &input) {
+  constexpr int kBpBase = 10000;
+  auto normalized = normalize_combat_damage_input(input);
+  int64_t attack = normalized.attack;
+  int64_t defense = normalized.defense;
+  int64_t armor_break = normalized.armor_break;
+  int64_t denominator = safe_denominator(
+      armor_break + defense * normalized.armor_break_defense_factor_bp / kBpBase + normalized.armor_break_flat);
+  int armor_break_bp = clamp_i64_to_int(armor_break * kBpBase / denominator, 0,
+                                        normalized.armor_break_cap_bp);
+  int64_t effective_defense = defense * (kBpBase - armor_break_bp) / kBpBase;
+  denominator = safe_denominator(effective_defense + attack * normalized.reduction_attack_factor_bp / kBpBase +
+                                 normalized.reduction_flat);
+  int reduction_bp = clamp_i64_to_int(effective_defense * kBpBase / denominator,
+                                      normalized.reduction_min_bp, normalized.reduction_max_bp);
+
+  int64_t damage = normalized.damage_base + attack * normalized.damage_skill_factor_bp / kBpBase;
+  int variance = normalized.damage_random_max_bp - normalized.damage_random_min_bp;
+  if (variance > 0) {
+    damage = damage * (normalized.damage_random_min_bp + normalized.variance_roll_bp) / kBpBase;
+  }
+  damage = damage * (kBpBase - reduction_bp) / kBpBase;
+
+  int64_t crit_denominator = safe_denominator(static_cast<int64_t>(normalized.critical) +
+                                              normalized.critical_resist + normalized.critical_flat);
+  int critical_rate = clamp_i64_to_int(
+      (normalized.critical_base_bp + normalized.critical_swing_bp *
+          (static_cast<int64_t>(normalized.critical) - normalized.critical_resist) / crit_denominator) / 100,
+      normalized.critical_min, normalized.critical_max);
+  int critical_hit = critical_rate > normalized.critical_roll ? 1 : 0;
+  if (critical_hit) {
+    damage = damage * normalized.critical_damage_factor_bp / kBpBase;
+  }
+  if (damage < normalized.damage_min) {
+    damage = normalized.damage_min;
+  }
+
+  result->damage = clamp_i64_to_int(damage, 0, std::numeric_limits<int>::max());
+  result->armor_break_bp = armor_break_bp;
+  result->reduction_bp = reduction_bp;
+  result->critical_rate = critical_rate;
+  result->critical_hit = critical_hit;
+  result->snapshot_hash = static_cast<uint64_t>(normalized.snapshot_hash);
+  result->input_hash = hash_combat_damage_input(normalized);
+}
 
 void fill_actor_score_result(VMWorkerActorScoreResult *result,
                              const VMWorkerActorScoreInput &input) {
@@ -317,19 +486,46 @@ class VMWorkerRuntime {
     return *result;
   }
 
-  uint64_t submit_actor_score(std::string owner_key, VMWorkerActorScoreInput input) {
+  VMWorkerCombatDamageResult combat_damage(std::string owner_key, VMWorkerCombatDamageInput input) {
+    if (owner_key.empty()) {
+      owner_key = "global";
+    }
+    input = normalize_combat_damage_input(input);
+    start(0);
+
+    auto result = std::make_shared<VMWorkerCombatDamageResult>();
+    result->owner_key = owner_key;
+    auto start_time = std::chrono::steady_clock::now();
+    auto future = submit_keyed(owner_key, [result, input] {
+      fill_combat_damage_result(result.get(), input);
+    });
+    future.get();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_time);
+    auto stats = this->stats();
+    result->worker_count = stats.worker_count;
+    result->elapsed_ms = elapsed.count();
+    return *result;
+  }
+
+  uint64_t submit_actor_score(std::string owner_key, VMWorkerActorScoreInput input,
+                              int timeout_ms, int ttl_ms) {
     if (owner_key.empty()) {
       owner_key = "global";
     }
     start(0);
 
     auto id = next_task_id_++;
+    auto input_hash = hash_mix(hash_mix(hash_mix(hash_mix(hash_mix(hash_mix(
+        1469598103934665603ULL, static_cast<uint64_t>(input.hp)),
+        static_cast<uint64_t>(input.max_hp)), static_cast<uint64_t>(input.mp)),
+        static_cast<uint64_t>(input.max_mp)), static_cast<uint64_t>(input.ep)),
+        static_cast<uint64_t>(input.max_ep));
     auto started = std::chrono::steady_clock::now();
     {
       std::lock_guard<std::mutex> lock(results_mutex_);
-      AsyncRecord record;
-      record.type = "actor_score";
-      async_results_[id] = record;
+      async_results_[id] = make_async_record(id, "actor_score", owner_key, input_hash,
+                                             timeout_ms, ttl_ms);
     }
 
     submit_keyed(owner_key, [this, id, owner_key, input, started] {
@@ -344,20 +540,61 @@ class VMWorkerRuntime {
 
       std::lock_guard<std::mutex> lock(results_mutex_);
       auto it = async_results_.find(id);
-      if (it != async_results_.end()) {
+      if (it != async_results_.end() && it->second.state == VMWorkerTaskState::kPending) {
         it->second.state = VMWorkerTaskState::kSucceeded;
+        mark_completed(&it->second);
         it->second.actor_score = score;
       }
     });
     return id;
   }
 
-  uint64_t submit_benchmark(int tasks, int millis) {
+  uint64_t submit_combat_damage(std::string owner_key, VMWorkerCombatDamageInput input,
+                                int timeout_ms, int ttl_ms) {
+    if (owner_key.empty()) {
+      owner_key = "global";
+    }
+    input = normalize_combat_damage_input(input);
+    start(0);
+
+    auto id = next_task_id_++;
+    auto input_hash = hash_combat_damage_input(input);
+    auto started = std::chrono::steady_clock::now();
+    {
+      std::lock_guard<std::mutex> lock(results_mutex_);
+      async_results_[id] = make_async_record(id, "combat_damage", owner_key, input_hash,
+                                             timeout_ms, ttl_ms);
+    }
+
+    submit_keyed(owner_key, [this, id, owner_key, input, started] {
+      VMWorkerCombatDamageResult damage;
+      damage.owner_key = owner_key;
+      fill_combat_damage_result(&damage, input);
+      auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - started);
+      auto stats = this->stats();
+      damage.worker_count = stats.worker_count;
+      damage.elapsed_ms = elapsed.count();
+
+      std::lock_guard<std::mutex> lock(results_mutex_);
+      auto it = async_results_.find(id);
+      if (it != async_results_.end() && it->second.state == VMWorkerTaskState::kPending) {
+        it->second.state = VMWorkerTaskState::kSucceeded;
+        mark_completed(&it->second);
+        it->second.combat_damage = damage;
+      }
+    });
+    return id;
+  }
+
+  uint64_t submit_benchmark(int tasks, int millis, int timeout_ms, int ttl_ms) {
     tasks = std::clamp(tasks, 1, 64);
     millis = std::clamp(millis, 1, 5000);
     start(0);
 
     auto id = next_task_id_++;
+    auto input_hash = hash_mix(hash_mix(1469598103934665603ULL, static_cast<uint64_t>(tasks)),
+                               static_cast<uint64_t>(millis));
     auto stats = this->stats();
     auto state = std::make_shared<AsyncBenchmarkState>();
     state->task_id = id;
@@ -372,9 +609,8 @@ class VMWorkerRuntime {
 
     {
       std::lock_guard<std::mutex> lock(results_mutex_);
-      AsyncRecord record;
-      record.type = "bench";
-      async_results_[id] = record;
+      async_results_[id] = make_async_record(id, "bench", "global", input_hash,
+                                             timeout_ms, ttl_ms);
     }
 
     for (int i = 0; i < tasks; i++) {
@@ -384,7 +620,8 @@ class VMWorkerRuntime {
     return id;
   }
 
-  uint64_t submit_snapshot_digest(std::string owner_key, std::string snapshot_text, int repeat) {
+  uint64_t submit_snapshot_digest(std::string owner_key, std::string snapshot_text, int repeat,
+                                  int timeout_ms, int ttl_ms) {
     if (owner_key.empty()) {
       owner_key = "global";
     }
@@ -393,12 +630,13 @@ class VMWorkerRuntime {
 
     auto id = next_task_id_++;
     auto input_bytes = static_cast<uint64_t>(snapshot_text.size());
+    auto input_hash = hash_mix(hash_string(1469598103934665603ULL, snapshot_text),
+                               static_cast<uint64_t>(repeat));
     auto started = std::chrono::steady_clock::now();
     {
       std::lock_guard<std::mutex> lock(results_mutex_);
-      AsyncRecord record;
-      record.type = "snapshot_digest";
-      async_results_[id] = record;
+      async_results_[id] = make_async_record(id, "snapshot_digest", owner_key, input_hash,
+                                             timeout_ms, ttl_ms);
     }
 
     submit_keyed(owner_key, [this, id, owner_key, snapshot_text = std::move(snapshot_text), repeat,
@@ -419,8 +657,9 @@ class VMWorkerRuntime {
                                           input_bytes, repeat, checksum};
       std::lock_guard<std::mutex> lock(results_mutex_);
       auto it = async_results_.find(id);
-      if (it != async_results_.end()) {
+      if (it != async_results_.end() && it->second.state == VMWorkerTaskState::kPending) {
         it->second.state = VMWorkerTaskState::kSucceeded;
+        mark_completed(&it->second);
         it->second.snapshot_digest = digest;
       }
     });
@@ -431,18 +670,78 @@ class VMWorkerRuntime {
     std::lock_guard<std::mutex> lock(results_mutex_);
     auto it = async_results_.find(task_id);
     if (it == async_results_.end()) {
-      return VMWorkerTaskResult{task_id, VMWorkerTaskState::kUnknown, "", {}, {}, {}, "unknown worker task id"};
+      return VMWorkerTaskResult{task_id, VMWorkerTaskState::kUnknown, "", {}, {}, {}, {}, {},
+                                "unknown worker task id"};
     }
 
-    VMWorkerTaskResult result{task_id, it->second.state, it->second.type, it->second.bench,
-                              it->second.snapshot_digest, it->second.actor_score, it->second.error};
-    if (result.state == VMWorkerTaskState::kSucceeded || result.state == VMWorkerTaskState::kFailed) {
+    apply_deadline_locked(&it->second);
+    if (is_expired_locked(it->second)) {
+      async_results_.erase(it);
+      return VMWorkerTaskResult{task_id, VMWorkerTaskState::kUnknown, "", {}, {}, {}, {}, {},
+                                "expired worker task result"};
+    }
+
+    VMWorkerTaskResult result{task_id, it->second.state, it->second.type, it->second.envelope,
+                               it->second.bench, it->second.snapshot_digest,
+                               it->second.actor_score, it->second.combat_damage,
+                               it->second.error};
+    if ((result.state == VMWorkerTaskState::kSucceeded || result.state == VMWorkerTaskState::kFailed) &&
+        it->second.envelope.ttl_ms == 0) {
       async_results_.erase(it);
     }
     return result;
   }
 
+  std::vector<VMWorkerTaskResult> poll_many(const std::vector<uint64_t> &task_ids) {
+    std::vector<VMWorkerTaskResult> results;
+    results.reserve(task_ids.size());
+    for (auto task_id : task_ids) {
+      results.push_back(poll(task_id));
+    }
+    return results;
+  }
+
  private:
+  AsyncRecord make_async_record(uint64_t id, std::string type, std::string owner_key,
+                                uint64_t input_hash, int timeout_ms, int ttl_ms) {
+    AsyncRecord record;
+    record.type = type;
+    record.envelope.task_id = id;
+    record.envelope.task_type = type;
+    record.envelope.owner_key = owner_key.empty() ? "global" : owner_key;
+    record.envelope.submitted_at_ms = now_ms();
+    record.envelope.timeout_ms = normalize_timeout_ms(timeout_ms);
+    record.envelope.ttl_ms = normalize_ttl_ms(ttl_ms);
+    record.envelope.input_hash = input_hash;
+    if (record.envelope.timeout_ms > 0) {
+      record.envelope.deadline_at_ms = record.envelope.submitted_at_ms + record.envelope.timeout_ms;
+    }
+    return record;
+  }
+
+  void mark_completed(AsyncRecord *record) {
+    record->envelope.completed_at_ms = now_ms();
+    if (record->envelope.ttl_ms > 0) {
+      record->envelope.expires_at_ms = record->envelope.completed_at_ms + record->envelope.ttl_ms;
+    }
+  }
+
+  void apply_deadline_locked(AsyncRecord *record) {
+    if (!record || record->state != VMWorkerTaskState::kPending || record->envelope.deadline_at_ms == 0) {
+      return;
+    }
+    if (now_ms() <= record->envelope.deadline_at_ms) {
+      return;
+    }
+    record->state = VMWorkerTaskState::kFailed;
+    record->error = "worker task timed out";
+    mark_completed(record);
+  }
+
+  bool is_expired_locked(const AsyncRecord &record) const {
+    return record.envelope.expires_at_ms > 0 && now_ms() > record.envelope.expires_at_ms;
+  }
+
   std::function<void()> wrap_task(std::function<void()> task,
                                   std::shared_ptr<std::promise<void>> promise,
                                   std::string owner_key = "") {
@@ -533,8 +832,9 @@ class VMWorkerRuntime {
                                 elapsed.count(), state->checksum->load()};
       std::lock_guard<std::mutex> lock(results_mutex_);
       auto it = async_results_.find(state->task_id);
-      if (it != async_results_.end()) {
+      if (it != async_results_.end() && it->second.state == VMWorkerTaskState::kPending) {
         it->second.state = VMWorkerTaskState::kSucceeded;
+        mark_completed(&it->second);
         it->second.bench = bench;
       }
     }
@@ -628,23 +928,59 @@ VMWorkerSnapshotDigestResult vm_worker_snapshot_digest(std::string owner_key,
 }
 
 VMWorkerActorScoreResult vm_worker_actor_score(std::string owner_key,
-                                               VMWorkerActorScoreInput input) {
+                                                VMWorkerActorScoreInput input) {
   return runtime().actor_score(std::move(owner_key), input);
 }
 
+VMWorkerCombatDamageResult vm_worker_combat_damage(std::string owner_key,
+                                                   VMWorkerCombatDamageInput input) {
+  return runtime().combat_damage(std::move(owner_key), input);
+}
+
 uint64_t vm_worker_submit_benchmark(int tasks, int millis) {
-  return runtime().submit_benchmark(tasks, millis);
+  return runtime().submit_benchmark(tasks, millis, 0, 0);
+}
+
+uint64_t vm_worker_submit_benchmark_v2(int tasks, int millis, int timeout_ms, int ttl_ms) {
+  return runtime().submit_benchmark(tasks, millis, timeout_ms, ttl_ms);
 }
 
 uint64_t vm_worker_submit_snapshot_digest(std::string owner_key,
-                                          std::string snapshot_text,
-                                          int repeat) {
-  return runtime().submit_snapshot_digest(std::move(owner_key), std::move(snapshot_text), repeat);
+                                           std::string snapshot_text,
+                                           int repeat) {
+  return runtime().submit_snapshot_digest(std::move(owner_key), std::move(snapshot_text), repeat, 0, 0);
+}
+
+uint64_t vm_worker_submit_snapshot_digest_v2(std::string owner_key,
+                                             std::string snapshot_text,
+                                             int repeat,
+                                             int timeout_ms,
+                                             int ttl_ms) {
+  return runtime().submit_snapshot_digest(std::move(owner_key), std::move(snapshot_text), repeat,
+                                          timeout_ms, ttl_ms);
 }
 
 uint64_t vm_worker_submit_actor_score(std::string owner_key,
-                                      VMWorkerActorScoreInput input) {
-  return runtime().submit_actor_score(std::move(owner_key), input);
+                                       VMWorkerActorScoreInput input) {
+  return runtime().submit_actor_score(std::move(owner_key), input, 0, 0);
+}
+
+uint64_t vm_worker_submit_actor_score_v2(std::string owner_key,
+                                          VMWorkerActorScoreInput input,
+                                          int timeout_ms,
+                                          int ttl_ms) {
+  return runtime().submit_actor_score(std::move(owner_key), input, timeout_ms, ttl_ms);
+}
+
+uint64_t vm_worker_submit_combat_damage_v2(std::string owner_key,
+                                           VMWorkerCombatDamageInput input,
+                                           int timeout_ms,
+                                           int ttl_ms) {
+  return runtime().submit_combat_damage(std::move(owner_key), input, timeout_ms, ttl_ms);
 }
 
 VMWorkerTaskResult vm_worker_poll_task(uint64_t task_id) { return runtime().poll(task_id); }
+
+std::vector<VMWorkerTaskResult> vm_worker_poll_tasks(const std::vector<uint64_t> &task_ids) {
+  return runtime().poll_many(task_ids);
+}

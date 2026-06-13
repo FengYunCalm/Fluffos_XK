@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <chrono>
+#include <limits>
 #include <string>
 #include <thread>
 #include "base/package_api.h"
@@ -938,7 +939,7 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
   vm_owner_thread_stop();
 }
 
-TEST_F(DriverTest, TestVmOwnerThreadRunsControlledLpcProbeOffMain) {
+TEST_F(DriverTest, TestVmOwnerThreadGuardsControlledLpcProbeOffMain) {
   const char* owner = "owner/test/thread/lpc-probe";
   ASSERT_TRUE(vm_context_is_main_thread());
 
@@ -981,7 +982,8 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsControlledLpcProbeOffMain) {
   }
 
   auto* running = vm_owner_thread_status();
-  ASSERT_GE(mapping_number(running, "thread_lpc_probe_executed"), 1);
+  ASSERT_EQ(mapping_number(running, "thread_lpc_probe_executed"), 0);
+  ASSERT_GE(mapping_number(running, "thread_lpc_probe_guarded"), 1);
   ASSERT_EQ(mapping_number(running, "thread_lpc_probe_failed"), 0);
   ASSERT_GE(mapping_number(running, "thread_context_bound"), 1);
   ASSERT_GE(mapping_number(running, "thread_object_store_isolated"), 1);
@@ -991,15 +993,15 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsControlledLpcProbeOffMain) {
   auto* events = find_string_in_mapping(trace, "events");
   ASSERT_NE(events, nullptr);
   ASSERT_EQ(events->type, T_ARRAY);
-  int lpc_executed = 0;
+  int lpc_guarded = 0;
   for (int i = 0; i < events->u.arr->size; i++) {
     auto* event = events->u.arr->item[i].u.map;
     if (mapping_number(event, "task_id") == task_id &&
-        std::string(mapping_string(event, "state")) == "thread_lpc_probe_executed") {
-      lpc_executed = 1;
+        std::string(mapping_string(event, "state")) == "thread_lpc_probe_guarded") {
+      lpc_guarded = 1;
     }
   }
-  ASSERT_EQ(lpc_executed, 1);
+  ASSERT_EQ(lpc_guarded, 1);
   free_mapping(trace);
 
   vm_owner_thread_stop();
@@ -1250,6 +1252,174 @@ TEST_F(DriverTest, TestVmWorkerAsyncActorScorePollsResult) {
   ASSERT_EQ(result.actor_score.total_score, 7850);
   ASSERT_EQ(result.actor_score.state, "strained");
   ASSERT_EQ(vm_worker_poll_task(task_id).state, VMWorkerTaskState::kUnknown);
+}
+
+TEST_F(DriverTest, TestVmWorkerCombatDamageBindsHashToSnapshotAndFields) {
+  VMWorkerCombatDamageInput input;
+  input.attack = 100;
+  input.defense = 50;
+  input.armor_break = 0;
+  input.critical = 0;
+  input.critical_resist = 0;
+  input.variance_roll_bp = 500;
+  input.critical_roll = 100;
+  input.snapshot_hash = 424242;
+
+  auto result = vm_worker_combat_damage("combat/test", input);
+  ASSERT_EQ(result.owner_key, "combat/test");
+  ASSERT_GE(result.worker_count, 1);
+  ASSERT_EQ(result.armor_break_bp, 0);
+  ASSERT_EQ(result.reduction_bp, 500);
+  ASSERT_EQ(result.critical_rate, 5);
+  ASSERT_EQ(result.critical_hit, 0);
+  ASSERT_EQ(result.damage, 95);
+  ASSERT_EQ(result.snapshot_hash, 424242u);
+  ASSERT_NE(result.input_hash, 424242u);
+
+  auto changed_attack = input;
+  changed_attack.attack = 101;
+  auto changed_attack_result = vm_worker_combat_damage("combat/test", changed_attack);
+  ASSERT_NE(changed_attack_result.input_hash, result.input_hash);
+
+  auto changed_snapshot = input;
+  changed_snapshot.snapshot_hash = 424243;
+  auto changed_snapshot_result = vm_worker_combat_damage("combat/test", changed_snapshot);
+  ASSERT_EQ(changed_snapshot_result.snapshot_hash, 424243u);
+  ASSERT_NE(changed_snapshot_result.input_hash, result.input_hash);
+}
+
+TEST_F(DriverTest, TestVmWorkerCombatDamageNormalizesExtremeInput) {
+  VMWorkerCombatDamageInput input;
+  input.snapshot_hash = std::numeric_limits<int>::max();
+  input.attack = std::numeric_limits<int>::max();
+  input.defense = std::numeric_limits<int>::max();
+  input.armor_break = std::numeric_limits<int>::max();
+  input.critical = std::numeric_limits<int>::max();
+  input.critical_resist = std::numeric_limits<int>::max();
+  input.reduction_min_bp = 9000;
+  input.reduction_max_bp = 1000;
+  input.damage_base = std::numeric_limits<int>::max();
+  input.damage_skill_factor_bp = std::numeric_limits<int>::max();
+  input.damage_random_min_bp = 20000;
+  input.damage_random_max_bp = 1000;
+  input.variance_roll_bp = std::numeric_limits<int>::max();
+  input.critical_min = 90;
+  input.critical_max = 10;
+  input.critical_roll = std::numeric_limits<int>::min();
+  input.critical_damage_factor_bp = std::numeric_limits<int>::max();
+
+  auto result = vm_worker_combat_damage("combat/extreme", input);
+  ASSERT_EQ(result.owner_key, "combat/extreme");
+  ASSERT_EQ(result.snapshot_hash, static_cast<uint64_t>(std::numeric_limits<int>::max()));
+  ASSERT_GE(result.damage, 0);
+  ASSERT_GE(result.reduction_bp, 1000);
+  ASSERT_LE(result.reduction_bp, 9000);
+  ASSERT_GE(result.critical_rate, 10);
+  ASSERT_LE(result.critical_rate, 90);
+  ASSERT_GT(result.input_hash, 0u);
+}
+
+TEST_F(DriverTest, TestVmWorkerAsyncCombatDamagePollsResult) {
+  VMWorkerCombatDamageInput input;
+  input.attack = 100;
+  input.defense = 50;
+  input.variance_roll_bp = 500;
+  input.critical_roll = 100;
+  input.snapshot_hash = 31337;
+
+  auto task_id = vm_worker_submit_combat_damage_v2("combat/async", input, 1000, 5000);
+  ASSERT_GT(task_id, 0u);
+
+  VMWorkerTaskResult result;
+  for (int i = 0; i < 100; i++) {
+    result = vm_worker_poll_task(task_id);
+    ASSERT_NE(result.state, VMWorkerTaskState::kUnknown);
+    if (result.state == VMWorkerTaskState::kSucceeded) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  ASSERT_EQ(result.state, VMWorkerTaskState::kSucceeded);
+  ASSERT_EQ(result.type, "combat_damage");
+  ASSERT_EQ(result.envelope.task_type, "combat_damage");
+  ASSERT_EQ(result.envelope.owner_key, "combat/async");
+  ASSERT_EQ(result.envelope.input_hash, result.combat_damage.input_hash);
+  ASSERT_EQ(result.combat_damage.owner_key, "combat/async");
+  ASSERT_EQ(result.combat_damage.damage, 95);
+  ASSERT_EQ(result.combat_damage.critical_hit, 0);
+  ASSERT_EQ(result.combat_damage.snapshot_hash, 31337u);
+  ASSERT_NE(result.combat_damage.input_hash, 31337u);
+}
+
+TEST_F(DriverTest, TestVmWorkerV2EnvelopeKeepsResultUntilTtl) {
+  auto task_id = vm_worker_submit_snapshot_digest_v2("actor/envelope", "{\"hp\":100}", 8, 1000, 5000);
+  ASSERT_GT(task_id, 0u);
+
+  VMWorkerTaskResult result;
+  for (int i = 0; i < 100; i++) {
+    result = vm_worker_poll_task(task_id);
+    ASSERT_NE(result.state, VMWorkerTaskState::kUnknown);
+    if (result.state == VMWorkerTaskState::kSucceeded) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  ASSERT_EQ(result.state, VMWorkerTaskState::kSucceeded);
+  ASSERT_EQ(result.envelope.task_id, task_id);
+  ASSERT_EQ(result.envelope.task_type, "snapshot_digest");
+  ASSERT_EQ(result.envelope.owner_key, "actor/envelope");
+  ASSERT_GT(result.envelope.input_hash, 0u);
+  ASSERT_GT(result.envelope.submitted_at_ms, 0u);
+  ASSERT_GE(result.envelope.completed_at_ms, result.envelope.submitted_at_ms);
+  ASSERT_GT(result.envelope.expires_at_ms, result.envelope.completed_at_ms);
+  ASSERT_EQ(result.envelope.timeout_ms, 1000);
+  ASSERT_EQ(result.envelope.ttl_ms, 5000);
+  ASSERT_EQ(vm_worker_poll_task(task_id).state, VMWorkerTaskState::kSucceeded);
+}
+
+TEST_F(DriverTest, TestVmWorkerV2TimeoutFailsPendingTask) {
+  auto task_id = vm_worker_submit_benchmark_v2(64, 80, 1, 5000);
+  ASSERT_GT(task_id, 0u);
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+  auto result = vm_worker_poll_task(task_id);
+  ASSERT_EQ(result.state, VMWorkerTaskState::kFailed);
+  ASSERT_EQ(result.error, "worker task timed out");
+  ASSERT_EQ(result.envelope.task_id, task_id);
+  ASSERT_EQ(result.envelope.timeout_ms, 1);
+  ASSERT_GT(result.envelope.completed_at_ms, 0u);
+}
+
+TEST_F(DriverTest, TestVmWorkerPollTasksReturnsBatchResults) {
+  VMWorkerActorScoreInput input;
+  input.hp = 100;
+  input.max_hp = 100;
+  input.mp = 80;
+  input.max_mp = 100;
+  input.ep = 60;
+  input.max_ep = 100;
+
+  std::vector<uint64_t> task_ids;
+  task_ids.push_back(vm_worker_submit_actor_score_v2("actor/batch-a", input, 1000, 5000));
+  task_ids.push_back(vm_worker_submit_actor_score_v2("actor/batch-b", input, 1000, 5000));
+
+  std::vector<VMWorkerTaskResult> results;
+  for (int i = 0; i < 100; i++) {
+    results = vm_worker_poll_tasks(task_ids);
+    ASSERT_EQ(results.size(), 2u);
+    if (results[0].state == VMWorkerTaskState::kSucceeded &&
+        results[1].state == VMWorkerTaskState::kSucceeded) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  ASSERT_EQ(results[0].state, VMWorkerTaskState::kSucceeded);
+  ASSERT_EQ(results[1].state, VMWorkerTaskState::kSucceeded);
+  ASSERT_EQ(results[0].actor_score.owner_key, "actor/batch-a");
+  ASSERT_EQ(results[1].actor_score.owner_key, "actor/batch-b");
 }
 
 TEST_F(DriverTest, TestInMemoryCompileFile) {
