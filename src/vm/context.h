@@ -29,6 +29,7 @@ struct VMObjectStoreState {
 struct VMOwnerState {
   std::string current_owner_id;
   uint64_t current_owner_epoch{0};
+  bool lpc_canary_active{false};
 };
 
 struct VMContext {
