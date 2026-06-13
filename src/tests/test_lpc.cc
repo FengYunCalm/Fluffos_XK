@@ -1267,7 +1267,7 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsUnregisteredLpcTask) {
   auto before_rejected = mapping_number(before, "thread_lpc_task_rejected");
   free_mapping(before);
 
-  auto* submitted = vm_owner_lpc_task(probe, owner, "owner_lpc_canary");
+  auto* submitted = vm_owner_lpc_task(probe, owner, "owner_task_unregistered");
   ASSERT_EQ(mapping_number(submitted, "success"), 1);
   ASSERT_EQ(mapping_number(submitted, "registered_task"), 0);
   free_mapping(submitted);

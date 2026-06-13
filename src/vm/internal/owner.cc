@@ -394,7 +394,7 @@ bool owner_execution_state_cleared() {
 }
 
 bool owner_lpc_task_allowed(const OwnerMailboxTask &task) {
-  return task.task_key.rfind("owner_task_", 0) == 0;
+  return task.task_key == "owner_task_readonly";
 }
 
 void record_owner_context_cleanup(const OwnerMailboxTask &task) {
