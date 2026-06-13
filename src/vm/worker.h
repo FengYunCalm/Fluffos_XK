@@ -100,6 +100,7 @@ struct VMWorkerCombatDamageResult {
   int reduction_bp{0};
   int critical_rate{0};
   int critical_hit{0};
+  uint64_t snapshot_hash{0};
   uint64_t input_hash{0};
 };
 

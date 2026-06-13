@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <chrono>
+#include <limits>
 #include <string>
 #include <thread>
 #include "base/package_api.h"
@@ -938,7 +939,7 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
   vm_owner_thread_stop();
 }
 
-TEST_F(DriverTest, TestVmOwnerThreadRunsControlledLpcProbeOffMain) {
+TEST_F(DriverTest, TestVmOwnerThreadGuardsControlledLpcProbeOffMain) {
   const char* owner = "owner/test/thread/lpc-probe";
   ASSERT_TRUE(vm_context_is_main_thread());
 
@@ -981,7 +982,8 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsControlledLpcProbeOffMain) {
   }
 
   auto* running = vm_owner_thread_status();
-  ASSERT_GE(mapping_number(running, "thread_lpc_probe_executed"), 1);
+  ASSERT_EQ(mapping_number(running, "thread_lpc_probe_executed"), 0);
+  ASSERT_GE(mapping_number(running, "thread_lpc_probe_guarded"), 1);
   ASSERT_EQ(mapping_number(running, "thread_lpc_probe_failed"), 0);
   ASSERT_GE(mapping_number(running, "thread_context_bound"), 1);
   ASSERT_GE(mapping_number(running, "thread_object_store_isolated"), 1);
@@ -991,15 +993,15 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsControlledLpcProbeOffMain) {
   auto* events = find_string_in_mapping(trace, "events");
   ASSERT_NE(events, nullptr);
   ASSERT_EQ(events->type, T_ARRAY);
-  int lpc_executed = 0;
+  int lpc_guarded = 0;
   for (int i = 0; i < events->u.arr->size; i++) {
     auto* event = events->u.arr->item[i].u.map;
     if (mapping_number(event, "task_id") == task_id &&
-        std::string(mapping_string(event, "state")) == "thread_lpc_probe_executed") {
-      lpc_executed = 1;
+        std::string(mapping_string(event, "state")) == "thread_lpc_probe_guarded") {
+      lpc_guarded = 1;
     }
   }
-  ASSERT_EQ(lpc_executed, 1);
+  ASSERT_EQ(lpc_guarded, 1);
   free_mapping(trace);
 
   vm_owner_thread_stop();
@@ -1252,7 +1254,7 @@ TEST_F(DriverTest, TestVmWorkerAsyncActorScorePollsResult) {
   ASSERT_EQ(vm_worker_poll_task(task_id).state, VMWorkerTaskState::kUnknown);
 }
 
-TEST_F(DriverTest, TestVmWorkerCombatDamageUsesSnapshotOnly) {
+TEST_F(DriverTest, TestVmWorkerCombatDamageBindsHashToSnapshotAndFields) {
   VMWorkerCombatDamageInput input;
   input.attack = 100;
   input.defense = 50;
@@ -1271,7 +1273,50 @@ TEST_F(DriverTest, TestVmWorkerCombatDamageUsesSnapshotOnly) {
   ASSERT_EQ(result.critical_rate, 5);
   ASSERT_EQ(result.critical_hit, 0);
   ASSERT_EQ(result.damage, 95);
-  ASSERT_EQ(result.input_hash, 424242u);
+  ASSERT_EQ(result.snapshot_hash, 424242u);
+  ASSERT_NE(result.input_hash, 424242u);
+
+  auto changed_attack = input;
+  changed_attack.attack = 101;
+  auto changed_attack_result = vm_worker_combat_damage("combat/test", changed_attack);
+  ASSERT_NE(changed_attack_result.input_hash, result.input_hash);
+
+  auto changed_snapshot = input;
+  changed_snapshot.snapshot_hash = 424243;
+  auto changed_snapshot_result = vm_worker_combat_damage("combat/test", changed_snapshot);
+  ASSERT_EQ(changed_snapshot_result.snapshot_hash, 424243u);
+  ASSERT_NE(changed_snapshot_result.input_hash, result.input_hash);
+}
+
+TEST_F(DriverTest, TestVmWorkerCombatDamageNormalizesExtremeInput) {
+  VMWorkerCombatDamageInput input;
+  input.snapshot_hash = std::numeric_limits<int>::max();
+  input.attack = std::numeric_limits<int>::max();
+  input.defense = std::numeric_limits<int>::max();
+  input.armor_break = std::numeric_limits<int>::max();
+  input.critical = std::numeric_limits<int>::max();
+  input.critical_resist = std::numeric_limits<int>::max();
+  input.reduction_min_bp = 9000;
+  input.reduction_max_bp = 1000;
+  input.damage_base = std::numeric_limits<int>::max();
+  input.damage_skill_factor_bp = std::numeric_limits<int>::max();
+  input.damage_random_min_bp = 20000;
+  input.damage_random_max_bp = 1000;
+  input.variance_roll_bp = std::numeric_limits<int>::max();
+  input.critical_min = 90;
+  input.critical_max = 10;
+  input.critical_roll = std::numeric_limits<int>::min();
+  input.critical_damage_factor_bp = std::numeric_limits<int>::max();
+
+  auto result = vm_worker_combat_damage("combat/extreme", input);
+  ASSERT_EQ(result.owner_key, "combat/extreme");
+  ASSERT_EQ(result.snapshot_hash, static_cast<uint64_t>(std::numeric_limits<int>::max()));
+  ASSERT_GE(result.damage, 0);
+  ASSERT_GE(result.reduction_bp, 1000);
+  ASSERT_LE(result.reduction_bp, 9000);
+  ASSERT_GE(result.critical_rate, 10);
+  ASSERT_LE(result.critical_rate, 90);
+  ASSERT_GT(result.input_hash, 0u);
 }
 
 TEST_F(DriverTest, TestVmWorkerAsyncCombatDamagePollsResult) {
@@ -1303,7 +1348,8 @@ TEST_F(DriverTest, TestVmWorkerAsyncCombatDamagePollsResult) {
   ASSERT_EQ(result.combat_damage.owner_key, "combat/async");
   ASSERT_EQ(result.combat_damage.damage, 95);
   ASSERT_EQ(result.combat_damage.critical_hit, 0);
-  ASSERT_EQ(result.combat_damage.input_hash, 31337u);
+  ASSERT_EQ(result.combat_damage.snapshot_hash, 31337u);
+  ASSERT_NE(result.combat_damage.input_hash, 31337u);
 }
 
 TEST_F(DriverTest, TestVmWorkerV2EnvelopeKeepsResultUntilTtl) {

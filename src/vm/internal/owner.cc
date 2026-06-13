@@ -1,8 +1,6 @@
 #include "base/package_api.h"
 
 #include "vm/context.h"
-#include "vm/internal/apply.h"
-#include "vm/internal/eval_limit.h"
 #include "vm/owner.h"
 
 #include <atomic>
@@ -48,6 +46,7 @@ std::atomic<uint64_t> owner_thread_owner_state_guarded{0};
 std::atomic<uint64_t> owner_thread_message_dispatched{0};
 std::atomic<uint64_t> owner_thread_lpc_probe_executed{0};
 std::atomic<uint64_t> owner_thread_lpc_probe_failed{0};
+std::atomic<uint64_t> owner_thread_lpc_probe_guarded{0};
 
 struct OwnerMailboxTask {
   uint64_t task_id;
@@ -56,6 +55,7 @@ struct OwnerMailboxTask {
   std::string owner_id;
   std::string task_type;
   std::string task_key;
+  std::string target_object;
   object_t *target{nullptr};
 };
 
@@ -164,7 +164,8 @@ mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
   add_mapping_string(map, "owner_id", task.owner_id.c_str());
   add_mapping_string(map, "task_type", task.task_type.c_str());
   add_mapping_string(map, "task_key", task.task_key.c_str());
-  add_mapping_string(map, "target_object", owner_object_name(task.target));
+  add_mapping_string(map, "target_object",
+                     task.target_object.empty() ? owner_object_name(task.target) : task.target_object.c_str());
   return map;
 }
 
@@ -295,35 +296,15 @@ bool pop_next_schedulable_task(OwnerMailboxTask *out) {
   return false;
 }
 
-bool lpc_probe_returned_off_main(svalue_t *ret) {
-  if (!ret) {
-    return false;
-  }
-  if (ret->type == T_NUMBER) {
-    return ret->u.number != 0;
-  }
-  if (ret->type == T_MAPPING) {
-    auto *value = find_string_in_mapping(ret->u.map, "off_main_thread");
-    return value && value->type == T_NUMBER && value->u.number != 0;
-  }
-  return false;
-}
-
 void run_owner_lpc_probe(const OwnerMailboxTask &task) {
-  auto execution = vm_context_capture_execution();
-  execution.current_object = task.target;
-  execution.command_giver = nullptr;
-  execution.current_interactive = nullptr;
-  execution.previous_ob = nullptr;
-  execution.current_prog = task.target ? task.target->prog : nullptr;
-  execution.caller_type = ORIGIN_DRIVER;
-
-  VMExecutionScope execution_scope(vm_context(), execution);
-  set_eval(max_eval_cost);
-  auto *ret = task.target ? safe_apply(task.task_key.c_str(), task.target, 0, ORIGIN_DRIVER) : nullptr;
-  if (ret && lpc_probe_returned_off_main(ret)) {
-    append_owner_task_trace_threadsafe(task, "thread_lpc_probe_executed");
-    owner_thread_lpc_probe_executed.fetch_add(1, std::memory_order_relaxed);
+  auto off_main_context = &vm_context() != &vm_main_context();
+  auto object_store_isolated = !vm_context().object_store.main_thread_owned &&
+                               vm_context().object_store.objects == nullptr;
+  auto owner_bound = vm_context().owner.current_owner_id == task.owner_id &&
+                     vm_context().owner.current_owner_epoch == task.owner_epoch;
+  if (off_main_context && object_store_isolated && owner_bound && !task.target_object.empty()) {
+    append_owner_task_trace_threadsafe(task, "thread_lpc_probe_guarded");
+    owner_thread_lpc_probe_guarded.fetch_add(1, std::memory_order_relaxed);
   } else {
     append_owner_task_trace_threadsafe(task, "thread_lpc_probe_failed");
     owner_thread_lpc_probe_failed.fetch_add(1, std::memory_order_relaxed);
@@ -546,13 +527,10 @@ mapping_t *vm_owner_lpc_probe(object_t *target, const char *owner_id, const char
   task.owner_id = normalize_owner_id(owner_id);
   task.task_type = "lpc_probe";
   task.task_key = normalize_task_text(method, "owner_lpc_probe");
-  task.target = target;
-  if (task.target) {
-    add_ref(task.target, "vm_owner_lpc_probe");
-  }
+  task.target_object = owner_object_name(target);
   task_id = task.task_id;
   auto normalized_owner_id = task.owner_id;
-  auto target_name = owner_object_name(task.target);
+  auto target_name = task.target_object;
 
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
@@ -575,7 +553,7 @@ mapping_t *vm_owner_lpc_probe(object_t *target, const char *owner_id, const char
   add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
   add_mapping_string(map, "task_type", "lpc_probe");
   add_mapping_string(map, "method", normalize_task_text(method, "owner_lpc_probe"));
-  add_mapping_string(map, "target_object", target_name);
+  add_mapping_string(map, "target_object", target_name.c_str());
   add_mapping_pair(map, "requires_owner_thread", 1);
   add_mapping_pair(map, "direct_cross_owner_write", 0);
   return map;
@@ -951,7 +929,7 @@ void vm_owner_thread_stop() {
 
 mapping_t *vm_owner_thread_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(17);
+  auto *map = allocate_mapping(18);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
   add_mapping_pair(map, "thread_count", static_cast<long>(owner_threads.size()));
@@ -975,6 +953,8 @@ mapping_t *vm_owner_thread_status() {
                    static_cast<long>(owner_thread_lpc_probe_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_probe_failed",
                    static_cast<long>(owner_thread_lpc_probe_failed.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_lpc_probe_guarded",
+                   static_cast<long>(owner_thread_lpc_probe_guarded.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_starts", static_cast<long>(owner_thread_starts.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_stops", static_cast<long>(owner_thread_stops.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "queue_depth", owner_mailbox_total_depth());
