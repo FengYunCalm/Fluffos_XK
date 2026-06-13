@@ -213,6 +213,17 @@ void f_vm_owner_lpc_canary() {
 }
 #endif
 
+#ifdef F_VM_OWNER_LPC_TASK
+void f_vm_owner_lpc_task() {
+  auto *method = sp;
+  auto *owner_id = sp - 1;
+  auto *target = sp - 2;
+  auto *result = vm_owner_lpc_task(target->u.ob, owner_id->u.string, method->u.string);
+  pop_n_elems(3);
+  push_refed_mapping(result);
+}
+#endif
+
 #ifdef F_VM_CONTEXT_IS_MAIN_THREAD
 void f_vm_context_is_main_thread() { push_number(vm_context_is_main_thread() ? 1 : 0); }
 #endif
