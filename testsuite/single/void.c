@@ -29,3 +29,8 @@ int owner_lpc_canary()
 {
   return !vm_context_is_main_thread();
 }
+
+int owner_task_readonly()
+{
+  return !vm_context_is_main_thread();
+}

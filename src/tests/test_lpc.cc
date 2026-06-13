@@ -1154,6 +1154,144 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsRestrictedLpcCanaryOffMainDeferredReleas
   destruct_object(probe);
 }
 
+TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredLpcTaskWithMultipleWorkers) {
+  const char* owner = "owner/test/thread/lpc-task";
+  const char* other_owner = "owner/test/thread/lpc-task-other";
+  ASSERT_TRUE(vm_context_is_main_thread());
+
+  vm_owner_thread_stop();
+  object_t* probe = load_object_for_test("single/void");
+  ASSERT_NE(probe, nullptr);
+  vm_owner_set_id(probe, owner);
+  auto owner_epoch = vm_owner_epoch(probe);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* before = vm_owner_thread_status();
+  auto before_executed = mapping_number(before, "thread_lpc_task_executed");
+  auto before_succeeded = mapping_number(before, "thread_lpc_task_succeeded");
+  auto before_failed = mapping_number(before, "thread_lpc_task_failed");
+  auto before_rejected = mapping_number(before, "thread_lpc_task_rejected");
+  auto before_context_leaks = mapping_number(before, "thread_context_leak_detected");
+  free_mapping(before);
+
+  auto* submitted = vm_owner_lpc_task(probe, owner, "owner_task_readonly");
+  auto task_id = mapping_number(submitted, "task_id");
+  ASSERT_EQ(mapping_number(submitted, "success"), 1);
+  ASSERT_EQ(mapping_number(submitted, "requires_owner_thread"), 1);
+  ASSERT_EQ(mapping_number(submitted, "registered_task"), 1);
+  ASSERT_EQ(mapping_number(submitted, "ordinary_lpc_default_closed"), 1);
+  ASSERT_EQ(mapping_number(submitted, "direct_cross_owner_write"), 0);
+  ASSERT_EQ(mapping_number(submitted, "owner_epoch"), static_cast<long>(owner_epoch));
+  ASSERT_STREQ(mapping_string(submitted, "task_type"), "lpc_task");
+  ASSERT_STREQ(mapping_string(submitted, "method"), "owner_task_readonly");
+  free_mapping(submitted);
+
+  auto other_task = vm_owner_enqueue_task(other_owner, "owner_state", "other-owner-state");
+  ASSERT_GT(other_task, 0u);
+
+  vm_owner_thread_start(2);
+  for (int i = 0; i < 100; i++) {
+    auto* status = vm_owner_mailbox_status(owner);
+    auto owner_depth = mapping_number(status, "owner_queue_depth");
+    free_mapping(status);
+    status = vm_owner_mailbox_status(other_owner);
+    auto other_depth = mapping_number(status, "owner_queue_depth");
+    free_mapping(status);
+    if (owner_depth == 0 && other_depth == 0) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  auto* running = vm_owner_thread_status();
+  ASSERT_EQ(mapping_number(running, "enabled"), 1);
+  ASSERT_EQ(mapping_number(running, "thread_count"), 2);
+  ASSERT_GE(mapping_number(running, "max_owner_threads"), 2);
+  ASSERT_GE(mapping_number(running, "thread_lpc_task_executed"), before_executed + 1);
+  ASSERT_GE(mapping_number(running, "thread_lpc_task_succeeded"), before_succeeded + 1);
+  ASSERT_EQ(mapping_number(running, "thread_lpc_task_failed"), before_failed);
+  ASSERT_EQ(mapping_number(running, "thread_lpc_task_rejected"), before_rejected);
+  ASSERT_EQ(mapping_number(running, "thread_context_leak_detected"), before_context_leaks);
+  ASSERT_EQ(mapping_number(running, "active_owners"), 0);
+  free_mapping(running);
+
+  auto* trace = vm_owner_task_trace(24);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  int lpc_task_succeeded = 0;
+  for (int i = 0; i < events->u.arr->size; i++) {
+    auto* event = events->u.arr->item[i].u.map;
+    if (mapping_number(event, "task_id") == task_id &&
+        std::string(mapping_string(event, "state")) == "thread_lpc_task_succeeded") {
+      lpc_task_succeeded = 1;
+    }
+  }
+  ASSERT_EQ(lpc_task_succeeded, 1);
+  free_mapping(trace);
+
+  vm_owner_thread_stop();
+  destruct_object(probe);
+}
+
+TEST_F(DriverTest, TestVmOwnerThreadRejectsUnregisteredLpcTask) {
+  const char* owner = "owner/test/thread/lpc-task-reject";
+  ASSERT_TRUE(vm_context_is_main_thread());
+
+  vm_owner_thread_stop();
+  object_t* probe = load_object_for_test("single/void");
+  ASSERT_NE(probe, nullptr);
+  vm_owner_set_id(probe, owner);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+
+  auto* before = vm_owner_thread_status();
+  auto before_succeeded = mapping_number(before, "thread_lpc_task_succeeded");
+  auto before_rejected = mapping_number(before, "thread_lpc_task_rejected");
+  free_mapping(before);
+
+  auto* submitted = vm_owner_lpc_task(probe, owner, "owner_lpc_canary");
+  ASSERT_EQ(mapping_number(submitted, "success"), 1);
+  ASSERT_EQ(mapping_number(submitted, "registered_task"), 0);
+  free_mapping(submitted);
+
+  vm_owner_thread_start(2);
+  for (int i = 0; i < 100; i++) {
+    auto* status = vm_owner_mailbox_status(owner);
+    auto depth = mapping_number(status, "owner_queue_depth");
+    free_mapping(status);
+    if (depth == 0) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  auto* running = vm_owner_thread_status();
+  ASSERT_EQ(mapping_number(running, "thread_lpc_task_succeeded"), before_succeeded);
+  ASSERT_GE(mapping_number(running, "thread_lpc_task_rejected"), before_rejected + 1);
+  free_mapping(running);
+
+  vm_owner_thread_stop();
+  destruct_object(probe);
+}
+
 TEST_F(DriverTest, TestVmOwnerThreadRejectsUnsafeLpcCanaryRequestsDeltas) {
   const char* owner = "owner/test/thread/lpc-canary-reject";
   ASSERT_TRUE(vm_context_is_main_thread());

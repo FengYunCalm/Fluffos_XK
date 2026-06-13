@@ -40,6 +40,7 @@ mapping_t *vm_owner_record_commit_boundary(const char *source_owner_id, const ch
 mapping_t *vm_owner_commit_trace(int limit);
 mapping_t *vm_owner_lpc_probe(object_t *target, const char *owner_id, const char *method);
 mapping_t *vm_owner_lpc_canary(object_t *target, const char *owner_id, const char *method);
+mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char *method);
 void vm_owner_thread_start(int requested_threads);
 void vm_owner_thread_stop();
 mapping_t *vm_owner_thread_status();
