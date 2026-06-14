@@ -4,7 +4,6 @@
 
 #include <stdlib.h>  // for qsort
 
-#include "vm/owner.h"
 #include "vm/internal/apply.h"
 #include "vm/internal/simulate.h"
 #include "vm/owner.h"
