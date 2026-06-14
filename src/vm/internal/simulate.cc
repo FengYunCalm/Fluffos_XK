@@ -21,6 +21,7 @@
 #include "backend.h"      // for clear_tick_events , FIXME
 #include "user.h"         // for users_foreach, FIXME
 #include "interactive.h"  // for interactive_t, FIXME
+#include "vm/context.h"
 #include "vm/internal/apply.h"
 #include "vm/internal/base/machine.h"
 #include "vm/internal/base/debug.h"
@@ -53,7 +54,6 @@ void db_cleanup(void);  // FIXME
 #include "comm.h"  // FIXME
 
 #include "vm/internal/trace.h"  // for dump_trace && get_svalue_trace
-#include "vm/context.h"
 #include "vm/owner.h"
 #include "vm/worker.h"
 /*
@@ -74,10 +74,10 @@ void shutdownMudOS(int exit_code) {
 #ifdef PACKAGE_MUDLIB_STATS
   save_stat_files();
 #endif
-  vm_worker_stop();
 #ifdef PACKAGE_ASYNC
   complete_all_asyncio();
 #endif
+  vm_worker_stop();
 
 #ifdef PACKAGE_DB
   db_cleanup();

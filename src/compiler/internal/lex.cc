@@ -226,6 +226,8 @@ static ident_hash_elem_t **ident_hash_tail;
 static ident_hash_elem_t *ident_dirty_list = nullptr;
 
 instr_t instrs[MAX_INSTRS];
+static_assert(NUM_OPCODES <= MAX_INSTRS, "MAX_INSTRS must cover generated opcode table");
+static_assert(MAX_INSTRS <= F_ALIAS_FLAG, "MAX_INSTRS must stay below the alias-token flag");
 
 #define TERM_ADD_INPUT 1
 #define TERM_INCLUDE 2

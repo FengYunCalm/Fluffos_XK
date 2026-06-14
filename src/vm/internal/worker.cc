@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <deque>
 #include <future>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -86,12 +87,70 @@ int ratio_bp(int value, int max_value) {
 
 std::string actor_state_from_score(int total_score);
 
-uint64_t hash_combat_damage_input(const VMWorkerCombatDamageInput &input) {
-  if (input.snapshot_hash > 0) {
-    return static_cast<uint64_t>(input.snapshot_hash);
-  }
+int clamp_int(int value, int min_value, int max_value) {
+  return std::clamp(value, min_value, max_value);
+}
 
+int clamp_i64_to_int(int64_t value, int min_value, int max_value) {
+  if (value < min_value) {
+    return min_value;
+  }
+  if (value > max_value) {
+    return max_value;
+  }
+  return static_cast<int>(value);
+}
+
+int64_t safe_denominator(int64_t value) { return value < 1 ? 1 : value; }
+
+void normalize_min_max(int *min_value, int *max_value) {
+  if (*min_value > *max_value) {
+    std::swap(*min_value, *max_value);
+  }
+}
+
+VMWorkerCombatDamageInput normalize_combat_damage_input(VMWorkerCombatDamageInput input) {
+  constexpr int kBpBase = 10000;
+  constexpr int kStatMax = 1000000000;
+  constexpr int kFactorMax = 100000;
+
+  input.snapshot_hash = clamp_int(input.snapshot_hash, 0, std::numeric_limits<int>::max());
+  input.attack = clamp_int(input.attack, 1, kStatMax);
+  input.defense = clamp_int(input.defense, 0, kStatMax);
+  input.armor_break = clamp_int(input.armor_break, 0, kStatMax);
+  input.critical = clamp_int(input.critical, 0, kStatMax);
+  input.critical_resist = clamp_int(input.critical_resist, 0, kStatMax);
+  input.armor_break_defense_factor_bp = clamp_int(input.armor_break_defense_factor_bp, 0, kFactorMax);
+  input.armor_break_flat = clamp_int(input.armor_break_flat, 0, kStatMax);
+  input.armor_break_cap_bp = clamp_int(input.armor_break_cap_bp, 0, kBpBase);
+  input.reduction_attack_factor_bp = clamp_int(input.reduction_attack_factor_bp, 0, kFactorMax);
+  input.reduction_flat = clamp_int(input.reduction_flat, 0, kStatMax);
+  input.reduction_min_bp = clamp_int(input.reduction_min_bp, 0, kBpBase);
+  input.reduction_max_bp = clamp_int(input.reduction_max_bp, 0, kBpBase);
+  normalize_min_max(&input.reduction_min_bp, &input.reduction_max_bp);
+  input.damage_base = clamp_int(input.damage_base, 0, kStatMax);
+  input.damage_skill_factor_bp = clamp_int(input.damage_skill_factor_bp, 0, kFactorMax);
+  input.damage_random_min_bp = clamp_int(input.damage_random_min_bp, 0, kFactorMax);
+  input.damage_random_max_bp = clamp_int(input.damage_random_max_bp, 0, kFactorMax);
+  normalize_min_max(&input.damage_random_min_bp, &input.damage_random_max_bp);
+  input.damage_min = clamp_int(input.damage_min, 0, kStatMax);
+  input.variance_roll_bp = clamp_int(input.variance_roll_bp, 0,
+                                     input.damage_random_max_bp - input.damage_random_min_bp);
+  input.critical_base_bp = clamp_int(input.critical_base_bp, 0, kFactorMax);
+  input.critical_swing_bp = clamp_int(input.critical_swing_bp, 0, kFactorMax);
+  input.critical_flat = clamp_int(input.critical_flat, 0, kStatMax);
+  input.critical_min = clamp_int(input.critical_min, 0, 100);
+  input.critical_max = clamp_int(input.critical_max, 0, 100);
+  normalize_min_max(&input.critical_min, &input.critical_max);
+  input.critical_roll = clamp_int(input.critical_roll, 0, 99);
+  input.critical_damage_factor_bp = clamp_int(input.critical_damage_factor_bp, 0, kFactorMax);
+  return input;
+}
+
+uint64_t hash_combat_damage_input(VMWorkerCombatDamageInput input) {
+  input = normalize_combat_damage_input(input);
   uint64_t hash = 1469598103934665603ULL;
+  hash = hash_mix(hash, static_cast<uint64_t>(input.snapshot_hash));
   hash = hash_mix(hash, static_cast<uint64_t>(input.attack));
   hash = hash_mix(hash, static_cast<uint64_t>(input.defense));
   hash = hash_mix(hash, static_cast<uint64_t>(input.armor_break));
@@ -120,49 +179,51 @@ uint64_t hash_combat_damage_input(const VMWorkerCombatDamageInput &input) {
   return hash;
 }
 
-int safe_denominator(int value) { return value < 1 ? 1 : value; }
-
 void fill_combat_damage_result(VMWorkerCombatDamageResult *result,
                                const VMWorkerCombatDamageInput &input) {
   constexpr int kBpBase = 10000;
-  int attack = std::max(1, input.attack);
-  int defense = std::max(0, input.defense);
-  int armor_break = std::max(0, input.armor_break);
-  int denominator = safe_denominator(
-      armor_break + defense * input.armor_break_defense_factor_bp / kBpBase + input.armor_break_flat);
-  int armor_break_bp = armor_break * kBpBase / denominator;
-  armor_break_bp = std::clamp(armor_break_bp, 0, std::max(0, input.armor_break_cap_bp));
-  int effective_defense = defense * (kBpBase - armor_break_bp) / kBpBase;
-  denominator = safe_denominator(effective_defense + attack * input.reduction_attack_factor_bp / kBpBase +
-                                 input.reduction_flat);
-  int reduction_bp = effective_defense * kBpBase / denominator;
-  reduction_bp = std::clamp(reduction_bp, input.reduction_min_bp, input.reduction_max_bp);
+  auto normalized = normalize_combat_damage_input(input);
+  int64_t attack = normalized.attack;
+  int64_t defense = normalized.defense;
+  int64_t armor_break = normalized.armor_break;
+  int64_t denominator = safe_denominator(
+      armor_break + defense * normalized.armor_break_defense_factor_bp / kBpBase + normalized.armor_break_flat);
+  int armor_break_bp = clamp_i64_to_int(armor_break * kBpBase / denominator, 0,
+                                        normalized.armor_break_cap_bp);
+  int64_t effective_defense = defense * (kBpBase - armor_break_bp) / kBpBase;
+  denominator = safe_denominator(effective_defense + attack * normalized.reduction_attack_factor_bp / kBpBase +
+                                 normalized.reduction_flat);
+  int reduction_bp = clamp_i64_to_int(effective_defense * kBpBase / denominator,
+                                      normalized.reduction_min_bp, normalized.reduction_max_bp);
 
-  int damage = input.damage_base + attack * input.damage_skill_factor_bp / kBpBase;
-  int variance = input.damage_random_max_bp - input.damage_random_min_bp;
+  int64_t damage = normalized.damage_base + attack * normalized.damage_skill_factor_bp / kBpBase;
+  int variance = normalized.damage_random_max_bp - normalized.damage_random_min_bp;
   if (variance > 0) {
-    damage = damage * (input.damage_random_min_bp + std::clamp(input.variance_roll_bp, 0, variance)) / kBpBase;
+    damage = damage * (normalized.damage_random_min_bp + normalized.variance_roll_bp) / kBpBase;
   }
   damage = damage * (kBpBase - reduction_bp) / kBpBase;
 
-  int crit_denominator = safe_denominator(input.critical + input.critical_resist + input.critical_flat);
-  int critical_rate = (input.critical_base_bp + input.critical_swing_bp *
-      (input.critical - input.critical_resist) / crit_denominator) / 100;
-  critical_rate = std::clamp(critical_rate, input.critical_min, input.critical_max);
-  int critical_hit = critical_rate > std::clamp(input.critical_roll, 0, 99) ? 1 : 0;
+  int64_t crit_denominator = safe_denominator(static_cast<int64_t>(normalized.critical) +
+                                              normalized.critical_resist + normalized.critical_flat);
+  int critical_rate = clamp_i64_to_int(
+      (normalized.critical_base_bp + normalized.critical_swing_bp *
+          (static_cast<int64_t>(normalized.critical) - normalized.critical_resist) / crit_denominator) / 100,
+      normalized.critical_min, normalized.critical_max);
+  int critical_hit = critical_rate > normalized.critical_roll ? 1 : 0;
   if (critical_hit) {
-    damage = damage * input.critical_damage_factor_bp / kBpBase;
+    damage = damage * normalized.critical_damage_factor_bp / kBpBase;
   }
-  if (damage < input.damage_min) {
-    damage = input.damage_min;
+  if (damage < normalized.damage_min) {
+    damage = normalized.damage_min;
   }
 
-  result->damage = damage;
+  result->damage = clamp_i64_to_int(damage, 0, std::numeric_limits<int>::max());
   result->armor_break_bp = armor_break_bp;
   result->reduction_bp = reduction_bp;
   result->critical_rate = critical_rate;
   result->critical_hit = critical_hit;
-  result->input_hash = hash_combat_damage_input(input);
+  result->snapshot_hash = static_cast<uint64_t>(normalized.snapshot_hash);
+  result->input_hash = hash_combat_damage_input(normalized);
 }
 
 void fill_actor_score_result(VMWorkerActorScoreResult *result,
@@ -429,6 +490,7 @@ class VMWorkerRuntime {
     if (owner_key.empty()) {
       owner_key = "global";
     }
+    input = normalize_combat_damage_input(input);
     start(0);
 
     auto result = std::make_shared<VMWorkerCombatDamageResult>();
@@ -492,6 +554,7 @@ class VMWorkerRuntime {
     if (owner_key.empty()) {
       owner_key = "global";
     }
+    input = normalize_combat_damage_input(input);
     start(0);
 
     auto id = next_task_id_++;

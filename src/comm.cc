@@ -5,6 +5,8 @@
 
 #include "base/std.h"
 
+#include "vm/context.h"
+
 #include "comm.h"
 
 #include <event2/buffer.h>       // for evbuffer_freeze, etc

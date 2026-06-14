@@ -26,11 +26,37 @@ static parse_node_t *last_node = nullptr;
 
 static int last_prog_size = 1;
 
+static bool node_cursor_is_live() {
+  if (!next_node || !last_node) {
+    return false;
+  }
+
+  auto node_addr = reinterpret_cast<uintptr_t>(next_node);
+  auto last_addr = reinterpret_cast<uintptr_t>(last_node);
+  if (node_addr >= last_addr) {
+    return false;
+  }
+
+  for (auto *block = parse_block_list; block; block = block->next) {
+    auto start_addr = reinterpret_cast<uintptr_t>(&block->nodes[0]);
+    auto end_addr = reinterpret_cast<uintptr_t>(&block->nodes[NODES_PER_BLOCK]);
+    if (node_addr >= start_addr && node_addr < end_addr && last_addr == end_addr) {
+      return true;
+    }
+  }
+
+  next_node = nullptr;
+  last_node = nullptr;
+  return false;
+}
+
 /* called by code generation when it is done with the tree */
 void free_tree() {
   parse_node_block_t *cur_block;
 
   if (!(cur_block = parse_block_list)) {
+    next_node = nullptr;
+    last_node = nullptr;
     return;
   }
 
@@ -58,6 +84,8 @@ void release_tree() {
     FREE(cur_block);
   }
   free_block_list = nullptr;
+  next_node = nullptr;
+  last_node = nullptr;
   last_prog_size = 1;
 }
 
@@ -66,7 +94,7 @@ parse_node_t *new_node() {
   parse_node_block_t *cur_block;
 
   /* fast case */
-  if (next_node < last_node) {
+  if (node_cursor_is_live()) {
     next_node->line = current_line_base + current_line;
     return next_node++;
   }
@@ -97,7 +125,7 @@ parse_node_t *new_node_no_line() {
   parse_node_block_t *cur_block;
 
   /* fast case */
-  if (next_node < last_node) {
+  if (node_cursor_is_live()) {
     next_node->line = 0;
     return next_node++;
   }

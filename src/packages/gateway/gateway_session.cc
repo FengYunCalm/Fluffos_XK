@@ -301,6 +301,7 @@ object_t *gateway_create_session_internal(const char *session_id, svalue_t *data
   has_gateway_logon = function_exists("gateway_logon", ob, 0) ? 1 : 0;
   save_command_giver(ob);
   current_interactive = ob;
+  vm_context_sync_execution(vm_context());
   if (has_gateway_logon) {
     if (data_val) {
       push_svalue(data_val);
@@ -313,6 +314,7 @@ object_t *gateway_create_session_internal(const char *session_id, svalue_t *data
   }
   restore_command_giver();
   current_interactive = nullptr;
+  vm_context_sync_execution(vm_context());
 
   if (!ret) {
     auto *active_ob = resolve_active_session_owner(session_id, ob);
@@ -341,11 +343,13 @@ int gateway_destroy_session_internal(const char *session_id, const char *reason_
   if (gateway_object_valid(ob) && ob->interactive) {
     save_command_giver(ob);
     current_interactive = ob;
+    vm_context_sync_execution(vm_context());
     set_eval(max_eval_cost);
     copy_and_push_string(reason_code_str);
     copy_and_push_string(reason_text_str);
     safe_apply("gateway_disconnected", ob, 2, ORIGIN_DRIVER);
     current_interactive = nullptr;
+    vm_context_sync_execution(vm_context());
     restore_command_giver();
 
     if ((sess = gateway_find_session(session_id))) {

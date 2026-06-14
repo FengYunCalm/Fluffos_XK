@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -50,6 +51,12 @@ bool is_json_safe_value(const svalue_t *value, int depth, std::string *error) {
 int mapping_number(mapping_t *map, const char *key, int fallback) {
   auto *value = find_string_in_mapping(map, key);
   if (value && value->type == T_NUMBER) {
+    if (value->u.number > std::numeric_limits<int>::max()) {
+      return std::numeric_limits<int>::max();
+    }
+    if (value->u.number < std::numeric_limits<int>::min()) {
+      return std::numeric_limits<int>::min();
+    }
     return static_cast<int>(value->u.number);
   }
   return fallback;
@@ -188,6 +195,7 @@ void add_combat_damage_result(mapping_t *map, const VMWorkerCombatDamageResult &
   add_mapping_pair(map, "reduction_bp", result.reduction_bp);
   add_mapping_pair(map, "critical_rate", result.critical_rate);
   add_mapping_pair(map, "critical_hit", result.critical_hit);
+  add_mapping_pair(map, "snapshot_hash", static_cast<long>(result.snapshot_hash));
   add_mapping_pair(map, "input_hash", static_cast<long>(result.input_hash));
 }
 
@@ -408,7 +416,7 @@ mapping_t *worker_combat_damage_response(svalue_t *snapshot, mapping_t *options)
   }
 
   auto result = vm_worker_combat_damage(owner_key, input);
-  auto *result_spec = allocate_mapping(10);
+  auto *result_spec = allocate_mapping(11);
   add_combat_damage_result(result_spec, result);
 
   auto *response = allocate_mapping(2);
@@ -514,7 +522,7 @@ mapping_t *worker_poll_response(uint64_t task_id) {
     result_spec = allocate_mapping(11);
     add_actor_score_result(result_spec, result.actor_score);
   } else if (result.type == "combat_damage") {
-    result_spec = allocate_mapping(10);
+    result_spec = allocate_mapping(11);
     add_combat_damage_result(result_spec, result.combat_damage);
   } else {
     result_spec = allocate_mapping(6);
@@ -541,6 +549,7 @@ mapping_t *worker_submit_batch_response(array_t *batch) {
     mapping_t *options = nullptr;
     svalue_t *task = nullptr;
     svalue_t *snapshot = nullptr;
+    svalue_t *options_value = nullptr;
     mapping_t *response = nullptr;
     std::string error;
 
@@ -548,7 +557,7 @@ mapping_t *worker_submit_batch_response(array_t *batch) {
       item_map = batch->item[i].u.map;
       task = find_string_in_mapping(item_map, "task");
       snapshot = find_string_in_mapping(item_map, "snapshot");
-      auto *options_value = find_string_in_mapping(item_map, "options");
+      options_value = find_string_in_mapping(item_map, "options");
       if (options_value && options_value->type == T_MAPPING) {
         options = options_value->u.map;
       }
@@ -557,7 +566,7 @@ mapping_t *worker_submit_batch_response(array_t *batch) {
     if (!item_map || !task || task->type != T_STRING || !snapshot || !options) {
       response = worker_failure_response("batch item must include task, snapshot, and options");
       rejected++;
-    } else if (!is_json_safe_value(snapshot, 0, &error)) {
+    } else if (!is_json_safe_value(snapshot, 0, &error) || !is_json_safe_value(options_value, 0, &error)) {
       response = worker_failure_response(error.c_str());
       rejected++;
     } else {

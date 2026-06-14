@@ -1,6 +1,7 @@
 #include "base/std.h"
 
 #include "base/internal/tracing.h"
+#include "vm/context.h"
 #include "vm/vm.h"
 #include "vm/internal/base/machine.h"
 #include "compiler/internal/lex.h"  // for instrs, FIXME

@@ -71,7 +71,7 @@ typedef struct defn_s {
 #define MAXLINE 4096
 #define MLEN 4096
 #define NSIZE 256
-#define MAX_INSTRS 512
+#define MAX_INSTRS 1024
 #define EXPANDMAX 25000
 #define NARGS 25
 #define MARKS '@'

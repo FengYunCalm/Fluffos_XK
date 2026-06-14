@@ -10,6 +10,7 @@
 #include <cstdlib>
 
 #include "applies_table.autogen.h"
+#include "vm/context.h"
 #include "vm/internal/base/machine.h"  // for reset_machine
 #include "vm/internal/eval_limit.h"
 #include "vm/internal/master.h"

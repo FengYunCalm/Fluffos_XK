@@ -1887,6 +1887,7 @@ void dealloc_object(object_t *ob, const char *from) {
   ob->next_all = 0;
   ob->prev_all = 0;
   tot_dangling_object--;
+  vm_context_sync_object_store(vm_context());
 #endif
   tot_alloc_object--;
   FREE((char *)ob);
