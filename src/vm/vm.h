@@ -10,6 +10,8 @@
 
 // This file is the main API bundle for interacting with vm layer.
 
+#include "vm/context.h"
+
 // for apply()
 #include "applies_table.autogen.h"
 #include "vm/internal/apply.h"

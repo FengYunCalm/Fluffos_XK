@@ -68,6 +68,7 @@ void preload_objects() {
 
 void vm_init() {
   boot_time = get_current_time();
+  vm_context_set_boot_time(vm_context(), boot_time);
 
   init_eval(); /* in eval.cc */
 
@@ -127,6 +128,7 @@ void clear_state() {
   previous_ob = nullptr;
   current_prog = nullptr;
   caller_type = 0;
+  vm_context_reset_execution(vm_context());
   reset_machine(0); /* Pop down the stack. */
 } /* clear_state() */
 
@@ -146,5 +148,6 @@ void remove_destructed_objects() {
       destruct2(ob);
     }
     obj_list_destruct = nullptr;
+    vm_context_sync_object_store(vm_context());
   }
 } /* remove_destructed_objects() */

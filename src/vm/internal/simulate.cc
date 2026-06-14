@@ -53,6 +53,9 @@ void db_cleanup(void);  // FIXME
 #include "comm.h"  // FIXME
 
 #include "vm/internal/trace.h"  // for dump_trace && get_svalue_trace
+#include "vm/context.h"
+#include "vm/owner.h"
+#include "vm/worker.h"
 /*
  * This one is called from HUP.
  */
@@ -71,6 +74,7 @@ void shutdownMudOS(int exit_code) {
 #ifdef PACKAGE_MUDLIB_STATS
   save_stat_files();
 #endif
+  vm_worker_stop();
 #ifdef PACKAGE_ASYNC
   complete_all_asyncio();
 #endif
@@ -104,19 +108,19 @@ void shutdownMudOS(int exit_code) {
 
 /* prevents infinite inherit loops.
  No, mark-and-sweep solution won't work.  Exercise for reader.  */
-static int num_objects_this_thread = 0;
+static thread_local int num_objects_this_thread = 0;
 
 #ifndef NO_ENVIRONMENT
-static object_t *restrict_destruct;
+static thread_local object_t *restrict_destruct;
 #endif
 
 object_t *obj_list, *obj_list_destruct;
 #ifdef DEBUG
 object_t *obj_list_dangling = 0;
 #endif
-object_t *current_object;      /* The object interpreting a function. */
-object_t *command_giver;       /* Where the current command came from. */
-object_t *current_interactive; /* The user who caused this execution */
+thread_local object_t *current_object;      /* The object interpreting a function. */
+thread_local object_t *command_giver;       /* Where the current command came from. */
+thread_local object_t *current_interactive; /* The user who caused this execution */
 
 #ifdef PRIVS
 static void init_privs_for_object(object_t *);
@@ -556,6 +560,7 @@ object_t *load_object(const char *lname, int callcreate) {
     obj_list->prev_all = ob;
   }
   obj_list = ob;
+  vm_context_sync_object_store(vm_context());
   ObjectTable::instance().insert(ob->obname, ob); /* add name to fast object lookup table */
   save_command_giver(command_giver);
   push_object(ob);
@@ -652,6 +657,7 @@ object_t *clone_object(const char *str1, int num_arg) {
   obj_list->prev_all = new_ob;
   new_ob->prev_all = nullptr;
   obj_list = new_ob;
+  vm_context_sync_object_store(vm_context());
   ObjectTable::instance().insert(new_ob->obname, new_ob); /* Add name to fast object lookup table */
   init_object(new_ob);
 
@@ -704,6 +710,7 @@ object_t *object_present(svalue_t *v, object_t *ob) {
   if (ob->flags & O_DESTRUCTED) {
     return nullptr;
   }
+  vm_owner_record_cross_owner_access(current_object, ob, "present");
   if (v->type == T_OBJECT) {
     if (specific) {
       if (v->u.ob->super == ob) {
@@ -850,6 +857,7 @@ void destruct_object(object_t *ob) {
   if (ob->flags & O_DESTRUCTED) {
     return;
   }
+  vm_owner_record_cross_owner_access(current_object, ob, "destruct");
   remove_object_from_stack(ob);
 /*
  * If this is the first object being shadowed by another object, then
@@ -1077,6 +1085,7 @@ void destruct_object(object_t *ob) {
   obj_list_dangling = ob;
   ob->prev_all = 0;
 #endif
+  vm_context_sync_object_store(vm_context());
 }
 
 /*
@@ -1509,6 +1518,7 @@ void move_object(object_t *item, object_t *dest) {
   object_t **pp, *ob;
 
   save_command_giver(command_giver);
+  vm_owner_record_cross_owner_access(item, dest, "move_object");
 
   /* Recursive moves are not allowed. */
   for (ob = dest; ob; ob = ob->super) {
@@ -1706,8 +1716,8 @@ void free_sentence(sentence_t *p) {
   std::abort();
 }
 
-static int num_error = 0;
-static int num_mudlib_error = 0;
+static thread_local int num_error = 0;
+static thread_local int num_mudlib_error = 0;
 
 /*
  * Error() has been "fixed" so that users can catch and throw them.

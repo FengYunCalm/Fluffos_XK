@@ -6,6 +6,7 @@
 #include <cstdio>     // for sprintf
 
 #include "base/internal/tracing.h"
+#include "vm/context.h"
 #include "vm/internal/base/apply_cache.h"
 #include "vm/internal/base/machine.h"
 #include "vm/internal/base/debug.h"
@@ -15,7 +16,7 @@
 #include "applies_table.autogen.h"
 
 // global static result
-svalue_t apply_ret_value;
+thread_local svalue_t apply_ret_value;
 
 int convert_type(int /*type*/);
 
@@ -275,6 +276,7 @@ retry_for_shadow:
             csp->pc = pc;
             csp->num_local_variables = 0;
             current_prog = progp;
+            vm_context_sync_execution(vm_context());
             call_program(progp, default_funcp->address);
 
             if (sp - current_sp != 1 || sp->type != T_FUNCTION) {
@@ -326,6 +328,7 @@ retry_for_shadow:
     /* Call the program */
     previous_ob = current_object;
     current_object = ob;
+    vm_context_sync_execution(vm_context());
 #ifdef DEBUG
     save_csp = csp;
 #endif

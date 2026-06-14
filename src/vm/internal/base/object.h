@@ -115,8 +115,10 @@ struct object_t {
 #ifdef PACKAGE_PARSER
   struct parse_info_s *pinfo;
 #endif
+  const char *vm_owner_id; /* owner-thread metadata; variables must stay last */
+  uint64_t vm_owner_epoch;
   svalue_t variables[1]; /* All variables to this program */
-                         /* The variables MUST come last in the struct */
+                          /* The variables MUST come last in the struct */
 };
 
 typedef int (*get_objectsfn_t)(object_t *, void *);
@@ -138,9 +140,9 @@ typedef int (*get_objectsfn_t)(object_t *, void *);
 
 #define SETOBNAME(ob, name) (*(const char **)&(ob->obname) = (char *)name)
 
-extern object_t *previous_ob;
+extern thread_local object_t *previous_ob;
 extern int save_svalue_depth;
-extern object_t **cgsp;
+extern thread_local object_t **cgsp;
 #ifdef F_SET_HIDE
 extern int num_hidden;
 #endif

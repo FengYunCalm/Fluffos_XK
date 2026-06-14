@@ -6,6 +6,7 @@
 #include "comm.h"
 #include "packages/core/dns.h"
 #include "user.h"
+#include "vm/context.h"
 
 #include <event2/event.h>
 #include <nlohmann/json.hpp>
@@ -76,6 +77,7 @@ void gateway_command_callback(evutil_socket_t /*fd*/, short /*what*/, void *arg)
   set_eval(max_eval_cost);
   process_user_command(user);
   current_interactive = nullptr;
+  vm_context_sync_execution(vm_context());
 }
 
 object_t *resolve_active_session_owner(const char *session_id, object_t *fallback = nullptr) {

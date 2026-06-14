@@ -70,6 +70,7 @@ event_base *init_backend() {
   evthread_use_pthreads();
 #endif
   g_event_base = event_base_new();
+  vm_context_set_event_base(vm_context(), g_event_base);
   debug_message("Event backend in use: %s\n", event_base_get_method(g_event_base));
   return g_event_base;
 }
@@ -144,6 +145,7 @@ inline void call_tick_events() {
 void on_game_tick(evutil_socket_t /*fd*/, short /*what*/, void *arg) {
   call_tick_events();
   g_current_gametick++;
+  vm_context_set_current_gametick(vm_context(), g_current_gametick);
 
   auto *ev = *(reinterpret_cast<struct event **>(arg));
   auto t = gametick_timeval();
@@ -211,6 +213,7 @@ void call_remove_destructed_objects() {
 void backend(struct event_base *base) {
   clear_state();
   g_current_gametick = 0;
+  vm_context_set_current_gametick(vm_context(), g_current_gametick);
 
   // Register various tick events
   add_gametick_event(0, TickEvent::callback_type(call_heart_beat));
