@@ -4198,6 +4198,7 @@ void call___INIT(object_t *ob) {
   previous_ob = current_object;
 
   current_object = ob;
+  vm_context_sync_execution(vm_context());
   setup_new_frame(num_functions - 1 + progp->last_inherited);
 #ifdef DEBUG
   save_csp = csp;
