@@ -1292,6 +1292,67 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsUnregisteredLpcTask) {
   destruct_object(probe);
 }
 
+TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredDomainLpcTasks) {
+  const char* owner = "owner/test/thread/lpc-domain-task";
+  const char* methods[] = {"owner_task_readonly", "owner_task_player",      "owner_task_room",
+                           "owner_task_session",  "owner_task_item",        "owner_task_economy",
+                           "owner_task_combat",   "owner_task_mail",        "owner_task_reward",
+                           "owner_task_world",    "owner_task_persistence", "owner_task_team",
+                           "owner_task_guild",    "owner_task_sect",        "owner_task_quest",
+                           "owner_task_rank",     "owner_task_crafting",    "owner_task_life_skill"};
+  const int method_count = static_cast<int>(sizeof(methods) / sizeof(methods[0]));
+  ASSERT_TRUE(vm_context_is_main_thread());
+
+  vm_owner_thread_stop();
+  object_t* probe = load_object_for_test("single/void");
+  ASSERT_NE(probe, nullptr);
+  vm_owner_set_id(probe, owner);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+
+  auto* before = vm_owner_thread_status();
+  auto before_succeeded = mapping_number(before, "thread_lpc_task_succeeded");
+  auto before_failed = mapping_number(before, "thread_lpc_task_failed");
+  auto before_rejected = mapping_number(before, "thread_lpc_task_rejected");
+  free_mapping(before);
+
+  for (const auto* method : methods) {
+    auto* submitted = vm_owner_lpc_task(probe, owner, method);
+    ASSERT_EQ(mapping_number(submitted, "success"), 1);
+    ASSERT_EQ(mapping_number(submitted, "registered_task"), 1) << method;
+    free_mapping(submitted);
+  }
+
+  vm_owner_thread_start(4);
+  for (int i = 0; i < 200; i++) {
+    auto* status = vm_owner_thread_status();
+    auto succeeded = mapping_number(status, "thread_lpc_task_succeeded");
+    auto active = mapping_number(status, "active_owners");
+    free_mapping(status);
+    if (succeeded >= before_succeeded + method_count && active == 0) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  auto* running = vm_owner_thread_status();
+  ASSERT_EQ(mapping_number(running, "enabled"), 1);
+  ASSERT_EQ(mapping_number(running, "thread_count"), 4);
+  ASSERT_GE(mapping_number(running, "thread_lpc_task_succeeded"), before_succeeded + method_count);
+  ASSERT_EQ(mapping_number(running, "thread_lpc_task_failed"), before_failed);
+  ASSERT_EQ(mapping_number(running, "thread_lpc_task_rejected"), before_rejected);
+  ASSERT_EQ(mapping_number(running, "active_owners"), 0);
+  free_mapping(running);
+
+  vm_owner_thread_stop();
+  destruct_object(probe);
+}
+
 TEST_F(DriverTest, TestVmOwnerThreadRejectsUnsafeLpcCanaryRequestsDeltas) {
   const char* owner = "owner/test/thread/lpc-canary-reject";
   ASSERT_TRUE(vm_context_is_main_thread());

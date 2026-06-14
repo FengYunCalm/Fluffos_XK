@@ -3,6 +3,7 @@
 #include "vm/context.h"
 #include "vm/owner.h"
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <cstring>
@@ -393,8 +394,20 @@ bool owner_execution_state_cleared() {
          execution.current_prog == nullptr && execution.caller_type == 0;
 }
 
+constexpr std::array<const char *, 18> kRegisteredOwnerLpcTasks = {
+    "owner_task_readonly",    "owner_task_player", "owner_task_room",       "owner_task_session",
+    "owner_task_item",        "owner_task_economy", "owner_task_combat",     "owner_task_mail",
+    "owner_task_reward",      "owner_task_world",   "owner_task_persistence", "owner_task_team",
+    "owner_task_guild",       "owner_task_sect",    "owner_task_quest",      "owner_task_rank",
+    "owner_task_crafting",    "owner_task_life_skill"};
+
 bool owner_lpc_task_allowed(const OwnerMailboxTask &task) {
-  return task.task_key == "owner_task_readonly";
+  for (const auto *method : kRegisteredOwnerLpcTasks) {
+    if (task.task_key == method) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void record_owner_context_cleanup(const OwnerMailboxTask &task) {
