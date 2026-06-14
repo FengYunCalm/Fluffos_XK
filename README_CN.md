@@ -1,22 +1,42 @@
-# FluffOS（本仓库分支）
+# FluffOS_XK
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![CMake](https://img.shields.io/badge/build-CMake-blue.svg)](CMakeLists.txt)
+[![LPC Runtime](https://img.shields.io/badge/runtime-LPC%20%2F%20MUD-informational.svg)](https://www.fluffos.info)
 
 [English](README.md) | 简体中文
 
-本仓库是 FluffOS 的分支，目标是提升现代编译工具链下的构建稳定性与告警清理，
-并重点优化 Windows/MSYS2 的安装体验。
+FluffOS_XK 是 [FluffOS](https://github.com/fluffos/fluffos) 的公开维护分支，面向现代 LPC/MUD 运行时项目。
+它保留经典 FluffOS driver 模型，同时改进构建稳定性、网关集成、运行时 ownership 边界和下游引擎维护体验。
 
-## 仓库定位
+这个仓库适合作为源码级 FluffOS 引擎基线使用；它不是完整游戏服务端，也不是对 LPC 生态的重写。
 
-- 维护供下游 MUD 运行树使用的 FluffOS 源码级分支改动
-- 重点放在构建稳定性和定向告警清理，而不是功能分叉
-- 与消费该驱动的游戏仓库分离维护上游同步关系
+## 特性亮点
 
-## 本分支的优化点
+- **适合下游项目消费的引擎分支**：引擎仓库与游戏 mudlib 分离，便于下游项目同步 driver 更新，而不会混入游戏内容。
+- **owner-runtime 基础设施**：包含运行时 ownership 与 VM worker 基础工作，支持下游逐步迁移到 actor-style 服务边界，同时不开放不安全的任意后台 LPC 执行。
+- **面向网关的运行路径**：维护现代 WebSocket 客户端和服务化部署所需的 gateway/session 集成。
+- **Linux 与 Windows 构建更稳定**：改进 CMake 与 Windows/MSYS2 安装行为，包括 `cmake --install` 时更安全地覆盖二进制。
+- **编译器与依赖卫生**：对核心模块做定向告警清理，并控制 vendored 第三方依赖的噪音告警。
+- **开源仓库基础完善**：提供清晰的 license、贡献指南、安全策略、变更记录和明确的维护范围，便于外部审查。
 
-- **Windows 安装稳定性**：`cmake --install` 在 Windows 下通过 `bash cp -f` 安全覆盖二进制，避免覆盖 `driver.exe` 等文件时出现“Permission denied”。
-- **核心告警清理**：针对 scratchpad、preprocessor、ed、telnet_ext、external、socket_efuns 等模块的告警修复。
-- **第三方告警控制**：对 libevent/crypt/libwebsockets 进行告警抑制并关闭 IPO；调整 filesystem 的 CMake 最低版本以增强兼容性。
-- **许可对齐**：补齐 LICENSE/NOTICE，并在 README 中引用官方许可来源。
+## 为什么维护这个分支
+
+上游 FluffOS 仍然是 driver 的 canonical 来源。FluffOS_XK 的定位是为实际运行项目保留一条生产可用的维护线，满足这些需求：
+
+- 在当前 Linux 与 Windows 工具链上获得可预测的构建结果；
+- 为 owner-runtime 与 VM worker 实验提供一个由下游实际使用验证的稳定位置；
+- 支持 Web 和移动客户端需要的 gateway 集成；
+- 提供一个不夹带私有项目产物、可以公开审查和集成的引擎仓库。
+
+## 运行时重点
+
+FluffOS_XK 关注引擎基础能力，不承载具体玩法规则。
+
+- **owner-bound execution**：ownership 检查与运行时合同支持从全局可变服务逐步迁移到更安全的 owner/actor-style 执行边界。
+- **VM worker infrastructure**：worker/context 清理为受控的 off-main 执行路径打基础。
+- **Gateway sessions**：gateway session 生命周期与 logon 行为保持可测试，便于面向 WebSocket 客户端。
+- **运行树隔离**：游戏仓库可以 pin 或重建这个 driver，而不继承引擎开发分支、私有文档或部署数据。
 
 ## 获取源码
 
@@ -25,36 +45,69 @@ git clone https://github.com/FengYunCalm/Fluffos_XK.git
 cd Fluffos_XK
 ```
 
-这个 README 只停留在源码仓库层面，不声明打包分发或托管部署路径。
+## 构建
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target driver lpcc lpc_tests
+build/src/tests/lpc_tests
+```
+
+面向安装的环境可以使用：
+
+```bash
+cmake --build build --target install
+```
+
+Windows/MSYS2 用户应优先使用 CMake install 路径，而不是手工复制生成的二进制。
+
+## 给下游 MUD 项目
+
+可以把本仓库作为引擎源码树，也可以用它重建 `driver` 与 `lpcc` 二进制。mudlib、世界内容、服务配置、账号和部署数据应留在你自己的项目仓库。
+
+推荐下游流程：
+
+1. 从确定的 FluffOS_XK commit 重建 `driver` 与 `lpcc`。
+2. 运行上游引擎测试，例如 `lpc_tests`。
+3. 将生成的二进制同步到下游运行树。
+4. 在项目侧跑登录、网关、命令、内容加载和持久化 smoke test。
+
+## 项目范围
+
+本仓库接受：
+
+- 构建稳定性、CMake 和安装修复；
+- runtime ownership、VM worker 和 gateway 集成维护；
+- 聚焦的编译告警清理；
+- 让 fork 更容易审查和消费的源码卫生改进。
+
+本仓库不做：
+
+- 捆绑完整游戏 mudlib；
+- 取代上游 FluffOS 的 canonical 项目地位；
+- 在没有显式 ownership 合同的情况下开放任意后台 LPC 执行；
+- 加入私有部署脚本、密钥、账号数据或游戏专属内容。
 
 ## 文档
 
-- 官方文档：https://www.fluffos.info
+- FluffOS 官方文档：https://www.fluffos.info
 - 本地文档入口：`docs/index.md`
 - 本分支变更记录：`CHANGELOG.md`
-- 完整功能列表与历史说明请参考上游文档。
+- 发布与工作流说明：`RELEASE.md`
 
-## 贡献指南
+## 贡献
 
-请查看 `CONTRIBUTING.md`（英文）了解范围与提交规范。
+欢迎聚焦的贡献，包括构建修复、告警清理、测试覆盖、文档，以及符合本分支定位的运行时维护。提交 PR 前请先阅读 `CONTRIBUTING.md`。
 
-## 安全
-
-请负责任地报告漏洞，详见 `SECURITY.md`。
-
-## 行为准则
-
-参见 `CODE_OF_CONDUCT.md`。
+安全问题请负责任地报告，详见 `SECURITY.md`。
 
 ## 许可与引用
 
-- MIT 许可，见 `LICENSE`。
-- 官方许可文本引用：
-  - https://www.fluffos.info（License & Copyright）
-  - `docs/index.md`
-- 历史 LPmud/MudOS 限制仍适用于遗留组件，见 `Copyright`。
+- MIT License：见 `LICENSE`。
+- 历史 LPmud/MudOS notice 仍适用于遗留组件：见 `Copyright`。
 - 第三方许可：见 `NOTICE` 与 `src/thirdparty/*`。
 
 ## 上游
 
-- https://github.com/fluffos/fluffos
+- 上游项目：https://github.com/fluffos/fluffos
+- 官方文档：https://www.fluffos.info
