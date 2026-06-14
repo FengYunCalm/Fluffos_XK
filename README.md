@@ -21,8 +21,8 @@ with special attention to Windows/MSYS2 installations.
 ## Get the code
 
 ```bash
-git clone https://github.com/FengYunCalm/fluffos-src.git
-cd fluffos-src
+git clone https://github.com/FengYunCalm/Fluffos_XK.git
+cd Fluffos_XK
 ```
 
 This README stays at source-repository scope. It does not claim any packaged distribution or hosted deployment path.

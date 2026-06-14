@@ -21,8 +21,8 @@
 ## 获取源码
 
 ```bash
-git clone https://github.com/FengYunCalm/fluffos-src.git
-cd fluffos-src
+git clone https://github.com/FengYunCalm/Fluffos_XK.git
+cd Fluffos_XK
 ```
 
 这个 README 只停留在源码仓库层面，不声明打包分发或托管部署路径。
