@@ -38,6 +38,19 @@ FluffOS_XK 关注引擎基础能力，不承载具体玩法规则。
 - **Gateway sessions**：gateway session 生命周期与 logon 行为保持可测试，便于面向 WebSocket 客户端。
 - **运行树隔离**：游戏仓库可以 pin 或重建这个 driver，而不继承引擎开发分支、私有文档或部署数据。
 
+## 多核化运行时状态
+
+当前多核化工作已经落地为受控运行时基础设施，而不是不受限制的后台 LPC 执行。driver 现在具备线程本地 VMContext、owner-aware worker runtime、owner mailbox、owner task trace，以及受保护的 owner LPC canary/task 路径。
+
+目前的实际效果：
+
+- 快照摘要、角色评分、战斗伤害计算等 CPU 型任务可以通过 VM worker 执行。
+- worker 队列按 owner key 约束，同一 owner 内保持串行，不同 owner 之间可以并行推进。
+- owner id、epoch、mailbox trace、access trace、message/commit trace 为下游迁移到 actor-style 服务边界提供观测和迁移路径。
+- 普通 LPC 执行仍默认禁止 off-main，只有通过显式 owner 合同和注册白名单的路径才会进入受控执行。
+
+当前状态、改造效果、边界和下游迁移建议见 `docs/multicore-runtime.md`。
+
 ## 获取源码
 
 ```bash
@@ -91,6 +104,7 @@ Windows/MSYS2 用户应优先使用 CMake install 路径，而不是手工复制
 ## 文档
 
 - FluffOS 官方文档：https://www.fluffos.info
+- 多核化运行时说明：`docs/multicore-runtime.md`
 - 本地文档入口：`docs/index.md`
 - 本分支变更记录：`CHANGELOG.md`
 - 发布与工作流说明：`RELEASE.md`

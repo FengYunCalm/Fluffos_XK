@@ -108,6 +108,7 @@ const FlagEntry INT_FLAGS[] = {
     {"gateway external", __RC_GATEWAY_EXTERNAL__, 0},
     {"gateway debug", __RC_GATEWAY_DEBUG__, 0},
     {"gateway packet size", __RC_GATEWAY_PACKET_SIZE__, 1048576, 1024, 16 * 1024 * 1024},
+    {"multicore mode", __RC_MULTICORE_MODE__, 1, 0, 2},
 };
 
 /*
@@ -171,6 +172,20 @@ bool scan_config_line(const char *fmt, void *dest, int required) {
   }
 
   return false;
+}
+
+int parse_multicore_mode(const char *value) {
+  if (!value || value[0] == '\0' || strcmp(value, "audit") == 0) {
+    return 1;
+  }
+  if (strcmp(value, "off") == 0) {
+    return 0;
+  }
+  if (strcmp(value, "enforced") == 0) {
+    return 2;
+  }
+  debug_message("Unknown multicore mode: %s. Expected off, audit, or enforced.\n", value);
+  exit(-1);
 }
 
 }  // namespace
@@ -366,6 +381,11 @@ void read_config(const char *filename) {
     }
   }
 #endif
+
+  if (scan_config_line("multicore mode : %[^\n]", tmp, kOptional)) {
+    auto value = trim(std::string(tmp));
+    CONFIG_INT(__RC_MULTICORE_MODE__) = parse_multicore_mode(value.c_str());
+  }
 
   // Complain about obsolete config lines.
   scan_config_line("address server ip : %[^\n]", tmp, -2);

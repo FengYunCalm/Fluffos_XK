@@ -77,6 +77,9 @@
 
 #include "packages/core/ed.h"
 
+#include "vm/context.h"
+#include "vm/owner.h"
+
 #include <algorithm>
 
 #include "packages/core/file.h"
@@ -592,6 +595,9 @@ static void free_ed_buffer(object_t *who) {
 
     /* make this "safe" */
     set_eval(max_eval_cost);
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(exit_ob), vm_owner_epoch(exit_ob));
+    vm_owner_record_task_trace(vm_owner_id(exit_ob), "ed_callback", exit_fn, vm_owner_epoch(exit_ob),
+                               "dispatched");
     safe_apply(exit_fn, exit_ob, 0, ORIGIN_INTERNAL);
     FREE(exit_fn);
     free_object(&exit_ob, "ed EOF");
@@ -772,6 +778,9 @@ static int dowrite(int from, int to, const char *fname, int apflg) {
     push_malloced_string(add_slash(fname));
     push_number(0);
     set_eval(max_eval_cost);
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(ED_BUFFER->exit_ob), vm_owner_epoch(ED_BUFFER->exit_ob));
+    vm_owner_record_task_trace(vm_owner_id(ED_BUFFER->exit_ob), "ed_callback", ED_BUFFER->write_fn,
+                               vm_owner_epoch(ED_BUFFER->exit_ob), "dispatched");
     res = safe_apply(ED_BUFFER->write_fn, ED_BUFFER->exit_ob, 2, ORIGIN_INTERNAL);
     if (IS_ZERO(res)) {
       return (EDERR);
@@ -814,6 +823,9 @@ static int dowrite(int from, int to, const char *fname, int apflg) {
     push_malloced_string(add_slash(fname));
     push_number(1);
     set_eval(max_eval_cost);
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(ED_BUFFER->exit_ob), vm_owner_epoch(ED_BUFFER->exit_ob));
+    vm_owner_record_task_trace(vm_owner_id(ED_BUFFER->exit_ob), "ed_callback", ED_BUFFER->write_fn,
+                               vm_owner_epoch(ED_BUFFER->exit_ob), "dispatched");
     safe_apply(ED_BUFFER->write_fn, ED_BUFFER->exit_ob, 2, ORIGIN_INTERNAL);
   }
 #endif

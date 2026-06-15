@@ -7,6 +7,7 @@
 #include "packages/core/heartbeat.h"
 
 #include "vm/context.h"
+#include "vm/object_handle.h"
 #include "vm/owner.h"
 
 #include <algorithm>
@@ -78,6 +79,7 @@ void call_heart_beat() {
 
     if (curr_hb->owner_id != vm_owner_id(ob) || curr_hb->owner_epoch != vm_owner_epoch(ob)) {
       vm_owner_record_task_trace(vm_owner_id(ob), "heartbeat", "heart_beat", vm_owner_epoch(ob), "stale");
+      continue;
     }
     vm_owner_record_task_trace(vm_owner_id(ob), "heartbeat", "heart_beat", vm_owner_epoch(ob), "dispatched");
 
@@ -100,6 +102,7 @@ void call_heart_beat() {
 
     auto heartbeat_execution = vm_context_capture_execution();
     heartbeat_execution.current_interactive = ob->interactive ? ob : nullptr;
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob), vm_owner_epoch(ob));
     VMExecutionScope heartbeat_scope(vm_context(), heartbeat_execution);
 
     save_command_giver(new_command_giver);
@@ -210,6 +213,7 @@ int set_heart_beat(object_t *ob, int to) {
     target_hb->heart_beat_ticks = to;
     target_hb->owner_id = vm_owner_id(ob);
     target_hb->owner_epoch = vm_owner_epoch(ob);
+    vm_object_store_record_heartbeat(ob);
     vm_owner_record_task_trace(target_hb->owner_id.c_str(), "heartbeat", "heart_beat", target_hb->owner_epoch,
                                "scheduled");
     return 1;
@@ -220,6 +224,7 @@ int set_heart_beat(object_t *ob, int to) {
     target_hb->heart_beat_ticks = to;
     target_hb->owner_id = vm_owner_id(ob);
     target_hb->owner_epoch = vm_owner_epoch(ob);
+    vm_object_store_record_heartbeat(ob);
     vm_owner_record_task_trace(target_hb->owner_id.c_str(), "heartbeat", "heart_beat", target_hb->owner_epoch,
                                "scheduled");
     return 1;

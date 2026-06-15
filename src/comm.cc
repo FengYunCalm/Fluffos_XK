@@ -38,6 +38,7 @@
 #include "net/tls.h"
 #include "user.h"
 #include "vm/vm.h"
+#include "vm/owner.h"
 
 #include "ghc/filesystem.hpp"
 namespace fs = ghc::filesystem;
@@ -71,6 +72,16 @@ namespace {
 struct UserEventData {
   int idx;
 };
+
+svalue_t *owner_bound_safe_apply(const char *fun, object_t *ob, int num_arg, int origin,
+                                 const char *task_type) {
+  if (!ob) {
+    return nullptr;
+  }
+  VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob), vm_owner_epoch(ob));
+  vm_owner_record_task_trace(vm_owner_id(ob), task_type, fun, vm_owner_epoch(ob), "dispatched");
+  return safe_apply(fun, ob, num_arg, origin);
+}
 
 void maybe_schedule_user_command(interactive_t *user) {
   // If user has a complete command, schedule a command execution.
@@ -308,7 +319,7 @@ void on_user_logon(interactive_t *user) {
 
   // Call logon() on the object.
   set_eval(max_eval_cost);
-  ret = safe_apply(APPLY_LOGON, ob, 0, ORIGIN_DRIVER);
+  ret = owner_bound_safe_apply(APPLY_LOGON, ob, 0, ORIGIN_DRIVER, "interactive");
   if (ret == nullptr) {
     debug_message("new_conn_handler: logon() on object %s has failed, the user is disconnected.\n",
                   ob->obname);
@@ -836,7 +847,7 @@ void get_user_data(interactive_t *ip) {
           }
           ip->text_end = 0;
           set_eval(max_eval_cost);
-          safe_apply(APPLY_PROCESS_INPUT, ip->ob, 1, ORIGIN_DRIVER);
+          owner_bound_safe_apply(APPLY_PROCESS_INPUT, ip->ob, 1, ORIGIN_DRIVER, "interactive");
         }
       }
       break;
@@ -863,7 +874,7 @@ void get_user_data(interactive_t *ip) {
           memcpy(str, p, nl - p + 1);
           push_malloced_string(str);
           set_eval(max_eval_cost);
-          safe_apply(APPLY_PROCESS_INPUT, ip->ob, 1, ORIGIN_DRIVER);
+          owner_bound_safe_apply(APPLY_PROCESS_INPUT, ip->ob, 1, ORIGIN_DRIVER, "interactive");
         }
 
         if (ip->text_start == ip->text_end) {
@@ -883,7 +894,7 @@ void get_user_data(interactive_t *ip) {
 
       push_refed_buffer(buffer);
       set_eval(max_eval_cost);
-      safe_apply(APPLY_PROCESS_INPUT, ip->ob, 1, ORIGIN_DRIVER);
+      owner_bound_safe_apply(APPLY_PROCESS_INPUT, ip->ob, 1, ORIGIN_DRIVER, "interactive");
     } break;
   }
 }
@@ -1145,9 +1156,9 @@ static void process_input(interactive_t *ip, char *user_command) {
    * send a copy of user input back to user object to provide
    * support for things like command history and mud shell
    * programming languages.
-   */
+  */
   copy_and_push_string(user_command);
-  ret = safe_apply(APPLY_PROCESS_INPUT, command_giver, 1, ORIGIN_DRIVER);
+  ret = owner_bound_safe_apply(APPLY_PROCESS_INPUT, command_giver, 1, ORIGIN_DRIVER, "interactive");
   if (!IP_VALID(ip, command_giver)) {
     return;
   }
@@ -1192,6 +1203,9 @@ int process_user_command(interactive_t *ip) {
   }
 
   current_interactive = command_giver; /* this is yuck phooey, sigh */
+  VMOwnerScope owner_scope(vm_context(), vm_owner_id(command_giver), vm_owner_epoch(command_giver));
+  vm_owner_record_task_trace(vm_owner_id(command_giver), "interactive", "process_user_command",
+                             vm_owner_epoch(command_giver), "dispatched");
   vm_context_sync_execution(vm_context());
   if (ip) {
     clear_notify(ip->ob);
@@ -1317,7 +1331,7 @@ void remove_interactive(object_t *ob, int dested) {
      */
     save_command_giver(ob);
     set_eval(max_eval_cost);
-    safe_apply(APPLY_NET_DEAD, ob, 0, ORIGIN_DRIVER);
+    owner_bound_safe_apply(APPLY_NET_DEAD, ob, 0, ORIGIN_DRIVER, "interactive");
     restore_command_giver();
   }
 
@@ -1498,8 +1512,11 @@ static int call_function_interactive(interactive_t *i, char *str) {
     }
     /* current_object no longer set */
     if (function) {
-      (void)safe_apply(function, ob, num_arg + 1, ORIGIN_INTERNAL);
+      (void)owner_bound_safe_apply(function, ob, num_arg + 1, ORIGIN_INTERNAL, "interactive_input_to");
     } else {
+      VMOwnerScope owner_scope(vm_context(), vm_owner_id(funp->hdr.owner), vm_owner_epoch(funp->hdr.owner));
+      vm_owner_record_task_trace(vm_owner_id(funp->hdr.owner), "interactive_input_to", "<function>",
+                                 vm_owner_epoch(funp->hdr.owner), "dispatched");
       safe_call_function_pointer(funp, num_arg + 1);
     }
     // NOTE: we can't use "i" here anymore, it is possible that it
@@ -1566,7 +1583,7 @@ static void print_prompt(interactive_t *ip) {
     tell_object(ip->ob, ip->prompt, strlen(ip->prompt));
   }
 #endif
-  else if (!safe_apply(APPLY_WRITE_PROMPT, ip->ob, 0, ORIGIN_DRIVER)) {
+  else if (!owner_bound_safe_apply(APPLY_WRITE_PROMPT, ip->ob, 0, ORIGIN_DRIVER, "interactive")) {
     ip->iflags &= ~HAS_WRITE_PROMPT;
     tell_object(ip->ob, ip->prompt, strlen(ip->prompt));
   }
@@ -1583,7 +1600,7 @@ static void receive_snoop(const char *buf, int len, object_t *snooper) {
     str[len] = 0;
     push_malloced_string(str);
     set_eval(max_eval_cost);
-    safe_apply(APPLY_RECEIVE_SNOOP, snooper, 1, ORIGIN_DRIVER);
+    owner_bound_safe_apply(APPLY_RECEIVE_SNOOP, snooper, 1, ORIGIN_DRIVER, "interactive");
   } else {
     /* snoop output is now % in all cases */
     add_message(snooper, "%", 1);

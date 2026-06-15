@@ -33,6 +33,7 @@
 #include "thirdparty/scope_guard/scope_guard.hpp"
 #include "packages/core/dns.h"                   // for init_dns_event_base.
 #include "vm/vm.h"                               // for push_constant_string, etc
+#include "vm/owner.h"
 #include "comm.h"                                // for init_user_conn
 #include "backend.h"                             // for backend();
 #include "thirdparty/backward-cpp/backward.hpp"  // for backtracing
@@ -46,6 +47,15 @@ extern void print_all_predefines();
 
 namespace {
 inline void print_sep() { debug_message("%s\n", std::string(72, '=').c_str()); }
+
+bool has_driver_flag(int argc, char **argv) {
+  for (int i = 1; i < argc; i++) {
+    if (argv[i][0] == '-' && argv[i][1] == 'f') {
+      return true;
+    }
+  }
+  return false;
+}
 
 void incrase_fd_rlimit() {
 #ifndef _WIN32
@@ -433,6 +443,11 @@ int driver_main(int argc, char **argv) {
   }
   if (MudOS_is_being_shut_down) {
     exit(1);
+  }
+
+  auto driver_flag_mode = has_driver_flag(argc, argv);
+  if (!driver_flag_mode && vm_multicore_audit_enabled()) {
+    vm_owner_thread_start(4);
   }
 
   // Initialize user connection socket

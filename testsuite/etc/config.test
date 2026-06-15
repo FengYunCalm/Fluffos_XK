@@ -127,6 +127,7 @@ living hash table size : 256
 
 gametick msec : 100
 heartbeat interval msec : 1000
+multicore mode : audit
 
 # explode():
 #

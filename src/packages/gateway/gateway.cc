@@ -5,6 +5,7 @@
 #include "backend.h"
 #include "base/internal/rc.h"
 #include "vm/context.h"
+#include "vm/owner.h"
 
 #include <arpa/inet.h>
 #include <event2/buffer.h>
@@ -61,6 +62,8 @@ void gateway_apply_receive(object_t *user, svalue_t *data_sv) {
 
   save_command_giver(user);
   current_interactive = user;
+  VMOwnerScope owner_scope(vm_context(), vm_owner_id(user), vm_owner_epoch(user));
+  vm_owner_record_task_trace(vm_owner_id(user), "gateway", "gateway_receive", vm_owner_epoch(user), "dispatched");
   vm_context_sync_execution(vm_context());
   set_eval(max_eval_cost);
   push_svalue(data_sv);
@@ -387,6 +390,9 @@ void gateway_handle_sys(int fd, const nlohmann::json &msg) {
   if (auto *gateway_d = find_object("/adm/daemons/gateway_d")) {
     svalue_t msg_sv = json_to_gateway_svalue(msg);
     save_command_giver(gateway_d);
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(gateway_d), vm_owner_epoch(gateway_d));
+    vm_owner_record_task_trace(vm_owner_id(gateway_d), "gateway", "receive_system_message",
+                               vm_owner_epoch(gateway_d), "dispatched");
     set_eval(max_eval_cost);
     push_svalue(&msg_sv);
     safe_apply("receive_system_message", gateway_d, 1, ORIGIN_DRIVER);

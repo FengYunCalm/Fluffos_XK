@@ -28,6 +28,7 @@
 #include "vm/internal/master.h"
 #include "vm/internal/otable.h"
 #include "vm/internal/simul_efun.h"
+#include "vm/object_handle.h"
 #include "compiler/internal/lex.h"  // for total_lines, FIXME
 
 #include "packages/core/add_action.h"
@@ -131,9 +132,26 @@ static int give_uid_to_object(object_t * /*ob*/);
 static int init_object(object_t * /*ob*/);
 static object_t *load_virtual_object(const char * /*name*/, int /*clone*/);
 static char *make_new_name(const char * /*str*/);
+static void assign_initial_owner(object_t * /*ob*/, object_t * /*prototype*/);
 #ifndef NO_ENVIRONMENT
 static void send_say(object_t * /*ob*/, const char * /*text*/, array_t * /*avoid*/);
 #endif
+
+static void assign_initial_owner(object_t *ob, object_t *prototype) {
+  if (!ob || vm_owner_has_explicit_id(ob)) {
+    return;
+  }
+  if (!vm_context().owner.current_owner_id.empty()) {
+    vm_owner_set_id(ob, vm_context().owner.current_owner_id.c_str());
+  } else if (current_object) {
+    vm_owner_set_id(ob, vm_owner_id(current_object));
+  } else if (prototype && vm_owner_has_explicit_id(prototype)) {
+    vm_owner_set_id(ob, vm_owner_id(prototype));
+  } else {
+    vm_owner_set_id(ob, vm_owner_default_id());
+  }
+  vm_object_store_update_owner(ob);
+}
 
 #ifdef PRIVS
 static void init_privs_for_object(object_t *ob) {
@@ -553,6 +571,7 @@ object_t *load_object(const char *lname, int callcreate) {
   SETOBNAME(ob, alloc_cstring(name, "load_object"));
   SET_TAG(ob->obname, TAG_OBJ_NAME);
   ob->prog = prog;
+  assign_initial_owner(ob, nullptr);
   ob->flags |= O_WILL_RESET; /* must be before reset is first called */
   ob->next_all = obj_list;
   ob->prev_all = nullptr;
@@ -561,6 +580,7 @@ object_t *load_object(const char *lname, int callcreate) {
   }
   obj_list = ob;
   vm_context_sync_object_store(vm_context());
+  vm_object_store_register(ob);
   ObjectTable::instance().insert(ob->obname, ob); /* add name to fast object lookup table */
   save_command_giver(command_giver);
   push_object(ob);
@@ -650,6 +670,7 @@ object_t *clone_object(const char *str1, int num_arg) {
   new_ob->flags |= (O_CLONE | (ob->flags & (O_WILL_CLEAN_UP | O_WILL_RESET)));
   new_ob->load_time = ob->load_time;
   new_ob->prog = ob->prog;
+  assign_initial_owner(new_ob, ob);
   reference_prog(ob->prog, "clone_object");
   DEBUG_CHECK(!current_object, "clone_object() from no current_object !\n");
 
@@ -658,6 +679,7 @@ object_t *clone_object(const char *str1, int num_arg) {
   new_ob->prev_all = nullptr;
   obj_list = new_ob;
   vm_context_sync_object_store(vm_context());
+  vm_object_store_register(new_ob);
   ObjectTable::instance().insert(new_ob->obname, new_ob); /* Add name to fast object lookup table */
   init_object(new_ob);
 
@@ -820,6 +842,14 @@ void destruct_object(object_t *ob) {
   }
 #endif
 
+  if (ob->flags & O_DESTRUCTED) {
+    return;
+  }
+  vm_owner_record_cross_owner_access(current_object, ob, "destruct");
+  if (vm_owner_cross_owner_access_blocked(current_object, ob, "destruct")) {
+    error("destruct(): cross-owner destruct requires owner message/future in enforced multicore mode.\n");
+  }
+
 /*
   * Notify object that it is scheduled for destruction
   *
@@ -857,7 +887,7 @@ void destruct_object(object_t *ob) {
   if (ob->flags & O_DESTRUCTED) {
     return;
   }
-  vm_owner_record_cross_owner_access(current_object, ob, "destruct");
+  vm_object_store_mark_destructed(ob);
   remove_object_from_stack(ob);
 /*
  * If this is the first object being shadowed by another object, then
@@ -1517,8 +1547,17 @@ object_t *find_object2(const char *str) {
 void move_object(object_t *item, object_t *dest) {
   object_t **pp, *ob;
 
+  auto *owner_source = current_object ? current_object : item;
+  vm_owner_record_cross_owner_access(owner_source, dest, "move_object");
+  if (vm_owner_cross_owner_access_blocked(owner_source, dest, "move_object")) {
+    error("move_object(): cross-owner move requires owner message/future in enforced multicore mode.\n");
+  }
+
   save_command_giver(command_giver);
-  vm_owner_record_cross_owner_access(item, dest, "move_object");
+  if (!vm_owner_has_explicit_id(item) && dest) {
+    vm_owner_set_id(item, vm_owner_id(dest));
+    vm_object_store_update_owner(item);
+  }
 
   /* Recursive moves are not allowed. */
   for (ob = dest; ob; ob = ob->super) {

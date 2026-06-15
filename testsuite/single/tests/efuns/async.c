@@ -1,5 +1,6 @@
 #ifdef __PACKAGE_ASYNC__
 nosave int calledGetDir, calledWrite, calledRead;
+nosave int calledStale;
 #endif
 
 void do_tests() {
@@ -61,6 +62,13 @@ void do_tests() {
         ASSERT_EQ(4, calledGetDir);
         ASSERT_EQ(2, calledWrite);
         ASSERT_EQ(2, calledRead);
+        async_getdir("/std/", function(mixed res) {
+            calledStale++;
+        });
+        vm_set_owner_id(this_object(), "owner/test/async-stale-new");
+        call_out(function() {
+            ASSERT_EQ(0, calledStale);
+        }, 1);
     }, 2);
 #endif
 }

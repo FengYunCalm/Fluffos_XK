@@ -32,6 +32,9 @@
 #include <zlib.h>
 #include <vm/internal/base/interpret.h>
 
+#include "vm/context.h"
+#include "vm/owner.h"
+
 #ifdef F_ASYNC_DB_EXEC
 #include "packages/db/db.h"
 #endif
@@ -46,6 +49,8 @@ enum astates { BUSY, DONE };
 
 struct Request {
   std::string path;
+  std::string owner_id;
+  uint64_t owner_epoch{0};
   int flags;
   int ret;
   int handle;
@@ -66,6 +71,38 @@ std::mutex reqs_lock;
 
 std::deque<struct Request *> finished_reqs;
 std::mutex finished_reqs_lock;
+
+object_t *callback_owner(function_to_call_t *fun) {
+  if (!fun) {
+    return nullptr;
+  }
+  return fun->ob ? fun->ob : fun->f.fp ? fun->f.fp->hdr.owner : nullptr;
+}
+
+void bind_request_owner(Request *req) {
+  auto *owner = callback_owner(req->fun);
+  req->owner_id = vm_owner_id(owner);
+  req->owner_epoch = vm_owner_epoch(owner);
+}
+
+svalue_t *safe_call_async_callback(Request *req, int narg, const char *operation) {
+  auto *owner = callback_owner(req->fun);
+  if (owner && (owner->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(req->owner_id.c_str(), "async_callback", operation, req->owner_epoch, "destructed");
+    pop_n_elems(narg);
+    return nullptr;
+  }
+  if (owner && (req->owner_id != vm_owner_id(owner) || req->owner_epoch != vm_owner_epoch(owner))) {
+    vm_owner_record_task_trace(vm_owner_id(owner), "async_callback", operation, vm_owner_epoch(owner), "stale");
+    pop_n_elems(narg);
+    return nullptr;
+  }
+  VMOwnerScope owner_scope(vm_context(), owner ? vm_owner_id(owner) : req->owner_id.c_str(),
+                           owner ? vm_owner_epoch(owner) : req->owner_epoch);
+  vm_owner_record_task_trace(owner ? vm_owner_id(owner) : req->owner_id.c_str(), "async_callback", operation,
+                             owner ? vm_owner_epoch(owner) : req->owner_epoch, "dispatched");
+  return safe_call_efun_callback(req->fun, narg);
+}
 
 void thread_func() {
   Tracer::setThreadName("Package Async thread");
@@ -277,6 +314,7 @@ int add_read(const char *fname, function_to_call_t *fun) {
     req->fun = fun;
     req->type = AREAD;
     req->path = std::string(fname);
+    bind_request_owner(req);
     return aio_gzread(req);
   }
   error("permission denied\n");
@@ -295,6 +333,7 @@ int add_getdir(const char *fname, function_to_call_t *fun) {
     req->fun = fun;
     req->type = AGETDIR;
     req->path = fname;
+    bind_request_owner(req);
     return aio_getdir(req);
   }
   error("permission denied\n");
@@ -314,6 +353,7 @@ int add_write(const char *fname, const char *buf, int size, char flags, function
   req->type = AWRITE;
   req->flags = flags;
   req->path = std::string(fname);
+  bind_request_owner(req);
   if (flags & 2) {
     return aio_gzwrite(req);
   }
@@ -327,6 +367,7 @@ int add_db_exec(int handle, const char *sql, function_to_call_t *fun) {
   req->type = ADBEXEC;
   req->handle = handle;
   req->data = sql;
+  bind_request_owner(req);
   return aio_db_exec(req);
 }
 #endif
@@ -336,7 +377,7 @@ void handle_read(struct Request *req) {
   if (val < 0) {
     push_number(val);
     set_eval(max_eval_cost);
-    safe_call_efun_callback(req->fun, 1);
+    safe_call_async_callback(req, 1, "async_read");
     return;
   }
   char *file = new_string(val, "read_file_async: str");
@@ -344,7 +385,7 @@ void handle_read(struct Request *req) {
   file[val] = 0;
   push_malloced_string(file);
   set_eval(max_eval_cost);
-  safe_call_efun_callback(req->fun, 1);
+  safe_call_async_callback(req, 1, "async_read");
 }
 
 #ifdef F_ASYNC_GETDIR
@@ -376,7 +417,7 @@ void handle_getdir(struct Request *req) {
 
   push_refed_array(ret);
   set_eval(max_eval_cost);
-  safe_call_efun_callback(req->fun, 1);
+  safe_call_async_callback(req, 1, "async_getdir");
 }
 #endif
 
@@ -385,12 +426,12 @@ void handle_write(struct Request *req) {
   if (val < 0) {
     push_number(val);
     set_eval(max_eval_cost);
-    safe_call_efun_callback(req->fun, 1);
+    safe_call_async_callback(req, 1, "async_write");
     return;
   }
   push_undefined();
   set_eval(max_eval_cost);
-  safe_call_efun_callback(req->fun, 1);
+  safe_call_async_callback(req, 1, "async_write");
 }
 
 void handle_db_exec(struct Request *req) {
@@ -401,7 +442,7 @@ void handle_db_exec(struct Request *req) {
     push_number(val);
   }
   set_eval(max_eval_cost);
-  safe_call_efun_callback(req->fun, 1);
+  safe_call_async_callback(req, 1, "async_db_exec");
 }
 
 void check_reqs() {

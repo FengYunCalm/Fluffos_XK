@@ -413,6 +413,7 @@ set(SRC
   "vm/internal/apply.cc"
   "vm/internal/context.cc"
   "vm/internal/eval_limit.cc"
+  "vm/internal/object_store.cc"
   "vm/internal/owner.cc"
   "vm/internal/posix_timers.cc"
   "vm/internal/master.cc"

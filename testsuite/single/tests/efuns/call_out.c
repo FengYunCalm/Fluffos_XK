@@ -26,9 +26,21 @@ void two_arg(int x, int y) {
   ASSERT(y == 2);
 }
 
-void finish() {
+void stale_should_not_run() {
+  called["stale_tests"]++;
+}
+
+void finish_stale() {
   busy = 0;
+  ASSERT_EQ(0, called["stale_tests"]);
+}
+
+void finish() {
   ASSERT(called["basic_tests"] == 6);
+  called["stale_tests"] = 0;
+  call_out("stale_should_not_run", 1);
+  vm_set_owner_id(this_object(), "owner/test/callout-stale-new");
+  call_out("finish_stale", 2);
 }
 
 void do_tests() {

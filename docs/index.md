@@ -17,6 +17,15 @@ FluffOS codebase contains three parts:
   * EFUN: predefined functions for LPC program to invoke C/C++ functions.
   * Apply: predefined callback functions for LPC to handle various Game events.   
 
+## FluffOS_XK Runtime Notes
+
+This repository is the FluffOS_XK maintenance fork. The current fork-specific runtime work focuses on controlled
+multicore foundations: thread-local VMContext, owner-aware VM workers, owner mailboxes, gateway sessions, and explicit
+owner execution boundaries.
+
+See [FluffOS_XK 项目现状与多核化改造说明](./multicore-runtime.md) for the current status, effect analysis, safety
+boundaries, and downstream migration guidance.
+
 ## Current Release
 
 [ALL RELEASES](https://github.com/fluffos/fluffos/releases)
