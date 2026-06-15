@@ -50,8 +50,14 @@ void vm_context_set_boot_time(VMContext &context, time_t boot_time);
 void vm_context_set_event_base(VMContext &context, event_base *base);
 void vm_context_set_current_gametick(VMContext &context, uint64_t gametick);
 void vm_context_set_current_owner(VMContext &context, const char *owner_id, uint64_t owner_epoch);
+void vm_context_set_current_object(VMContext &context, object_t *object);
 void vm_context_set_command_giver(VMContext &context, object_t *giver);
 void vm_context_set_current_interactive(VMContext &context, object_t *interactive);
+void vm_context_set_previous_object(VMContext &context, object_t *object);
+void vm_context_set_current_program(VMContext &context, program_t *program);
+void vm_context_set_caller_type(VMContext &context, int type);
+void vm_context_set_execution_frame(VMContext &context, object_t *object, program_t *program,
+                                    object_t *previous, int type);
 void vm_context_reset_execution(VMContext &context);
 VMExecutionState vm_context_capture_execution();
 void vm_context_apply_execution(VMContext &context, const VMExecutionState &execution);

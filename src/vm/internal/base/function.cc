@@ -299,10 +299,9 @@ svalue_t *call_function_pointer(funptr_t *funp, int num_arg) {
               function_name(current_object->prog, funp->f.local.index));
       }
       push_control_stack(FRAME_FUNCTION);
-      current_prog = funp->hdr.owner->prog;
+      vm_context_set_current_program(vm_context(), funp->hdr.owner->prog);
 
-      caller_type = ORIGIN_LOCAL;
-      vm_context_sync_execution(vm_context());
+      vm_context_set_caller_type(vm_context(), ORIGIN_LOCAL);
 
       csp->num_local_variables = num_arg;
       func = setup_new_frame(funp->f.local.index);
@@ -314,11 +313,10 @@ svalue_t *call_function_pointer(funptr_t *funp, int num_arg) {
     case FP_FUNCTIONAL | FP_NOT_BINDABLE: {
       fp = sp - num_arg + 1;
       push_control_stack(FRAME_FUNP);
-      current_prog = funp->f.functional.prog;
+      vm_context_set_current_program(vm_context(), funp->f.functional.prog);
       csp->fr.funp = funp;
 
-      caller_type = ORIGIN_FUNCTIONAL;
-      vm_context_sync_execution(vm_context());
+      vm_context_set_caller_type(vm_context(), ORIGIN_FUNCTIONAL);
 
       setup_variables(num_arg, funp->f.functional.num_local, funp->f.functional.num_arg);
 

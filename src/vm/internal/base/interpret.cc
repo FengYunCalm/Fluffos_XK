@@ -1336,11 +1336,7 @@ void pop_control_stack() {
     stuff = stuff->next;
     FREE(old);
   }
-  current_object = csp->ob;
-  current_prog = csp->prog;
-  previous_ob = csp->prev_ob;
-  caller_type = csp->caller_type;
-  vm_context_sync_execution(vm_context());
+  vm_context_set_execution_frame(vm_context(), csp->ob, csp->prog, csp->prev_ob, csp->caller_type);
   pc = csp->pc;
   fp = csp->fp;
   function_index_offset = csp->function_index_offset;
@@ -1547,8 +1543,7 @@ function_t *setup_new_frame(int findex) {
     findex -= current_prog->inherit[low].function_index_offset;
     function_index_offset += current_prog->inherit[low].function_index_offset;
     variable_index_offset += current_prog->inherit[low].variable_index_offset;
-    current_prog = current_prog->inherit[low].prog;
-    vm_context_sync_execution(vm_context());
+    vm_context_set_current_program(vm_context(), current_prog->inherit[low].prog);
   }
 
   flags = current_prog->function_flags[findex];
@@ -1596,8 +1591,7 @@ function_t *setup_inherited_frame(int findex) {
     findex -= current_prog->inherit[low].function_index_offset;
     function_index_offset += current_prog->inherit[low].function_index_offset;
     variable_index_offset += current_prog->inherit[low].variable_index_offset;
-    current_prog = current_prog->inherit[low].prog;
-    vm_context_sync_execution(vm_context());
+    vm_context_set_current_program(vm_context(), current_prog->inherit[low].prog);
   }
 
   flags = current_prog->function_flags[findex];
@@ -1658,11 +1652,8 @@ void setup_fake_frame(funptr_t *fun) {
   csp->num_local_variables = 0;
 
   pc = reinterpret_cast<char *>(&fake_program);
-  caller_type = ORIGIN_FUNCTION_POINTER;
-  current_prog = &fake_prog;
-  previous_ob = current_object;
-  current_object = fun->hdr.owner;
-  vm_context_sync_execution(vm_context());
+  vm_context_set_execution_frame(vm_context(), fun->hdr.owner, &fake_prog, current_object,
+                                 ORIGIN_FUNCTION_POINTER);
 }
 
 /* Remove a fake frame added by setup_fake_frame().  Basically just a
@@ -1670,11 +1661,7 @@ void setup_fake_frame(funptr_t *fun) {
  */
 void remove_fake_frame() {
   DEBUG_CHECK(csp == (control_stack - 1), "Popped out of the control stack\n");
-  current_object = csp->ob;
-  current_prog = csp->prog;
-  previous_ob = csp->prev_ob;
-  caller_type = csp->caller_type;
-  vm_context_sync_execution(vm_context());
+  vm_context_set_execution_frame(vm_context(), csp->ob, csp->prog, csp->prev_ob, csp->caller_type);
   pc = csp->pc;
   fp = csp->fp;
   function_index_offset = csp->function_index_offset;
@@ -3157,12 +3144,11 @@ void eval_instruction(char *p) {
 
               push_control_stack(FRAME_FUNCTION);
               fp = sp + 1; // zero args
-              caller_type = ORIGIN_LOCAL;
+              vm_context_set_caller_type(vm_context(), ORIGIN_LOCAL);
               csp->pc = saved_pc;
               csp->num_local_variables = 0;
               csp->fr.table_index = funcp->default_args_findex[i];
-              current_prog = progp;
-              vm_context_sync_execution(vm_context());
+              vm_context_set_current_program(vm_context(), progp);
               call_program(progp, default_funcp->address);
 
               DEBUG_CHECK((sp - current_sp != 1) && dump_vm_state(),
@@ -3198,10 +3184,9 @@ void eval_instruction(char *p) {
 
         /* Save all important global stack machine registers */
         push_control_stack(FRAME_FUNCTION);
-        current_prog = current_object->prog;
+        vm_context_set_current_program(vm_context(), current_object->prog);
 
-        caller_type = ORIGIN_LOCAL;
-        vm_context_sync_execution(vm_context());
+        vm_context_set_caller_type(vm_context(), ORIGIN_LOCAL);
         /*
          * If it is an inherited function, search for the real
          * definition.
@@ -3224,10 +3209,9 @@ void eval_instruction(char *p) {
         LOAD_SHORT(offset, pc);
 
         push_control_stack(FRAME_FUNCTION);
-        current_prog = temp_prog;
+        vm_context_set_current_program(vm_context(), temp_prog);
 
-        caller_type = ORIGIN_LOCAL;
-        vm_context_sync_execution(vm_context());
+        vm_context_set_caller_type(vm_context(), ORIGIN_LOCAL);
 
         csp->num_local_variables = EXTRACT_UCHAR(pc++) + num_varargs;
         num_varargs = 0;
@@ -4186,19 +4170,16 @@ void call___INIT(object_t *ob) {
     return;
   }
   push_control_stack(FRAME_FUNCTION | FRAME_OB_CHANGE);
-  current_prog = progp;
+  vm_context_set_current_program(vm_context(), progp);
   csp->fr.table_index = num_functions - 1;
 #ifdef PROFILE_FUNCTIONS
   get_cpu_times(&(csp->entry_secs), &(csp->entry_usecs));
   current_prog->function_table[num_functions - 1].calls++;
 #endif
-  caller_type = ORIGIN_DRIVER;
+  vm_context_set_caller_type(vm_context(), ORIGIN_DRIVER);
   csp->num_local_variables = 0;
 
-  previous_ob = current_object;
-
-  current_object = ob;
-  vm_context_sync_execution(vm_context());
+  vm_context_set_execution_frame(vm_context(), ob, current_prog, current_object, caller_type);
   setup_new_frame(num_functions - 1 + progp->last_inherited);
 #ifdef DEBUG
   save_csp = csp;
@@ -4353,12 +4334,8 @@ void call_direct(object_t *ob, int offset, int origin, int num_arg) {
 
   ob->time_of_ref = g_current_gametick;
   push_control_stack(FRAME_FUNCTION | FRAME_OB_CHANGE);
-  caller_type = origin;
   csp->num_local_variables = num_arg;
-  current_prog = prog;
-  previous_ob = current_object;
-  current_object = ob;
-  vm_context_sync_execution(vm_context());
+  vm_context_set_execution_frame(vm_context(), ob, prog, current_object, origin);
   funp = setup_new_frame(offset);
   call_program(current_prog, funp->address);
 }

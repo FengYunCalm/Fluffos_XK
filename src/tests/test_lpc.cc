@@ -183,6 +183,40 @@ TEST_F(DriverTest, TestVmCommandGiverStackSyncsContext) {
   ASSERT_EQ(vm_context().execution.command_giver, nullptr);
 }
 
+TEST_F(DriverTest, TestVmExecutionFrameSettersSyncContext) {
+  object_t* first = find_object("single/master.c");
+  object_t* second = find_object("single/simul_efun.c");
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  ASSERT_NE(first->prog, nullptr);
+  ASSERT_NE(second->prog, nullptr);
+
+  vm_context_set_execution_frame(vm_context(), first, first->prog, second, ORIGIN_DRIVER);
+  ASSERT_EQ(current_object, first);
+  ASSERT_EQ(current_prog, first->prog);
+  ASSERT_EQ(previous_ob, second);
+  ASSERT_EQ(caller_type, ORIGIN_DRIVER);
+  ASSERT_EQ(vm_context().execution.current_object, first);
+  ASSERT_EQ(vm_context().execution.current_prog, first->prog);
+  ASSERT_EQ(vm_context().execution.previous_ob, second);
+  ASSERT_EQ(vm_context().execution.caller_type, ORIGIN_DRIVER);
+
+  vm_context_set_current_object(vm_context(), second);
+  vm_context_set_current_program(vm_context(), second->prog);
+  vm_context_set_previous_object(vm_context(), first);
+  vm_context_set_caller_type(vm_context(), ORIGIN_LOCAL);
+  ASSERT_EQ(current_object, second);
+  ASSERT_EQ(current_prog, second->prog);
+  ASSERT_EQ(previous_ob, first);
+  ASSERT_EQ(caller_type, ORIGIN_LOCAL);
+  ASSERT_EQ(vm_context().execution.current_object, second);
+  ASSERT_EQ(vm_context().execution.current_prog, second->prog);
+  ASSERT_EQ(vm_context().execution.previous_ob, first);
+  ASSERT_EQ(vm_context().execution.caller_type, ORIGIN_LOCAL);
+
+  vm_context_set_execution_frame(vm_context(), master_ob, nullptr, nullptr, 0);
+}
+
 TEST_F(DriverTest, TestVmContextThreadScopeBindsThreadLocalContext) {
   auto *main_context = &vm_context();
   ASSERT_EQ(main_context, &vm_main_context());
