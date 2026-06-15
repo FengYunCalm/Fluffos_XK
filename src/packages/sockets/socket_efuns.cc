@@ -1181,8 +1181,62 @@ int socket_write(int fd, svalue_t *message, const char *name) {
 
 #endif /* PACKAGE_SOCKETS */
 
+struct SocketQueuedCallback {
+  bool is_function{false};
+  union string_or_func callback{nullptr};
+  object_t *owner{nullptr};
+  array_t *args{nullptr};
+};
+
+static void free_socket_queued_callback(SocketQueuedCallback *task) {
+  if (!task) {
+    return;
+  }
+  if (task->is_function) {
+    free_funp(task->callback.f);
+  } else if (task->callback.s) {
+    free_string(task->callback.s);
+  }
+  if (task->owner) {
+    free_object(&task->owner, "socket_callback_owner");
+  }
+  if (task->args) {
+    free_array(task->args);
+  }
+  delete task;
+}
+
+static void execute_socket_queued_callback(SocketQueuedCallback *task) {
+  set_eval(max_eval_cost);
+  push_some_svalues(task->args->item, task->args->size);
+  if (task->is_function) {
+    safe_call_function_pointer(task->callback.f, task->args->size);
+  } else {
+    safe_apply(task->callback.s, task->owner, task->args->size, ORIGIN_INTERNAL);
+  }
+  free_socket_queued_callback(task);
+}
+
+static SocketQueuedCallback *capture_socket_callback_args(object_t *owner, bool is_function,
+                                                          union string_or_func callback, int num_arg) {
+  auto *task = new SocketQueuedCallback;
+  task->is_function = is_function;
+  task->owner = owner;
+  add_ref(task->owner, "socket_callback_owner");
+  if (is_function) {
+    task->callback.f = callback.f;
+    task->callback.f->hdr.ref++;
+  } else {
+    task->callback.s = make_shared_string(callback.s);
+  }
+  task->args = allocate_empty_array(num_arg);
+  copy_some_svalues(task->args->item, sp - num_arg + 1, num_arg);
+  pop_n_elems(num_arg);
+  return task;
+}
+
 static void call_callback(int fd, int what, int num_arg) {
-  union string_or_func callback;
+  union string_or_func callback{nullptr};
 
   switch (what) {
     case S_READ_FP:
@@ -1194,25 +1248,49 @@ static void call_callback(int fd, int what, int num_arg) {
     case S_CLOSE_FP:
       callback = lpc_socks[fd].close_callback;
       break;
+    default:
+      pop_n_elems(num_arg);
+      return;
   }
-
-  set_eval(max_eval_cost);
 
   if (lpc_socks[fd].flags & what) {
     auto *owner = callback.f ? callback.f->hdr.owner : lpc_socks[fd].owner_ob;
-    VMOwnerScope owner_scope(vm_context(), vm_owner_id(owner), vm_owner_epoch(owner));
-    vm_owner_record_task_trace(vm_owner_id(owner), "socket_callback", "<function>", vm_owner_epoch(owner),
-                               "dispatched");
-    safe_call_function_pointer(callback.f, num_arg);
+    if (!owner || (owner->flags & O_DESTRUCTED)) {
+      pop_n_elems(num_arg);
+      return;
+    }
+    auto *task = capture_socket_callback_args(owner, true, callback, num_arg);
+
+    auto task_id = vm_owner_enqueue_main_task(
+        owner, "socket_callback", "<function>",
+        [task] { execute_socket_queued_callback(task); },
+        [task] { free_socket_queued_callback(task); });
+    if (task_id == 0) {
+      execute_socket_queued_callback(task);
+    }
+    vm_owner_drain_main_tasks(64);
   } else if (callback.s) {
     if (callback.s[0] == APPLY___INIT_SPECIAL_CHAR) {
+      pop_n_elems(num_arg);
       error("Illegal function name.\n");
     }
     auto *owner = lpc_socks[fd].owner_ob;
-    VMOwnerScope owner_scope(vm_context(), vm_owner_id(owner), vm_owner_epoch(owner));
-    vm_owner_record_task_trace(vm_owner_id(owner), "socket_callback", callback.s, vm_owner_epoch(owner),
-                               "dispatched");
-    safe_apply(callback.s, lpc_socks[fd].owner_ob, num_arg, ORIGIN_INTERNAL);
+    if (!owner || (owner->flags & O_DESTRUCTED)) {
+      pop_n_elems(num_arg);
+      return;
+    }
+    auto *task = capture_socket_callback_args(owner, false, callback, num_arg);
+
+    auto task_id = vm_owner_enqueue_main_task(
+        owner, "socket_callback", task->callback.s,
+        [task] { execute_socket_queued_callback(task); },
+        [task] { free_socket_queued_callback(task); });
+    if (task_id == 0) {
+      execute_socket_queued_callback(task);
+    }
+    vm_owner_drain_main_tasks(64);
+  } else {
+    pop_n_elems(num_arg);
   }
 }
 
