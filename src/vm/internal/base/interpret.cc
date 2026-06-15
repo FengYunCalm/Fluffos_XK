@@ -1339,8 +1339,8 @@ void pop_control_stack() {
   vm_context_set_execution_frame(vm_context(), csp->ob, csp->prog, csp->prev_ob, csp->caller_type);
   pc = csp->pc;
   fp = csp->fp;
-  function_index_offset = csp->function_index_offset;
-  variable_index_offset = csp->variable_index_offset;
+  vm_context_set_inherit_offsets(vm_context(), csp->function_index_offset,
+                                 csp->variable_index_offset);
   if (Tracer::enabled()) {
     if (csp->trace_id && !csp->trace_id->empty()) {
       Tracer::end(*csp->trace_id, EventCategory::LPC_FUNCTION);
@@ -1521,7 +1521,7 @@ function_t *setup_new_frame(int findex) {
   int low, high, mid;
   int flags;
 
-  function_index_offset = variable_index_offset = 0;
+  vm_context_set_inherit_offsets(vm_context(), 0, 0);
 
   /* Walk up the inheritance tree to the real definition */
   if (current_prog->function_flags[findex] & FUNC_ALIAS) {
@@ -1541,8 +1541,9 @@ function_t *setup_new_frame(int findex) {
       }
     }
     findex -= current_prog->inherit[low].function_index_offset;
-    function_index_offset += current_prog->inherit[low].function_index_offset;
-    variable_index_offset += current_prog->inherit[low].variable_index_offset;
+    vm_context_set_inherit_offsets(
+        vm_context(), function_index_offset + current_prog->inherit[low].function_index_offset,
+        variable_index_offset + current_prog->inherit[low].variable_index_offset);
     vm_context_set_current_program(vm_context(), current_prog->inherit[low].prog);
   }
 
@@ -1589,8 +1590,9 @@ function_t *setup_inherited_frame(int findex) {
       }
     }
     findex -= current_prog->inherit[low].function_index_offset;
-    function_index_offset += current_prog->inherit[low].function_index_offset;
-    variable_index_offset += current_prog->inherit[low].variable_index_offset;
+    vm_context_set_inherit_offsets(
+        vm_context(), function_index_offset + current_prog->inherit[low].function_index_offset,
+        variable_index_offset + current_prog->inherit[low].variable_index_offset);
     vm_context_set_current_program(vm_context(), current_prog->inherit[low].prog);
   }
 
@@ -1664,8 +1666,8 @@ void remove_fake_frame() {
   vm_context_set_execution_frame(vm_context(), csp->ob, csp->prog, csp->prev_ob, csp->caller_type);
   pc = csp->pc;
   fp = csp->fp;
-  function_index_offset = csp->function_index_offset;
-  variable_index_offset = csp->variable_index_offset;
+  vm_context_set_inherit_offsets(vm_context(), csp->function_index_offset,
+                                 csp->variable_index_offset);
   csp--;
 }
 
@@ -3216,8 +3218,8 @@ void eval_instruction(char *p) {
         csp->num_local_variables = EXTRACT_UCHAR(pc++) + num_varargs;
         num_varargs = 0;
 
-        function_index_offset += ip->function_index_offset;
-        variable_index_offset += ip->variable_index_offset;
+        vm_context_set_inherit_offsets(vm_context(), function_index_offset + ip->function_index_offset,
+                                       variable_index_offset + ip->variable_index_offset);
 
         funp = setup_inherited_frame(offset);
         csp->pc = pc;

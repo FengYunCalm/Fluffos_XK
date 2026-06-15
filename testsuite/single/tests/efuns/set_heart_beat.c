@@ -42,7 +42,7 @@ void do_tests() {
     set_heart_beat(1);
     ASSERT_EQ(1, query_heart_beat(this_object()));
 
-    stale_target = load_object("/single/void");
+    stale_target = new("/single/void");
     stale_target->reset_heartbeat_called();
     stale_target->start_heartbeat();
     ASSERT_EQ(1, query_heart_beat(stale_target));
@@ -60,4 +60,5 @@ void finish_stale_heartbeat(int before) {
     ASSERT_EQ(before, stale_target->get_heartbeat_called());
     stale_target->stop_heartbeat();
     ASSERT_EQ(0, query_heart_beat(stale_target));
+    destruct(stale_target);
 }

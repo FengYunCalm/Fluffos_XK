@@ -576,6 +576,7 @@ bool owner_execution_state_cleared() {
          execution.current_interactive == nullptr && execution.previous_ob == nullptr &&
          execution.current_prog == nullptr && execution.caller_type == 0 &&
          execution.call_origin == 0 &&
+         execution.function_index_offset == 0 && execution.variable_index_offset == 0 &&
          vm_context().error.current_error_context == nullptr;
 }
 

@@ -320,8 +320,7 @@ svalue_t *call_function_pointer(funptr_t *funp, int num_arg) {
 
       setup_variables(num_arg, funp->f.functional.num_local, funp->f.functional.num_arg);
 
-      function_index_offset = funp->f.functional.fio;
-      variable_index_offset = funp->f.functional.vio;
+      vm_context_set_inherit_offsets(vm_context(), funp->f.functional.fio, funp->f.functional.vio);
       call_program(funp->f.functional.prog, funp->f.functional.offset);
       break;
     }

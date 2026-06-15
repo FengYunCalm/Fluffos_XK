@@ -86,6 +86,13 @@ void vm_context_set_call_origin(VMContext &context, int origin) {
   context.execution.call_origin = origin;
 }
 
+void vm_context_set_inherit_offsets(VMContext &context, int function_offset, int variable_offset) {
+  function_index_offset = function_offset;
+  variable_index_offset = variable_offset;
+  context.execution.function_index_offset = function_offset;
+  context.execution.variable_index_offset = variable_offset;
+}
+
 void vm_context_set_execution_frame(VMContext &context, object_t *object, program_t *program,
                                     object_t *previous, int type) {
   current_object = object;
@@ -114,6 +121,8 @@ VMExecutionState vm_context_capture_execution() {
   execution.current_prog = current_prog;
   execution.caller_type = caller_type;
   execution.call_origin = call_origin;
+  execution.function_index_offset = function_index_offset;
+  execution.variable_index_offset = variable_index_offset;
   return execution;
 }
 
@@ -125,6 +134,8 @@ void vm_context_apply_execution(VMContext &context, const VMExecutionState &exec
   current_prog = execution.current_prog;
   caller_type = execution.caller_type;
   call_origin = execution.call_origin;
+  function_index_offset = execution.function_index_offset;
+  variable_index_offset = execution.variable_index_offset;
   context.execution = execution;
 }
 
