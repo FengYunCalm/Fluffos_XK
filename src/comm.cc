@@ -109,8 +109,7 @@ void on_user_command(evutil_socket_t fd, short what, void *arg) {
       process_user_command(user);
 
       /* Has to be cleared if we jumped out of process_user_command() */
-      current_interactive = nullptr;
-      vm_context_sync_execution(vm_context());
+      vm_context_set_current_interactive(vm_context(), nullptr);
     });
     vm_owner_drain_main_tasks(64);
   } else {
@@ -118,8 +117,7 @@ void on_user_command(evutil_socket_t fd, short what, void *arg) {
     process_user_command(user);
 
     /* Has to be cleared if we jumped out of process_user_command() */
-    current_interactive = nullptr;
-    vm_context_sync_execution(vm_context());
+    vm_context_set_current_interactive(vm_context(), nullptr);
   }
 
   // if user still have pending command, continue to schedule it.
@@ -1214,11 +1212,10 @@ int process_user_command(interactive_t *ip) {
     DEBUG_FATAL("BUG: process_user_command.");
   }
 
-  current_interactive = command_giver; /* this is yuck phooey, sigh */
+  vm_context_set_current_interactive(vm_context(), command_giver); /* this is yuck phooey, sigh */
   VMOwnerScope owner_scope(vm_context(), vm_owner_id(command_giver), vm_owner_epoch(command_giver));
   vm_owner_record_task_trace(vm_owner_id(command_giver), "interactive", "process_user_command",
                              vm_owner_epoch(command_giver), "dispatched");
-  vm_context_sync_execution(vm_context());
   if (ip) {
     clear_notify(ip->ob);
   }
@@ -1293,8 +1290,7 @@ exit:
     maybe_schedule_user_command(ip);
   }
 
-  current_interactive = nullptr;
-  vm_context_sync_execution(vm_context());
+  vm_context_set_current_interactive(vm_context(), nullptr);
   restore_command_giver();
   return 1;
 }

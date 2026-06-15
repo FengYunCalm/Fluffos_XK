@@ -61,15 +61,14 @@ void gateway_apply_receive(object_t *user, svalue_t *data_sv) {
   }
 
   save_command_giver(user);
-  current_interactive = user;
-  VMOwnerScope owner_scope(vm_context(), vm_owner_id(user), vm_owner_epoch(user));
-  vm_owner_record_task_trace(vm_owner_id(user), "gateway", "gateway_receive", vm_owner_epoch(user), "dispatched");
-  vm_context_sync_execution(vm_context());
-  set_eval(max_eval_cost);
-  push_svalue(data_sv);
-  safe_apply("gateway_receive", user, 1, ORIGIN_DRIVER);
-  current_interactive = nullptr;
-  vm_context_sync_execution(vm_context());
+  {
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(user), vm_owner_epoch(user));
+    VMCurrentInteractiveScope interactive_scope(vm_context(), user);
+    vm_owner_record_task_trace(vm_owner_id(user), "gateway", "gateway_receive", vm_owner_epoch(user), "dispatched");
+    set_eval(max_eval_cost);
+    push_svalue(data_sv);
+    safe_apply("gateway_receive", user, 1, ORIGIN_DRIVER);
+  }
   restore_command_giver();
 }
 

@@ -139,6 +139,23 @@ TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
   ASSERT_EQ(vm_context().execution.caller_type, 0);
 }
 
+TEST_F(DriverTest, TestVmCurrentInteractiveScopeRestoresState) {
+  object_t* obj = find_object("single/master.c");
+  ASSERT_NE(obj, nullptr);
+
+  current_interactive = nullptr;
+  vm_context_sync_execution(vm_context());
+
+  {
+    VMCurrentInteractiveScope scope(vm_context(), obj);
+    ASSERT_EQ(current_interactive, obj);
+    ASSERT_EQ(vm_context().execution.current_interactive, obj);
+  }
+
+  ASSERT_EQ(current_interactive, nullptr);
+  ASSERT_EQ(vm_context().execution.current_interactive, nullptr);
+}
+
 TEST_F(DriverTest, TestVmContextThreadScopeBindsThreadLocalContext) {
   auto *main_context = &vm_context();
   ASSERT_EQ(main_context, &vm_main_context());
