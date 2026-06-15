@@ -27,6 +27,55 @@ struct heart_beat_t {
 // Global pointer to current object executing heartbeat.
 object_t *g_current_heartbeat_obj;
 
+namespace {
+void execute_heart_beat(object_t *ob) {
+  if (!ob || (ob->flags & O_DESTRUCTED) || ob->prog->heart_beat == 0) {
+    return;
+  }
+
+  object_t *new_command_giver;
+  new_command_giver = ob;
+#ifndef NO_SHADOWS
+  while (new_command_giver->shadowing) {
+    new_command_giver = new_command_giver->shadowing;
+  }
+#endif
+#ifndef NO_ADD_ACTION
+  if (!(new_command_giver->flags & O_ENABLE_COMMANDS)) {
+    new_command_giver = nullptr;
+  }
+#endif
+#ifdef PACKAGE_MUDLIB_STATS
+  add_heart_beats(&ob->stats, 1);
+#endif
+
+  auto heartbeat_execution = vm_context_capture_execution();
+  heartbeat_execution.current_interactive = ob->interactive ? ob : nullptr;
+  VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob), vm_owner_epoch(ob));
+  VMExecutionScope heartbeat_scope(vm_context(), heartbeat_execution);
+
+  save_command_giver(new_command_giver);
+
+  g_current_heartbeat_obj = ob;
+
+  error_context_t econ;
+
+  save_context(&econ);
+  try {
+    set_eval(max_eval_cost);
+    // TODO: provide a safe_call_direct()
+    call_direct(ob, ob->prog->heart_beat - 1, ORIGIN_DRIVER, 0);
+    pop_stack(); /* pop the return value */
+  } catch (const char *) {
+    restore_context(&econ);
+  }
+  pop_context(&econ);
+
+  restore_command_giver();
+  g_current_heartbeat_obj = nullptr;
+}
+}  // namespace
+
 /*
  * TODO: ideally we should be using vector here for performance, however dealing with
  * enable/disable heartbeat during execution make it difficult to implement correctly.
@@ -81,51 +130,10 @@ void call_heart_beat() {
       vm_owner_record_task_trace(vm_owner_id(ob), "heartbeat", "heart_beat", vm_owner_epoch(ob), "stale");
       continue;
     }
-    vm_owner_record_task_trace(vm_owner_id(ob), "heartbeat", "heart_beat", vm_owner_epoch(ob), "dispatched");
-
-    object_t *new_command_giver;
-
-    new_command_giver = ob;
-#ifndef NO_SHADOWS
-    while (new_command_giver->shadowing) {
-      new_command_giver = new_command_giver->shadowing;
-    }
-#endif
-#ifndef NO_ADD_ACTION
-    if (!(new_command_giver->flags & O_ENABLE_COMMANDS)) {
-      new_command_giver = nullptr;
-    }
-#endif
-#ifdef PACKAGE_MUDLIB_STATS
-    add_heart_beats(&ob->stats, 1);
-#endif
-
-    auto heartbeat_execution = vm_context_capture_execution();
-    heartbeat_execution.current_interactive = ob->interactive ? ob : nullptr;
-    VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob), vm_owner_epoch(ob));
-    VMExecutionScope heartbeat_scope(vm_context(), heartbeat_execution);
-
-    save_command_giver(new_command_giver);
-
-    g_current_heartbeat_obj = ob;
-
-    error_context_t econ;
-
-    save_context(&econ);
-    try {
-      set_eval(max_eval_cost);
-      // TODO: provide a safe_call_direct()
-      call_direct(ob, ob->prog->heart_beat - 1, ORIGIN_DRIVER, 0);
-      pop_stack(); /* pop the return value */
-    } catch (const char *) {
-      restore_context(&econ);
-    }
-    pop_context(&econ);
-
-    restore_command_giver();
-    g_current_heartbeat_obj = nullptr;
+    vm_owner_enqueue_main_task(ob, "heartbeat", "heart_beat", [ob] { execute_heart_beat(ob); });
     curr_hb = nullptr;
   }
+  vm_owner_drain_main_tasks(1024);
 } /* call_heart_beat() */
 
 // Query heartbeat interval for a object

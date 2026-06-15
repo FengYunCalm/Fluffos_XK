@@ -103,12 +103,24 @@ void on_user_command(evutil_socket_t fd, short what, void *arg) {
     return;
   }
 
-  set_eval(max_eval_cost);
-  process_user_command(user);
+  if (user->ob && !(user->ob->flags & O_DESTRUCTED)) {
+    vm_owner_enqueue_main_task(user->ob, "input", "process_user_command", [user] {
+      set_eval(max_eval_cost);
+      process_user_command(user);
 
-  /* Has to be cleared if we jumped out of process_user_command() */
-  current_interactive = nullptr;
-  vm_context_sync_execution(vm_context());
+      /* Has to be cleared if we jumped out of process_user_command() */
+      current_interactive = nullptr;
+      vm_context_sync_execution(vm_context());
+    });
+    vm_owner_drain_main_tasks(64);
+  } else {
+    set_eval(max_eval_cost);
+    process_user_command(user);
+
+    /* Has to be cleared if we jumped out of process_user_command() */
+    current_interactive = nullptr;
+    vm_context_sync_execution(vm_context());
+  }
 
   // if user still have pending command, continue to schedule it.
   //

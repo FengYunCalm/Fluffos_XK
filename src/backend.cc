@@ -27,6 +27,7 @@
 #include <algorithm>
 
 #include "vm/vm.h"
+#include "vm/owner.h"
 
 #include "packages/core/heartbeat.h"
 #include "packages/core/reclaim.h"
@@ -144,6 +145,7 @@ inline void call_tick_events() {
 
 void on_game_tick(evutil_socket_t /*fd*/, short /*what*/, void *arg) {
   call_tick_events();
+  vm_owner_drain_main_tasks(1024);
   g_current_gametick++;
   vm_context_set_current_gametick(vm_context(), g_current_gametick);
 

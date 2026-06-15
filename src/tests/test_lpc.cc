@@ -391,6 +391,72 @@ TEST_F(DriverTest, TestVmOwnerTaskTraceRecordsObservedAndDispatchedEvents) {
   free_mapping(trace);
 }
 
+TEST_F(DriverTest, TestVmOwnerMainQueueDispatchesWithOwnerScope) {
+  object_t* obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+  vm_owner_set_id(obj, "owner/test/main-queue");
+
+  bool ran = false;
+  std::string seen_owner;
+  auto task_id = vm_owner_enqueue_main_task(obj, "unit_main", "dispatch", [&] {
+    ran = true;
+    seen_owner = vm_context().owner.current_owner_id;
+  });
+  ASSERT_GT(task_id, 0u);
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+  ASSERT_TRUE(ran);
+  ASSERT_EQ(seen_owner, "owner/test/main-queue");
+
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+  auto* trace = vm_owner_task_trace(2);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  ASSERT_EQ(events->u.arr->size, 2);
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "state"), "main_queued");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[1].u.map, "state"), "main_dispatched");
+  free_mapping(trace);
+
+  vm_owner_clear_id(obj);
+  destruct_object(obj);
+}
+
+TEST_F(DriverTest, TestVmOwnerMainQueueDropsStaleOwnerEpoch) {
+  object_t* obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+  vm_owner_set_id(obj, "owner/test/main-stale-old");
+
+  bool ran = false;
+  auto task_id = vm_owner_enqueue_main_task(obj, "unit_main", "stale", [&] { ran = true; });
+  ASSERT_GT(task_id, 0u);
+  vm_owner_set_id(obj, "owner/test/main-stale-new");
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+  ASSERT_FALSE(ran);
+
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+  auto* trace = vm_owner_task_trace(2);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  ASSERT_EQ(events->u.arr->size, 2);
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "state"), "main_queued");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[1].u.map, "state"), "main_stale");
+  free_mapping(trace);
+
+  vm_owner_clear_id(obj);
+  destruct_object(obj);
+}
+
 TEST_F(DriverTest, TestVmOwnerHeartbeatTraceRecordsScheduledEvent) {
   current_object = master_ob;
   object_t* obj = find_object("single/master.c");

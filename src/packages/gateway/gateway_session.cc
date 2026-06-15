@@ -75,17 +75,20 @@ void gateway_command_callback(evutil_socket_t /*fd*/, short /*what*/, void *arg)
     debug_message("[gateway] command_callback begin sid=%s\n", user->gateway_session_id);
   }
 
-  set_eval(max_eval_cost);
   if (user->ob && !(user->ob->flags & O_DESTRUCTED)) {
-    VMOwnerScope owner_scope(vm_context(), vm_owner_id(user->ob), vm_owner_epoch(user->ob));
-    vm_owner_record_task_trace(vm_owner_id(user->ob), "gateway", "process_user_command",
-                               vm_owner_epoch(user->ob), "dispatched");
-    process_user_command(user);
+    vm_owner_enqueue_main_task(user->ob, "gateway", "process_user_command", [user] {
+      set_eval(max_eval_cost);
+      process_user_command(user);
+      current_interactive = nullptr;
+      vm_context_sync_execution(vm_context());
+    });
+    vm_owner_drain_main_tasks(64);
   } else {
+    set_eval(max_eval_cost);
     process_user_command(user);
+    current_interactive = nullptr;
+    vm_context_sync_execution(vm_context());
   }
-  current_interactive = nullptr;
-  vm_context_sync_execution(vm_context());
 }
 
 object_t *resolve_active_session_owner(const char *session_id, object_t *fallback = nullptr) {
