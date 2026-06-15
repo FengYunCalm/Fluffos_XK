@@ -4977,10 +4977,12 @@ void save_context(error_context_t *econ) {
   econ->save_cgsp = cgsp;
   econ->save_context = current_error_context;
 
-  current_error_context = econ;
+  vm_context_set_current_error_context(vm_context(), econ);
 }
 
-void pop_context(error_context_t *econ) { current_error_context = econ->save_context; }
+void pop_context(error_context_t *econ) {
+  vm_context_set_current_error_context(vm_context(), econ->save_context);
+}
 
 /* can the error handler do this ? */
 void restore_context(error_context_t *econ) {

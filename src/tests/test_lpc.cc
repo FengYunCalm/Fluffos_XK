@@ -85,6 +85,7 @@ TEST_F(DriverTest, TestVmContextTracksTopLevelState) {
   ASSERT_EQ(vm_context().execution.previous_ob, nullptr);
   ASSERT_EQ(vm_context().execution.current_prog, nullptr);
   ASSERT_EQ(vm_context().execution.caller_type, 0);
+  ASSERT_EQ(vm_context().error.current_error_context, nullptr);
   ASSERT_EQ(vm_context().object_store.objects, obj_list);
   ASSERT_EQ(vm_context().object_store.destructed_objects, obj_list_destruct);
 }
@@ -215,6 +216,32 @@ TEST_F(DriverTest, TestVmExecutionFrameSettersSyncContext) {
   ASSERT_EQ(vm_context().execution.caller_type, ORIGIN_LOCAL);
 
   vm_context_set_execution_frame(vm_context(), master_ob, nullptr, nullptr, 0);
+}
+
+TEST_F(DriverTest, TestVmErrorContextStackSyncsContext) {
+  vm_context_set_current_error_context(vm_context(), nullptr);
+  ASSERT_EQ(current_error_context, nullptr);
+  ASSERT_EQ(vm_context().error.current_error_context, nullptr);
+
+  error_context_t first{};
+  error_context_t second{};
+  save_context(&first);
+  ASSERT_EQ(current_error_context, &first);
+  ASSERT_EQ(vm_context().error.current_error_context, &first);
+  ASSERT_EQ(first.save_context, nullptr);
+
+  save_context(&second);
+  ASSERT_EQ(current_error_context, &second);
+  ASSERT_EQ(vm_context().error.current_error_context, &second);
+  ASSERT_EQ(second.save_context, &first);
+
+  pop_context(&second);
+  ASSERT_EQ(current_error_context, &first);
+  ASSERT_EQ(vm_context().error.current_error_context, &first);
+
+  pop_context(&first);
+  ASSERT_EQ(current_error_context, nullptr);
+  ASSERT_EQ(vm_context().error.current_error_context, nullptr);
 }
 
 TEST_F(DriverTest, TestVmContextThreadScopeBindsThreadLocalContext) {

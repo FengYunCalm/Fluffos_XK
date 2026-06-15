@@ -93,6 +93,11 @@ void vm_context_set_execution_frame(VMContext &context, object_t *object, progra
   context.execution.caller_type = type;
 }
 
+void vm_context_set_current_error_context(VMContext &context, error_context_t *error_context) {
+  current_error_context = error_context;
+  context.error.current_error_context = error_context;
+}
+
 void vm_context_reset_execution(VMContext &context) { context.execution = VMExecutionState{}; }
 
 VMExecutionState vm_context_capture_execution() {
