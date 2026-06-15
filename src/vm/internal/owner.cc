@@ -153,6 +153,7 @@ struct OwnerMainTask {
   std::string target_object;
   object_t *target{nullptr};
   std::function<void()> callback;
+  std::function<void()> drop_callback;
 };
 
 std::unordered_map<std::string, std::deque<OwnerMailboxTask>> owner_mailboxes;
@@ -1140,7 +1141,7 @@ uint64_t vm_owner_record_task_trace(const char *owner_id, const char *task_type,
 }
 
 uint64_t vm_owner_enqueue_main_task(object_t *target, const char *task_type, const char *task_key,
-                                    std::function<void()> callback) {
+                                    std::function<void()> callback, std::function<void()> drop_callback) {
   if (!target || !callback) {
     return 0;
   }
@@ -1155,6 +1156,7 @@ uint64_t vm_owner_enqueue_main_task(object_t *target, const char *task_type, con
   task.target_object = owner_object_name(target);
   task.target = target;
   task.callback = std::move(callback);
+  task.drop_callback = std::move(drop_callback);
   add_ref(target, "owner main task");
 
   auto task_id = task.task_id;
@@ -1200,12 +1202,17 @@ int vm_owner_drain_main_tasks(int limit) {
     bool stale = !target || (target->flags & O_DESTRUCTED) || task.owner_id != vm_owner_id(target) ||
                  task.owner_epoch != vm_owner_epoch(target);
     if (stale) {
-      std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-      append_owner_task_trace(task, target && (target->flags & O_DESTRUCTED) ? "main_destructed" : "main_stale");
-      if (target && (target->flags & O_DESTRUCTED)) {
-        owner_main_destructed.fetch_add(1, std::memory_order_relaxed);
-      } else {
-        owner_main_stale.fetch_add(1, std::memory_order_relaxed);
+      {
+        std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+        append_owner_task_trace(task, target && (target->flags & O_DESTRUCTED) ? "main_destructed" : "main_stale");
+        if (target && (target->flags & O_DESTRUCTED)) {
+          owner_main_destructed.fetch_add(1, std::memory_order_relaxed);
+        } else {
+          owner_main_stale.fetch_add(1, std::memory_order_relaxed);
+        }
+      }
+      if (task.drop_callback) {
+        task.drop_callback();
       }
     } else {
       {

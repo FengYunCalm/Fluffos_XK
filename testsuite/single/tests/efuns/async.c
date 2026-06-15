@@ -1,6 +1,7 @@
 #ifdef __PACKAGE_ASYNC__
 nosave int calledGetDir, calledWrite, calledRead;
 nosave int calledStale;
+nosave int ownerMainQueuedBefore;
 #endif
 
 void do_tests() {
@@ -8,6 +9,7 @@ void do_tests() {
     write("PACKAGE_ASYNC is not enabled, skipping async tests...\n");
     return;
 #else
+    ownerMainQueuedBefore = vm_owner_runtime_status()["main_queued"];
 
     // async_getdir
     async_getdir("/nonexistant/", function(mixed res) {
@@ -62,6 +64,7 @@ void do_tests() {
         ASSERT_EQ(4, calledGetDir);
         ASSERT_EQ(2, calledWrite);
         ASSERT_EQ(2, calledRead);
+        ASSERT(vm_owner_runtime_status()["main_queued"] > ownerMainQueuedBefore);
         async_getdir("/std/", function(mixed res) {
             calledStale++;
         });

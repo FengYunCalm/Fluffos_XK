@@ -104,6 +104,35 @@ svalue_t *safe_call_async_callback(Request *req, int narg, const char *operation
   return safe_call_efun_callback(req->fun, narg);
 }
 
+const char *async_operation_name(enum atypes type) {
+  switch (type) {
+    case AREAD:
+      return "async_read";
+    case AWRITE:
+      return "async_write";
+#ifdef F_ASYNC_GETDIR
+    case AGETDIR:
+      return "async_getdir";
+#endif
+#ifdef F_ASYNC_DB_EXEC
+    case ADBEXEC:
+      return "async_db_exec";
+#endif
+    case ADONE:
+    default:
+      return "async_done";
+  }
+}
+
+void free_async_request(Request *req) {
+  if (!req) {
+    return;
+  }
+  free_funp(req->fun->f.fp);
+  delete req->fun;
+  delete req;
+}
+
 void thread_func() {
   Tracer::setThreadName("Package Async thread");
 
@@ -445,43 +474,71 @@ void handle_db_exec(struct Request *req) {
   safe_call_async_callback(req, 1, "async_db_exec");
 }
 
+void handle_finished_request(Request *req, enum atypes type) {
+  req->type = ADONE;
+  switch (type) {
+    case AREAD:
+      handle_read(req);
+      break;
+    case AWRITE:
+      handle_write(req);
+      break;
+#ifdef F_ASYNC_GETDIR
+    case AGETDIR:
+      handle_getdir(req);
+      break;
+#endif
+#ifdef F_ASYNC_DB_EXEC
+    case ADBEXEC:
+      handle_db_exec(req);
+      break;
+#endif
+    case ADONE:
+      // must have had an error while handling it before.
+      break;
+    default:
+      fatal("unknown async type\n");
+  }
+}
+
+void dispatch_finished_request(Request *req, enum atypes type) {
+  auto *owner = callback_owner(req->fun);
+  auto *operation = async_operation_name(type);
+  if (!owner || (owner->flags & O_DESTRUCTED)) {
+    handle_finished_request(req, type);
+    free_async_request(req);
+    return;
+  }
+
+  auto task_id = vm_owner_enqueue_main_task(
+      owner, "async_callback", operation,
+      [req, type] {
+        handle_finished_request(req, type);
+        free_async_request(req);
+      },
+      [req] { free_async_request(req); });
+  if (task_id == 0) {
+    handle_finished_request(req, type);
+    free_async_request(req);
+  }
+}
+
 void check_reqs() {
   ScopedTracer const tracer("Async callback");
 
-  std::lock_guard<std::mutex> const lock(finished_reqs_lock);
-  while (!finished_reqs.empty()) {
-    auto *req = finished_reqs.front();
-    finished_reqs.pop_front();
-
-    enum atypes const type = (req->type);
-    req->type = ADONE;
-    switch (type) {
-      case AREAD:
-        handle_read(req);
-        break;
-      case AWRITE:
-        handle_write(req);
-        break;
-#ifdef F_ASYNC_GETDIR
-      case AGETDIR:
-        handle_getdir(req);
-        break;
-#endif
-#ifdef F_ASYNC_DB_EXEC
-      case ADBEXEC:
-        handle_db_exec(req);
-        break;
-#endif
-      case ADONE:
-        // must have had an error while handling it before.
-        break;
-      default:
-        fatal("unknown async type\n");
-    }
-    free_funp(req->fun->f.fp);
-    delete req->fun;
-    delete req;
+  std::deque<struct Request *> ready;
+  {
+    std::lock_guard<std::mutex> const lock(finished_reqs_lock);
+    ready.swap(finished_reqs);
   }
+
+  while (!ready.empty()) {
+    auto *req = ready.front();
+    ready.pop_front();
+    auto const type = req->type;
+    dispatch_finished_request(req, type);
+  }
+  vm_owner_drain_main_tasks(1024);
 }
 
 void complete_all_asyncio() {
