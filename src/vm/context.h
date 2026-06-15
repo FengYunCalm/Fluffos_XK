@@ -6,6 +6,7 @@
 #include <string>
 
 struct event_base;
+struct error_context_t;
 struct object_t;
 struct program_t;
 
@@ -32,12 +33,17 @@ struct VMOwnerState {
   bool lpc_canary_active{false};
 };
 
+struct VMErrorState {
+  error_context_t *current_error_context{nullptr};
+};
+
 struct VMContext {
   time_t boot_time{0};
   event_base *event_loop{nullptr};
   uint64_t current_gametick{0};
   VMOwnerState owner;
   VMExecutionState execution;
+  VMErrorState error;
   VMObjectStoreState object_store;
 };
 
@@ -58,6 +64,7 @@ void vm_context_set_current_program(VMContext &context, program_t *program);
 void vm_context_set_caller_type(VMContext &context, int type);
 void vm_context_set_execution_frame(VMContext &context, object_t *object, program_t *program,
                                     object_t *previous, int type);
+void vm_context_set_current_error_context(VMContext &context, error_context_t *error_context);
 void vm_context_reset_execution(VMContext &context);
 VMExecutionState vm_context_capture_execution();
 void vm_context_apply_execution(VMContext &context, const VMExecutionState &execution);

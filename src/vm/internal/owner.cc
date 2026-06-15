@@ -574,7 +574,8 @@ bool owner_execution_state_cleared() {
   const auto &execution = vm_context().execution;
   return execution.current_object == nullptr && execution.command_giver == nullptr &&
          execution.current_interactive == nullptr && execution.previous_ob == nullptr &&
-         execution.current_prog == nullptr && execution.caller_type == 0;
+         execution.current_prog == nullptr && execution.caller_type == 0 &&
+         vm_context().error.current_error_context == nullptr;
 }
 
 constexpr std::array<const char *, 18> kRegisteredOwnerLpcTasks = {
