@@ -457,6 +457,25 @@ TEST_F(DriverTest, TestVmOwnerMainQueueDropsStaleOwnerEpoch) {
   destruct_object(obj);
 }
 
+TEST_F(DriverTest, TestVmOwnerMainQueueRunsDropCallbackForStaleTask) {
+  object_t* obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+  vm_owner_set_id(obj, "owner/test/main-drop-old");
+
+  bool ran = false;
+  bool dropped = false;
+  auto task_id = vm_owner_enqueue_main_task(
+      obj, "unit_main", "drop", [&] { ran = true; }, [&] { dropped = true; });
+  ASSERT_GT(task_id, 0u);
+  vm_owner_set_id(obj, "owner/test/main-drop-new");
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+  ASSERT_FALSE(ran);
+  ASSERT_TRUE(dropped);
+
+  vm_owner_clear_id(obj);
+  destruct_object(obj);
+}
+
 TEST_F(DriverTest, TestVmOwnerHeartbeatTraceRecordsScheduledEvent) {
   current_object = master_ob;
   object_t* obj = find_object("single/master.c");
