@@ -51,6 +51,11 @@ void vm_context_set_current_owner(VMContext &context, const char *owner_id, uint
   context.owner.current_owner_epoch = owner_epoch;
 }
 
+void vm_context_set_command_giver(VMContext &context, object_t *giver) {
+  command_giver = giver;
+  context.execution.command_giver = giver;
+}
+
 void vm_context_set_current_interactive(VMContext &context, object_t *interactive) {
   current_interactive = interactive;
   context.execution.current_interactive = interactive;

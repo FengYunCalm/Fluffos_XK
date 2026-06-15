@@ -28,6 +28,7 @@
 #include "packages/core/custom_crypt.h"
 #include "packages/core/ed.h"
 #include "packages/core/heartbeat.h"
+#include "vm/context.h"
 #include "vm/owner.h"
 
 int data_size(object_t *ob);
@@ -2854,15 +2855,16 @@ void f__this_object() { push_object(current_object); }
 
 #ifdef F_THIS_PLAYER
 void f_this_player() {
+  const auto &execution = vm_context().execution;
   if (sp->u.number) {
-    if (current_interactive) {
-      put_unrefed_object(current_interactive, "this_player(1)");
+    if (execution.current_interactive) {
+      put_unrefed_object(execution.current_interactive, "this_player(1)");
     } else {
       sp->u.number = 0;
     }
   } else {
-    if (command_giver) {
-      put_unrefed_object(command_giver, "this_player(0)");
+    if (execution.command_giver) {
+      put_unrefed_object(execution.command_giver, "this_player(0)");
     }
     /* else zero is on stack already */
   }
