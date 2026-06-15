@@ -51,6 +51,11 @@ void vm_context_set_current_owner(VMContext &context, const char *owner_id, uint
   context.owner.current_owner_epoch = owner_epoch;
 }
 
+void vm_context_set_current_object(VMContext &context, object_t *object) {
+  current_object = object;
+  context.execution.current_object = object;
+}
+
 void vm_context_set_command_giver(VMContext &context, object_t *giver) {
   command_giver = giver;
   context.execution.command_giver = giver;
@@ -59,6 +64,33 @@ void vm_context_set_command_giver(VMContext &context, object_t *giver) {
 void vm_context_set_current_interactive(VMContext &context, object_t *interactive) {
   current_interactive = interactive;
   context.execution.current_interactive = interactive;
+}
+
+void vm_context_set_previous_object(VMContext &context, object_t *object) {
+  previous_ob = object;
+  context.execution.previous_ob = object;
+}
+
+void vm_context_set_current_program(VMContext &context, program_t *program) {
+  current_prog = program;
+  context.execution.current_prog = program;
+}
+
+void vm_context_set_caller_type(VMContext &context, int type) {
+  caller_type = type;
+  context.execution.caller_type = type;
+}
+
+void vm_context_set_execution_frame(VMContext &context, object_t *object, program_t *program,
+                                    object_t *previous, int type) {
+  current_object = object;
+  current_prog = program;
+  previous_ob = previous;
+  caller_type = type;
+  context.execution.current_object = object;
+  context.execution.current_prog = program;
+  context.execution.previous_ob = previous;
+  context.execution.caller_type = type;
 }
 
 void vm_context_reset_execution(VMContext &context) { context.execution = VMExecutionState{}; }

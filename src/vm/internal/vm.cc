@@ -123,12 +123,12 @@ void vm_start() {
  * stack machine execution (as stack will be cleared).
  */
 void clear_state() {
-  current_object = nullptr;
+  vm_context_set_current_object(vm_context(), nullptr);
   set_command_giver(nullptr);
   vm_context_set_current_interactive(vm_context(), nullptr);
-  previous_ob = nullptr;
-  current_prog = nullptr;
-  caller_type = 0;
+  vm_context_set_previous_object(vm_context(), nullptr);
+  vm_context_set_current_program(vm_context(), nullptr);
+  vm_context_set_caller_type(vm_context(), 0);
   vm_context_reset_execution(vm_context());
   reset_machine(0); /* Pop down the stack. */
 } /* clear_state() */

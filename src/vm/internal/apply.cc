@@ -277,11 +277,10 @@ retry_for_shadow:
             // will be called in the context of the caller
             fp = sp + 1; // zero args
             push_control_stack(FRAME_FUNCTION);
-            caller_type = ORIGIN_LOCAL;
+            vm_context_set_caller_type(vm_context(), ORIGIN_LOCAL);
             csp->pc = pc;
             csp->num_local_variables = 0;
-            current_prog = progp;
-            vm_context_sync_execution(vm_context());
+            vm_context_set_current_program(vm_context(), progp);
             call_program(progp, default_funcp->address);
 
             if (sp - current_sp != 1 || sp->type != T_FUNCTION) {
@@ -314,8 +313,8 @@ retry_for_shadow:
     }
     /* Setup new call frame */
     push_control_stack(FRAME_FUNCTION | FRAME_OB_CHANGE);
-    current_prog = entry.progp;
-    caller_type = local_call_origin;
+    vm_context_set_current_program(vm_context(), entry.progp);
+    vm_context_set_caller_type(vm_context(), local_call_origin);
     csp->num_local_variables = num_arg;
     function_index_offset = entry.function_index_offset;
     variable_index_offset = entry.variable_index_offset;
@@ -331,9 +330,7 @@ retry_for_shadow:
       setup_variables(csp->num_local_variables, funp->num_local, funp->num_arg);
     }
     /* Call the program */
-    previous_ob = current_object;
-    current_object = ob;
-    vm_context_sync_execution(vm_context());
+    vm_context_set_execution_frame(vm_context(), ob, current_prog, current_object, caller_type);
 #ifdef DEBUG
     save_csp = csp;
 #endif

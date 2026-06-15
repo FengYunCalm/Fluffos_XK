@@ -1784,8 +1784,7 @@ int restore_object(object_t *ob, const char *file, int noclear) {
     return 0;
   }
 
-  current_object = ob;
-  vm_context_sync_execution(vm_context());
+  vm_context_set_current_object(vm_context(), ob);
 
   /* This next bit added by Armidale@Cyberworld 1/1/93
    * If 'noclear' flag is not set, all non-static variables will be
@@ -1797,8 +1796,7 @@ int restore_object(object_t *ob, const char *file, int noclear) {
 
   restore_object_from_buff(ob, buf.data(), noclear);
 
-  current_object = save;
-  vm_context_sync_execution(vm_context());
+  vm_context_set_current_object(vm_context(), save);
   debug(d_flag, "Object /%s restored from /%s.\n", ob->obname, file);
 
   return 1;
