@@ -21,6 +21,7 @@ nosave int client_handshake_done = 0;
 nosave int server_handshake_done = 0;
 nosave int client_sent = 0;
 nosave int test_completed = 0;
+nosave int owner_main_queued_before = 0;
 
 void cleanup() {
   if (accepted_fd != -1) {
@@ -49,6 +50,7 @@ void finish_test() {
   ASSERT(client_handshake_done);
   ASSERT_EQ("client hello", server_received);
   ASSERT_EQ("server hello", client_received);
+  ASSERT(vm_owner_runtime_status()["main_queued"] >= owner_main_queued_before + 3);
   test_completed = 1;
   cleanup();
 }
@@ -127,12 +129,12 @@ void begin_test() {
   ASSERT_EQ(2, sizeof(parts));
 
   port = to_int(parts[1]);
+  owner_main_queued_before = vm_owner_runtime_status()["main_queued"];
   start_client(port);
 }
 
 void do_tests() {
   int ret;
-  string err;
 
   server_fd = socket_create(STREAM_TLS, "server_accept_ready");
   ASSERT2(server_fd >= 0, "failed to create server socket");

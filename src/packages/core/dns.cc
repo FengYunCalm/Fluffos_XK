@@ -88,6 +88,29 @@ struct AddrNumberQuery {
   evutil_addrinfo *res;
 };
 
+object_t *dns_callback_owner(AddrNumberQuery *query) {
+  if (!query) {
+    return nullptr;
+  }
+  if (query->call_back.type == T_FUNCTION && query->call_back.u.fp) {
+    return query->call_back.u.fp->hdr.owner;
+  }
+  return query->ob_to_call;
+}
+
+void free_addr_number_query(AddrNumberQuery *query) {
+  if (!query) {
+    return;
+  }
+  if (query->res != nullptr) {
+    evutil_freeaddrinfo(query->res);
+  }
+  free_string(query->name);
+  free_svalue(&query->call_back, "on_addr_result");
+  free_object(&query->ob_to_call, "on_addr_result: ");
+  delete query;
+}
+
 // query finished, call the LPC callback.
 void on_query_addr_by_name_finish(AddrNumberQuery *query) {
   if (query->err) {
@@ -144,12 +167,22 @@ void on_query_addr_by_name_finish(AddrNumberQuery *query) {
     safe_call_function_pointer(query->call_back.u.fp, 3);
   }
 
-  if (query->res != nullptr) evutil_freeaddrinfo(query->res);
+  free_addr_number_query(query);
+}
 
-  free_string(query->name);
-  free_svalue(&query->call_back, "on_addr_result");
-  free_object(&query->ob_to_call, "on_addr_result: ");
-  delete query;
+void enqueue_addr_by_name_callback(AddrNumberQuery *query) {
+  auto *owner = dns_callback_owner(query);
+  if (!owner || (owner->flags & O_DESTRUCTED)) {
+    free_addr_number_query(query);
+    return;
+  }
+  auto *task_key = query->call_back.type == T_STRING ? query->call_back.u.string : "<function>";
+  auto task_id = vm_owner_enqueue_main_task(
+      owner, "dns_callback", task_key, [query] { on_query_addr_by_name_finish(query); },
+      [query] { free_addr_number_query(query); });
+  if (task_id == 0) {
+    on_query_addr_by_name_finish(query);
+  }
 }
 
 // intermediate result from evdns_getaddrinfo
@@ -158,8 +191,8 @@ void on_getaddr_result(int err, evutil_addrinfo *res, void *arg) {
   query->err = err;
   query->res = res;
 
-  // Schedule an immediate event to call LPC callback.
-  add_gametick_event(0, [=] { return on_query_addr_by_name_finish(query); });
+  // Schedule an immediate event to queue the LPC callback on its owner.
+  add_gametick_event(0, [=] { return enqueue_addr_by_name_callback(query); });
 }
 
 /*
