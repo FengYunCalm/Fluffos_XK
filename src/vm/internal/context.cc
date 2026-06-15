@@ -51,6 +51,11 @@ void vm_context_set_current_owner(VMContext &context, const char *owner_id, uint
   context.owner.current_owner_epoch = owner_epoch;
 }
 
+void vm_context_set_current_interactive(VMContext &context, object_t *interactive) {
+  current_interactive = interactive;
+  context.execution.current_interactive = interactive;
+}
+
 void vm_context_reset_execution(VMContext &context) { context.execution = VMExecutionState{}; }
 
 VMExecutionState vm_context_capture_execution() {
@@ -110,6 +115,15 @@ VMExecutionScope::~VMExecutionScope() { vm_context_apply_execution(context_, sav
 VMContextThreadScope::VMContextThreadScope(VMContext &context) : saved_(vm_context_bind_thread(&context)) {}
 
 VMContextThreadScope::~VMContextThreadScope() { vm_context_bind_thread(saved_); }
+
+VMCurrentInteractiveScope::VMCurrentInteractiveScope(VMContext &context, object_t *interactive)
+    : context_(context), saved_(current_interactive) {
+  vm_context_set_current_interactive(context_, interactive);
+}
+
+VMCurrentInteractiveScope::~VMCurrentInteractiveScope() {
+  vm_context_set_current_interactive(context_, saved_);
+}
 
 VMOwnerScope::VMOwnerScope(VMContext &context, const char *owner_id, uint64_t owner_epoch)
     : context_(context), saved_(context.owner) {

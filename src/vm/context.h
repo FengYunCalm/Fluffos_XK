@@ -50,6 +50,7 @@ void vm_context_set_boot_time(VMContext &context, time_t boot_time);
 void vm_context_set_event_base(VMContext &context, event_base *base);
 void vm_context_set_current_gametick(VMContext &context, uint64_t gametick);
 void vm_context_set_current_owner(VMContext &context, const char *owner_id, uint64_t owner_epoch);
+void vm_context_set_current_interactive(VMContext &context, object_t *interactive);
 void vm_context_reset_execution(VMContext &context);
 VMExecutionState vm_context_capture_execution();
 void vm_context_apply_execution(VMContext &context, const VMExecutionState &execution);
@@ -80,6 +81,19 @@ class VMContextThreadScope {
 
  private:
   VMContext *saved_;
+};
+
+class VMCurrentInteractiveScope {
+ public:
+  VMCurrentInteractiveScope(VMContext &context, object_t *interactive);
+  ~VMCurrentInteractiveScope();
+
+  VMCurrentInteractiveScope(const VMCurrentInteractiveScope &) = delete;
+  VMCurrentInteractiveScope &operator=(const VMCurrentInteractiveScope &) = delete;
+
+ private:
+  VMContext &context_;
+  object_t *saved_;
 };
 
 class VMOwnerScope {

@@ -125,7 +125,7 @@ void vm_start() {
 void clear_state() {
   current_object = nullptr;
   set_command_giver(nullptr);
-  current_interactive = nullptr;
+  vm_context_set_current_interactive(vm_context(), nullptr);
   previous_ob = nullptr;
   current_prog = nullptr;
   caller_type = 0;
