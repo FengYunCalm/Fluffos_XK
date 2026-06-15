@@ -2120,11 +2120,10 @@ void save_command_giver(object_t *ob) {
   DEBUG_CHECK(cgsp == &command_giver_stack[CFG_MAX_CALL_DEPTH], "command_giver stack overflow");
   *(++cgsp) = command_giver;
 
-  command_giver = ob;
+  vm_context_set_command_giver(vm_context(), ob);
   if (command_giver) {
     add_ref(command_giver, "save_command_giver");
   }
-  vm_context_sync_execution(vm_context());
 }
 
 /* restore the saved command giver */
@@ -2133,8 +2132,7 @@ void restore_command_giver(void) {
     free_object(&command_giver, "command_giver_error_handler");
   }
   DEBUG_CHECK(cgsp == command_giver_stack, "command_giver stack underflow");
-  command_giver = *(cgsp--);
-  vm_context_sync_execution(vm_context());
+  vm_context_set_command_giver(vm_context(), *(cgsp--));
 }
 
 /* set a new command giver */
@@ -2143,9 +2141,8 @@ void set_command_giver(object_t *ob) {
     free_object(&command_giver, "set_command_giver");
   }
 
-  command_giver = ob;
+  vm_context_set_command_giver(vm_context(), ob);
   if (command_giver != nullptr) {
     add_ref(command_giver, "set_command_giver");
   }
-  vm_context_sync_execution(vm_context());
 }

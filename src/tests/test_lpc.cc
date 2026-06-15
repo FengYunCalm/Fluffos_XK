@@ -156,6 +156,33 @@ TEST_F(DriverTest, TestVmCurrentInteractiveScopeRestoresState) {
   ASSERT_EQ(vm_context().execution.current_interactive, nullptr);
 }
 
+TEST_F(DriverTest, TestVmCommandGiverStackSyncsContext) {
+  object_t* first = find_object("single/master.c");
+  object_t* second = find_object("single/simul_efun.c");
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+
+  set_command_giver(nullptr);
+  ASSERT_EQ(command_giver, nullptr);
+  ASSERT_EQ(vm_context().execution.command_giver, nullptr);
+
+  save_command_giver(first);
+  ASSERT_EQ(command_giver, first);
+  ASSERT_EQ(vm_context().execution.command_giver, first);
+
+  save_command_giver(second);
+  ASSERT_EQ(command_giver, second);
+  ASSERT_EQ(vm_context().execution.command_giver, second);
+
+  restore_command_giver();
+  ASSERT_EQ(command_giver, first);
+  ASSERT_EQ(vm_context().execution.command_giver, first);
+
+  restore_command_giver();
+  ASSERT_EQ(command_giver, nullptr);
+  ASSERT_EQ(vm_context().execution.command_giver, nullptr);
+}
+
 TEST_F(DriverTest, TestVmContextThreadScopeBindsThreadLocalContext) {
   auto *main_context = &vm_context();
   ASSERT_EQ(main_context, &vm_main_context());
