@@ -2,6 +2,7 @@
 #define SRC_VM_OWNER_H_
 
 #include <cstdint>
+#include <functional>
 
 struct mapping_t;
 struct object_t;
@@ -34,6 +35,9 @@ uint64_t vm_owner_enqueue_task_epoch(const char *owner_id, const char *task_type
                                      uint64_t owner_epoch);
 uint64_t vm_owner_record_task_trace(const char *owner_id, const char *task_type, const char *task_key,
                                      uint64_t owner_epoch, const char *state);
+uint64_t vm_owner_enqueue_main_task(object_t *target, const char *task_type, const char *task_key,
+                                    std::function<void()> callback);
+int vm_owner_drain_main_tasks(int limit);
 uint64_t vm_owner_record_access(object_t *source, object_t *target, const char *operation);
 uint64_t vm_owner_record_cross_owner_access(object_t *source, object_t *target, const char *operation);
 bool vm_owner_cross_owner_access_blocked(object_t *source, object_t *target, const char *operation);

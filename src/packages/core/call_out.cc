@@ -184,7 +184,7 @@ LPC_INT new_call_out(object_t *ob, svalue_t *fun, std::chrono::milliseconds dela
  * if it is a living object. Check for shadowing objects, which may also
  * be living objects.
  */
-void call_out(pending_call_t *cop) {
+static void execute_call_out(pending_call_t *cop) {
   auto callout_execution = vm_context_capture_execution();
   callout_execution.current_interactive = nullptr;
   VMExecutionScope callout_scope(vm_context(), callout_execution);
@@ -285,6 +285,19 @@ void call_out(pending_call_t *cop) {
   restore_command_giver();
 
   free_called_call(cop);
+}
+
+void call_out(pending_call_t *cop) {
+  if (!cop) {
+    return;
+  }
+  auto *ob = cop->ob ? cop->ob : cop->function.f->hdr.owner;
+  if (!ob || (ob->flags & O_DESTRUCTED)) {
+    execute_call_out(cop);
+    return;
+  }
+  vm_owner_enqueue_main_task(ob, "call_out", cop->ob ? cop->function.s : "<function>", [cop] { execute_call_out(cop); });
+  vm_owner_drain_main_tasks(64);
 }
 
 static int time_left(pending_call_t *cop) {

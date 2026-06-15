@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -67,6 +68,11 @@ std::atomic<uint64_t> owner_thread_lpc_task_executed{0};
 std::atomic<uint64_t> owner_thread_lpc_task_succeeded{0};
 std::atomic<uint64_t> owner_thread_lpc_task_failed{0};
 std::atomic<uint64_t> owner_thread_lpc_task_rejected{0};
+std::atomic<uint64_t> owner_main_queued{0};
+std::atomic<uint64_t> owner_main_dispatched{0};
+std::atomic<uint64_t> owner_main_stale{0};
+std::atomic<uint64_t> owner_main_destructed{0};
+std::atomic<uint64_t> owner_main_budget_yields{0};
 
 struct OwnerMailboxTask {
   uint64_t task_id;
@@ -137,10 +143,26 @@ struct OwnerFutureRecord {
   std::string error;
 };
 
+struct OwnerMainTask {
+  uint64_t task_id;
+  uint64_t sequence;
+  uint64_t owner_epoch;
+  std::string owner_id;
+  std::string task_type;
+  std::string task_key;
+  std::string target_object;
+  object_t *target{nullptr};
+  std::function<void()> callback;
+};
+
 std::unordered_map<std::string, std::deque<OwnerMailboxTask>> owner_mailboxes;
+std::unordered_map<std::string, std::deque<OwnerMainTask>> owner_main_queues;
 std::deque<std::string> schedulable_owners;
+std::deque<std::string> main_schedulable_owners;
 std::unordered_set<std::string> schedulable_owner_set;
+std::unordered_set<std::string> main_schedulable_owner_set;
 std::unordered_set<std::string> active_owner_set;
+std::unordered_set<std::string> active_main_owner_set;
 std::deque<OwnerTaskTrace> owner_task_traces;
 std::deque<OwnerAccessTrace> owner_access_traces;
 std::deque<OwnerMessageTrace> owner_message_traces;
@@ -150,6 +172,7 @@ std::vector<object_t *> owner_deferred_target_releases;
 std::mutex owner_runtime_mutex;
 std::condition_variable owner_runtime_cv;
 bool owner_thread_stopping{false};
+bool owner_main_draining{false};
 std::vector<std::thread> owner_threads;
 
 bool valid_owner_id(const char *owner_id) {
@@ -210,6 +233,14 @@ long owner_mailbox_total_depth() {
   return depth;
 }
 
+long owner_main_queue_total_depth() {
+  long depth = 0;
+  for (const auto &entry : owner_main_queues) {
+    depth += static_cast<long>(entry.second.size());
+  }
+  return depth;
+}
+
 long owner_mailbox_active_owners() {
   long owners = 0;
   for (const auto &entry : owner_mailboxes) {
@@ -251,6 +282,19 @@ void release_owner_task_target(OwnerMailboxTask *task) {
     auto *target = task->target;
     if (vm_context_is_main_thread()) {
       free_object(&target, "owner mailbox task");
+    } else {
+      std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+      owner_deferred_target_releases.push_back(target);
+    }
+    task->target = nullptr;
+  }
+}
+
+void release_owner_main_task_target(OwnerMainTask *task) {
+  if (task && task->target) {
+    auto *target = task->target;
+    if (vm_context_is_main_thread()) {
+      free_object(&target, "owner main task");
     } else {
       std::lock_guard<std::mutex> lock(owner_runtime_mutex);
       owner_deferred_target_releases.push_back(target);
@@ -349,6 +393,11 @@ uint64_t append_owner_task_trace(const OwnerMailboxTask &task, const char *state
                                  task.task_key, state);
 }
 
+uint64_t append_owner_task_trace(const OwnerMainTask &task, const char *state) {
+  return append_owner_task_trace(task.task_id, task.sequence, task.owner_id, task.owner_epoch, task.task_type,
+                                 task.task_key, state);
+}
+
 uint64_t append_owner_task_trace_threadsafe(const OwnerMailboxTask &task, const char *state) {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
   return append_owner_task_trace(task, state);
@@ -404,6 +453,7 @@ void complete_owner_future_for_task_locked(uint64_t target_task_id, const char *
 }
 
 void mark_owner_schedulable(const std::string &owner_id);
+void mark_main_owner_schedulable(const std::string &owner_id);
 
 void enqueue_owner_task_locked(OwnerMailboxTask task, const std::string &owner_id, bool *notify_owner_thread) {
   append_owner_task_trace(task, "queued");
@@ -419,6 +469,21 @@ void enqueue_owner_task_locked(OwnerMailboxTask task, const std::string &owner_i
 void mark_owner_schedulable(const std::string &owner_id) {
   if (schedulable_owner_set.insert(owner_id).second) {
     schedulable_owners.push_back(owner_id);
+  }
+}
+
+void mark_main_owner_schedulable(const std::string &owner_id) {
+  if (main_schedulable_owner_set.insert(owner_id).second) {
+    main_schedulable_owners.push_back(owner_id);
+  }
+}
+
+void finish_active_main_owner_task(const std::string &owner_id) {
+  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+  active_main_owner_set.erase(owner_id);
+  auto it = owner_main_queues.find(owner_id);
+  if (it != owner_main_queues.end() && !it->second.empty()) {
+    mark_main_owner_schedulable(owner_id);
   }
 }
 
@@ -464,6 +529,39 @@ bool pop_next_schedulable_task(OwnerMailboxTask *out, bool claim_owner) {
     }
     if (claim_owner) {
       active_owner_set.insert(owner_id);
+    }
+    return true;
+  }
+
+  return false;
+}
+
+bool pop_next_main_task(OwnerMainTask *out, bool claim_owner) {
+  while (!main_schedulable_owners.empty()) {
+    auto owner_id = main_schedulable_owners.front();
+    main_schedulable_owners.pop_front();
+    if (main_schedulable_owner_set.erase(owner_id) == 0) {
+      continue;
+    }
+    if (claim_owner && active_main_owner_set.count(owner_id) > 0) {
+      continue;
+    }
+
+    auto it = owner_main_queues.find(owner_id);
+    if (it == owner_main_queues.end() || it->second.empty()) {
+      owner_main_queues.erase(owner_id);
+      continue;
+    }
+
+    *out = std::move(it->second.front());
+    it->second.pop_front();
+    if (it->second.empty()) {
+      owner_main_queues.erase(it);
+    } else if (!claim_owner) {
+      mark_main_owner_schedulable(owner_id);
+    }
+    if (claim_owner) {
+      active_main_owner_set.insert(owner_id);
     }
     return true;
   }
@@ -1041,6 +1139,99 @@ uint64_t vm_owner_record_task_trace(const char *owner_id, const char *task_type,
                                   normalize_task_text(task_type, "generic"), normalize_task_text(task_key, ""), state);
 }
 
+uint64_t vm_owner_enqueue_main_task(object_t *target, const char *task_type, const char *task_key,
+                                    std::function<void()> callback) {
+  if (!target || !callback) {
+    return 0;
+  }
+
+  OwnerMainTask task;
+  task.task_id = next_mailbox_task_id.fetch_add(1, std::memory_order_relaxed);
+  task.sequence = total_enqueued.fetch_add(1, std::memory_order_relaxed) + 1;
+  task.owner_id = normalize_owner_id(vm_owner_id(target));
+  task.owner_epoch = vm_owner_epoch(target);
+  task.task_type = normalize_task_text(task_type, "main");
+  task.task_key = normalize_task_text(task_key, "");
+  task.target_object = owner_object_name(target);
+  task.target = target;
+  task.callback = std::move(callback);
+  add_ref(target, "owner main task");
+
+  auto task_id = task.task_id;
+  {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    append_owner_task_trace(task, "main_queued");
+    auto &queue = owner_main_queues[task.owner_id];
+    auto was_empty = queue.empty();
+    queue.push_back(std::move(task));
+    if (was_empty && active_main_owner_set.count(queue.back().owner_id) == 0) {
+      mark_main_owner_schedulable(queue.back().owner_id);
+    }
+  }
+  owner_main_queued.fetch_add(1, std::memory_order_relaxed);
+  return task_id;
+}
+
+int vm_owner_drain_main_tasks(int limit) {
+  if (!vm_context_is_main_thread()) {
+    return 0;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    if (owner_main_draining) {
+      return 0;
+    }
+    owner_main_draining = true;
+  }
+
+  int dispatched = 0;
+  auto budget = limit <= 0 ? kOwnerExecutorTaskBudget : limit;
+  while (dispatched < budget) {
+    OwnerMainTask task;
+    {
+      std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+      if (!pop_next_main_task(&task, true)) {
+        break;
+      }
+    }
+
+    auto *target = task.target;
+    bool stale = !target || (target->flags & O_DESTRUCTED) || task.owner_id != vm_owner_id(target) ||
+                 task.owner_epoch != vm_owner_epoch(target);
+    if (stale) {
+      std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+      append_owner_task_trace(task, target && (target->flags & O_DESTRUCTED) ? "main_destructed" : "main_stale");
+      if (target && (target->flags & O_DESTRUCTED)) {
+        owner_main_destructed.fetch_add(1, std::memory_order_relaxed);
+      } else {
+        owner_main_stale.fetch_add(1, std::memory_order_relaxed);
+      }
+    } else {
+      {
+        std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+        append_owner_task_trace(task, "main_dispatched");
+      }
+      VMOwnerScope owner_scope(vm_context(), task.owner_id.c_str(), task.owner_epoch);
+      task.callback();
+      owner_main_dispatched.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    dispatched++;
+    finish_active_main_owner_task(task.owner_id);
+    release_owner_main_task_target(&task);
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    if (dispatched >= budget && owner_main_queue_total_depth() > 0) {
+      owner_main_budget_yields.fetch_add(1, std::memory_order_relaxed);
+    }
+    owner_main_draining = false;
+  }
+  return dispatched;
+}
+
 uint64_t vm_owner_record_access(object_t *source, object_t *target, const char *operation) {
   if (!vm_multicore_audit_enabled()) {
     return 0;
@@ -1479,7 +1670,7 @@ void vm_owner_thread_stop() {
 
 mapping_t *vm_owner_thread_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(36);
+  auto *map = allocate_mapping(43);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
   add_mapping_pair(map, "thread_count", static_cast<long>(owner_threads.size()));
@@ -1536,12 +1727,19 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_pair(map, "thread_starts", static_cast<long>(owner_thread_starts.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_stops", static_cast<long>(owner_thread_stops.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "queue_depth", owner_mailbox_total_depth());
+  add_mapping_pair(map, "main_queue_depth", owner_main_queue_total_depth());
+  add_mapping_pair(map, "main_active_owners", static_cast<long>(active_main_owner_set.size()));
+  add_mapping_pair(map, "main_queued", static_cast<long>(owner_main_queued.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_dispatched", static_cast<long>(owner_main_dispatched.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_stale", static_cast<long>(owner_main_stale.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_destructed", static_cast<long>(owner_main_destructed.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_budget_yields", static_cast<long>(owner_main_budget_yields.load(std::memory_order_relaxed)));
   return map;
 }
 
 mapping_t *vm_owner_runtime_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(21);
+  auto *map = allocate_mapping(28);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
   add_mapping_string(map, "multicore_mode_name", vm_multicore_mode_name(vm_multicore_mode()));
@@ -1549,6 +1747,13 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_pair(map, "enforced", vm_multicore_enforced() ? 1 : 0);
   add_mapping_string(map, "default_owner_id", kDefaultOwnerId);
   add_mapping_pair(map, "queue_depth", owner_mailbox_total_depth());
+  add_mapping_pair(map, "main_queue_depth", owner_main_queue_total_depth());
+  add_mapping_pair(map, "main_active_owners", static_cast<long>(active_main_owner_set.size()));
+  add_mapping_pair(map, "main_queued", static_cast<long>(owner_main_queued.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_dispatched", static_cast<long>(owner_main_dispatched.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_stale", static_cast<long>(owner_main_stale.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_destructed", static_cast<long>(owner_main_destructed.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_budget_yields", static_cast<long>(owner_main_budget_yields.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "active_owners", static_cast<long>(active_owner_set.size()));
   add_mapping_pair(map, "owner_threads", static_cast<long>(owner_threads.size()));
   add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
