@@ -7,6 +7,7 @@
 #include "packages/core/dns.h"
 #include "user.h"
 #include "vm/context.h"
+#include "vm/owner.h"
 
 #include <event2/event.h>
 #include <nlohmann/json.hpp>
@@ -75,7 +76,14 @@ void gateway_command_callback(evutil_socket_t /*fd*/, short /*what*/, void *arg)
   }
 
   set_eval(max_eval_cost);
-  process_user_command(user);
+  if (user->ob && !(user->ob->flags & O_DESTRUCTED)) {
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(user->ob), vm_owner_epoch(user->ob));
+    vm_owner_record_task_trace(vm_owner_id(user->ob), "gateway", "process_user_command",
+                               vm_owner_epoch(user->ob), "dispatched");
+    process_user_command(user);
+  } else {
+    process_user_command(user);
+  }
   current_interactive = nullptr;
   vm_context_sync_execution(vm_context());
 }
@@ -301,20 +309,25 @@ object_t *gateway_create_session_internal(const char *session_id, svalue_t *data
   has_gateway_logon = function_exists("gateway_logon", ob, 0) ? 1 : 0;
   save_command_giver(ob);
   current_interactive = ob;
-  vm_context_sync_execution(vm_context());
-  if (has_gateway_logon) {
-    if (data_val) {
-      push_svalue(data_val);
-      ret = safe_apply("gateway_logon", ob, 1, ORIGIN_DRIVER);
+  {
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob), vm_owner_epoch(ob));
+    vm_owner_record_task_trace(vm_owner_id(ob), "gateway", has_gateway_logon ? "gateway_logon" : "logon",
+                               vm_owner_epoch(ob), "dispatched");
+    vm_context_sync_execution(vm_context());
+    if (has_gateway_logon) {
+      if (data_val) {
+        push_svalue(data_val);
+        ret = safe_apply("gateway_logon", ob, 1, ORIGIN_DRIVER);
+      } else {
+        ret = safe_apply("gateway_logon", ob, 0, ORIGIN_DRIVER);
+      }
     } else {
-      ret = safe_apply("gateway_logon", ob, 0, ORIGIN_DRIVER);
+      ret = safe_apply("logon", ob, 0, ORIGIN_DRIVER);
     }
-  } else {
-    ret = safe_apply("logon", ob, 0, ORIGIN_DRIVER);
+    current_interactive = nullptr;
+    vm_context_sync_execution(vm_context());
   }
   restore_command_giver();
-  current_interactive = nullptr;
-  vm_context_sync_execution(vm_context());
 
   if (!ret) {
     auto *active_ob = resolve_active_session_owner(session_id, ob);
@@ -343,13 +356,18 @@ int gateway_destroy_session_internal(const char *session_id, const char *reason_
   if (gateway_object_valid(ob) && ob->interactive) {
     save_command_giver(ob);
     current_interactive = ob;
-    vm_context_sync_execution(vm_context());
-    set_eval(max_eval_cost);
-    copy_and_push_string(reason_code_str);
-    copy_and_push_string(reason_text_str);
-    safe_apply("gateway_disconnected", ob, 2, ORIGIN_DRIVER);
-    current_interactive = nullptr;
-    vm_context_sync_execution(vm_context());
+    {
+      VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob), vm_owner_epoch(ob));
+      vm_owner_record_task_trace(vm_owner_id(ob), "gateway", "gateway_disconnected", vm_owner_epoch(ob),
+                                 "dispatched");
+      vm_context_sync_execution(vm_context());
+      set_eval(max_eval_cost);
+      copy_and_push_string(reason_code_str);
+      copy_and_push_string(reason_text_str);
+      safe_apply("gateway_disconnected", ob, 2, ORIGIN_DRIVER);
+      current_interactive = nullptr;
+      vm_context_sync_execution(vm_context());
+    }
     restore_command_giver();
 
     if ((sess = gateway_find_session(session_id))) {

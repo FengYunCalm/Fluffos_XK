@@ -5,6 +5,7 @@
 #include <thread>
 #include "base/package_api.h"
 
+#include "backend.h"
 #include "mainlib.h"
 
 #include "compiler/internal/compiler.h"
@@ -13,6 +14,7 @@
 #include "vm/context.h"
 #include "vm/internal/base/array.h"
 #include "vm/internal/simulate.h"
+#include "vm/object_handle.h"
 #include "vm/owner.h"
 #include "vm/worker.h"
 
@@ -414,6 +416,52 @@ TEST_F(DriverTest, TestVmOwnerHeartbeatTraceRecordsScheduledEvent) {
 
   set_heart_beat(obj, 0);
   vm_owner_clear_id(obj);
+}
+
+TEST_F(DriverTest, TestVmOwnerHeartbeatStaleOwnerSkipsExecution) {
+  object_t* obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+  vm_owner_set_id(obj, "owner/test/heartbeat-stale-old");
+
+  auto call_number = [](const char* method, object_t* target) -> long {
+    auto* ret = safe_apply(method, target, 0, ORIGIN_DRIVER);
+    EXPECT_NE(ret, nullptr);
+    EXPECT_EQ(ret ? ret->type : T_INVALID, T_NUMBER);
+    return ret && ret->type == T_NUMBER ? ret->u.number : -1;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  ASSERT_EQ(call_number("get_heartbeat_called", obj), 0);
+  ASSERT_EQ(set_heart_beat(obj, 1), 1);
+  vm_owner_set_id(obj, "owner/test/heartbeat-stale-new");
+
+  call_heart_beat();
+  clear_tick_events();
+
+  ASSERT_EQ(call_number("get_heartbeat_called", obj), 0);
+  auto* trace = vm_owner_task_trace(4);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  bool saw_stale = false;
+  for (int i = 0; i < events->u.arr->size; i++) {
+    auto* event = events->u.arr->item[i].u.map;
+    if (std::string(mapping_string(event, "task_type")) == "heartbeat" &&
+        std::string(mapping_string(event, "state")) == "stale") {
+      saw_stale = true;
+    }
+  }
+  ASSERT_TRUE(saw_stale);
+  free_mapping(trace);
+
+  set_heart_beat(obj, 0);
+  vm_owner_clear_id(obj);
+  destruct_object(obj);
 }
 
 TEST_F(DriverTest, TestVmOwnerAccessTraceRecordsCrossOwnerAccess) {
@@ -1490,6 +1538,86 @@ TEST_F(DriverTest, TestVmOwnerMessageAndCommitTracesAreSpecOnly) {
   ASSERT_STREQ(mapping_string(tasks->u.arr->item[0].u.map, "task_key"), "room_snapshot");
   free_mapping(drained);
   free_mapping(submitted);
+}
+
+TEST_F(DriverTest, TestVmOwnerFuturePollTracksMessageCompletion) {
+  const char* source_owner = "owner/test/future/source";
+  const char* target_owner = "owner/test/future/target";
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  free_mapping(vm_owner_purge_mailbox(target_owner));
+  auto* submitted = vm_owner_submit_message(source_owner, target_owner, "future_method", "future/payload");
+  auto future_id = mapping_number(submitted, "future_id");
+  auto target_task_id = mapping_number(submitted, "target_task_id");
+  ASSERT_GT(future_id, 0);
+  ASSERT_GT(target_task_id, 0);
+
+  auto* pending = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+  ASSERT_EQ(mapping_number(pending, "success"), 1);
+  ASSERT_EQ(mapping_number(pending, "future_id"), future_id);
+  ASSERT_EQ(mapping_number(pending, "target_task_id"), target_task_id);
+  ASSERT_EQ(mapping_number(pending, "requires_owner_message_completion"), 1);
+  ASSERT_STREQ(mapping_string(pending, "state"), "pending");
+  free_mapping(pending);
+
+  free_mapping(vm_owner_drain_mailbox(target_owner, 1));
+  auto* completed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+  ASSERT_EQ(mapping_number(completed, "success"), 1);
+  ASSERT_EQ(mapping_number(completed, "requires_owner_message_completion"), 0);
+  ASSERT_STREQ(mapping_string(completed, "state"), "completed");
+  ASSERT_STREQ(mapping_string(completed, "result_key"), "future_method");
+  free_mapping(completed);
+  free_mapping(submitted);
+}
+
+TEST_F(DriverTest, TestVmOwnerFuturePollReportsUnknownFuture) {
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* result = vm_owner_future_poll(999999999u);
+  ASSERT_EQ(mapping_number(result, "success"), 0);
+  ASSERT_EQ(mapping_number(result, "requires_owner_message_completion"), 0);
+  ASSERT_STREQ(mapping_string(result, "state"), "unknown");
+  free_mapping(result);
+}
+
+TEST_F(DriverTest, TestVmObjectHandleRejectsStaleOwnerEpoch) {
+  object_t* obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+
+  vm_owner_set_id(obj, "owner/test/handle/a");
+  auto handle = vm_object_handle(obj);
+  ASSERT_TRUE(handle.valid);
+  ASSERT_EQ(vm_object_handle_resolve(handle), obj);
+
+  vm_owner_set_id(obj, "owner/test/handle/b");
+  ASSERT_EQ(vm_object_handle_resolve(handle), nullptr);
+  ASSERT_FALSE(vm_object_handle_is_current(handle));
+
+  vm_owner_clear_id(obj);
+  destruct_object(obj);
 }
 
 TEST_F(DriverTest, TestVmOwnerGuardFailsFastOnMismatch) {

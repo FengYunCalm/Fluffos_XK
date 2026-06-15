@@ -1,11 +1,33 @@
 int called = 0;
+int heartbeat_called = 0;
 
 void virtual_start() {
   called = 1;
 }
 
 int get_called() {
-  return called;
+   return called;
+}
+
+void heart_beat() {
+  heartbeat_called++;
+}
+
+int get_heartbeat_called() {
+  return heartbeat_called;
+}
+
+void reset_heartbeat_called() {
+  heartbeat_called = 0;
+  set_heart_beat(0);
+}
+
+void start_heartbeat() {
+  set_heart_beat(1);
+}
+
+void stop_heartbeat() {
+  set_heart_beat(0);
 }
 
 void dummy()

@@ -49,6 +49,21 @@ FluffOS_XK focuses on engine-level foundations, not gameplay rules.
 - **Operational separation**: game repositories can pin or rebuild this driver without inheriting engine development
   branches, private docs, or deployment data.
 
+## Multicore Runtime Status
+
+The current multicore work has landed as controlled runtime infrastructure rather than unrestricted background LPC
+execution. The driver now has thread-local VMContext binding, an owner-aware worker runtime, owner mailboxes, owner task
+tracing, and guarded owner LPC canary/task paths.
+
+Practical effects today:
+
+- CPU-bound snapshot tasks such as digesting, actor scoring, and combat damage calculation can run through VM workers.
+- Worker queues are owner-key aware, so tasks for the same owner stay serialized while independent owners can progress in parallel.
+- Owner ids, epochs, mailbox traces, access traces, and commit/message traces give downstream projects a migration path toward actor-style service boundaries.
+- Ordinary LPC execution remains closed off-main unless it goes through explicit owner contracts and registered allowlists.
+
+See `docs/multicore-runtime.md` for the current status, effect analysis, boundaries, and recommended downstream migration path.
+
 ## Get The Code
 
 ```bash
@@ -103,6 +118,7 @@ Out of scope:
 ## Documentation
 
 - Official FluffOS docs: https://www.fluffos.info
+- Multicore runtime status: `docs/multicore-runtime.md`
 - Local docs entry: `docs/index.md`
 - Fork changelog: `CHANGELOG.md`
 - Release notes and workflow notes: `RELEASE.md`

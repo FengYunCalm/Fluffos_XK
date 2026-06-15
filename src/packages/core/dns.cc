@@ -2,6 +2,9 @@
 
 #include "packages/core/dns.h"
 
+#include "vm/context.h"
+#include "vm/owner.h"
+
 #include <event2/event.h>
 #include <event2/dns.h>
 #include <event2/util.h>
@@ -129,8 +132,15 @@ void on_query_addr_by_name_finish(AddrNumberQuery *query) {
   push_number(query->key);
   set_eval(max_eval_cost);
   if (query->call_back.type == T_STRING) {
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(query->ob_to_call), vm_owner_epoch(query->ob_to_call));
+    vm_owner_record_task_trace(vm_owner_id(query->ob_to_call), "dns_callback", query->call_back.u.string,
+                               vm_owner_epoch(query->ob_to_call), "dispatched");
     safe_apply(query->call_back.u.string, query->ob_to_call, 3, ORIGIN_INTERNAL);
   } else {
+    auto *owner = query->call_back.u.fp ? query->call_back.u.fp->hdr.owner : query->ob_to_call;
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(owner), vm_owner_epoch(owner));
+    vm_owner_record_task_trace(vm_owner_id(owner), "dns_callback", "<function>", vm_owner_epoch(owner),
+                               "dispatched");
     safe_call_function_pointer(query->call_back.u.fp, 3);
   }
 

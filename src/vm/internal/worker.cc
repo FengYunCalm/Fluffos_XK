@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "base/internal/tracing.h"
+#include "vm/owner.h"
 
 namespace {
 
@@ -724,6 +725,7 @@ class VMWorkerRuntime {
     if (record->envelope.ttl_ms > 0) {
       record->envelope.expires_at_ms = record->envelope.completed_at_ms + record->envelope.ttl_ms;
     }
+    vm_owner_enqueue_task(record->envelope.owner_key.c_str(), "compute_result", record->type.c_str());
   }
 
   void apply_deadline_locked(AsyncRecord *record) {

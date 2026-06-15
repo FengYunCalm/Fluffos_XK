@@ -1,7 +1,74 @@
 #include "base/package_api.h"
 
 #include "vm/context.h"
+#include "vm/object_handle.h"
 #include "vm/owner.h"
+
+#include <string>
+
+namespace {
+bool owner_payload_safe(svalue_t *value, int depth, std::string *error) {
+  if (depth > 8) {
+    *error = "owner payload nesting is too deep";
+    return false;
+  }
+  switch (value->type) {
+    case T_NUMBER:
+    case T_REAL:
+    case T_STRING:
+      return true;
+    case T_ARRAY:
+      for (int i = 0; i < value->u.arr->size; i++) {
+        if (!owner_payload_safe(&value->u.arr->item[i], depth + 1, error)) {
+          return false;
+        }
+      }
+      return true;
+    case T_MAPPING:
+      for (unsigned int i = 0; i <= value->u.map->table_size; i++) {
+        for (auto *node = value->u.map->table[i]; node; node = node->next) {
+          if (node->values[0].type != T_STRING) {
+            *error = "owner payload mapping keys must be strings";
+            return false;
+          }
+          if (!owner_payload_safe(&node->values[1], depth + 1, error)) {
+            return false;
+          }
+        }
+      }
+      return true;
+    default:
+      *error = "owner payload must be frozen data, not object/function/buffer/class";
+      return false;
+  }
+}
+
+std::string owner_mapping_string(mapping_t *map, const char *key, const char *fallback) {
+  auto *value = find_string_in_mapping(map, key);
+  if (value && value->type == T_STRING && value->u.string) {
+    return value->u.string;
+  }
+  return fallback ? fallback : "";
+}
+
+const char *current_owner_id_for_message() {
+  if (current_object) {
+    return vm_owner_id(current_object);
+  }
+  if (!vm_context().owner.current_owner_id.empty()) {
+    return vm_context().owner.current_owner_id.c_str();
+  }
+  return vm_owner_default_id();
+}
+
+mapping_t *owner_payload_error(const std::string &error_text) {
+  auto *map = allocate_mapping(3);
+  add_mapping_pair(map, "success", 0);
+  add_mapping_string(map, "error", error_text.c_str());
+  add_mapping_pair(map, "frozen_payload", 0);
+  return map;
+}
+}  // namespace
 
 #ifdef F_VM_OWNER_ID
 void f_vm_owner_id() {
@@ -271,5 +338,119 @@ void f_vm_owner_thread_stop() {
 void f_vm_owner_thread_status() {
   auto *result = vm_owner_thread_status();
   push_refed_mapping(result);
+}
+#endif
+
+#ifdef F_VM_OWNER_RUNTIME_STATUS
+void f_vm_owner_runtime_status() {
+  auto *result = vm_owner_runtime_status();
+  push_refed_mapping(result);
+}
+#endif
+
+#ifdef F_VM_OBJECT_HANDLE
+void f_vm_object_handle() {
+  auto *result = vm_object_handle_status(sp->u.ob);
+  free_object(&sp->u.ob, "f_vm_object_handle");
+  sp->type = T_MAPPING;
+  sp->subtype = 0;
+  sp->u.map = result;
+}
+#endif
+
+#ifdef F_VM_OBJECT_STORE_STATUS
+void f_vm_object_store_status() {
+  auto *result = vm_object_store_status();
+  push_refed_mapping(result);
+}
+#endif
+
+#ifdef F_VM_OBJECT_STORE_OWNER_STATUS
+void f_vm_object_store_owner_status() {
+  auto *result = vm_object_store_owner_status(sp->u.string);
+  pop_stack();
+  push_refed_mapping(result);
+}
+#endif
+
+#ifdef F_OWNER_SEND
+void f_owner_send() {
+  auto *payload = sp;
+  auto *target_owner = sp - 1;
+  std::string error_text;
+  if (!owner_payload_safe(payload, 0, &error_text)) {
+    pop_2_elems();
+    push_refed_mapping(owner_payload_error(error_text));
+    return;
+  }
+  auto message_type = owner_mapping_string(payload->u.map, "type", "message");
+  auto payload_key = owner_mapping_string(payload->u.map, "payload_key", message_type.c_str());
+  auto *result = vm_owner_submit_message(current_owner_id_for_message(), target_owner->u.string,
+                                         message_type.c_str(), payload_key.c_str());
+  add_mapping_pair(result, "frozen_payload", 1);
+  pop_2_elems();
+  push_refed_mapping(result);
+}
+#endif
+
+#ifdef F_OWNER_CALL_ASYNC
+void f_owner_call_async() {
+  auto *payload = sp;
+  auto *method = sp - 1;
+  auto *target = sp - 2;
+  std::string error_text;
+  if (!owner_payload_safe(payload, 0, &error_text)) {
+    pop_n_elems(3);
+    push_refed_mapping(owner_payload_error(error_text));
+    return;
+  }
+  auto payload_key = owner_mapping_string(payload->u.map, "payload_key", method->u.string);
+  auto *result = vm_owner_submit_message(current_owner_id_for_message(), vm_owner_id(target->u.ob),
+                                          method->u.string, payload_key.c_str());
+  add_mapping_pair(result, "frozen_payload", 1);
+  add_mapping_pair(result, "async_only", 1);
+  pop_n_elems(3);
+  push_refed_mapping(result);
+}
+#endif
+
+#ifdef F_OWNER_FUTURE_POLL
+void f_owner_future_poll() {
+  auto future_id = sp->u.number;
+  pop_stack();
+  push_refed_mapping(vm_owner_future_poll(static_cast<uint64_t>(future_id)));
+}
+#endif
+
+#ifdef F_OWNER_SNAPSHOT
+void f_owner_snapshot() {
+  auto *result = vm_object_handle_status(sp->u.ob);
+  add_mapping_pair(result, "snapshot_only", 1);
+  free_object(&sp->u.ob, "f_owner_snapshot");
+  sp->type = T_MAPPING;
+  sp->subtype = 0;
+  sp->u.map = result;
+}
+#endif
+
+#ifdef F_OWNER_PUBLISH_SNAPSHOT
+void f_owner_publish_snapshot() {
+  std::string error_text;
+  if (!owner_payload_safe(sp, 0, &error_text)) {
+    pop_stack();
+    push_refed_mapping(owner_payload_error(error_text));
+    return;
+  }
+  auto owner_id = current_owner_id_for_message();
+  auto *map = allocate_mapping(7);
+  add_mapping_pair(map, "success", 1);
+  add_mapping_string(map, "owner_id", owner_id);
+  add_mapping_pair(map, "owner_epoch", current_object ? static_cast<long>(vm_owner_epoch(current_object)) : 0);
+  add_mapping_pair(map, "frozen_payload", 1);
+  add_mapping_pair(map, "snapshot_only", 1);
+  add_mapping_pair(map, "direct_cross_owner_write", 0);
+  add_mapping_string(map, "state", "snapshot_published");
+  pop_stack();
+  push_refed_mapping(map);
 }
 #endif

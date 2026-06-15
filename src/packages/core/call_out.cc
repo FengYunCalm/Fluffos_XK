@@ -3,6 +3,7 @@
 #include "packages/core/call_out.h"
 
 #include "vm/context.h"
+#include "vm/object_handle.h"
 #include "vm/owner.h"
 
 #include <chrono>
@@ -146,6 +147,7 @@ LPC_INT new_call_out(object_t *ob, svalue_t *fun, std::chrono::milliseconds dela
   DBG_CALLOUT("  handle: %" LPC_INT_FMTSTR_P "\n", cop->handle);
 
   object_t *owner_ob = cop->ob ? cop->ob : fun->u.fp->hdr.owner;
+  vm_object_store_record_callout(owner_ob);
   cop->owner_id = make_shared_string(vm_owner_id(owner_ob));
   cop->owner_epoch = vm_owner_epoch(owner_ob);
   vm_owner_record_task_trace(cop->owner_id, "call_out", fun->type == T_STRING ? fun->u.string : "<function>",
@@ -218,6 +220,8 @@ void call_out(pending_call_t *cop) {
   if ((cop->owner_id && strcmp(cop->owner_id, vm_owner_id(ob)) != 0) || cop->owner_epoch != vm_owner_epoch(ob)) {
     vm_owner_record_task_trace(vm_owner_id(ob), "call_out", cop->ob ? cop->function.s : "<function>",
                                vm_owner_epoch(ob), "stale");
+    free_call(cop);
+    return;
   }
   vm_owner_record_task_trace(vm_owner_id(ob), "call_out", cop->ob ? cop->function.s : "<function>",
                              vm_owner_epoch(ob), "dispatched");
@@ -270,6 +274,7 @@ void call_out(pending_call_t *cop) {
 
   save_command_giver(new_command_giver);
   /* current object no longer set */
+  VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob), vm_owner_epoch(ob));
   if (cop->ob) {
     DBG_CALLOUT("  func: %s\n", cop->function.s);
     (void)safe_apply(cop->function.s, cop->ob, num_callout_args, ORIGIN_INTERNAL);

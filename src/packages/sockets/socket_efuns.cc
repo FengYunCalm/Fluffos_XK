@@ -9,6 +9,8 @@
 
 #include "packages/sockets/socket_efuns.h"
 #include "net/tls.h"
+#include "vm/context.h"
+#include "vm/owner.h"
 
 #include <cinttypes>
 #include <event2/event.h>
@@ -1197,11 +1199,19 @@ static void call_callback(int fd, int what, int num_arg) {
   set_eval(max_eval_cost);
 
   if (lpc_socks[fd].flags & what) {
+    auto *owner = callback.f ? callback.f->hdr.owner : lpc_socks[fd].owner_ob;
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(owner), vm_owner_epoch(owner));
+    vm_owner_record_task_trace(vm_owner_id(owner), "socket_callback", "<function>", vm_owner_epoch(owner),
+                               "dispatched");
     safe_call_function_pointer(callback.f, num_arg);
   } else if (callback.s) {
     if (callback.s[0] == APPLY___INIT_SPECIAL_CHAR) {
       error("Illegal function name.\n");
     }
+    auto *owner = lpc_socks[fd].owner_ob;
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(owner), vm_owner_epoch(owner));
+    vm_owner_record_task_trace(vm_owner_id(owner), "socket_callback", callback.s, vm_owner_epoch(owner),
+                               "dispatched");
     safe_apply(callback.s, lpc_socks[fd].owner_ob, num_arg, ORIGIN_INTERNAL);
   }
 }
@@ -1771,8 +1781,15 @@ int socket_release(int fd, object_t *ob, svalue_t *callback) {
   set_eval(max_eval_cost);
 
   if (callback->type == T_FUNCTION) {
+    auto *owner = callback->u.fp ? callback->u.fp->hdr.owner : ob;
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(owner), vm_owner_epoch(owner));
+    vm_owner_record_task_trace(vm_owner_id(owner), "socket_release", "<function>", vm_owner_epoch(owner),
+                               "dispatched");
     safe_call_function_pointer(callback->u.fp, 2);
   } else {
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob), vm_owner_epoch(ob));
+    vm_owner_record_task_trace(vm_owner_id(ob), "socket_release", callback->u.string, vm_owner_epoch(ob),
+                               "dispatched");
     safe_apply(callback->u.string, ob, 2, ORIGIN_INTERNAL);
   }
 
