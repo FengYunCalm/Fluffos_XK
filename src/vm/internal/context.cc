@@ -81,6 +81,11 @@ void vm_context_set_caller_type(VMContext &context, int type) {
   context.execution.caller_type = type;
 }
 
+void vm_context_set_call_origin(VMContext &context, int origin) {
+  call_origin = origin;
+  context.execution.call_origin = origin;
+}
+
 void vm_context_set_execution_frame(VMContext &context, object_t *object, program_t *program,
                                     object_t *previous, int type) {
   current_object = object;
@@ -108,6 +113,7 @@ VMExecutionState vm_context_capture_execution() {
   execution.previous_ob = previous_ob;
   execution.current_prog = current_prog;
   execution.caller_type = caller_type;
+  execution.call_origin = call_origin;
   return execution;
 }
 
@@ -118,6 +124,7 @@ void vm_context_apply_execution(VMContext &context, const VMExecutionState &exec
   previous_ob = execution.previous_ob;
   current_prog = execution.current_prog;
   caller_type = execution.caller_type;
+  call_origin = execution.call_origin;
   context.execution = execution;
 }
 

@@ -85,6 +85,7 @@ TEST_F(DriverTest, TestVmContextTracksTopLevelState) {
   ASSERT_EQ(vm_context().execution.previous_ob, nullptr);
   ASSERT_EQ(vm_context().execution.current_prog, nullptr);
   ASSERT_EQ(vm_context().execution.caller_type, 0);
+  ASSERT_EQ(vm_context().execution.call_origin, 0);
   ASSERT_EQ(vm_context().error.current_error_context, nullptr);
   ASSERT_EQ(vm_context().object_store.objects, obj_list);
   ASSERT_EQ(vm_context().object_store.destructed_objects, obj_list_destruct);
@@ -97,6 +98,7 @@ TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
   previous_ob = nullptr;
   current_prog = nullptr;
   caller_type = 0;
+  vm_context_set_call_origin(vm_context(), 0);
   vm_context_sync_execution(vm_context());
 
   object_t* obj = find_object("single/master.c");
@@ -109,6 +111,7 @@ TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
   scoped.previous_ob = obj;
   scoped.current_prog = obj->prog;
   scoped.caller_type = 42;
+  scoped.call_origin = ORIGIN_EFUN;
 
   {
     VMExecutionScope scope(vm_context(), scoped);
@@ -118,12 +121,14 @@ TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
     ASSERT_EQ(previous_ob, obj);
     ASSERT_EQ(current_prog, obj->prog);
     ASSERT_EQ(caller_type, 42);
+    ASSERT_EQ(call_origin, ORIGIN_EFUN);
     ASSERT_EQ(vm_context().execution.current_object, obj);
     ASSERT_EQ(vm_context().execution.command_giver, obj);
     ASSERT_EQ(vm_context().execution.current_interactive, obj);
     ASSERT_EQ(vm_context().execution.previous_ob, obj);
     ASSERT_EQ(vm_context().execution.current_prog, obj->prog);
     ASSERT_EQ(vm_context().execution.caller_type, 42);
+    ASSERT_EQ(vm_context().execution.call_origin, ORIGIN_EFUN);
   }
 
   ASSERT_EQ(current_object, master_ob);
@@ -132,12 +137,14 @@ TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
   ASSERT_EQ(previous_ob, nullptr);
   ASSERT_EQ(current_prog, nullptr);
   ASSERT_EQ(caller_type, 0);
+  ASSERT_EQ(call_origin, 0);
   ASSERT_EQ(vm_context().execution.current_object, master_ob);
   ASSERT_EQ(vm_context().execution.command_giver, nullptr);
   ASSERT_EQ(vm_context().execution.current_interactive, nullptr);
   ASSERT_EQ(vm_context().execution.previous_ob, nullptr);
   ASSERT_EQ(vm_context().execution.current_prog, nullptr);
   ASSERT_EQ(vm_context().execution.caller_type, 0);
+  ASSERT_EQ(vm_context().execution.call_origin, 0);
 }
 
 TEST_F(DriverTest, TestVmCurrentInteractiveScopeRestoresState) {
@@ -206,16 +213,20 @@ TEST_F(DriverTest, TestVmExecutionFrameSettersSyncContext) {
   vm_context_set_current_program(vm_context(), second->prog);
   vm_context_set_previous_object(vm_context(), first);
   vm_context_set_caller_type(vm_context(), ORIGIN_LOCAL);
+  vm_context_set_call_origin(vm_context(), ORIGIN_CALL_OTHER);
   ASSERT_EQ(current_object, second);
   ASSERT_EQ(current_prog, second->prog);
   ASSERT_EQ(previous_ob, first);
   ASSERT_EQ(caller_type, ORIGIN_LOCAL);
+  ASSERT_EQ(call_origin, ORIGIN_CALL_OTHER);
   ASSERT_EQ(vm_context().execution.current_object, second);
   ASSERT_EQ(vm_context().execution.current_prog, second->prog);
   ASSERT_EQ(vm_context().execution.previous_ob, first);
   ASSERT_EQ(vm_context().execution.caller_type, ORIGIN_LOCAL);
+  ASSERT_EQ(vm_context().execution.call_origin, ORIGIN_CALL_OTHER);
 
   vm_context_set_execution_frame(vm_context(), master_ob, nullptr, nullptr, 0);
+  vm_context_set_call_origin(vm_context(), 0);
 }
 
 TEST_F(DriverTest, TestVmErrorContextStackSyncsContext) {
