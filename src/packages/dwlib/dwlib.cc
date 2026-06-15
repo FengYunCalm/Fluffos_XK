@@ -46,7 +46,7 @@ void query_multiple_short(svalue_t *arg, const char *type, int no_dollars, int q
    } */
 
   if (no_dollars && arr->item->type == T_OBJECT && !dark && command_giver && command_giver->super) {
-    call_origin = ORIGIN_EFUN;
+    vm_context_set_call_origin(vm_context(), ORIGIN_EFUN);
     if (!apply_low("query_light", command_giver->super, 0)) {
       push_number(0);
     }

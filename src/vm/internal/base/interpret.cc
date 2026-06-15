@@ -4224,7 +4224,7 @@ array_t *call_all_other(array_t *v, const char *func, int numargs) {
     while (i--) {
       push_svalue(tmp - i);
     }
-    call_origin = ORIGIN_CALL_OTHER;
+    vm_context_set_call_origin(vm_context(), ORIGIN_CALL_OTHER);
     if (apply_low(func, ob, numargs)) {
       *rptr = *sp--;
     }

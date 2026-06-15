@@ -575,6 +575,7 @@ bool owner_execution_state_cleared() {
   return execution.current_object == nullptr && execution.command_giver == nullptr &&
          execution.current_interactive == nullptr && execution.previous_ob == nullptr &&
          execution.current_prog == nullptr && execution.caller_type == 0 &&
+         execution.call_origin == 0 &&
          vm_context().error.current_error_context == nullptr;
 }
 
