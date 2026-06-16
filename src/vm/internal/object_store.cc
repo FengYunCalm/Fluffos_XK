@@ -72,8 +72,19 @@ void move_record_owner_locked(ObjectRecord &record, const std::string &new_owner
     old_it->second.objects.erase(record.object_id);
   }
   record.owner_id = new_owner_id;
-  auto &new_shard = shard_for_owner(record.owner_id);
-  new_shard.objects.insert(record.object_id);
+  if (!record.destructed) {
+    auto &new_shard = shard_for_owner(record.owner_id);
+    new_shard.objects.insert(record.object_id);
+  }
+}
+
+void sync_record_activity_locked(const ObjectRecord &record) {
+  auto &shard = shard_for_owner(record.owner_id);
+  if (record.destructed) {
+    shard.objects.erase(record.object_id);
+  } else {
+    shard.objects.insert(record.object_id);
+  }
 }
 
 mapping_t *shard_mapping(const ObjectShardRecord &shard) {
@@ -142,6 +153,7 @@ void vm_object_store_register(object_t *object) {
   record.owner_epoch = vm_owner_epoch(object);
   record.object_path = safe_object_path(object);
   record.destructed = (object->flags & O_DESTRUCTED) != 0;
+  sync_record_activity_locked(record);
 }
 
 mapping_t *vm_object_handle_status(object_t *object) {
@@ -166,6 +178,7 @@ void vm_object_store_update_owner(object_t *object) {
   move_record_owner_locked(record, safe_owner_id(vm_owner_id(object)));
   record.owner_epoch = vm_owner_epoch(object);
   record.object_path = safe_object_path(object);
+  sync_record_activity_locked(record);
 }
 
 void vm_object_store_mark_destructed(object_t *object) {

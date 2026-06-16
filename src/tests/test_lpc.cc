@@ -1952,6 +1952,11 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
   ASSERT_EQ(mapping_number(after, "objects"), 0);
   ASSERT_EQ(mapping_number(after, "destructed"), before_destructed + 1);
   free_mapping(after);
+
+  vm_owner_set_id(obj, "owner/test/store/destruct-after");
+  auto* moved_after_destruct = vm_object_store_owner_status("owner/test/store/destruct-after");
+  ASSERT_EQ(mapping_number(moved_after_destruct, "objects"), 0);
+  free_mapping(moved_after_destruct);
 }
 
 TEST_F(DriverTest, TestVmOwnerGuardFailsFastOnMismatch) {
