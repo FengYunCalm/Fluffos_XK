@@ -1855,6 +1855,8 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredLpcTaskWithMultipleWorkers) {
   auto before_failed = mapping_number(before, "thread_lpc_task_failed");
   auto before_rejected = mapping_number(before, "thread_lpc_task_rejected");
   auto before_context_leaks = mapping_number(before, "thread_context_leak_detected");
+  auto before_claims = mapping_number(before, "executor_owner_claims");
+  auto before_releases = mapping_number(before, "executor_owner_releases");
   free_mapping(before);
 
   auto* submitted = vm_owner_lpc_task(probe, owner, "owner_task_readonly");
@@ -1896,6 +1898,10 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredLpcTaskWithMultipleWorkers) {
   ASSERT_EQ(mapping_number(running, "thread_lpc_task_rejected"), before_rejected);
   ASSERT_EQ(mapping_number(running, "thread_context_leak_detected"), before_context_leaks);
   ASSERT_EQ(mapping_number(running, "active_owners"), 0);
+  ASSERT_GE(mapping_number(running, "executor_owner_claims"), before_claims + 2);
+  ASSERT_GE(mapping_number(running, "executor_owner_releases"), before_releases + 2);
+  ASSERT_EQ(mapping_number(running, "executor_owner_claims") - before_claims,
+            mapping_number(running, "executor_owner_releases") - before_releases);
   free_mapping(running);
 
   auto* trace = vm_owner_task_trace(24);
@@ -1990,6 +1996,8 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredDomainLpcTasks) {
   auto before_succeeded = mapping_number(before, "thread_lpc_task_succeeded");
   auto before_failed = mapping_number(before, "thread_lpc_task_failed");
   auto before_rejected = mapping_number(before, "thread_lpc_task_rejected");
+  auto before_claims = mapping_number(before, "executor_owner_claims");
+  auto before_releases = mapping_number(before, "executor_owner_releases");
   free_mapping(before);
 
   for (const auto* method : methods) {
@@ -2018,6 +2026,8 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredDomainLpcTasks) {
   ASSERT_EQ(mapping_number(running, "thread_lpc_task_failed"), before_failed);
   ASSERT_EQ(mapping_number(running, "thread_lpc_task_rejected"), before_rejected);
   ASSERT_EQ(mapping_number(running, "active_owners"), 0);
+  ASSERT_EQ(mapping_number(running, "executor_owner_claims"), before_claims + 1);
+  ASSERT_EQ(mapping_number(running, "executor_owner_releases"), before_releases + 1);
   free_mapping(running);
 
   vm_owner_thread_stop();

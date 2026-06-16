@@ -68,6 +68,8 @@ std::atomic<uint64_t> owner_thread_lpc_task_executed{0};
 std::atomic<uint64_t> owner_thread_lpc_task_succeeded{0};
 std::atomic<uint64_t> owner_thread_lpc_task_failed{0};
 std::atomic<uint64_t> owner_thread_lpc_task_rejected{0};
+std::atomic<uint64_t> owner_executor_owner_claims{0};
+std::atomic<uint64_t> owner_executor_owner_releases{0};
 std::atomic<uint64_t> owner_main_queued{0};
 std::atomic<uint64_t> owner_main_dispatched{0};
 std::atomic<uint64_t> owner_main_stale{0};
@@ -511,7 +513,9 @@ void finish_active_owner_task(const std::string &owner_id) {
   bool notify_owner_thread = false;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    active_owner_set.erase(owner_id);
+    if (active_owner_set.erase(owner_id) > 0) {
+      owner_executor_owner_releases.fetch_add(1, std::memory_order_relaxed);
+    }
     auto it = owner_mailboxes.find(owner_id);
     if (it != owner_mailboxes.end() && !it->second.empty()) {
       mark_owner_schedulable(owner_id);
@@ -549,6 +553,7 @@ bool pop_next_schedulable_task(OwnerMailboxTask *out, bool claim_owner) {
     }
     if (claim_owner) {
       active_owner_set.insert(owner_id);
+      owner_executor_owner_claims.fetch_add(1, std::memory_order_relaxed);
     }
     return true;
   }
@@ -1708,7 +1713,7 @@ void vm_owner_thread_stop() {
 
 mapping_t *vm_owner_thread_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(43);
+  auto *map = allocate_mapping(45);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
   add_mapping_pair(map, "thread_count", static_cast<long>(owner_threads.size()));
@@ -1761,6 +1766,10 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_pair(map, "executor_task_budget", kOwnerExecutorTaskBudget);
   add_mapping_pair(map, "executor_budget_yields",
                    static_cast<long>(owner_executor_budget_yields.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_owner_claims",
+                   static_cast<long>(owner_executor_owner_claims.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_owner_releases",
+                   static_cast<long>(owner_executor_owner_releases.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "deferred_target_releases", static_cast<long>(owner_deferred_target_releases.size()));
   add_mapping_pair(map, "thread_starts", static_cast<long>(owner_thread_starts.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_stops", static_cast<long>(owner_thread_stops.load(std::memory_order_relaxed)));
@@ -1777,7 +1786,7 @@ mapping_t *vm_owner_thread_status() {
 
 mapping_t *vm_owner_runtime_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(28);
+  auto *map = allocate_mapping(30);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
   add_mapping_string(map, "multicore_mode_name", vm_multicore_mode_name(vm_multicore_mode()));
@@ -1801,6 +1810,10 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_pair(map, "futures_failed", static_cast<long>(total_futures_failed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_budget_yields",
                    static_cast<long>(owner_executor_budget_yields.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_owner_claims",
+                   static_cast<long>(owner_executor_owner_claims.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_owner_releases",
+                   static_cast<long>(owner_executor_owner_releases.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "cross_owner", static_cast<long>(total_cross_owner_accesses.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "snapshot_required",
                    static_cast<long>(total_cross_owner_snapshot_accesses.load(std::memory_order_relaxed)));
