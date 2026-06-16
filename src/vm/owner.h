@@ -72,9 +72,7 @@ void vm_owner_thread_stop();
 mapping_t *vm_owner_thread_status();
 mapping_t *vm_owner_runtime_status();
 
-// Object snapshot APIs for safe cross-owner read-only access
+// Object snapshot API for safe cross-owner structure inspection.
 mapping_t *vm_owner_query_object_snapshot(object_t *target, const char *requesting_owner_id);
-bool vm_owner_is_safe_read_only_property(const char *property_name);
-svalue_t *vm_owner_safe_query(object_t *target, const char *method, const char *requesting_owner_id);
 
 #endif /* SRC_VM_OWNER_H_ */

@@ -2,7 +2,7 @@
 
 ## Overview
 
-FluffOS now supports owner-based object isolation for multicore execution. Each player becomes an independent "owner" with their own object shard, enabling true parallel execution without synchronization overhead.
+FluffOS_XK supports owner-based object boundaries for controlled multicore migration. Each player-owned object can be assigned to an independent owner shard, while legacy system objects remain under the default owner. The current model does not make arbitrary LPC execution freely parallel; it provides guarded owner queues, deterministic worker tasks, and explicit snapshot/message contracts.
 
 ## Core Concepts
 
@@ -15,7 +15,8 @@ FluffOS now supports owner-based object isolation for multicore execution. Each 
 ### Cross-Owner Access Rules
 - **Same owner**: Direct access allowed (fast path)
 - **Default owner target**: Always accessible from any owner
-- **Cross-owner**: Blocked in enforced mode, requires safe access API
+- **Cross-owner synchronous calls/writes**: Blocked in enforced mode unless they use an explicit owner contract
+- **Cross-owner structure inspection**: Use `owner_query_object_snapshot()` for data that can be read without executing target LPC code
 
 ### Multicore Modes
 ```c
@@ -25,9 +26,7 @@ multicore mode : 1    // Owner-based (default)
 multicore mode : 2    // Enforced isolation
 ```
 
-## Safe Cross-Owner Access API
-
-### 1. Object Snapshot API
+## Cross-Owner Snapshot API
 
 Get read-only structural information about cross-owner objects.
 
@@ -217,7 +216,7 @@ object *filter_living_objects(object *obs) {
 
 ### Snapshot API Cost
 - **Fast path**: Same owner check is O(1) pointer comparison
-- **Cross-owner**: Creates small mapping (~5 entries)
+- **Cross-owner**: Creates a small mapping with identity and type flags
 - **Recommended**: Cache snapshot results when querying multiple properties
 
 ### Error Catching Cost
@@ -281,12 +280,6 @@ object find_player(string name) {
 ```
 
 ## Debugging
-
-### Enable Cross-Owner Logging
-```c
-// In owner.cc
-#define DEBUG_CROSS_OWNER_ACCESS 1
-```
 
 ### Check Owner ID
 ```lpc

@@ -51,28 +51,31 @@ FluffOS_XK focuses on engine-level foundations, not gameplay rules.
 
 ## Multicore Runtime Status
 
-### Owner/Actor Shard VM (✅ Production Ready)
+### Owner/Actor Shard VM
 
-FluffOS_XK now supports **owner-based object isolation** for true multicore execution. Each player becomes an independent 
-"owner" with their own object shard, enabling parallel execution without synchronization overhead.
+FluffOS_XK supports owner-based object boundaries for controlled actor-style execution. Each player-owned object can be
+assigned to an owner shard, while legacy system objects remain under the default `legacy/main` owner. The current design
+keeps arbitrary LPC execution on guarded paths and uses owner-aware queues, worker tasks, and explicit snapshot/message
+contracts for migration.
 
 **Key Features:**
-- **Owner-based isolation**: Every object has an owner ID (`"player/<account>"` or `"legacy/main"`)
-- **Enforced mode**: Complete cross-owner access blocking with safe read-only API
-- **Zero-copy snapshots**: Query object structure without cross-owner calls
-- **Multicore execution**: Independent owners run in parallel on separate CPU cores
+- **Owner-based isolation**: Objects can carry an owner ID such as `"player/<account>"` or `"legacy/main"`.
+- **Enforced mode**: Cross-owner synchronous writes/calls are blocked unless they use an explicit owner contract.
+- **Snapshot inspection**: `owner_query_object_snapshot()` exposes structural information without calling target LPC methods.
+- **Controlled multicore paths**: Deterministic worker tasks and registered owner LPC tasks can run off-main; ordinary LPC
+  remains guarded rather than freely parallelized.
 
-**Validated in Production:**
-- ✅ 10 concurrent users × 300 seconds stress test: 100% success rate
-- ✅ Zero cross-owner errors in enforced mode
-- ✅ Stable performance: 3.08 cmd/s, 202ms avg latency
+**Validated status:**
+- Owner/multicore engine regression tests cover owner scope, owner queues, enforced blocking, object handles, and guarded owner threads.
+- Downstream XiaKeXing load testing has validated the enforced-mode player command path with clean runtime logs for targeted scenarios.
+- Longer stress tests should be run by downstream projects with their mudlib-specific workloads before treating a deployment as production-ready.
 
 **Safe Cross-Owner Access API:**
 ```lpc
 // Get object snapshot without cross-owner call
 mapping snapshot = owner_query_object_snapshot(target);
 if (mapp(snapshot)) {
-    // Cross-owner - use snapshot data
+    // Cross-owner - use snapshot data only
     if (snapshot["living"]) { ... }
 } else {
     // Same owner - direct access
@@ -85,7 +88,7 @@ if (mapp(snapshot)) {
 // In driver config
 multicore mode : 0    // Disabled
 multicore mode : 1    // Owner-based (default)
-multicore mode : 2    // Enforced isolation (recommended for production)
+multicore mode : 2    // Enforced isolation
 ```
 
 See [`docs/owner-multicore-api.md`](docs/owner-multicore-api.md) for complete API documentation and migration guide.

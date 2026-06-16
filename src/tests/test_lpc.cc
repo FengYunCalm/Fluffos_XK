@@ -566,6 +566,49 @@ TEST_F(DriverTest, TestVmOwnerMetadataDefaultsAndChecks) {
   ASSERT_EQ(vm_owner_epoch(obj), default_epoch + 2);
 }
 
+TEST_F(DriverTest, TestVmOwnerQueryObjectSnapshotOnlyForCrossOwnerTargets) {
+  object_t* source = find_object("single/master.c");
+  object_t* target = find_object("single/simul_efun.c");
+  ASSERT_NE(source, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  current_object = source;
+  vm_owner_set_id(source, "owner/test/snapshot/source");
+  vm_owner_set_id(target, "owner/test/snapshot/source");
+  ASSERT_EQ(vm_owner_query_object_snapshot(target, vm_owner_id(source)), nullptr);
+
+  vm_owner_clear_id(target);
+  ASSERT_EQ(vm_owner_query_object_snapshot(target, vm_owner_id(source)), nullptr);
+
+  vm_owner_set_id(target, "owner/test/snapshot/target");
+  auto* snapshot = vm_owner_query_object_snapshot(target, vm_owner_id(source));
+  ASSERT_NE(snapshot, nullptr);
+  ASSERT_STREQ(mapping_string(snapshot, "object_name"), target->obname);
+  ASSERT_STREQ(mapping_string(snapshot, "owner_id"), "owner/test/snapshot/target");
+  ASSERT_EQ(mapping_number(snapshot, "living"), 0);
+  ASSERT_EQ(mapping_number(snapshot, "living_flag"), 0);
+  ASSERT_EQ(mapping_number(snapshot, "has_is_npc"), 0);
+  ASSERT_EQ(mapping_number(snapshot, "has_is_player"), 0);
+  ASSERT_EQ(mapping_number(snapshot, "has_is_character"), 0);
+  free_mapping(snapshot);
+
+  vm_owner_clear_id(source);
+  vm_owner_clear_id(target);
+}
+
 TEST_F(DriverTest, TestLoadedSingletonUsesDefaultOwnerInsideOwnerScope) {
   if (auto* existing = find_object("single/owner_singleton.c")) {
     destruct_object(existing);

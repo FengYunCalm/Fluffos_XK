@@ -2184,17 +2184,6 @@ mapping_t *vm_owner_runtime_status() {
   return map;
 }
 
-// Safe read-only properties that can be queried across owners without requiring message/future
-static const std::unordered_set<std::string> safe_read_only_properties = {
-  "name", "id", "short", "living", "is_character", "is_npc", "is_player",
-  "query_temp/is_dying", "environment"
-};
-
-bool vm_owner_is_safe_read_only_property(const char *property_name) {
-  if (!property_name) return false;
-  return safe_read_only_properties.find(property_name) != safe_read_only_properties.end();
-}
-
 // Query object snapshot for safe cross-owner read-only access
 // Returns a mapping with basic properties that don't require synchronous call_other
 mapping_t *vm_owner_query_object_snapshot(object_t *target, const char *requesting_owner_id) {
@@ -2248,33 +2237,4 @@ mapping_t *vm_owner_query_object_snapshot(object_t *target, const char *requesti
   add_mapping_pair(snapshot, "living_flag", living_flag);
 
   return snapshot;
-}
-
-// Safely query a read-only method on a cross-owner object
-// Returns the result with error suppression, or null on error
-svalue_t *vm_owner_safe_query(object_t *target, const char *method, const char *requesting_owner_id) {
-  if (!target || !method) {
-    return nullptr;
-  }
-
-  const char *target_owner_id = vm_owner_id(target);
-
-  // If same owner or target is default owner, allow direct query
-  if (std::strcmp(target_owner_id, requesting_owner_id) == 0 ||
-      std::strcmp(target_owner_id, kDefaultOwnerId) == 0) {
-    // Safe to query directly - return nullptr to signal direct access
-    return nullptr;
-  }
-
-  // Cross-owner query - check if method exists
-  if (!function_exists(method, target, 0)) {
-    return &const0u;
-  }
-
-  // For cross-owner read-only queries, use safe_apply which handles errors
-  // safe_apply returns nullptr if an error occurs
-  svalue_t *result = safe_apply(method, target, 0, ORIGIN_EFUN);
-
-  // Return the result or const0 if error occurred
-  return result ? result : &const0u;
 }

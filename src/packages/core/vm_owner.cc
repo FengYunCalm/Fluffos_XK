@@ -493,34 +493,3 @@ void f_owner_query_object_snapshot() {
   sp->u.map = snapshot;
 }
 #endif
-
-#ifdef F_OWNER_SAFE_QUERY
-void f_owner_safe_query() {
-  const char *method = (sp - 1)->u.string;
-  object_t *target = sp->u.ob;
-
-  if (!target || !method) {
-    free_svalue(sp--, "f_owner_safe_query");
-    free_svalue(sp, "f_owner_safe_query");
-    *sp = const0u;
-    return;
-  }
-
-  const char *requesting_owner_id = current_owner_id_for_message();
-  svalue_t *result = vm_owner_safe_query(target, method, requesting_owner_id);
-
-  free_svalue(sp--, "f_owner_safe_query");
-  free_object(&sp->u.ob, "f_owner_safe_query");
-
-  if (!result) {
-    // Same owner - do direct call_other
-    push_constant_string(method);
-    push_object(target);
-    f__call_other();
-    return;
-  }
-
-  // Cross-owner or error - return the safe result
-  assign_svalue_no_free(sp, result);
-}
-#endif
