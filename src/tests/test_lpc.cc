@@ -1189,6 +1189,70 @@ TEST_F(DriverTest, TestVmMulticoreModeControlsCrossOwnerBlocking) {
   vm_owner_clear_id(target);
 }
 
+TEST_F(DriverTest, TestCurrentOwnerScopeControlsCrossOwnerBlocking) {
+  object_t* source = find_object("single/master.c");
+  object_t* target = find_object("single/simul_efun.c");
+  ASSERT_NE(source, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  auto saved_mode = CONFIG_INT(__RC_MULTICORE_MODE__);
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_ENFORCED;
+
+  vm_owner_set_id(source, "owner/test/scope/source-object");
+  vm_owner_set_id(target, "owner/test/scope/target");
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  ASSERT_TRUE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+  {
+    VMOwnerScope scope(vm_context(), "owner/test/scope/target", vm_owner_epoch(target));
+    ASSERT_FALSE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+    ASSERT_EQ(vm_owner_record_cross_owner_access(source, target, "call_other"), 0u);
+  }
+  {
+    VMOwnerScope scope(vm_context(), "owner/test/scope/other", 1);
+    ASSERT_TRUE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+  }
+  {
+    VMOwnerScope scope(vm_context(), vm_owner_default_id(), 0);
+    set_command_giver(target);
+    ASSERT_FALSE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+    ASSERT_EQ(vm_owner_record_cross_owner_access(source, target, "call_other"), 0u);
+    ASSERT_GT(vm_owner_record_access(source, target, "call_other"), 0u);
+    auto* trace = vm_owner_access_trace(1);
+    auto* events = find_string_in_mapping(trace, "events");
+    ASSERT_NE(events, nullptr);
+    ASSERT_EQ(events->type, T_ARRAY);
+    ASSERT_EQ(events->u.arr->size, 1);
+    ASSERT_EQ(mapping_number(events->u.arr->item[0].u.map, "cross_owner"), 0);
+    ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "source_owner_id"), "owner/test/scope/target");
+    ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "target_owner_id"), "owner/test/scope/target");
+    free_mapping(trace);
+
+    set_command_giver(source);
+    ASSERT_TRUE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+    set_command_giver(nullptr);
+  }
+  set_command_giver(target);
+  ASSERT_TRUE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+  set_command_giver(nullptr);
+
+  CONFIG_INT(__RC_MULTICORE_MODE__) = saved_mode;
+  vm_owner_clear_id(source);
+  vm_owner_clear_id(target);
+}
+
 TEST_F(DriverTest, TestAllInventoryRecordsCrossOwnerAccessTrace) {
   object_t* source = find_object("single/master.c");
   object_t* target = find_object("single/simul_efun.c");

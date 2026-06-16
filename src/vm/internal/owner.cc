@@ -203,6 +203,32 @@ const char *owner_object_name(object_t *object) {
   return object && object->obname ? object->obname : "";
 }
 
+const char *effective_source_owner_id(object_t *source) {
+  if (!vm_context().owner.current_owner_id.empty() && vm_context().owner.current_owner_id != kDefaultOwnerId) {
+    return vm_context().owner.current_owner_id.c_str();
+  }
+  if (vm_context().owner.current_owner_id == kDefaultOwnerId && vm_owner_has_explicit_id(command_giver)) {
+    return vm_owner_id(command_giver);
+  }
+  if (!vm_context().owner.current_owner_id.empty()) {
+    return vm_context().owner.current_owner_id.c_str();
+  }
+  return vm_owner_id(source);
+}
+
+uint64_t effective_source_owner_epoch(object_t *source) {
+  if (!vm_context().owner.current_owner_id.empty() && vm_context().owner.current_owner_id != kDefaultOwnerId) {
+    return vm_context().owner.current_owner_epoch;
+  }
+  if (vm_context().owner.current_owner_id == kDefaultOwnerId && vm_owner_has_explicit_id(command_giver)) {
+    return vm_owner_epoch(command_giver);
+  }
+  if (!vm_context().owner.current_owner_id.empty()) {
+    return vm_context().owner.current_owner_epoch;
+  }
+  return vm_owner_epoch(source);
+}
+
 const char *owner_access_policy_mode(const char *operation, bool cross_owner) {
   if (!cross_owner) {
     return "same_owner";
@@ -1324,9 +1350,9 @@ uint64_t vm_owner_record_access(object_t *source, object_t *target, const char *
   uint64_t access_id;
   trace.access_id = next_access_trace_id.fetch_add(1, std::memory_order_relaxed);
   trace.sequence = total_access_traced.fetch_add(1, std::memory_order_relaxed) + 1;
-  trace.source_owner_epoch = vm_owner_epoch(source);
+  trace.source_owner_epoch = effective_source_owner_epoch(source);
   trace.target_owner_epoch = vm_owner_epoch(target);
-  trace.source_owner_id = vm_owner_id(source);
+  trace.source_owner_id = effective_source_owner_id(source);
   trace.target_owner_id = vm_owner_id(target);
   trace.source_object = owner_object_name(source);
   trace.target_object = owner_object_name(target);
@@ -1348,14 +1374,15 @@ uint64_t vm_owner_record_access(object_t *source, object_t *target, const char *
 }
 
 uint64_t vm_owner_record_cross_owner_access(object_t *source, object_t *target, const char *operation) {
-  if (!source || !target || std::strcmp(vm_owner_id(source), vm_owner_id(target)) == 0) {
+  if (!source || !target || std::strcmp(effective_source_owner_id(source), vm_owner_id(target)) == 0) {
     return 0;
   }
   return vm_owner_record_access(source, target, operation);
 }
 
 bool vm_owner_cross_owner_access_blocked(object_t *source, object_t *target, const char *operation) {
-  if (!source || !target || std::strcmp(vm_owner_id(source), vm_owner_id(target)) == 0 || !vm_multicore_enforced()) {
+  if (!source || !target || std::strcmp(effective_source_owner_id(source), vm_owner_id(target)) == 0 ||
+      !vm_multicore_enforced()) {
     return false;
   }
   auto policy_mode = owner_access_policy_mode(normalize_task_text(operation, "access"), true);
