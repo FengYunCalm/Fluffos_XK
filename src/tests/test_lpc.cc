@@ -1224,9 +1224,16 @@ TEST_F(DriverTest, TestCurrentOwnerScopeControlsCrossOwnerBlocking) {
     VMOwnerScope scope(vm_context(), "owner/test/scope/other", 1);
     ASSERT_TRUE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
   }
+  vm_owner_clear_id(target);
+  ASSERT_FALSE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+  vm_owner_set_id(target, "owner/test/scope/target");
+  vm_owner_clear_id(source);
+  ASSERT_FALSE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+  vm_owner_set_id(source, "owner/test/scope/source-object");
   {
     VMOwnerScope scope(vm_context(), vm_owner_default_id(), 0);
-    set_command_giver(target);
+    vm_owner_set_id(source, "owner/test/scope/target");
+    set_command_giver(source);
     ASSERT_FALSE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
     ASSERT_EQ(vm_owner_record_cross_owner_access(source, target, "call_other"), 0u);
     ASSERT_GT(vm_owner_record_access(source, target, "call_other"), 0u);
@@ -1240,8 +1247,22 @@ TEST_F(DriverTest, TestCurrentOwnerScopeControlsCrossOwnerBlocking) {
     ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "target_owner_id"), "owner/test/scope/target");
     free_mapping(trace);
 
+    vm_owner_set_id(source, "owner/test/scope/source-object");
     set_command_giver(source);
     ASSERT_TRUE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+
+    set_command_giver(target);
+    ASSERT_FALSE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+    ASSERT_GT(vm_owner_record_access(source, target, "call_other"), 0u);
+    trace = vm_owner_access_trace(1);
+    events = find_string_in_mapping(trace, "events");
+    ASSERT_NE(events, nullptr);
+    ASSERT_EQ(events->type, T_ARRAY);
+    ASSERT_EQ(events->u.arr->size, 1);
+    ASSERT_EQ(mapping_number(events->u.arr->item[0].u.map, "cross_owner"), 0);
+    ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "source_owner_id"), "owner/test/scope/target");
+    ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "target_owner_id"), "owner/test/scope/target");
+    free_mapping(trace);
     set_command_giver(nullptr);
   }
   set_command_giver(target);
