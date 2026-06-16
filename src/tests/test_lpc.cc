@@ -1291,6 +1291,53 @@ TEST_F(DriverTest, TestCallOtherRecordsCrossOwnerAccessTrace) {
   destruct_object(target);
 }
 
+TEST_F(DriverTest, TestCallOtherEnforcedModeBlocksCrossOwnerCall) {
+  object_t* caller = load_object_for_test("single/void");
+  object_t* target = load_object_for_test("single/on_destruct_good");
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  vm_owner_set_id(caller, "owner/test/call/enforced/source");
+  vm_owner_set_id(target, "owner/test/call/enforced/target");
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+
+  auto saved_mode = CONFIG_INT(__RC_MULTICORE_MODE__);
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_ENFORCED;
+  auto* before = vm_owner_access_trace(0);
+  auto before_blocks = mapping_number(before, "enforced_blocks");
+  free_mapping(before);
+
+  bool blocked = false;
+  error_context_t econ{};
+  save_context(&econ);
+  try {
+    push_object(target);
+    blocked = safe_apply("call_target", caller, 1, ORIGIN_DRIVER) == nullptr;
+    pop_context(&econ);
+  } catch (...) {
+    restore_context(&econ);
+    blocked = true;
+  }
+
+  auto* after = vm_owner_access_trace(0);
+  auto after_blocks = mapping_number(after, "enforced_blocks");
+  free_mapping(after);
+  CONFIG_INT(__RC_MULTICORE_MODE__) = saved_mode;
+  ASSERT_TRUE(blocked);
+  ASSERT_GT(after_blocks, before_blocks);
+
+  vm_owner_clear_id(caller);
+  vm_owner_clear_id(target);
+  destruct_object(caller);
+  destruct_object(target);
+}
+
 TEST_F(DriverTest, TestVmOwnerScheduleRoundsOwnersAndKeepsOwnerFifo) {
   const char* owner_a = "owner/test/schedule/a";
   const char* owner_b = "owner/test/schedule/b";
