@@ -954,6 +954,42 @@ TEST_F(DriverTest, TestVmOwnerCrossOwnerAccessTraceClassifiesPolicyModes) {
   vm_owner_clear_id(target);
 }
 
+TEST_F(DriverTest, TestVmMulticoreModeControlsCrossOwnerBlocking) {
+  object_t* source = find_object("single/master.c");
+  object_t* target = find_object("single/simul_efun.c");
+  ASSERT_NE(source, nullptr);
+  ASSERT_NE(target, nullptr);
+  vm_owner_set_id(source, "owner/test/mode/source");
+  vm_owner_set_id(target, "owner/test/mode/target");
+
+  auto saved_mode = CONFIG_INT(__RC_MULTICORE_MODE__);
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_OFF;
+  ASSERT_STREQ(vm_multicore_mode_name(vm_multicore_mode()), "off");
+  ASSERT_FALSE(vm_multicore_audit_enabled());
+  ASSERT_FALSE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_AUDIT;
+  ASSERT_STREQ(vm_multicore_mode_name(vm_multicore_mode()), "audit");
+  ASSERT_TRUE(vm_multicore_audit_enabled());
+  ASSERT_FALSE(vm_multicore_enforced());
+  ASSERT_FALSE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_ENFORCED;
+  ASSERT_STREQ(vm_multicore_mode_name(vm_multicore_mode()), "enforced");
+  ASSERT_TRUE(vm_multicore_enforced());
+  ASSERT_FALSE(vm_owner_cross_owner_access_blocked(source, target, "environment"));
+  ASSERT_TRUE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+  ASSERT_TRUE(vm_owner_cross_owner_access_blocked(source, target, "unknown_access"));
+
+  CONFIG_INT(__RC_MULTICORE_MODE__) = 999;
+  ASSERT_STREQ(vm_multicore_mode_name(vm_multicore_mode()), "audit");
+  ASSERT_FALSE(vm_multicore_enforced());
+
+  CONFIG_INT(__RC_MULTICORE_MODE__) = saved_mode;
+  vm_owner_clear_id(source);
+  vm_owner_clear_id(target);
+}
+
 TEST_F(DriverTest, TestAllInventoryRecordsCrossOwnerAccessTrace) {
   object_t* source = find_object("single/master.c");
   object_t* target = find_object("single/simul_efun.c");
