@@ -7,7 +7,8 @@ void assert_payload_error(mapping result, string error) {
 }
 
 void do_tests() {
-    mapping result, future;
+    mapping result, future, bad_mapping;
+    int i;
     string target_owner = "owner/test/payload";
 
     result = owner_send(target_owner, ([
@@ -32,7 +33,12 @@ void do_tests() {
                          "owner payload must be frozen data, not object/function/buffer/class");
     assert_payload_error(owner_call_async(this_object(), "dummy", ([ "callback": (: dummy :) ])),
                          "owner payload must be frozen data, not object/function/buffer/class");
-    assert_payload_error(owner_publish_snapshot(([ 1: "bad_key" ])),
+    bad_mapping = ([]);
+    for (i = 0; i < 64; i++) {
+        bad_mapping[sprintf("key/%d", i)] = i;
+    }
+    bad_mapping[1] = "bad_key";
+    assert_payload_error(owner_publish_snapshot(bad_mapping),
                          "owner payload mapping keys must be strings");
     assert_payload_error(owner_publish_snapshot(([ "deep": ({ ({ ({ ({ ({ ({ ({ ({ ({ ({ 1 }) }) }) }) }) }) }) }) }) }) ])),
                          "owner payload nesting is too deep");
