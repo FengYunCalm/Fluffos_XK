@@ -174,9 +174,12 @@ void vm_object_store_mark_destructed(object_t *object) {
   }
   std::lock_guard<std::mutex> lock(object_store_mutex);
   auto &record = register_locked(object);
-  record.destructed = true;
-  auto &shard = shard_for_owner(record.owner_id);
-  shard.destructed++;
+  if (!record.destructed) {
+    record.destructed = true;
+    auto &shard = shard_for_owner(record.owner_id);
+    shard.objects.erase(record.object_id);
+    shard.destructed++;
+  }
 }
 
 void vm_object_store_record_callout(object_t *object) {

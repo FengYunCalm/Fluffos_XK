@@ -1928,6 +1928,32 @@ TEST_F(DriverTest, TestVmObjectHandleRejectsStaleOwnerEpoch) {
   destruct_object(obj);
 }
 
+TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+
+  object_t* obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+  vm_owner_set_id(obj, "owner/test/store/destruct");
+  vm_object_store_register(obj);
+
+  auto* before = vm_object_store_owner_status("owner/test/store/destruct");
+  ASSERT_EQ(mapping_number(before, "objects"), 1);
+  auto before_destructed = mapping_number(before, "destructed");
+  free_mapping(before);
+
+  destruct_object(obj);
+
+  auto* after = vm_object_store_owner_status("owner/test/store/destruct");
+  ASSERT_EQ(mapping_number(after, "objects"), 0);
+  ASSERT_EQ(mapping_number(after, "destructed"), before_destructed + 1);
+  free_mapping(after);
+}
+
 TEST_F(DriverTest, TestVmOwnerGuardFailsFastOnMismatch) {
   current_object = master_ob;
   object_t* obj = find_object("single/master.c");
