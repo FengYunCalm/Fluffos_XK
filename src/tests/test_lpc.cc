@@ -566,6 +566,20 @@ TEST_F(DriverTest, TestVmOwnerMetadataDefaultsAndChecks) {
   ASSERT_EQ(vm_owner_epoch(obj), default_epoch + 2);
 }
 
+TEST_F(DriverTest, TestLoadedSingletonUsesDefaultOwnerInsideOwnerScope) {
+  if (auto* existing = find_object("single/owner_singleton.c")) {
+    destruct_object(existing);
+  }
+
+  VMOwnerScope scope(vm_context(), "owner/test/player", 1);
+  current_object = master_ob;
+  auto* obj = load_object_for_test("single/owner_singleton.c");
+
+  ASSERT_NE(obj, nullptr);
+  ASSERT_STREQ(vm_owner_default_id(), vm_owner_id(obj));
+  destruct_object(obj);
+}
+
 TEST_F(DriverTest, TestVmOwnerMailboxDrainsOwnerFifo) {
   const char* owner_id = "owner/test/mailbox";
   auto first_id = vm_owner_enqueue_task(owner_id, "command", "first");

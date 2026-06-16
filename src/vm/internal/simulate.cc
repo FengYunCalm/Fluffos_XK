@@ -157,7 +157,9 @@ static void assign_initial_owner(object_t *ob, object_t *prototype) {
   if (!ob || vm_owner_has_explicit_id(ob)) {
     return;
   }
-  if (!vm_context().owner.current_owner_id.empty()) {
+  if (!prototype) {
+    vm_owner_set_id(ob, vm_owner_default_id());
+  } else if (!vm_context().owner.current_owner_id.empty()) {
     vm_owner_set_id(ob, vm_context().owner.current_owner_id.c_str());
   } else if (current_object) {
     vm_owner_set_id(ob, vm_owner_id(current_object));
