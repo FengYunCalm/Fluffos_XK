@@ -356,7 +356,7 @@ mapping_t *owner_access_trace_mapping(const OwnerAccessTrace &trace) {
 }
 
 mapping_t *owner_message_trace_mapping(const OwnerMessageTrace &trace) {
-  auto *map = allocate_mapping(9);
+  auto *map = allocate_mapping(10);
   add_mapping_pair(map, "message_id", static_cast<long>(trace.message_id));
   add_mapping_pair(map, "sequence", static_cast<long>(trace.sequence));
   add_mapping_pair(map, "target_task_id", static_cast<long>(trace.target_task_id));
@@ -366,6 +366,7 @@ mapping_t *owner_message_trace_mapping(const OwnerMessageTrace &trace) {
   add_mapping_string(map, "payload_key", trace.payload_key.c_str());
   add_mapping_string(map, "state", trace.state.c_str());
   add_mapping_pair(map, "direct_cross_owner_write", 0);
+  add_mapping_pair(map, "payload_frozen", 1);
   return map;
 }
 
@@ -419,7 +420,7 @@ uint64_t append_owner_task_trace_threadsafe(const OwnerMailboxTask &task, const 
 }
 
 mapping_t *owner_future_mapping(const OwnerFutureRecord &record) {
-  auto *map = allocate_mapping(17);
+  auto *map = allocate_mapping(19);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "future_id", static_cast<long>(record.future_id));
   add_mapping_pair(map, "target_task_id", static_cast<long>(record.target_task_id));
@@ -432,6 +433,8 @@ mapping_t *owner_future_mapping(const OwnerFutureRecord &record) {
   add_mapping_string(map, "error", record.error.c_str());
   add_mapping_pair(map, "requires_owner_message_completion", record.state == "pending" ? 1 : 0);
   add_mapping_pair(map, "direct_cross_owner_write", 0);
+  add_mapping_pair(map, "payload_frozen", 1);
+  add_mapping_pair(map, "frozen_result", record.state == "completed" ? 1 : 0);
   add_mapping_pair(map, "has_target_handle", record.has_target_handle ? 1 : 0);
   add_mapping_pair(map, "target_handle_current",
                    !record.has_target_handle || vm_object_handle_is_current(record.target_handle) ? 1 : 0);
@@ -1597,7 +1600,7 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
     owner_runtime_cv.notify_one();
   }
 
-  auto *map = allocate_mapping(16);
+  auto *map = allocate_mapping(17);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "message_id", static_cast<long>(message_id));
   add_mapping_pair(map, "future_id", static_cast<long>(message_id));
@@ -1609,6 +1612,7 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
   add_mapping_pair(map, "requires_owner_mailbox", 1);
   add_mapping_pair(map, "message_only_cross_owner", 1);
   add_mapping_pair(map, "direct_cross_owner_write", 0);
+  add_mapping_pair(map, "payload_frozen", 1);
   add_mapping_pair(map, "has_target_handle", target_handle ? 1 : 0);
   add_mapping_pair(map, "target_handle_current",
                    !target_handle || vm_object_handle_is_current(*target_handle) ? 1 : 0);

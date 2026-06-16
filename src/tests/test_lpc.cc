@@ -2169,6 +2169,7 @@ TEST_F(DriverTest, TestVmOwnerMessageAndCommitTracesAreSpecOnly) {
   ASSERT_EQ(mapping_number(submitted, "requires_owner_mailbox"), 1);
   ASSERT_EQ(mapping_number(submitted, "message_only_cross_owner"), 1);
   ASSERT_EQ(mapping_number(submitted, "direct_cross_owner_write"), 0);
+  ASSERT_EQ(mapping_number(submitted, "payload_frozen"), 1);
   ASSERT_STREQ(mapping_string(submitted, "source_owner_id"), source_owner);
   ASSERT_STREQ(mapping_string(submitted, "target_owner_id"), target_owner);
   ASSERT_STREQ(mapping_string(submitted, "message_type"), "room_snapshot");
@@ -2188,6 +2189,7 @@ TEST_F(DriverTest, TestVmOwnerMessageAndCommitTracesAreSpecOnly) {
   ASSERT_EQ(mapping_number(message_event, "message_id"), message_id);
   ASSERT_EQ(mapping_number(message_event, "target_task_id"), target_task_id);
   ASSERT_EQ(mapping_number(message_event, "direct_cross_owner_write"), 0);
+  ASSERT_EQ(mapping_number(message_event, "payload_frozen"), 1);
   ASSERT_STREQ(mapping_string(message_event, "state"), "message_submitted");
   free_mapping(message_trace);
 
@@ -2229,6 +2231,7 @@ TEST_F(DriverTest, TestVmOwnerMessageAndCommitTracesAreSpecOnly) {
   ASSERT_EQ(message_events->u.arr->size, 1);
   message_event = message_events->u.arr->item[0].u.map;
   ASSERT_EQ(mapping_number(message_event, "message_id"), message_id);
+  ASSERT_EQ(mapping_number(message_event, "payload_frozen"), 1);
   ASSERT_STREQ(mapping_string(message_event, "state"), "completed");
   free_mapping(message_trace);
   free_mapping(submitted);
@@ -2263,6 +2266,8 @@ TEST_F(DriverTest, TestVmOwnerFuturePollTracksMessageCompletion) {
   ASSERT_EQ(mapping_number(pending, "future_id"), future_id);
   ASSERT_EQ(mapping_number(pending, "target_task_id"), target_task_id);
   ASSERT_EQ(mapping_number(pending, "requires_owner_message_completion"), 1);
+  ASSERT_EQ(mapping_number(pending, "payload_frozen"), 1);
+  ASSERT_EQ(mapping_number(pending, "frozen_result"), 0);
   ASSERT_STREQ(mapping_string(pending, "state"), "pending");
   free_mapping(pending);
 
@@ -2270,6 +2275,8 @@ TEST_F(DriverTest, TestVmOwnerFuturePollTracksMessageCompletion) {
   auto* completed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
   ASSERT_EQ(mapping_number(completed, "success"), 1);
   ASSERT_EQ(mapping_number(completed, "requires_owner_message_completion"), 0);
+  ASSERT_EQ(mapping_number(completed, "payload_frozen"), 1);
+  ASSERT_EQ(mapping_number(completed, "frozen_result"), 1);
   ASSERT_STREQ(mapping_string(completed, "state"), "completed");
   ASSERT_STREQ(mapping_string(completed, "result_key"), "future_method");
   free_mapping(completed);
@@ -2308,6 +2315,8 @@ TEST_F(DriverTest, TestVmOwnerPurgeFailsPendingFuture) {
   auto* failed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
   ASSERT_EQ(mapping_number(failed, "success"), 1);
   ASSERT_EQ(mapping_number(failed, "requires_owner_message_completion"), 0);
+  ASSERT_EQ(mapping_number(failed, "payload_frozen"), 1);
+  ASSERT_EQ(mapping_number(failed, "frozen_result"), 0);
   ASSERT_STREQ(mapping_string(failed, "state"), "failed");
   ASSERT_STREQ(mapping_string(failed, "error"), "purged");
   free_mapping(failed);
@@ -2361,6 +2370,8 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageFailsStaleTargetHandle) {
   ASSERT_EQ(mapping_number(failed, "requires_owner_message_completion"), 0);
   ASSERT_EQ(mapping_number(failed, "has_target_handle"), 1);
   ASSERT_EQ(mapping_number(failed, "target_handle_current"), 0);
+  ASSERT_EQ(mapping_number(failed, "payload_frozen"), 1);
+  ASSERT_EQ(mapping_number(failed, "frozen_result"), 0);
   ASSERT_STREQ(mapping_string(failed, "state"), "failed");
   ASSERT_STREQ(mapping_string(failed, "error"), "stale target");
   free_mapping(failed);

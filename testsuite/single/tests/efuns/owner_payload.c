@@ -24,10 +24,14 @@ void do_tests() {
     future = owner_future_poll(result["future_id"]);
     ASSERT_EQ(1, future["success"]);
     ASSERT_EQ("pending", future["state"]);
+    ASSERT_EQ(1, future["payload_frozen"]);
+    ASSERT_EQ(0, future["frozen_result"]);
     vm_owner_drain(target_owner, 1);
     future = owner_future_poll(result["future_id"]);
     ASSERT_EQ(1, future["success"]);
     ASSERT_EQ("completed", future["state"]);
+    ASSERT_EQ(1, future["payload_frozen"]);
+    ASSERT_EQ(1, future["frozen_result"]);
 
     result = owner_call_async(this_object(), "dummy", ([ "payload_key": "dummy/v1" ]));
     ASSERT_EQ(1, result["success"]);
@@ -41,6 +45,8 @@ void do_tests() {
     future = owner_future_poll(result["future_id"]);
     ASSERT_EQ(1, future["success"]);
     ASSERT_EQ("completed", future["state"]);
+    ASSERT_EQ(1, future["payload_frozen"]);
+    ASSERT_EQ(1, future["frozen_result"]);
 
     assert_payload_error(owner_send(target_owner, ([ "type": "bad_object", "object": this_object() ])),
                          "owner payload must be frozen data, not object/function/buffer/class");
