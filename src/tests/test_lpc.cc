@@ -580,6 +580,29 @@ TEST_F(DriverTest, TestLoadedSingletonUsesDefaultOwnerInsideOwnerScope) {
   destruct_object(obj);
 }
 
+TEST_F(DriverTest, TestCloneOwnerUsesCurrentObjectNotAmbientScope) {
+  if (auto* existing = find_object("single/owner_singleton.c")) {
+    destruct_object(existing);
+  }
+  auto* prototype = load_object_for_test("single/owner_singleton.c");
+  ASSERT_NE(prototype, nullptr);
+
+  VMOwnerScope scope(vm_context(), "owner/test/player", 1);
+  current_object = master_ob;
+  auto* shared_clone = clone_object("single/owner_singleton", 0);
+  ASSERT_NE(shared_clone, nullptr);
+  ASSERT_STREQ(vm_owner_default_id(), vm_owner_id(shared_clone));
+  destruct_object(shared_clone);
+
+  vm_owner_set_id(prototype, "owner/test/factory");
+  current_object = prototype;
+  auto* owned_clone = clone_object("single/owner_singleton", 0);
+  ASSERT_NE(owned_clone, nullptr);
+  ASSERT_STREQ("owner/test/factory", vm_owner_id(owned_clone));
+  destruct_object(owned_clone);
+  destruct_object(prototype);
+}
+
 TEST_F(DriverTest, TestVmOwnerMailboxDrainsOwnerFifo) {
   const char* owner_id = "owner/test/mailbox";
   auto first_id = vm_owner_enqueue_task(owner_id, "command", "first");
@@ -1243,6 +1266,10 @@ TEST_F(DriverTest, TestCurrentOwnerScopeControlsCrossOwnerBlocking) {
   vm_owner_set_id(target, "owner/test/scope/target");
   vm_owner_clear_id(source);
   ASSERT_FALSE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+  {
+    VMOwnerScope scope(vm_context(), "owner/test/scope/other", 1);
+    ASSERT_FALSE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+  }
   vm_owner_set_id(source, "owner/test/scope/source-object");
   {
     VMOwnerScope scope(vm_context(), vm_owner_default_id(), 0);

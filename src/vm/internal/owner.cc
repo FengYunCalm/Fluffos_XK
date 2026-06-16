@@ -306,6 +306,9 @@ bool command_giver_owner_applies(object_t *source, object_t *target) {
 
 const char *effective_source_owner_id(object_t *source, object_t *target) {
   if (!vm_context().owner.current_owner_id.empty() && vm_context().owner.current_owner_id != kDefaultOwnerId) {
+    if (owner_id_is_default(vm_owner_id(source))) {
+      return vm_owner_id(source);
+    }
     return vm_context().owner.current_owner_id.c_str();
   }
   if (command_giver_owner_applies(source, target)) {
@@ -316,6 +319,9 @@ const char *effective_source_owner_id(object_t *source, object_t *target) {
 
 uint64_t effective_source_owner_epoch(object_t *source, object_t *target) {
   if (!vm_context().owner.current_owner_id.empty() && vm_context().owner.current_owner_id != kDefaultOwnerId) {
+    if (owner_id_is_default(vm_owner_id(source))) {
+      return vm_owner_epoch(source);
+    }
     return vm_context().owner.current_owner_epoch;
   }
   if (command_giver_owner_applies(source, target)) {

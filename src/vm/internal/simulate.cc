@@ -159,11 +159,12 @@ static void assign_initial_owner(object_t *ob, object_t *prototype) {
   }
   if (!prototype) {
     vm_owner_set_id(ob, vm_owner_default_id());
-  } else if (!vm_context().owner.current_owner_id.empty()) {
-    vm_owner_set_id(ob, vm_context().owner.current_owner_id.c_str());
-  } else if (current_object) {
+  } else if (current_object && std::strcmp(vm_owner_id(current_object), vm_owner_default_id()) != 0) {
     vm_owner_set_id(ob, vm_owner_id(current_object));
-  } else if (prototype && vm_owner_has_explicit_id(prototype)) {
+  } else if (!current_object && !vm_context().owner.current_owner_id.empty()) {
+    auto *owner_id = vm_context().owner.current_owner_id.c_str();
+    vm_owner_set_id(ob, std::strcmp(owner_id, vm_owner_default_id()) == 0 ? vm_owner_default_id() : owner_id);
+  } else if (vm_owner_has_explicit_id(prototype) && std::strcmp(vm_owner_id(prototype), vm_owner_default_id()) != 0) {
     vm_owner_set_id(ob, vm_owner_id(prototype));
   } else {
     vm_owner_set_id(ob, vm_owner_default_id());
