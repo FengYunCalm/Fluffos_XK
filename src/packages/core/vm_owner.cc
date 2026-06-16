@@ -25,7 +25,7 @@ bool owner_payload_safe(svalue_t *value, int depth, std::string *error) {
       }
       return true;
     case T_MAPPING:
-      for (unsigned int i = 0; i < value->u.map->table_size; i++) {
+      for (unsigned int i = 0; i <= value->u.map->table_size; i++) {
         for (auto *node = value->u.map->table[i]; node; node = node->next) {
           if (node->values[0].type != T_STRING) {
             *error = "owner payload mapping keys must be strings";
@@ -41,6 +41,14 @@ bool owner_payload_safe(svalue_t *value, int depth, std::string *error) {
       *error = "owner payload must be frozen data, not object/function/buffer/class";
       return false;
   }
+}
+
+bool owner_payload_mapping_safe(svalue_t *value, std::string *error) {
+  if (value->type != T_MAPPING) {
+    *error = "owner payload top-level value must be a mapping";
+    return false;
+  }
+  return owner_payload_safe(value, 0, error);
 }
 
 std::string owner_mapping_string(mapping_t *map, const char *key, const char *fallback) {
@@ -378,7 +386,7 @@ void f_owner_send() {
   auto *payload = sp;
   auto *target_owner = sp - 1;
   std::string error_text;
-  if (!owner_payload_safe(payload, 0, &error_text)) {
+  if (!owner_payload_mapping_safe(payload, &error_text)) {
     pop_2_elems();
     push_refed_mapping(owner_payload_error(error_text));
     return;
@@ -399,7 +407,7 @@ void f_owner_call_async() {
   auto *method = sp - 1;
   auto *target = sp - 2;
   std::string error_text;
-  if (!owner_payload_safe(payload, 0, &error_text)) {
+  if (!owner_payload_mapping_safe(payload, &error_text)) {
     pop_n_elems(3);
     push_refed_mapping(owner_payload_error(error_text));
     return;
@@ -436,7 +444,7 @@ void f_owner_snapshot() {
 #ifdef F_OWNER_PUBLISH_SNAPSHOT
 void f_owner_publish_snapshot() {
   std::string error_text;
-  if (!owner_payload_safe(sp, 0, &error_text)) {
+  if (!owner_payload_mapping_safe(sp, &error_text)) {
     pop_stack();
     push_refed_mapping(owner_payload_error(error_text));
     return;
