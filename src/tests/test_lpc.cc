@@ -177,6 +177,35 @@ TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
   ASSERT_EQ(vm_context().execution.stack_in_use_as_temporary, 0);
 }
 
+TEST_F(DriverTest, TestVmContextResetClearsThreadExecutionState) {
+  object_t* obj = find_object("single/master.c");
+  ASSERT_NE(obj, nullptr);
+
+  vm_context_set_current_object(vm_context(), obj);
+  vm_context_set_command_giver(vm_context(), obj);
+  vm_context_set_current_interactive(vm_context(), obj);
+  vm_context_set_previous_object(vm_context(), obj);
+  vm_context_set_current_program(vm_context(), obj->prog);
+  vm_context_set_caller_type(vm_context(), ORIGIN_DRIVER);
+  vm_context_set_call_origin(vm_context(), ORIGIN_DRIVER);
+  vm_context_set_inherit_offsets(vm_context(), 3, 5);
+  vm_context_set_stack_temporary_depth(vm_context(), 7);
+
+  vm_context_reset_execution(vm_context());
+  auto execution = vm_context_capture_execution();
+
+  ASSERT_EQ(execution.current_object, nullptr);
+  ASSERT_EQ(execution.command_giver, nullptr);
+  ASSERT_EQ(execution.current_interactive, nullptr);
+  ASSERT_EQ(execution.previous_ob, nullptr);
+  ASSERT_EQ(execution.current_prog, nullptr);
+  ASSERT_EQ(execution.caller_type, 0);
+  ASSERT_EQ(execution.call_origin, 0);
+  ASSERT_EQ(execution.function_index_offset, 0);
+  ASSERT_EQ(execution.variable_index_offset, 0);
+  ASSERT_EQ(execution.stack_in_use_as_temporary, 0);
+}
+
 TEST_F(DriverTest, TestVmCurrentInteractiveScopeRestoresState) {
   object_t* obj = find_object("single/master.c");
   ASSERT_NE(obj, nullptr);

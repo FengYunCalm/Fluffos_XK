@@ -140,8 +140,6 @@ void vm_context_set_error_flags(VMContext &context, int too_deep, int max_eval) 
   context.error.max_eval_error = max_eval;
 }
 
-void vm_context_reset_execution(VMContext &context) { context.execution = VMExecutionState{}; }
-
 VMExecutionState vm_context_capture_execution() {
   VMExecutionState execution;
   execution.current_object = current_object;
@@ -173,6 +171,10 @@ void vm_context_apply_execution(VMContext &context, const VMExecutionState &exec
   stack_in_use_as_temporary = execution.stack_in_use_as_temporary;
 #endif
   context.execution = execution;
+}
+
+void vm_context_reset_execution(VMContext &context) {
+  vm_context_apply_execution(context, VMExecutionState{});
 }
 
 void vm_context_sync_execution(VMContext &context) {
