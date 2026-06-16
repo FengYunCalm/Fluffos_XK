@@ -28,6 +28,8 @@ struct ObjectShardRecord {
   uint64_t heartbeats{0};
   uint64_t callouts{0};
   uint64_t messages{0};
+  std::unordered_set<uint64_t> active_heartbeats;
+  std::unordered_set<uint64_t> pending_callouts;
 };
 
 std::mutex object_store_mutex;
@@ -88,13 +90,15 @@ void sync_record_activity_locked(const ObjectRecord &record) {
 }
 
 mapping_t *shard_mapping(const ObjectShardRecord &shard) {
-  auto *map = allocate_mapping(7);
+  auto *map = allocate_mapping(9);
   add_mapping_string(map, "owner_id", shard.owner_id.c_str());
   add_mapping_pair(map, "objects", static_cast<long>(shard.objects.size()));
   add_mapping_pair(map, "registered", static_cast<long>(shard.registered));
   add_mapping_pair(map, "destructed", static_cast<long>(shard.destructed));
   add_mapping_pair(map, "heartbeats", static_cast<long>(shard.heartbeats));
+  add_mapping_pair(map, "active_heartbeats", static_cast<long>(shard.active_heartbeats.size()));
   add_mapping_pair(map, "callouts", static_cast<long>(shard.callouts));
+  add_mapping_pair(map, "pending_callouts", static_cast<long>(shard.pending_callouts.size()));
   add_mapping_pair(map, "messages", static_cast<long>(shard.messages));
   return map;
 }
@@ -191,17 +195,30 @@ void vm_object_store_mark_destructed(object_t *object) {
     record.destructed = true;
     auto &shard = shard_for_owner(record.owner_id);
     shard.objects.erase(record.object_id);
+    shard.active_heartbeats.erase(record.object_id);
     shard.destructed++;
   }
 }
 
-void vm_object_store_record_callout(object_t *object) {
+void vm_object_store_record_callout(object_t *object, uint64_t callout_id) {
   if (!object) {
     return;
   }
   std::lock_guard<std::mutex> lock(object_store_mutex);
   auto &record = register_locked(object);
-  shard_for_owner(record.owner_id).callouts++;
+  auto &shard = shard_for_owner(record.owner_id);
+  shard.callouts++;
+  if (callout_id != 0) {
+    shard.pending_callouts.insert(callout_id);
+  }
+}
+
+void vm_object_store_remove_callout(const char *owner_id, uint64_t callout_id) {
+  if (callout_id == 0) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(object_store_mutex);
+  shard_for_owner(safe_owner_id(owner_id)).pending_callouts.erase(callout_id);
 }
 
 void vm_object_store_record_heartbeat(object_t *object) {
@@ -210,7 +227,20 @@ void vm_object_store_record_heartbeat(object_t *object) {
   }
   std::lock_guard<std::mutex> lock(object_store_mutex);
   auto &record = register_locked(object);
-  shard_for_owner(record.owner_id).heartbeats++;
+  auto &shard = shard_for_owner(record.owner_id);
+  shard.heartbeats++;
+  if (!record.destructed) {
+    shard.active_heartbeats.insert(record.object_id);
+  }
+}
+
+void vm_object_store_remove_heartbeat(object_t *object) {
+  if (!object) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(object_store_mutex);
+  auto &record = register_locked(object);
+  shard_for_owner(record.owner_id).active_heartbeats.erase(record.object_id);
 }
 
 void vm_object_store_record_message(const char *owner_id) {

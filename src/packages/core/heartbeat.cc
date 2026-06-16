@@ -181,6 +181,7 @@ int set_heart_beat(object_t *ob, int to) {
   // Removal: set the flag and hb will be deleted in next round.
   if (to == 0) {
     ob->flags &= ~O_HEART_BEAT;
+    vm_object_store_remove_heartbeat(ob);
     vm_owner_record_task_trace(vm_owner_id(ob), "heartbeat", "heart_beat", vm_owner_epoch(ob), "disabled");
 
     bool found = false;

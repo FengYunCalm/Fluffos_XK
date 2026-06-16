@@ -707,6 +707,12 @@ TEST_F(DriverTest, TestVmOwnerHeartbeatTraceRecordsScheduledEvent) {
 
   ASSERT_EQ(set_heart_beat(obj, 1), 1);
 
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
   auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
     auto* value = find_string_in_mapping(map, key);
     EXPECT_NE(value, nullptr);
@@ -722,7 +728,38 @@ TEST_F(DriverTest, TestVmOwnerHeartbeatTraceRecordsScheduledEvent) {
   ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "state"), "scheduled");
   free_mapping(trace);
 
+  auto* owner_status = vm_object_store_owner_status("owner/test/heartbeat");
+  ASSERT_EQ(mapping_number(owner_status, "active_heartbeats"), 1);
+  free_mapping(owner_status);
+
   set_heart_beat(obj, 0);
+  owner_status = vm_object_store_owner_status("owner/test/heartbeat");
+  ASSERT_EQ(mapping_number(owner_status, "active_heartbeats"), 0);
+  free_mapping(owner_status);
+  vm_owner_clear_id(obj);
+}
+
+TEST_F(DriverTest, TestVmObjectStoreTracksPendingCallouts) {
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+
+  object_t* obj = find_object("single/master.c");
+  ASSERT_NE(obj, nullptr);
+  vm_owner_set_id(obj, "owner/test/callout-store");
+  vm_object_store_record_callout(obj, 12345);
+
+  auto* owner_status = vm_object_store_owner_status("owner/test/callout-store");
+  ASSERT_EQ(mapping_number(owner_status, "pending_callouts"), 1);
+  free_mapping(owner_status);
+
+  vm_object_store_remove_callout("owner/test/callout-store", 12345);
+  owner_status = vm_object_store_owner_status("owner/test/callout-store");
+  ASSERT_EQ(mapping_number(owner_status, "pending_callouts"), 0);
+  free_mapping(owner_status);
   vm_owner_clear_id(obj);
 }
 
