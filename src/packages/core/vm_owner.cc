@@ -415,8 +415,13 @@ void f_owner_call_async() {
   auto payload_key = owner_mapping_string(payload->u.map, "payload_key", method->u.string);
   auto *result = vm_owner_submit_message(current_owner_id_for_message(), vm_owner_id(target->u.ob),
                                           method->u.string, payload_key.c_str());
+  auto handle = vm_object_handle(target->u.ob);
   add_mapping_pair(result, "frozen_payload", 1);
   add_mapping_pair(result, "async_only", 1);
+  add_mapping_pair(result, "target_object_id", static_cast<long>(handle.object_id));
+  add_mapping_string(result, "target_object_path", handle.object_path.c_str());
+  add_mapping_pair(result, "target_owner_epoch", static_cast<long>(handle.owner_epoch));
+  add_mapping_pair(result, "target_handle_valid", handle.valid ? 1 : 0);
   pop_n_elems(3);
   push_refed_mapping(result);
 }
