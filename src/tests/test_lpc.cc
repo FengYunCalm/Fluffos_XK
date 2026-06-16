@@ -2057,6 +2057,41 @@ TEST_F(DriverTest, TestVmOwnerFuturePollTracksMessageCompletion) {
   free_mapping(submitted);
 }
 
+TEST_F(DriverTest, TestVmOwnerPurgeFailsPendingFuture) {
+  const char* source_owner = "owner/test/future/purge-source";
+  const char* target_owner = "owner/test/future/purge-target";
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  free_mapping(vm_owner_purge_mailbox(target_owner));
+  auto* submitted = vm_owner_submit_message(source_owner, target_owner, "future_method", "future/purge");
+  auto future_id = mapping_number(submitted, "future_id");
+  ASSERT_GT(future_id, 0);
+  free_mapping(submitted);
+
+  auto* purged = vm_owner_purge_mailbox(target_owner);
+  ASSERT_EQ(mapping_number(purged, "purged"), 1);
+  free_mapping(purged);
+
+  auto* failed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+  ASSERT_EQ(mapping_number(failed, "success"), 1);
+  ASSERT_EQ(mapping_number(failed, "requires_owner_message_completion"), 0);
+  ASSERT_STREQ(mapping_string(failed, "state"), "failed");
+  ASSERT_STREQ(mapping_string(failed, "error"), "purged");
+  free_mapping(failed);
+}
+
 TEST_F(DriverTest, TestVmOwnerFuturePollReportsUnknownFuture) {
   auto mapping_number = [](mapping_t* map, const char* key) -> long {
     auto* value = find_string_in_mapping(map, key);

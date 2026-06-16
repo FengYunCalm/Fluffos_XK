@@ -432,6 +432,9 @@ void complete_owner_future_locked(uint64_t future_id, const char *state, const c
   if (it == owner_futures.end()) {
     return;
   }
+  if (it->second.state != "pending") {
+    return;
+  }
   it->second.state = normalize_task_text(state, "completed");
   it->second.result_key = normalize_task_text(result_key, "");
   it->second.error = normalize_task_text(error, "");
@@ -1355,6 +1358,9 @@ mapping_t *vm_owner_purge_mailbox(const char *owner_id) {
       append_owner_task_trace(task, "purged");
     }
     for (auto &task : it->second) {
+      if (task.task_type == "owner_message" || task.task_type == "compute_result") {
+        complete_owner_future_for_task_locked(task.task_id, "failed", "", "purged");
+      }
       record_owner_mailbox_task_drained(task);
       release_owner_task_target(&task);
     }
