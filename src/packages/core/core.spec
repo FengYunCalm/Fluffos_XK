@@ -408,6 +408,7 @@ mapping owner_call_async(object, string, mapping);
 mapping owner_future_poll(int);
 mapping owner_snapshot(object default: F__THIS_OBJECT);
 mapping owner_publish_snapshot(mapping);
+mapping owner_query_object_snapshot(object);
 mapping vm_owner_lpc_probe(object, string, string);
 mapping vm_owner_lpc_canary(object, string, string);
 mapping vm_owner_lpc_task(object, string, string);

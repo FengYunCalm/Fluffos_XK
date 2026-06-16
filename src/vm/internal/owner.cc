@@ -2183,3 +2183,69 @@ mapping_t *vm_owner_runtime_status() {
                    static_cast<long>(vm_context_object_store_sync_rejections()));
   return map;
 }
+
+// Safe read-only properties that can be queried across owners without requiring message/future
+static const std::unordered_set<std::string> safe_read_only_properties = {
+  "name", "id", "short", "living", "is_character", "is_npc", "is_player",
+  "query_temp/is_dying", "environment"
+};
+
+bool vm_owner_is_safe_read_only_property(const char *property_name) {
+  if (!property_name) return false;
+  return safe_read_only_properties.find(property_name) != safe_read_only_properties.end();
+}
+
+// Query object snapshot for safe cross-owner read-only access
+// Returns a mapping with basic properties that don't require synchronous call_other
+mapping_t *vm_owner_query_object_snapshot(object_t *target, const char *requesting_owner_id) {
+  if (!target) {
+    return nullptr;
+  }
+
+  const char *target_owner_id = vm_owner_id(target);
+
+  // Record this as a snapshot access
+  vm_owner_record_cross_owner_access(current_object, target, "snapshot");
+
+  // If same owner or target is default owner, allow direct access
+  if (std::strcmp(target_owner_id, requesting_owner_id) == 0 ||
+      std::strcmp(target_owner_id, kDefaultOwnerId) == 0) {
+    return nullptr;  // Signal that direct access is safe
+  }
+
+  // Cross-owner access - return a safe snapshot
+  total_cross_owner_snapshot_accesses.fetch_add(1, std::memory_order_relaxed);
+
+  auto *snapshot = allocate_mapping(8);
+
+  // Object identity
+  add_mapping_string(snapshot, "object_name", target->obname);
+  add_mapping_string(snapshot, "owner_id", target_owner_id);
+
+  // Living status (check flags directly without calling methods)
+  int living_flag = (target->flags & O_ENABLE_COMMANDS) ? 1 : 0;
+  add_mapping_pair(snapshot, "living", living_flag);
+
+  // Object type flags (check if methods exist without calling them)
+  int has_is_npc = 0;
+  int has_is_player = 0;
+  int has_is_character = 0;
+
+  // Check if methods exist (pass 0 as third argument for local function check)
+  if (function_exists("is_npc", target, 0)) {
+    has_is_npc = 1;
+  }
+  if (function_exists("is_player", target, 0)) {
+    has_is_player = 1;
+  }
+  if (function_exists("is_character", target, 0)) {
+    has_is_character = 1;
+  }
+
+  add_mapping_pair(snapshot, "has_is_npc", has_is_npc);
+  add_mapping_pair(snapshot, "has_is_player", has_is_player);
+  add_mapping_pair(snapshot, "has_is_character", has_is_character);
+  add_mapping_pair(snapshot, "living_flag", living_flag);
+
+  return snapshot;
+}

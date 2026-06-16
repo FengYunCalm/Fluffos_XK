@@ -467,3 +467,29 @@ void f_owner_publish_snapshot() {
   push_refed_mapping(map);
 }
 #endif
+
+#ifdef F_OWNER_QUERY_OBJECT_SNAPSHOT
+void f_owner_query_object_snapshot() {
+  object_t *target = sp->u.ob;
+  if (!target) {
+    free_object(&sp->u.ob, "f_owner_query_object_snapshot");
+    *sp = const0u;
+    return;
+  }
+
+  const char *requesting_owner_id = current_owner_id_for_message();
+  auto *snapshot = vm_owner_query_object_snapshot(target, requesting_owner_id);
+
+  free_object(&sp->u.ob, "f_owner_query_object_snapshot");
+
+  if (!snapshot) {
+    // Same owner or default owner - direct access is safe
+    *sp = const0u;
+    return;
+  }
+
+  sp->type = T_MAPPING;
+  sp->subtype = 0;
+  sp->u.map = snapshot;
+}
+#endif
