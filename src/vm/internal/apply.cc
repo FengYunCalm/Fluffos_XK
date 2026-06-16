@@ -316,8 +316,8 @@ retry_for_shadow:
     vm_context_set_current_program(vm_context(), entry.progp);
     vm_context_set_caller_type(vm_context(), local_call_origin);
     csp->num_local_variables = num_arg;
-    function_index_offset = entry.function_index_offset;
-    variable_index_offset = entry.variable_index_offset;
+    vm_context_set_inherit_offsets(vm_context(), entry.function_index_offset,
+                                   entry.variable_index_offset);
     csp->fr.table_index = findex;
 #ifdef PROFILE_FUNCTIONS
     get_cpu_times(&(csp->entry_secs), &(csp->entry_usecs));

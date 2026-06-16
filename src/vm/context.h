@@ -18,6 +18,8 @@ struct VMExecutionState {
   program_t *current_prog{nullptr};
   int caller_type{0};
   int call_origin{0};
+  int function_index_offset{0};
+  int variable_index_offset{0};
 };
 
 struct VMObjectStoreState {
@@ -64,6 +66,7 @@ void vm_context_set_previous_object(VMContext &context, object_t *object);
 void vm_context_set_current_program(VMContext &context, program_t *program);
 void vm_context_set_caller_type(VMContext &context, int type);
 void vm_context_set_call_origin(VMContext &context, int origin);
+void vm_context_set_inherit_offsets(VMContext &context, int function_offset, int variable_offset);
 void vm_context_set_execution_frame(VMContext &context, object_t *object, program_t *program,
                                     object_t *previous, int type);
 void vm_context_set_current_error_context(VMContext &context, error_context_t *error_context);
