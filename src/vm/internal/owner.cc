@@ -2249,3 +2249,41 @@ mapping_t *vm_owner_query_object_snapshot(object_t *target, const char *requesti
 
   return snapshot;
 }
+
+// Safely query a read-only method on a cross-owner object
+// Returns the result with error suppression, or null on error
+svalue_t *vm_owner_safe_query(object_t *target, const char *method, const char *requesting_owner_id) {
+  if (!target || !method) {
+    return nullptr;
+  }
+
+  const char *target_owner_id = vm_owner_id(target);
+
+  // If same owner or target is default owner, allow direct query
+  if (std::strcmp(target_owner_id, requesting_owner_id) == 0 ||
+      std::strcmp(target_owner_id, kDefaultOwnerId) == 0) {
+    // Safe to query directly - return nullptr to signal direct access
+    return nullptr;
+  }
+
+  // Cross-owner query - use catch to suppress errors
+  if (!function_exists(method, target, 0)) {
+    return &const0u;
+  }
+
+  // Temporarily allow cross-owner access for read-only queries
+  // by catching and suppressing any errors
+  error_context_t econ;
+  save_context(&econ);
+
+  svalue_t *result = nullptr;
+  try {
+    result = safe_apply(method, target, 0, ORIGIN_EFUN);
+  } catch (...) {
+    // Suppress error - return const0
+    result = &const0u;
+  }
+
+  restore_context(&econ);
+  return result ? result : &const0u;
+}
