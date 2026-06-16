@@ -445,6 +445,15 @@ void complete_owner_future_locked(uint64_t future_id, const char *state, const c
   }
 }
 
+void update_owner_message_trace_state_for_task_locked(uint64_t target_task_id, const char *state) {
+  for (auto &trace : owner_message_traces) {
+    if (trace.target_task_id == target_task_id) {
+      trace.state = normalize_task_text(state, "completed");
+      return;
+    }
+  }
+}
+
 void complete_owner_future_for_task_locked(uint64_t target_task_id, const char *state, const char *result_key,
                                            const char *error) {
   for (auto &entry : owner_futures) {
@@ -452,6 +461,7 @@ void complete_owner_future_for_task_locked(uint64_t target_task_id, const char *
       entry.second.state = normalize_task_text(state, "completed");
       entry.second.result_key = normalize_task_text(result_key, "");
       entry.second.error = normalize_task_text(error, "");
+      update_owner_message_trace_state_for_task_locked(target_task_id, entry.second.state.c_str());
       if (entry.second.state == "failed") {
         total_futures_failed.fetch_add(1, std::memory_order_relaxed);
       } else {

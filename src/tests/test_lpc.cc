@@ -2149,6 +2149,16 @@ TEST_F(DriverTest, TestVmOwnerMessageAndCommitTracesAreSpecOnly) {
   ASSERT_STREQ(mapping_string(tasks->u.arr->item[0].u.map, "task_type"), "owner_message");
   ASSERT_STREQ(mapping_string(tasks->u.arr->item[0].u.map, "task_key"), "room_snapshot");
   free_mapping(drained);
+
+  message_trace = vm_owner_message_trace(1);
+  message_events = find_string_in_mapping(message_trace, "events");
+  ASSERT_NE(message_events, nullptr);
+  ASSERT_EQ(message_events->type, T_ARRAY);
+  ASSERT_EQ(message_events->u.arr->size, 1);
+  message_event = message_events->u.arr->item[0].u.map;
+  ASSERT_EQ(mapping_number(message_event, "message_id"), message_id);
+  ASSERT_STREQ(mapping_string(message_event, "state"), "completed");
+  free_mapping(message_trace);
   free_mapping(submitted);
 }
 
@@ -2214,7 +2224,9 @@ TEST_F(DriverTest, TestVmOwnerPurgeFailsPendingFuture) {
   free_mapping(vm_owner_purge_mailbox(target_owner));
   auto* submitted = vm_owner_submit_message(source_owner, target_owner, "future_method", "future/purge");
   auto future_id = mapping_number(submitted, "future_id");
+  auto target_task_id = mapping_number(submitted, "target_task_id");
   ASSERT_GT(future_id, 0);
+  ASSERT_GT(target_task_id, 0);
   free_mapping(submitted);
 
   auto* purged = vm_owner_purge_mailbox(target_owner);
@@ -2227,6 +2239,16 @@ TEST_F(DriverTest, TestVmOwnerPurgeFailsPendingFuture) {
   ASSERT_STREQ(mapping_string(failed, "state"), "failed");
   ASSERT_STREQ(mapping_string(failed, "error"), "purged");
   free_mapping(failed);
+
+  auto* message_trace = vm_owner_message_trace(1);
+  auto* message_events = find_string_in_mapping(message_trace, "events");
+  ASSERT_NE(message_events, nullptr);
+  ASSERT_EQ(message_events->type, T_ARRAY);
+  ASSERT_EQ(message_events->u.arr->size, 1);
+  auto* message_event = message_events->u.arr->item[0].u.map;
+  ASSERT_EQ(mapping_number(message_event, "target_task_id"), target_task_id);
+  ASSERT_STREQ(mapping_string(message_event, "state"), "failed");
+  free_mapping(message_trace);
 }
 
 TEST_F(DriverTest, TestVmOwnerFuturePollReportsUnknownFuture) {
