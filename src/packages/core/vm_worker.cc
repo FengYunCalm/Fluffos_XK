@@ -207,6 +207,7 @@ void add_task_envelope(mapping_t *map, const VMWorkerTaskEnvelope &envelope) {
   add_mapping_pair(map, "deadline_at_ms", static_cast<long>(envelope.deadline_at_ms));
   add_mapping_pair(map, "completed_at_ms", static_cast<long>(envelope.completed_at_ms));
   add_mapping_pair(map, "expires_at_ms", static_cast<long>(envelope.expires_at_ms));
+  add_mapping_pair(map, "owner_future_id", static_cast<long>(envelope.owner_future_id));
   add_mapping_pair(map, "input_hash", static_cast<long>(envelope.input_hash));
   add_mapping_pair(map, "timeout_ms", envelope.timeout_ms);
   add_mapping_pair(map, "ttl_ms", envelope.ttl_ms);
@@ -314,7 +315,7 @@ void add_mapping_mapping(mapping_t *map, const char *key_name, mapping_t *value)
 }
 
 mapping_t *worker_envelope_mapping(const VMWorkerTaskEnvelope &envelope) {
-  auto *map = allocate_mapping(10);
+  auto *map = allocate_mapping(11);
   add_mapping_pair(map, "task_id", static_cast<long>(envelope.task_id));
   add_mapping_string(map, "task_type", envelope.task_type.c_str());
   add_mapping_string(map, "owner_key", envelope.owner_key.c_str());
@@ -322,6 +323,7 @@ mapping_t *worker_envelope_mapping(const VMWorkerTaskEnvelope &envelope) {
   add_mapping_pair(map, "deadline_at_ms", static_cast<long>(envelope.deadline_at_ms));
   add_mapping_pair(map, "completed_at_ms", static_cast<long>(envelope.completed_at_ms));
   add_mapping_pair(map, "expires_at_ms", static_cast<long>(envelope.expires_at_ms));
+  add_mapping_pair(map, "owner_future_id", static_cast<long>(envelope.owner_future_id));
   add_mapping_pair(map, "input_hash", static_cast<long>(envelope.input_hash));
   add_mapping_pair(map, "timeout_ms", envelope.timeout_ms);
   add_mapping_pair(map, "ttl_ms", envelope.ttl_ms);
@@ -481,10 +483,12 @@ mapping_t *worker_submit_response(const char *task_name, svalue_t *snapshot, map
     return worker_failure_response("unknown worker task");
   }
 
-  auto *response = allocate_mapping(6);
+  auto owner_future_id = vm_worker_owner_future_id(task_id);
+  auto *response = allocate_mapping(7);
   add_mapping_pair(response, "success", 1);
   add_mapping_string(response, "status", "submitted");
   add_mapping_pair(response, "task_id", static_cast<long>(task_id));
+  add_mapping_pair(response, "owner_future_id", static_cast<long>(owner_future_id));
   add_mapping_string(response, "task", task_name);
   add_mapping_pair(response, "timeout_ms", timeout_ms);
   add_mapping_pair(response, "ttl_ms", ttl_ms);
@@ -497,7 +501,7 @@ mapping_t *worker_poll_response(uint64_t task_id) {
   add_mapping_pair(response, "task_id", static_cast<long>(task_id));
   add_mapping_string(response, "status", worker_task_state_name(result.state));
   add_mapping_string(response, "task", result.type.c_str());
-  auto *envelope = allocate_mapping(10);
+  auto *envelope = allocate_mapping(11);
   add_task_envelope(envelope, result.envelope);
   add_mapping_mapping(response, "envelope", envelope);
   free_mapping(envelope);

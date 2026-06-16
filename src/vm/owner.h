@@ -53,6 +53,10 @@ mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *targ
                                     const char *payload_key);
 mapping_t *vm_owner_submit_object_message(const char *source_owner_id, const VMObjectHandle &target_handle,
                                           const char *message_type, const char *payload_key);
+uint64_t vm_owner_register_compute_future(const char *owner_id, uint64_t worker_task_id, const char *task_type,
+                                          const char *payload_key);
+uint64_t vm_owner_enqueue_compute_result(const char *owner_id, uint64_t worker_task_id, const char *task_type,
+                                         const char *state, const char *result_key, const char *error);
 mapping_t *vm_owner_message_trace(int limit);
 mapping_t *vm_owner_future_poll(uint64_t future_id);
 mapping_t *vm_owner_record_commit_boundary(const char *source_owner_id, const char *target_owner_id,

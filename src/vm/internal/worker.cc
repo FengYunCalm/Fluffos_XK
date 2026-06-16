@@ -702,6 +702,12 @@ class VMWorkerRuntime {
     return results;
   }
 
+  uint64_t owner_future_id(uint64_t task_id) const {
+    std::lock_guard<std::mutex> lock(results_mutex_);
+    auto it = async_results_.find(task_id);
+    return it == async_results_.end() ? 0 : it->second.envelope.owner_future_id;
+  }
+
  private:
   AsyncRecord make_async_record(uint64_t id, std::string type, std::string owner_key,
                                 uint64_t input_hash, int timeout_ms, int ttl_ms) {
@@ -714,6 +720,8 @@ class VMWorkerRuntime {
     record.envelope.timeout_ms = normalize_timeout_ms(timeout_ms);
     record.envelope.ttl_ms = normalize_ttl_ms(ttl_ms);
     record.envelope.input_hash = input_hash;
+    record.envelope.owner_future_id = vm_owner_register_compute_future(record.envelope.owner_key.c_str(), id,
+                                                                       record.type.c_str(), "worker_compute");
     if (record.envelope.timeout_ms > 0) {
       record.envelope.deadline_at_ms = record.envelope.submitted_at_ms + record.envelope.timeout_ms;
     }
@@ -725,7 +733,9 @@ class VMWorkerRuntime {
     if (record->envelope.ttl_ms > 0) {
       record->envelope.expires_at_ms = record->envelope.completed_at_ms + record->envelope.ttl_ms;
     }
-    vm_owner_enqueue_task(record->envelope.owner_key.c_str(), "compute_result", record->type.c_str());
+    auto state = record->state == VMWorkerTaskState::kFailed ? "failed" : "completed";
+    vm_owner_enqueue_compute_result(record->envelope.owner_key.c_str(), record->envelope.task_id,
+                                    record->type.c_str(), state, record->type.c_str(), record->error.c_str());
   }
 
   void apply_deadline_locked(AsyncRecord *record) {
@@ -985,4 +995,8 @@ VMWorkerTaskResult vm_worker_poll_task(uint64_t task_id) { return runtime().poll
 
 std::vector<VMWorkerTaskResult> vm_worker_poll_tasks(const std::vector<uint64_t> &task_ids) {
   return runtime().poll_many(task_ids);
+}
+
+uint64_t vm_worker_owner_future_id(uint64_t task_id) {
+  return runtime().owner_future_id(task_id);
 }

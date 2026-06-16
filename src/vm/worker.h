@@ -126,6 +126,7 @@ struct VMWorkerTaskEnvelope {
   uint64_t deadline_at_ms{0};
   uint64_t completed_at_ms{0};
   uint64_t expires_at_ms{0};
+  uint64_t owner_future_id{0};
   uint64_t input_hash{0};
   int timeout_ms{0};
   int ttl_ms{0};
@@ -177,5 +178,6 @@ uint64_t vm_worker_submit_combat_damage_v2(std::string owner_key,
                                            int ttl_ms);
 VMWorkerTaskResult vm_worker_poll_task(uint64_t task_id);
 std::vector<VMWorkerTaskResult> vm_worker_poll_tasks(const std::vector<uint64_t> &task_ids);
+uint64_t vm_worker_owner_future_id(uint64_t task_id);
 
 #endif /* SRC_VM_WORKER_H_ */

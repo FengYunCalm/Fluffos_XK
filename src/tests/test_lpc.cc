@@ -2727,6 +2727,78 @@ TEST_F(DriverTest, TestVmWorkerAsyncCombatDamagePollsResult) {
   ASSERT_NE(result.combat_damage.input_hash, 31337u);
 }
 
+TEST_F(DriverTest, TestVmWorkerComputeResultCompletesOwnerFutureThroughQueue) {
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  VMWorkerActorScoreInput input;
+  input.hp = 100;
+  input.max_hp = 100;
+  input.mp = 80;
+  input.max_mp = 100;
+  input.ep = 60;
+  input.max_ep = 100;
+
+  auto task_id = vm_worker_submit_actor_score_v2("actor/owner-future", input, 1000, 5000);
+  ASSERT_GT(task_id, 0u);
+  auto future_id = vm_worker_owner_future_id(task_id);
+  ASSERT_GT(future_id, 0u);
+
+  auto* pending = vm_owner_future_poll(future_id);
+  ASSERT_STREQ(mapping_string(pending, "state"), "pending");
+  ASSERT_EQ(mapping_number(pending, "target_task_id"), static_cast<long>(task_id));
+  ASSERT_STREQ(mapping_string(pending, "message_type"), "actor_score");
+  ASSERT_STREQ(mapping_string(pending, "payload_key"), "worker_compute");
+  free_mapping(pending);
+
+  VMWorkerTaskResult result;
+  for (int i = 0; i < 100; i++) {
+    result = vm_worker_poll_task(task_id);
+    ASSERT_NE(result.state, VMWorkerTaskState::kUnknown);
+    if (result.state == VMWorkerTaskState::kSucceeded) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  ASSERT_EQ(result.state, VMWorkerTaskState::kSucceeded);
+  ASSERT_EQ(result.envelope.owner_future_id, future_id);
+  auto* still_pending = vm_owner_future_poll(future_id);
+  ASSERT_STREQ(mapping_string(still_pending, "state"), "pending");
+  free_mapping(still_pending);
+
+  auto* scheduled = vm_owner_drain_mailbox("actor/owner-future", 1);
+  ASSERT_EQ(mapping_number(scheduled, "drained"), 1);
+  auto* tasks = find_string_in_mapping(scheduled, "tasks");
+  ASSERT_NE(tasks, nullptr);
+  ASSERT_EQ(tasks ? tasks->type : T_INVALID, T_ARRAY);
+  ASSERT_EQ(tasks->u.arr->size, 1);
+  auto* task_map = tasks->u.arr->item[0].u.map;
+  ASSERT_STREQ(mapping_string(task_map, "task_type"), "compute_result");
+  ASSERT_STREQ(mapping_string(task_map, "task_key"), "actor_score");
+  ASSERT_EQ(mapping_number(task_map, "future_target_task_id"), static_cast<long>(task_id));
+  ASSERT_STREQ(mapping_string(task_map, "future_state"), "completed");
+  free_mapping(scheduled);
+
+  auto* completed = vm_owner_future_poll(future_id);
+  ASSERT_STREQ(mapping_string(completed, "state"), "completed");
+  ASSERT_STREQ(mapping_string(completed, "result_key"), "actor_score");
+  ASSERT_EQ(mapping_number(completed, "payload_frozen"), 1);
+  ASSERT_EQ(mapping_number(completed, "frozen_result"), 1);
+  ASSERT_EQ(mapping_number(completed, "direct_cross_owner_write"), 0);
+  free_mapping(completed);
+}
+
 TEST_F(DriverTest, TestVmWorkerV2EnvelopeKeepsResultUntilTtl) {
   auto task_id = vm_worker_submit_snapshot_digest_v2("actor/envelope", "{\"hp\":100}", 8, 1000, 5000);
   ASSERT_GT(task_id, 0u);
