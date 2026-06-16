@@ -10,6 +10,7 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -92,6 +93,7 @@ struct OwnerMailboxTask {
   std::string target_object;
   object_t *target{nullptr};
   bool has_target_handle{false};
+  std::shared_ptr<struct OwnerFrozenValue> payload;
 };
 
 struct OwnerTaskTrace {
@@ -152,6 +154,16 @@ struct OwnerFutureRecord {
   std::string result_key;
   std::string error;
   bool has_target_handle{false};
+  std::shared_ptr<struct OwnerFrozenValue> result;
+};
+
+struct OwnerFrozenValue {
+  svalue_t value{const0u};
+
+  OwnerFrozenValue() = default;
+  OwnerFrozenValue(const OwnerFrozenValue &) = delete;
+  OwnerFrozenValue &operator=(const OwnerFrozenValue &) = delete;
+  ~OwnerFrozenValue() { free_svalue(&value, "owner frozen value"); }
 };
 
 struct OwnerMainTask {
@@ -201,6 +213,88 @@ const char *normalize_task_text(const char *text, const char *fallback) {
 
 const char *owner_object_name(object_t *object) {
   return object && object->obname ? object->obname : "";
+}
+
+bool copy_owner_frozen_svalue(svalue_t *dest, svalue_t *source);
+
+bool copy_owner_frozen_array(svalue_t *dest, array_t *source) {
+  auto *array = allocate_array(source ? source->size : 0);
+  for (int i = 0; source && i < source->size; i++) {
+    if (!copy_owner_frozen_svalue(&array->item[i], &source->item[i])) {
+      free_array(array);
+      return false;
+    }
+  }
+  dest->type = T_ARRAY;
+  dest->subtype = 0;
+  dest->u.arr = array;
+  return true;
+}
+
+bool copy_owner_frozen_mapping(svalue_t *dest, mapping_t *source) {
+  auto *map = allocate_mapping(source ? MAP_COUNT(source) : 0);
+  if (source) {
+    for (unsigned int i = 0; i <= source->table_size; i++) {
+      for (auto *node = source->table[i]; node; node = node->next) {
+        if (node->values[0].type != T_STRING) {
+          free_mapping(map);
+          return false;
+        }
+        svalue_t key{T_STRING, STRING_SHARED, {0}};
+        key.u.string = make_shared_string(node->values[0].u.string ? node->values[0].u.string : "");
+        auto *slot = find_for_insert(map, &key, 1);
+        free_svalue(&key, "owner frozen mapping key");
+        if (!copy_owner_frozen_svalue(slot, &node->values[1])) {
+          free_mapping(map);
+          return false;
+        }
+      }
+    }
+  }
+  dest->type = T_MAPPING;
+  dest->subtype = 0;
+  dest->u.map = map;
+  return true;
+}
+
+bool copy_owner_frozen_svalue(svalue_t *dest, svalue_t *source) {
+  if (!source) {
+    *dest = const0u;
+    return true;
+  }
+  switch (source->type) {
+    case T_NUMBER:
+    case T_REAL:
+      *dest = *source;
+      return true;
+    case T_STRING:
+      dest->type = T_STRING;
+      dest->subtype = STRING_SHARED;
+      dest->u.string = make_shared_string(source->u.string ? source->u.string : "");
+      return true;
+    case T_ARRAY:
+      return copy_owner_frozen_array(dest, source->u.arr);
+    case T_MAPPING:
+      return copy_owner_frozen_mapping(dest, source->u.map);
+    default:
+      return false;
+  }
+}
+
+std::shared_ptr<OwnerFrozenValue> clone_owner_frozen_value(svalue_t *source) {
+  auto value = std::make_shared<OwnerFrozenValue>();
+  if (!copy_owner_frozen_svalue(&value->value, source)) {
+    return nullptr;
+  }
+  return value;
+}
+
+void add_mapping_svalue(mapping_t *map, const char *key, svalue_t *value) {
+  svalue_t key_sv{T_STRING, STRING_SHARED, {0}};
+  key_sv.u.string = make_shared_string(key ? key : "");
+  auto *slot = find_for_insert(map, &key_sv, 1);
+  free_svalue(&key_sv, "owner future result key");
+  assign_svalue_no_free(slot, value);
 }
 
 const char *effective_source_owner_id(object_t *source) {
@@ -452,7 +546,7 @@ uint64_t append_owner_task_trace_threadsafe(const OwnerMailboxTask &task, const 
 }
 
 mapping_t *owner_future_mapping(const OwnerFutureRecord &record) {
-  auto *map = allocate_mapping(19);
+  auto *map = allocate_mapping(20);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "future_id", static_cast<long>(record.future_id));
   add_mapping_pair(map, "target_task_id", static_cast<long>(record.target_task_id));
@@ -473,6 +567,9 @@ mapping_t *owner_future_mapping(const OwnerFutureRecord &record) {
   add_mapping_pair(map, "target_object_id", static_cast<long>(record.target_handle.object_id));
   add_mapping_string(map, "target_object_path", record.target_handle.object_path.c_str());
   add_mapping_pair(map, "target_owner_epoch", static_cast<long>(record.target_handle.owner_epoch));
+  if (record.result) {
+    add_mapping_svalue(map, "result", &record.result->value);
+  }
   return map;
 }
 
@@ -480,7 +577,8 @@ bool owner_message_target_current(const OwnerMailboxTask &task) {
   return !task.has_target_handle || vm_object_handle_is_current(task.target_handle);
 }
 
-void complete_owner_future_locked(uint64_t future_id, const char *state, const char *result_key, const char *error) {
+void complete_owner_future_locked(uint64_t future_id, const char *state, const char *result_key, const char *error,
+                                  std::shared_ptr<OwnerFrozenValue> result = nullptr) {
   auto it = owner_futures.find(future_id);
   if (it == owner_futures.end()) {
     return;
@@ -491,6 +589,7 @@ void complete_owner_future_locked(uint64_t future_id, const char *state, const c
   it->second.state = normalize_task_text(state, "completed");
   it->second.result_key = normalize_task_text(result_key, "");
   it->second.error = normalize_task_text(error, "");
+  it->second.result = std::move(result);
   if (it->second.state == "failed") {
     total_futures_failed.fetch_add(1, std::memory_order_relaxed);
   } else {
@@ -508,12 +607,14 @@ void update_owner_message_trace_state_for_task_locked(uint64_t target_task_id, c
 }
 
 void complete_owner_future_for_task_locked(uint64_t target_task_id, const char *state, const char *result_key,
-                                            const char *error) {
+                                            const char *error,
+                                            std::shared_ptr<OwnerFrozenValue> result = nullptr) {
   for (auto &entry : owner_futures) {
     if (entry.second.target_task_id == target_task_id && entry.second.state == "pending") {
       entry.second.state = normalize_task_text(state, "completed");
       entry.second.result_key = normalize_task_text(result_key, "");
       entry.second.error = normalize_task_text(error, "");
+      entry.second.result = std::move(result);
       update_owner_message_trace_state_for_task_locked(target_task_id, entry.second.state.c_str());
       if (entry.second.state == "failed") {
         total_futures_failed.fetch_add(1, std::memory_order_relaxed);
@@ -534,9 +635,10 @@ void complete_owner_message_task_locked(const OwnerMailboxTask &task) {
 }
 
 void complete_owner_message_task_threadsafe(const OwnerMailboxTask &task, const char *state,
-                                            const char *result_key, const char *error) {
+                                            const char *result_key, const char *error,
+                                            std::shared_ptr<OwnerFrozenValue> result = nullptr) {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  complete_owner_future_for_task_locked(task.task_id, state, result_key, error);
+  complete_owner_future_for_task_locked(task.task_id, state, result_key, error, std::move(result));
 }
 
 void dispatch_owner_message_on_main(const OwnerMailboxTask &task) {
@@ -559,12 +661,22 @@ void dispatch_owner_message_on_main(const OwnerMailboxTask &task) {
 
   VMOwnerScope owner_scope(vm_context(), task.owner_id.c_str(), task.owner_epoch);
   set_eval(max_eval_cost);
-  auto *result = safe_apply(task.task_key.c_str(), target, 0, ORIGIN_DRIVER);
+  int num_args = 0;
+  if (task.payload) {
+    push_svalue(&task.payload->value);
+    num_args = 1;
+  }
+  auto *result = safe_apply(task.task_key.c_str(), target, num_args, ORIGIN_DRIVER);
   if (!result) {
     complete_owner_message_task_threadsafe(task, "failed", "", "lpc call failed");
     return;
   }
-  complete_owner_message_task_threadsafe(task, "completed", task.task_key.c_str(), "");
+  auto frozen_result = clone_owner_frozen_value(result);
+  if (!frozen_result) {
+    complete_owner_message_task_threadsafe(task, "failed", "", "owner async result must be frozen data");
+    return;
+  }
+  complete_owner_message_task_threadsafe(task, "completed", task.task_key.c_str(), "", std::move(frozen_result));
 }
 
 void complete_owner_compute_result_task_locked(const OwnerMailboxTask &task) {
@@ -577,12 +689,26 @@ void complete_owner_compute_result_task_locked(const OwnerMailboxTask &task) {
 void mark_owner_schedulable(const std::string &owner_id);
 void mark_main_owner_schedulable(const std::string &owner_id);
 
+bool owner_task_requires_main_drain(const OwnerMailboxTask &task) {
+  return task.task_type == "owner_message" && task.has_target_handle;
+}
+
+bool owner_queue_has_thread_task(const std::deque<OwnerMailboxTask> &queue) {
+  for (const auto &task : queue) {
+    if (!owner_task_requires_main_drain(task)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void enqueue_owner_task_locked(OwnerMailboxTask task, const std::string &owner_id, bool *notify_owner_thread) {
   append_owner_task_trace(task, "queued");
   auto &queue = owner_mailboxes[owner_id];
-  auto was_empty = queue.empty();
+  auto had_thread_task = owner_queue_has_thread_task(queue);
+  auto task_requires_main = owner_task_requires_main_drain(task);
   queue.push_back(std::move(task));
-  if (was_empty && active_owner_set.count(owner_id) == 0) {
+  if (!task_requires_main && !had_thread_task && active_owner_set.count(owner_id) == 0) {
     mark_owner_schedulable(owner_id);
     *notify_owner_thread = true;
   }
@@ -619,7 +745,7 @@ void finish_active_owner_task(const std::string &owner_id) {
       owner_executor_owner_releases.fetch_add(1, std::memory_order_relaxed);
     }
     auto it = owner_mailboxes.find(owner_id);
-    if (it != owner_mailboxes.end() && !it->second.empty()) {
+    if (it != owner_mailboxes.end() && owner_queue_has_thread_task(it->second)) {
       mark_owner_schedulable(owner_id);
       notify_owner_thread = true;
     }
@@ -646,11 +772,19 @@ bool pop_next_schedulable_task(OwnerMailboxTask *out, bool claim_owner) {
       continue;
     }
 
-    *out = it->second.front();
-    it->second.pop_front();
+    auto task_it = it->second.begin();
+    while (task_it != it->second.end() && owner_task_requires_main_drain(*task_it)) {
+      ++task_it;
+    }
+    if (task_it == it->second.end()) {
+      continue;
+    }
+
+    *out = *task_it;
+    it->second.erase(task_it);
     if (it->second.empty()) {
       owner_mailboxes.erase(it);
-    } else if (!claim_owner) {
+    } else if (!claim_owner && owner_queue_has_thread_task(it->second)) {
       mark_owner_schedulable(owner_id);
     }
     if (claim_owner) {
@@ -1628,12 +1762,21 @@ mapping_t *vm_owner_access_trace(int limit) {
 }
 
 mapping_t *submit_owner_message(const char *source_owner_id, const char *target_owner_id, const char *message_type,
-                                const char *payload_key, const VMObjectHandle *target_handle) {
+                                const char *payload_key, const VMObjectHandle *target_handle, svalue_t *payload) {
   std::string source_owner = normalize_owner_id(source_owner_id);
   std::string target_owner = target_handle && !target_handle->owner_id.empty() ? target_handle->owner_id
                                                                               : normalize_owner_id(target_owner_id);
   std::string normalized_type = normalize_task_text(message_type, "message");
   std::string normalized_payload = normalize_task_text(payload_key, "");
+  auto frozen_payload = payload ? clone_owner_frozen_value(payload) : nullptr;
+  if (payload && !frozen_payload) {
+    auto *map = allocate_mapping(4);
+    add_mapping_pair(map, "success", 0);
+    add_mapping_pair(map, "frozen_payload", 0);
+    add_mapping_string(map, "state", "rejected");
+    add_mapping_string(map, "error", "owner payload must be frozen data");
+    return map;
+  }
   auto message_id = next_message_trace_id.fetch_add(1, std::memory_order_relaxed);
 
   OwnerMailboxTask task;
@@ -1644,6 +1787,7 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
   task.task_type = "owner_message";
   task.task_key = normalized_type;
   task.has_target_handle = target_handle != nullptr;
+  task.payload = std::move(frozen_payload);
   if (target_handle) {
     task.target_handle = *target_handle;
     task.target_object = target_handle->object_path;
@@ -1711,13 +1855,14 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
 }
 
 mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *target_owner_id, const char *message_type,
-                                   const char *payload_key) {
-  return submit_owner_message(source_owner_id, target_owner_id, message_type, payload_key, nullptr);
+                                    const char *payload_key) {
+  return submit_owner_message(source_owner_id, target_owner_id, message_type, payload_key, nullptr, nullptr);
 }
 
 mapping_t *vm_owner_submit_object_message(const char *source_owner_id, const VMObjectHandle &target_handle,
-                                          const char *message_type, const char *payload_key) {
-  return submit_owner_message(source_owner_id, target_handle.owner_id.c_str(), message_type, payload_key, &target_handle);
+                                          const char *message_type, const char *payload_key, svalue_t *payload) {
+  return submit_owner_message(source_owner_id, target_handle.owner_id.c_str(), message_type, payload_key, &target_handle,
+                              payload);
 }
 
 uint64_t vm_owner_register_compute_future(const char *owner_id, uint64_t worker_task_id, const char *task_type,

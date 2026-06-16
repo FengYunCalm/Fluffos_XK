@@ -415,7 +415,7 @@ void f_owner_call_async() {
   auto payload_key = owner_mapping_string(payload->u.map, "payload_key", method->u.string);
   auto handle = vm_object_handle(target->u.ob);
   auto *result = vm_owner_submit_object_message(current_owner_id_for_message(), handle, method->u.string,
-                                                payload_key.c_str());
+                                                payload_key.c_str(), payload);
   add_mapping_pair(result, "frozen_payload", 1);
   add_mapping_pair(result, "async_only", 1);
   add_mapping_pair(result, "target_object_id", static_cast<long>(handle.object_id));

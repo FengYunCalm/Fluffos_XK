@@ -7,6 +7,7 @@
 struct mapping_t;
 struct VMObjectHandle;
 struct object_t;
+struct svalue_t;
 
 constexpr int VM_MULTICORE_MODE_OFF = 0;
 constexpr int VM_MULTICORE_MODE_AUDIT = 1;
@@ -52,7 +53,8 @@ mapping_t *vm_owner_access_trace(int limit);
 mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *target_owner_id, const char *message_type,
                                     const char *payload_key);
 mapping_t *vm_owner_submit_object_message(const char *source_owner_id, const VMObjectHandle &target_handle,
-                                          const char *message_type, const char *payload_key);
+                                          const char *message_type, const char *payload_key,
+                                          svalue_t *payload = nullptr);
 uint64_t vm_owner_register_compute_future(const char *owner_id, uint64_t worker_task_id, const char *task_type,
                                           const char *payload_key);
 uint64_t vm_owner_enqueue_compute_result(const char *owner_id, uint64_t worker_task_id, const char *task_type,
