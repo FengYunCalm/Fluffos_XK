@@ -2266,24 +2266,15 @@ svalue_t *vm_owner_safe_query(object_t *target, const char *method, const char *
     return nullptr;
   }
 
-  // Cross-owner query - use catch to suppress errors
+  // Cross-owner query - check if method exists
   if (!function_exists(method, target, 0)) {
     return &const0u;
   }
 
-  // Temporarily allow cross-owner access for read-only queries
-  // by catching and suppressing any errors
-  error_context_t econ;
-  save_context(&econ);
+  // For cross-owner read-only queries, use safe_apply which handles errors
+  // safe_apply returns nullptr if an error occurs
+  svalue_t *result = safe_apply(method, target, 0, ORIGIN_EFUN);
 
-  svalue_t *result = nullptr;
-  try {
-    result = safe_apply(method, target, 0, ORIGIN_EFUN);
-  } catch (...) {
-    // Suppress error - return const0
-    result = &const0u;
-  }
-
-  restore_context(&econ);
+  // Return the result or const0 if error occurred
   return result ? result : &const0u;
 }
