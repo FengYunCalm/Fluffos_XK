@@ -91,7 +91,8 @@ void sync_record_activity_locked(const ObjectRecord &record) {
 }
 
 mapping_t *shard_mapping(const ObjectShardRecord &shard) {
-  auto *map = allocate_mapping(10);
+  auto runnable_tasks = shard.active_heartbeats.size() + shard.pending_callouts.size() + shard.pending_messages.size();
+  auto *map = allocate_mapping(12);
   add_mapping_string(map, "owner_id", shard.owner_id.c_str());
   add_mapping_pair(map, "objects", static_cast<long>(shard.objects.size()));
   add_mapping_pair(map, "registered", static_cast<long>(shard.registered));
@@ -102,6 +103,8 @@ mapping_t *shard_mapping(const ObjectShardRecord &shard) {
   add_mapping_pair(map, "pending_callouts", static_cast<long>(shard.pending_callouts.size()));
   add_mapping_pair(map, "messages", static_cast<long>(shard.messages));
   add_mapping_pair(map, "pending_messages", static_cast<long>(shard.pending_messages.size()));
+  add_mapping_pair(map, "runnable_tasks", static_cast<long>(runnable_tasks));
+  add_mapping_pair(map, "executor_ready", runnable_tasks > 0 ? 1 : 0);
   return map;
 }
 }  // namespace

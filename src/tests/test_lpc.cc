@@ -730,11 +730,15 @@ TEST_F(DriverTest, TestVmOwnerHeartbeatTraceRecordsScheduledEvent) {
 
   auto* owner_status = vm_object_store_owner_status("owner/test/heartbeat");
   ASSERT_EQ(mapping_number(owner_status, "active_heartbeats"), 1);
+  ASSERT_EQ(mapping_number(owner_status, "runnable_tasks"), 1);
+  ASSERT_EQ(mapping_number(owner_status, "executor_ready"), 1);
   free_mapping(owner_status);
 
   set_heart_beat(obj, 0);
   owner_status = vm_object_store_owner_status("owner/test/heartbeat");
   ASSERT_EQ(mapping_number(owner_status, "active_heartbeats"), 0);
+  ASSERT_EQ(mapping_number(owner_status, "runnable_tasks"), 0);
+  ASSERT_EQ(mapping_number(owner_status, "executor_ready"), 0);
   free_mapping(owner_status);
   vm_owner_clear_id(obj);
 }
@@ -754,11 +758,15 @@ TEST_F(DriverTest, TestVmObjectStoreTracksPendingCallouts) {
 
   auto* owner_status = vm_object_store_owner_status("owner/test/callout-store");
   ASSERT_EQ(mapping_number(owner_status, "pending_callouts"), 1);
+  ASSERT_EQ(mapping_number(owner_status, "runnable_tasks"), 1);
+  ASSERT_EQ(mapping_number(owner_status, "executor_ready"), 1);
   free_mapping(owner_status);
 
   vm_object_store_remove_callout("owner/test/callout-store", 12345);
   owner_status = vm_object_store_owner_status("owner/test/callout-store");
   ASSERT_EQ(mapping_number(owner_status, "pending_callouts"), 0);
+  ASSERT_EQ(mapping_number(owner_status, "runnable_tasks"), 0);
+  ASSERT_EQ(mapping_number(owner_status, "executor_ready"), 0);
   free_mapping(owner_status);
   vm_owner_clear_id(obj);
 }
@@ -774,6 +782,8 @@ TEST_F(DriverTest, TestVmObjectStoreTracksPendingOwnerMessages) {
   auto assert_pending_messages = [&](const char* owner_id, long expected) {
     auto* owner_status = vm_object_store_owner_status(owner_id);
     ASSERT_EQ(mapping_number(owner_status, "pending_messages"), expected);
+    ASSERT_EQ(mapping_number(owner_status, "runnable_tasks"), expected);
+    ASSERT_EQ(mapping_number(owner_status, "executor_ready"), expected > 0 ? 1 : 0);
     free_mapping(owner_status);
   };
 
