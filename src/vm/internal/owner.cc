@@ -1275,7 +1275,7 @@ uint64_t vm_owner_record_access(object_t *source, object_t *target, const char *
   OwnerAccessTrace trace;
   uint64_t access_id;
   trace.access_id = next_access_trace_id.fetch_add(1, std::memory_order_relaxed);
-  trace.sequence = total_access_traced.load(std::memory_order_relaxed) + 1;
+  trace.sequence = total_access_traced.fetch_add(1, std::memory_order_relaxed) + 1;
   trace.source_owner_epoch = vm_owner_epoch(source);
   trace.target_owner_epoch = vm_owner_epoch(target);
   trace.source_owner_id = vm_owner_id(source);
@@ -1296,7 +1296,6 @@ uint64_t vm_owner_record_access(object_t *source, object_t *target, const char *
       owner_access_traces.pop_front();
     }
   }
-  total_access_traced.fetch_add(1, std::memory_order_relaxed);
   return access_id;
 }
 
@@ -1520,7 +1519,7 @@ mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *targ
 
   OwnerMessageTrace trace;
   trace.message_id = message_id;
-  trace.sequence = total_message_traced.load(std::memory_order_relaxed) + 1;
+  trace.sequence = total_message_traced.fetch_add(1, std::memory_order_relaxed) + 1;
   trace.target_task_id = target_task_id;
   trace.source_owner_id = source_owner;
   trace.target_owner_id = target_owner;
@@ -1548,7 +1547,6 @@ mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *targ
     }
     enqueue_owner_task_locked(std::move(task), target_owner, &notify_owner_thread);
   }
-  total_message_traced.fetch_add(1, std::memory_order_relaxed);
   if (notify_owner_thread) {
     owner_runtime_cv.notify_one();
   }
@@ -1611,7 +1609,7 @@ mapping_t *vm_owner_record_commit_boundary(const char *source_owner_id, const ch
                                            const char *operation, uint64_t message_id, const char *state) {
   OwnerCommitTrace trace;
   trace.commit_id = next_commit_trace_id.fetch_add(1, std::memory_order_relaxed);
-  trace.sequence = total_commit_traced.load(std::memory_order_relaxed) + 1;
+  trace.sequence = total_commit_traced.fetch_add(1, std::memory_order_relaxed) + 1;
   trace.message_id = message_id;
   trace.direct_write = false;
   trace.source_owner_id = normalize_owner_id(source_owner_id);
@@ -1626,8 +1624,6 @@ mapping_t *vm_owner_record_commit_boundary(const char *source_owner_id, const ch
       owner_commit_traces.pop_front();
     }
   }
-  total_commit_traced.fetch_add(1, std::memory_order_relaxed);
-
   auto *map = allocate_mapping(9);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "commit_id", static_cast<long>(result.commit_id));
