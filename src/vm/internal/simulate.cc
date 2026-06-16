@@ -766,6 +766,9 @@ object_t *object_present(svalue_t *v, object_t *ob) {
     }
     return nullptr;
   }
+  if (vm_owner_cross_owner_access_blocked(current_object, ob, "present")) {
+    error("present(): cross-owner id() search requires owner message/future in enforced multicore mode.\n");
+  }
   ret_ob = object_present2(v->u.string, ob->contains);
   if (ret_ob) {
     return ret_ob;
@@ -774,6 +777,9 @@ object_t *object_present(svalue_t *v, object_t *ob) {
     return nullptr;
   }
   if (ob->super) {
+    if (vm_owner_cross_owner_access_blocked(current_object, ob->super, "present")) {
+      error("present(): cross-owner id() search requires owner message/future in enforced multicore mode.\n");
+    }
     push_svalue(v);
     ret = apply(APPLY_ID, ob->super, 1, ORIGIN_DRIVER);
     if (ob->super->flags & O_DESTRUCTED) {
@@ -817,6 +823,9 @@ static object_t *object_present2(const char *str, object_t *ob) {
   }
 
   for (; ob; ob = ob->next_inv) {
+    if (vm_owner_cross_owner_access_blocked(current_object, ob, "present")) {
+      continue;
+    }
     char *str_to_push = new_string(namelen, "object_present2");
     memcpy(str_to_push, name, namelen);
     str_to_push[namelen] = 0;

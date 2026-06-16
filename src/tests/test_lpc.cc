@@ -1202,13 +1202,14 @@ TEST_F(DriverTest, TestVmOwnerCrossOwnerAccessTraceClassifiesPolicyModes) {
   vm_owner_set_id(target, "owner/test/access-policy/target");
   ASSERT_GT(vm_owner_record_access(source, target, "environment"), 0u);
   ASSERT_GT(vm_owner_record_access(source, target, "call_other"), 0u);
+  ASSERT_GT(vm_owner_record_access(source, target, "present"), 0u);
   ASSERT_GT(vm_owner_record_access(source, target, "unknown_access"), 0u);
 
-  auto* trace = vm_owner_access_trace(3);
+  auto* trace = vm_owner_access_trace(4);
   auto* events = find_string_in_mapping(trace, "events");
   ASSERT_NE(events, nullptr);
   ASSERT_EQ(events->type, T_ARRAY);
-  ASSERT_EQ(events->u.arr->size, 3);
+  ASSERT_EQ(events->u.arr->size, 4);
 
   auto* snapshot_event = events->u.arr->item[0].u.map;
   ASSERT_STREQ(mapping_string(snapshot_event, "operation"), "environment");
@@ -1222,7 +1223,13 @@ TEST_F(DriverTest, TestVmOwnerCrossOwnerAccessTraceClassifiesPolicyModes) {
   ASSERT_EQ(mapping_number(message_event, "message_only_cross_owner"), 1);
   ASSERT_EQ(mapping_number(message_event, "direct_cross_owner_write"), 0);
 
-  auto* rejected_event = events->u.arr->item[2].u.map;
+  auto* present_event = events->u.arr->item[2].u.map;
+  ASSERT_STREQ(mapping_string(present_event, "operation"), "present");
+  ASSERT_STREQ(mapping_string(present_event, "access_mode"), "message");
+  ASSERT_EQ(mapping_number(present_event, "message_only_cross_owner"), 1);
+  ASSERT_EQ(mapping_number(present_event, "direct_cross_owner_write"), 0);
+
+  auto* rejected_event = events->u.arr->item[3].u.map;
   ASSERT_STREQ(mapping_string(rejected_event, "operation"), "unknown_access");
   ASSERT_STREQ(mapping_string(rejected_event, "access_mode"), "reject");
   ASSERT_EQ(mapping_number(rejected_event, "rejected_by_default"), 1);
@@ -1258,6 +1265,8 @@ TEST_F(DriverTest, TestVmMulticoreModeControlsCrossOwnerBlocking) {
   ASSERT_TRUE(vm_multicore_enforced());
   ASSERT_FALSE(vm_owner_cross_owner_access_blocked(source, target, "environment"));
   ASSERT_TRUE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+  ASSERT_TRUE(vm_owner_cross_owner_access_blocked(source, target, "present"));
+  ASSERT_TRUE(vm_owner_cross_owner_access_blocked(source, target, "parser"));
   ASSERT_TRUE(vm_owner_cross_owner_access_blocked(source, target, "unknown_access"));
 
   CONFIG_INT(__RC_MULTICORE_MODE__) = 999;
@@ -1460,6 +1469,71 @@ TEST_F(DriverTest, TestPresentRecordsCrossOwnerAccessTrace) {
 
   vm_owner_clear_id(source);
   vm_owner_clear_id(target);
+}
+
+TEST_F(DriverTest, TestPresentEnforcedModeBlocksCrossOwnerIdSearch) {
+  object_t* source = find_object("single/master.c");
+  object_t* target = find_object("single/simul_efun.c");
+  ASSERT_NE(source, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  current_object = source;
+  vm_owner_set_id(source, "owner/test/present/enforced/source");
+  vm_owner_set_id(target, "owner/test/present/enforced/target");
+
+  auto saved_mode = CONFIG_INT(__RC_MULTICORE_MODE__);
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_ENFORCED;
+
+  svalue_t needle;
+  needle.type = T_STRING;
+  needle.subtype = STRING_CONSTANT;
+  needle.u.string = "anything";
+
+  bool blocked = false;
+  error_context_t econ{};
+  save_context(&econ);
+  try {
+    (void)object_present(&needle, target);
+    pop_context(&econ);
+  } catch (...) {
+    restore_context(&econ);
+    blocked = true;
+  }
+
+  CONFIG_INT(__RC_MULTICORE_MODE__) = saved_mode;
+  ASSERT_TRUE(blocked);
+
+  vm_owner_clear_id(source);
+  vm_owner_clear_id(target);
+}
+
+TEST_F(DriverTest, TestParserEnforcedModeBlocksCrossOwnerInterrogateApply) {
+  object_t* parser = load_object_for_test("single/tests/efuns/parser_owner_probe");
+  object_t* item = clone_object("single/tests/efuns/parser_owner_probe", 0);
+  ASSERT_NE(parser, nullptr);
+  ASSERT_NE(item, nullptr);
+
+  current_object = parser;
+  vm_owner_set_id(parser, "owner/test/parser/enforced/source");
+  vm_owner_set_id(item, "owner/test/parser/enforced/target");
+  auto saved_mode = CONFIG_INT(__RC_MULTICORE_MODE__);
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_ENFORCED;
+
+  auto* targets = allocate_array(1);
+  targets->item[0].type = T_OBJECT;
+  targets->item[0].u.ob = item;
+  add_ref(item, "parser owner probe target");
+  push_refed_array(targets);
+
+  auto* ret = safe_apply("parse_targets", parser, 1, ORIGIN_DRIVER);
+  ASSERT_NE(ret, nullptr);
+  ASSERT_EQ(ret->type, T_NUMBER);
+  ASSERT_EQ(ret->u.number, 0);
+
+  CONFIG_INT(__RC_MULTICORE_MODE__) = saved_mode;
+  vm_owner_clear_id(parser);
+  vm_owner_clear_id(item);
+  destruct_object(item);
 }
 
 TEST_F(DriverTest, TestMoveObjectRecordsCrossOwnerAccessTrace) {
@@ -2137,7 +2211,7 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsRestrictedLpcCanaryOffMainDeferredReleas
   destruct_object(probe);
 }
 
-TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredLpcTaskWithMultipleWorkers) {
+TEST_F(DriverTest, TestVmOwnerThreadRejectsRegisteredLpcTaskWithMultipleWorkers) {
   const char* owner = "owner/test/thread/lpc-task";
   const char* other_owner = "owner/test/thread/lpc-task-other";
   ASSERT_TRUE(vm_context_is_main_thread());
@@ -2175,7 +2249,7 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredLpcTaskWithMultipleWorkers) {
   auto task_id = mapping_number(submitted, "task_id");
   ASSERT_EQ(mapping_number(submitted, "success"), 1);
   ASSERT_EQ(mapping_number(submitted, "requires_owner_thread"), 1);
-  ASSERT_EQ(mapping_number(submitted, "registered_task"), 1);
+  ASSERT_EQ(mapping_number(submitted, "registered_task"), 0);
   ASSERT_EQ(mapping_number(submitted, "ordinary_lpc_default_closed"), 1);
   ASSERT_EQ(mapping_number(submitted, "direct_cross_owner_write"), 0);
   ASSERT_EQ(mapping_number(submitted, "owner_epoch"), static_cast<long>(owner_epoch));
@@ -2204,10 +2278,10 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredLpcTaskWithMultipleWorkers) {
   ASSERT_EQ(mapping_number(running, "enabled"), 1);
   ASSERT_EQ(mapping_number(running, "thread_count"), 2);
   ASSERT_GE(mapping_number(running, "max_owner_threads"), 2);
-  ASSERT_GE(mapping_number(running, "thread_lpc_task_executed"), before_executed + 1);
-  ASSERT_GE(mapping_number(running, "thread_lpc_task_succeeded"), before_succeeded + 1);
+  ASSERT_EQ(mapping_number(running, "thread_lpc_task_executed"), before_executed);
+  ASSERT_EQ(mapping_number(running, "thread_lpc_task_succeeded"), before_succeeded);
   ASSERT_EQ(mapping_number(running, "thread_lpc_task_failed"), before_failed);
-  ASSERT_EQ(mapping_number(running, "thread_lpc_task_rejected"), before_rejected);
+  ASSERT_GE(mapping_number(running, "thread_lpc_task_rejected"), before_rejected + 1);
   ASSERT_EQ(mapping_number(running, "thread_context_leak_detected"), before_context_leaks);
   ASSERT_EQ(mapping_number(running, "active_owners"), 0);
   ASSERT_GE(mapping_number(running, "executor_owner_claims"), before_claims + 2);
@@ -2220,15 +2294,15 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredLpcTaskWithMultipleWorkers) {
   auto* events = find_string_in_mapping(trace, "events");
   ASSERT_NE(events, nullptr);
   ASSERT_EQ(events->type, T_ARRAY);
-  int lpc_task_succeeded = 0;
+  int lpc_task_rejected = 0;
   for (int i = 0; i < events->u.arr->size; i++) {
     auto* event = events->u.arr->item[i].u.map;
     if (mapping_number(event, "task_id") == task_id &&
-        std::string(mapping_string(event, "state")) == "thread_lpc_task_succeeded") {
-      lpc_task_succeeded = 1;
+        std::string(mapping_string(event, "state")) == "thread_lpc_task_rejected") {
+      lpc_task_rejected = 1;
     }
   }
-  ASSERT_EQ(lpc_task_succeeded, 1);
+  ASSERT_EQ(lpc_task_rejected, 1);
   free_mapping(trace);
 
   vm_owner_thread_stop();
@@ -2281,7 +2355,7 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsUnregisteredLpcTask) {
   destruct_object(probe);
 }
 
-TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredDomainLpcTasks) {
+TEST_F(DriverTest, TestVmOwnerThreadRejectsRegisteredDomainLpcTasks) {
   const char* owner = "owner/test/thread/lpc-domain-task";
   const char* methods[] = {"owner_task_readonly", "owner_task_player",      "owner_task_room",
                            "owner_task_session",  "owner_task_item",        "owner_task_economy",
@@ -2315,17 +2389,17 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredDomainLpcTasks) {
   for (const auto* method : methods) {
     auto* submitted = vm_owner_lpc_task(probe, owner, method);
     ASSERT_EQ(mapping_number(submitted, "success"), 1);
-    ASSERT_EQ(mapping_number(submitted, "registered_task"), 1) << method;
+    ASSERT_EQ(mapping_number(submitted, "registered_task"), 0) << method;
     free_mapping(submitted);
   }
 
   vm_owner_thread_start(4);
   for (int i = 0; i < 200; i++) {
     auto* status = vm_owner_thread_status();
-    auto succeeded = mapping_number(status, "thread_lpc_task_succeeded");
+    auto rejected = mapping_number(status, "thread_lpc_task_rejected");
     auto active = mapping_number(status, "active_owners");
     free_mapping(status);
-    if (succeeded >= before_succeeded + method_count && active == 0) {
+    if (rejected >= before_rejected + method_count && active == 0) {
       break;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -2334,9 +2408,9 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredDomainLpcTasks) {
   auto* running = vm_owner_thread_status();
   ASSERT_EQ(mapping_number(running, "enabled"), 1);
   ASSERT_EQ(mapping_number(running, "thread_count"), 4);
-  ASSERT_GE(mapping_number(running, "thread_lpc_task_succeeded"), before_succeeded + method_count);
+  ASSERT_EQ(mapping_number(running, "thread_lpc_task_succeeded"), before_succeeded);
   ASSERT_EQ(mapping_number(running, "thread_lpc_task_failed"), before_failed);
-  ASSERT_EQ(mapping_number(running, "thread_lpc_task_rejected"), before_rejected);
+  ASSERT_GE(mapping_number(running, "thread_lpc_task_rejected"), before_rejected + method_count);
   ASSERT_EQ(mapping_number(running, "active_owners"), 0);
   ASSERT_EQ(mapping_number(running, "executor_owner_claims"), before_claims + 1);
   ASSERT_EQ(mapping_number(running, "executor_owner_releases"), before_releases + 1);

@@ -40,14 +40,14 @@ FluffOS_XK 关注引擎基础能力，不承载具体玩法规则。
 
 ## 多核化运行时状态
 
-当前多核化工作已经落地为受控运行时基础设施，而不是不受限制的后台 LPC 执行。driver 现在具备线程本地 VMContext、owner-aware worker runtime、owner mailbox、owner task trace，以及受保护的 owner LPC canary/task 路径。
+当前多核化工作已经落地为受控运行时基础设施，而不是不受限制的后台 LPC 执行。driver 现在具备线程本地 VMContext、owner-aware worker runtime、owner mailbox、owner task trace，以及受保护的 owner LPC probe/canary 路径。
 
 目前的实际效果：
 
 - 快照摘要、角色评分、战斗伤害计算等 CPU 型任务可以通过 VM worker 执行。
 - worker 队列按 owner key 约束，同一 owner 内保持串行，不同 owner 之间可以并行推进。
 - owner id、epoch、mailbox trace、access trace、message/commit trace 为下游迁移到 actor-style 服务边界提供观测和迁移路径。
-- 普通 LPC 执行仍默认禁止 off-main，只有通过显式 owner 合同和注册白名单的路径才会进入受控执行。
+- 普通和注册 LPC task 仍默认禁止 off-main；只有受控 probe/canary 这类验证路径可以进入后台执行。
 
 当前状态、改造效果、边界和下游迁移建议见 `docs/multicore-runtime.md`。
 

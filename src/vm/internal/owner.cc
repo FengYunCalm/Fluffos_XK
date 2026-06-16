@@ -334,12 +334,11 @@ const char *owner_access_policy_mode(const char *operation, bool cross_owner) {
   if (!cross_owner) {
     return "same_owner";
   }
-  if (std::strcmp(operation, "environment") == 0 || std::strcmp(operation, "all_inventory") == 0 ||
-      std::strcmp(operation, "present") == 0) {
+  if (std::strcmp(operation, "environment") == 0 || std::strcmp(operation, "all_inventory") == 0) {
     return "snapshot";
   }
   if (std::strcmp(operation, "call_other") == 0 || std::strcmp(operation, "move_object") == 0 ||
-      std::strcmp(operation, "destruct") == 0) {
+      std::strcmp(operation, "destruct") == 0 || std::strcmp(operation, "present") == 0) {
     return "message";
   }
   return "reject";
@@ -854,23 +853,9 @@ bool owner_execution_state_cleared() {
          object_store.restricted_destruct_object == nullptr;
 }
 
-constexpr std::array<const char *, 18> kRegisteredOwnerLpcTasks = {
-    "owner_task_readonly",    "owner_task_player", "owner_task_room",       "owner_task_session",
-    "owner_task_item",        "owner_task_economy", "owner_task_combat",     "owner_task_mail",
-    "owner_task_reward",      "owner_task_world",   "owner_task_persistence", "owner_task_team",
-    "owner_task_guild",       "owner_task_sect",    "owner_task_quest",      "owner_task_rank",
-    "owner_task_crafting",    "owner_task_life_skill"};
-
 constexpr int kOwnerExecutorTaskBudget = 32;
 
-bool owner_lpc_task_allowed(const OwnerMailboxTask &task) {
-  for (const auto *method : kRegisteredOwnerLpcTasks) {
-    if (task.task_key == method) {
-      return true;
-    }
-  }
-  return false;
-}
+bool owner_lpc_task_allowed(const OwnerMailboxTask & /*task*/) { return false; }
 
 void record_owner_context_cleanup(const OwnerMailboxTask &task) {
   auto owner_cleared = vm_context().owner.current_owner_id.empty() &&

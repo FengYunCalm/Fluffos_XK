@@ -62,8 +62,8 @@ contracts for migration.
 - **Owner-based isolation**: Objects can carry an owner ID such as `"player/<account>"` or `"legacy/main"`.
 - **Enforced mode**: Cross-owner synchronous writes/calls are blocked unless they use an explicit owner contract.
 - **Snapshot inspection**: `owner_query_object_snapshot()` exposes structural information without calling target LPC methods.
-- **Controlled multicore paths**: Deterministic worker tasks and registered owner LPC tasks can run off-main; ordinary LPC
-  remains guarded rather than freely parallelized.
+- **Controlled multicore paths**: Deterministic worker tasks and restricted owner LPC probe/canary paths can run off-main;
+  ordinary and registered LPC tasks remain guarded rather than freely parallelized.
 
 **Validated status:**
 - Owner/multicore engine regression tests cover owner scope, owner queues, enforced blocking, object handles, and guarded owner threads.

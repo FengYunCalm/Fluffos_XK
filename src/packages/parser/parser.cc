@@ -24,6 +24,7 @@
 
 #include "packages/parser/parser.h"
 #include "packages/core/outbuf.h"
+#include "vm/owner.h"
 
 /*
  * These match routines in the LIMA mudlib.  [The fact that this file was
@@ -846,8 +847,16 @@ static void free_words() {
   num_words = 0;
 }
 
+static bool parser_cross_owner_blocked(object_t *ob) {
+  return vm_owner_cross_owner_access_blocked(current_object, ob, "parser");
+}
+
 static void interrogate_object(object_t *ob) {
   svalue_t *ret;
+
+  if (parser_cross_owner_blocked(ob)) {
+    return;
+  }
 
   if (ob->pinfo->flags & PI_REFRESH) {
     remove_ids(ob->pinfo);
@@ -984,6 +993,9 @@ static void rec_add_object(object_t *ob, int flags) {
   if (ob->flags & O_DESTRUCTED) {
     return;
   }
+  if (parser_cross_owner_blocked(ob)) {
+    return;
+  }
   if (ob->pinfo) {
     if (num_objects == MAX_NUM_OBJECTS) {
       return;
@@ -1033,6 +1045,9 @@ static void add_objects_from_array(array_t *arr, int flags) {
     last_flags = 0;
     last_was_me = 0;
     if (arr->item[i].type == T_OBJECT && !((ob = arr->item[i].u.ob)->flags & O_DESTRUCTED)) {
+      if (parser_cross_owner_blocked(ob)) {
+        continue;
+      }
       if (ob->pinfo) {
         if (num_objects == MAX_NUM_OBJECTS) {
           return;
@@ -1070,6 +1085,9 @@ static void get_objects_from_array(array_t *arr) {
     if (ob->flags & O_DESTRUCTED) {
       continue;
     }
+    if (parser_cross_owner_blocked(ob)) {
+      continue;
+    }
     if (NEED_REFRESH(ob)) {
       if (num_objects == MAX_NUM_OBJECTS) {
         return;
@@ -1087,6 +1105,9 @@ static void find_uninited_objects(object_t *ob) {
     return;
   }
   if (ob->flags & O_DESTRUCTED) {
+    return;
+  }
+  if (parser_cross_owner_blocked(ob)) {
     return;
   }
   if (NEED_REFRESH(ob)) {
