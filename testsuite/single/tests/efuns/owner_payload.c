@@ -1,4 +1,8 @@
-void dummy() {}
+int called;
+
+void dummy() {
+    called++;
+}
 
 void assert_payload_error(mapping result, string error) {
     ASSERT_EQ(0, result["success"]);
@@ -41,7 +45,9 @@ void do_tests() {
     ASSERT_EQ(file_name(this_object())[1..], result["target_object_path"]);
     ASSERT_EQ(vm_owner_epoch(this_object()), result["target_owner_epoch"]);
     ASSERT_EQ(1, result["target_object_id"] > 0);
+    ASSERT_EQ(0, called);
     vm_owner_drain(vm_owner_id(this_object()), 1);
+    ASSERT_EQ(1, called);
     future = owner_future_poll(result["future_id"]);
     ASSERT_EQ(1, future["success"]);
     ASSERT_EQ("completed", future["state"]);

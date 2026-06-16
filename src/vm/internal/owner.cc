@@ -533,6 +533,40 @@ void complete_owner_message_task_locked(const OwnerMailboxTask &task) {
   }
 }
 
+void complete_owner_message_task_threadsafe(const OwnerMailboxTask &task, const char *state,
+                                            const char *result_key, const char *error) {
+  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+  complete_owner_future_for_task_locked(task.task_id, state, result_key, error);
+}
+
+void dispatch_owner_message_on_main(const OwnerMailboxTask &task) {
+  if (!task.has_target_handle) {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    complete_owner_message_task_locked(task);
+    return;
+  }
+  if (!owner_message_target_current(task)) {
+    complete_owner_message_task_threadsafe(task, "failed", "", "stale target");
+    return;
+  }
+
+  auto *target = vm_object_handle_resolve(task.target_handle);
+  if (!target || (target->flags & O_DESTRUCTED) ||
+      !vm_owner_epoch_matches(target, task.owner_id.c_str(), task.owner_epoch)) {
+    complete_owner_message_task_threadsafe(task, "failed", "", "stale target");
+    return;
+  }
+
+  VMOwnerScope owner_scope(vm_context(), task.owner_id.c_str(), task.owner_epoch);
+  set_eval(max_eval_cost);
+  auto *result = safe_apply(task.task_key.c_str(), target, 0, ORIGIN_DRIVER);
+  if (!result) {
+    complete_owner_message_task_threadsafe(task, "failed", "", "lpc call failed");
+    return;
+  }
+  complete_owner_message_task_threadsafe(task, "completed", task.task_key.c_str(), "");
+}
+
 void complete_owner_compute_result_task_locked(const OwnerMailboxTask &task) {
   auto target_task_id = task.future_target_task_id == 0 ? task.task_id : task.future_target_task_id;
   auto state = task.future_state.empty() ? "completed" : task.future_state.c_str();
@@ -1394,33 +1428,46 @@ bool vm_owner_cross_owner_access_blocked(object_t *source, object_t *target, con
 }
 
 mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
-  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
   std::string normalized_owner_id = normalize_owner_id(owner_id);
-  auto &queue = owner_mailboxes[normalized_owner_id];
-  auto requested = limit <= 0 || static_cast<size_t>(limit) > queue.size() ? queue.size() : static_cast<size_t>(limit);
+  std::vector<OwnerMailboxTask> drained_tasks;
+
+  {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    auto &queue = owner_mailboxes[normalized_owner_id];
+    auto requested = limit <= 0 || static_cast<size_t>(limit) > queue.size() ? queue.size() : static_cast<size_t>(limit);
+
+    drained_tasks.reserve(requested);
+    for (size_t i = 0; i < requested; i++) {
+      auto task = queue.front();
+      queue.pop_front();
+      append_owner_task_trace(task, "drained");
+      record_owner_mailbox_task_drained(task);
+      drained_tasks.push_back(std::move(task));
+    }
+    if (queue.empty()) {
+      owner_mailboxes.erase(normalized_owner_id);
+      schedulable_owner_set.erase(normalized_owner_id);
+    }
+    total_drained.fetch_add(drained_tasks.size(), std::memory_order_relaxed);
+  }
+
+  auto requested = drained_tasks.size();
   auto *tasks = allocate_array(static_cast<int>(requested));
 
   for (size_t i = 0; i < requested; i++) {
-    auto task = queue.front();
-    queue.pop_front();
-    append_owner_task_trace(task, "drained");
+    auto &task = drained_tasks[i];
     if (task.task_type == "owner_message") {
-      complete_owner_message_task_locked(task);
+      dispatch_owner_message_on_main(task);
     } else if (task.task_type == "compute_result") {
+      std::lock_guard<std::mutex> lock(owner_runtime_mutex);
       complete_owner_compute_result_task_locked(task);
     }
-    record_owner_mailbox_task_drained(task);
     auto *task_map = owner_mailbox_task_mapping(task);
     tasks->item[i].type = T_MAPPING;
     tasks->item[i].subtype = 0;
     tasks->item[i].u.map = task_map;
     release_owner_task_target(&task);
   }
-  if (queue.empty()) {
-    owner_mailboxes.erase(normalized_owner_id);
-    schedulable_owner_set.erase(normalized_owner_id);
-  }
-  total_drained.fetch_add(requested, std::memory_order_relaxed);
 
   auto *map = allocate_mapping(7);
   add_mapping_pair(map, "success", 1);
