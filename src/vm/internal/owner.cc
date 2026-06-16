@@ -520,7 +520,7 @@ bool pop_next_schedulable_task(OwnerMailboxTask *out, bool claim_owner) {
     if (schedulable_owner_set.erase(owner_id) == 0) {
       continue;
     }
-    if (claim_owner && active_owner_set.count(owner_id) > 0) {
+    if (active_owner_set.count(owner_id) > 0) {
       continue;
     }
 
