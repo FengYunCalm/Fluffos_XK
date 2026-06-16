@@ -580,7 +580,8 @@ bool owner_execution_state_cleared() {
          execution.function_index_offset == 0 && execution.variable_index_offset == 0 &&
          execution.stack_in_use_as_temporary == 0 &&
          error.current_error_context == nullptr && error.too_deep_error == 0 &&
-         error.max_eval_error == 0;
+         error.max_eval_error == 0 && error.error_depth == 0 &&
+         error.mudlib_error_depth == 0;
 }
 
 constexpr std::array<const char *, 18> kRegisteredOwnerLpcTasks = {

@@ -41,6 +41,8 @@ struct VMErrorState {
   error_context_t *current_error_context{nullptr};
   int too_deep_error{0};
   int max_eval_error{0};
+  int error_depth{0};
+  int mudlib_error_depth{0};
 };
 
 struct VMContext {
@@ -78,6 +80,9 @@ void vm_context_set_current_error_context(VMContext &context, error_context_t *e
 void vm_context_set_too_deep_error(VMContext &context, int value);
 void vm_context_set_max_eval_error(VMContext &context, int value);
 void vm_context_set_error_flags(VMContext &context, int too_deep, int max_eval);
+void vm_context_set_error_depths(VMContext &context, int error_depth, int mudlib_error_depth);
+void vm_context_adjust_error_depth(VMContext &context, int delta);
+void vm_context_adjust_mudlib_error_depth(VMContext &context, int delta);
 void vm_context_reset_execution(VMContext &context);
 VMExecutionState vm_context_capture_execution();
 void vm_context_apply_execution(VMContext &context, const VMExecutionState &execution);

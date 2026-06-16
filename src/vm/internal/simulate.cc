@@ -1758,6 +1758,21 @@ void free_sentence(sentence_t *p) {
 static thread_local int num_error = 0;
 static thread_local int num_mudlib_error = 0;
 
+void vm_context_set_error_depths(VMContext &context, int error_depth, int mudlib_error_depth) {
+  num_error = error_depth;
+  num_mudlib_error = mudlib_error_depth;
+  context.error.error_depth = error_depth;
+  context.error.mudlib_error_depth = mudlib_error_depth;
+}
+
+void vm_context_adjust_error_depth(VMContext &context, int delta) {
+  vm_context_set_error_depths(context, num_error + delta, num_mudlib_error);
+}
+
+void vm_context_adjust_mudlib_error_depth(VMContext &context, int delta) {
+  vm_context_set_error_depths(context, num_error, num_mudlib_error + delta);
+}
+
 /*
  * Error() has been "fixed" so that users can catch and throw them.
  * To catch them nicely, we really have to provide decent error information.
@@ -1909,13 +1924,13 @@ void _error_handler(char *err) {
     } else {
       if (num_mudlib_error) {
         debug_message("Error in error handler: ");
-        num_error++;
+        vm_context_adjust_error_depth(vm_context(), 1);
         debug_message_with_location(err);
         if (num_mudlib_error == 1) {
           dump_trace(CONFIG_INT(__RC_TRACE_CODE__));
         }
-        num_error--;
-        num_mudlib_error = 0;
+        vm_context_adjust_error_depth(vm_context(), -1);
+        vm_context_set_error_depths(vm_context(), num_error, 0);
       } else {
         if (max_eval_error) {
           set_eval(max_eval_cost);
@@ -1923,9 +1938,9 @@ void _error_handler(char *err) {
         }
 
         if (!too_deep_error) {
-          num_mudlib_error++;
+          vm_context_adjust_mudlib_error_depth(vm_context(), 1);
           mudlib_error_handler(err, 1);
-          num_mudlib_error--;
+          vm_context_adjust_mudlib_error_depth(vm_context(), -1);
           set_eval(max_eval_cost);
         }
       }
@@ -1942,7 +1957,7 @@ void _error_handler(char *err) {
     throw("error handler");
   }
 
-  num_error++;
+  vm_context_adjust_error_depth(vm_context(), 1);
 #ifdef PACKAGE_MUDLIB_STATS
   if (current_object) {
     add_errors(&current_object->stats, 1);
@@ -1963,17 +1978,17 @@ void _error_handler(char *err) {
 
   // Error occured while running mudlib error handler.
   if (!num_mudlib_error) {
-    num_mudlib_error++;
-    num_error--;
+    vm_context_adjust_mudlib_error_depth(vm_context(), 1);
+    vm_context_adjust_error_depth(vm_context(), -1);
     outoftime = 0;
     mudlib_error_handler(err, 0);
     if (max_eval_error) {
       outoftime = 1;
     }
-    num_mudlib_error--;
-    num_error++;
+    vm_context_adjust_mudlib_error_depth(vm_context(), -1);
+    vm_context_adjust_error_depth(vm_context(), 1);
   } else if (num_mudlib_error > 10) {
-    num_mudlib_error = 0;
+    vm_context_set_error_depths(vm_context(), num_error, 0);
     // stop recurse errors
     _error_handler(err);
     goto exit;
@@ -1981,16 +1996,17 @@ void _error_handler(char *err) {
     debug_message("Error in mudlib error handler: ");
     debug_message_with_location(err);
     dump_trace(CONFIG_INT(__RC_TRACE_CODE__));
-    num_mudlib_error--;
+    vm_context_adjust_mudlib_error_depth(vm_context(), -1);
   }
 exit:
-  num_error--;
+  vm_context_adjust_error_depth(vm_context(), -1);
 
   if (num_error || num_mudlib_error) {
     /* This can happen via errors in the object_name() apply. */
     debug_message("Error '%s' occurred while trying to print error trace -- trace suppressed.\n",
                   err);
   } else {
+    vm_context_set_error_depths(vm_context(), 0, 0);
     vm_context_set_error_flags(vm_context(), 0, 0);
   }
   if (current_error_context) {
