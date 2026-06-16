@@ -92,6 +92,8 @@ TEST_F(DriverTest, TestVmContextTracksTopLevelState) {
   ASSERT_EQ(vm_context().error.current_error_context, nullptr);
   ASSERT_EQ(vm_context().error.too_deep_error, 0);
   ASSERT_EQ(vm_context().error.max_eval_error, 0);
+  ASSERT_EQ(vm_context().error.error_depth, 0);
+  ASSERT_EQ(vm_context().error.mudlib_error_depth, 0);
   ASSERT_EQ(vm_context().object_store.objects, obj_list);
   ASSERT_EQ(vm_context().object_store.destructed_objects, obj_list_destruct);
 }
@@ -301,10 +303,13 @@ TEST_F(DriverTest, TestVmErrorContextStackSyncsContext) {
 
 TEST_F(DriverTest, TestVmErrorFlagsSyncContext) {
   vm_context_set_error_flags(vm_context(), 0, 0);
+  vm_context_set_error_depths(vm_context(), 0, 0);
   ASSERT_EQ(too_deep_error, 0);
   ASSERT_EQ(max_eval_error, 0);
   ASSERT_EQ(vm_context().error.too_deep_error, 0);
   ASSERT_EQ(vm_context().error.max_eval_error, 0);
+  ASSERT_EQ(vm_context().error.error_depth, 0);
+  ASSERT_EQ(vm_context().error.mudlib_error_depth, 0);
 
   vm_context_set_too_deep_error(vm_context(), 1);
   ASSERT_EQ(too_deep_error, 1);
@@ -318,11 +323,18 @@ TEST_F(DriverTest, TestVmErrorFlagsSyncContext) {
   ASSERT_EQ(vm_context().error.too_deep_error, 1);
   ASSERT_EQ(vm_context().error.max_eval_error, 1);
 
+  vm_context_adjust_error_depth(vm_context(), 1);
+  vm_context_adjust_mudlib_error_depth(vm_context(), 2);
+  ASSERT_EQ(vm_context().error.error_depth, 1);
+  ASSERT_EQ(vm_context().error.mudlib_error_depth, 2);
+
   clear_state();
   ASSERT_EQ(too_deep_error, 0);
   ASSERT_EQ(max_eval_error, 0);
   ASSERT_EQ(vm_context().error.too_deep_error, 0);
   ASSERT_EQ(vm_context().error.max_eval_error, 0);
+  ASSERT_EQ(vm_context().error.error_depth, 0);
+  ASSERT_EQ(vm_context().error.mudlib_error_depth, 0);
 }
 
 TEST_F(DriverTest, TestVmContextThreadScopeBindsThreadLocalContext) {
