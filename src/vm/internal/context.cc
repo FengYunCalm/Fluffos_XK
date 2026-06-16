@@ -19,6 +19,8 @@ bool can_sync_object_store_to_context(VMContext &context) {
   return &context == &main_vm_context && std::this_thread::get_id() == main_vm_thread_id;
 }
 
+bool is_current_thread_context(VMContext &context) { return &context == thread_vm_context; }
+
 void clear_object_store_snapshot(VMObjectStoreState &object_store) {
   object_store.objects = nullptr;
   object_store.destructed_objects = nullptr;
@@ -53,50 +55,68 @@ void vm_context_set_current_owner(VMContext &context, const char *owner_id, uint
 }
 
 void vm_context_set_current_object(VMContext &context, object_t *object) {
-  current_object = object;
+  if (is_current_thread_context(context)) {
+    current_object = object;
+  }
   context.execution.current_object = object;
 }
 
 void vm_context_set_command_giver(VMContext &context, object_t *giver) {
-  command_giver = giver;
+  if (is_current_thread_context(context)) {
+    command_giver = giver;
+  }
   context.execution.command_giver = giver;
 }
 
 void vm_context_set_current_interactive(VMContext &context, object_t *interactive) {
-  current_interactive = interactive;
+  if (is_current_thread_context(context)) {
+    current_interactive = interactive;
+  }
   context.execution.current_interactive = interactive;
 }
 
 void vm_context_set_previous_object(VMContext &context, object_t *object) {
-  previous_ob = object;
+  if (is_current_thread_context(context)) {
+    previous_ob = object;
+  }
   context.execution.previous_ob = object;
 }
 
 void vm_context_set_current_program(VMContext &context, program_t *program) {
-  current_prog = program;
+  if (is_current_thread_context(context)) {
+    current_prog = program;
+  }
   context.execution.current_prog = program;
 }
 
 void vm_context_set_caller_type(VMContext &context, int type) {
-  caller_type = type;
+  if (is_current_thread_context(context)) {
+    caller_type = type;
+  }
   context.execution.caller_type = type;
 }
 
 void vm_context_set_call_origin(VMContext &context, int origin) {
-  call_origin = origin;
+  if (is_current_thread_context(context)) {
+    call_origin = origin;
+  }
   context.execution.call_origin = origin;
 }
 
 void vm_context_set_inherit_offsets(VMContext &context, int function_offset, int variable_offset) {
-  function_index_offset = function_offset;
-  variable_index_offset = variable_offset;
+  if (is_current_thread_context(context)) {
+    function_index_offset = function_offset;
+    variable_index_offset = variable_offset;
+  }
   context.execution.function_index_offset = function_offset;
   context.execution.variable_index_offset = variable_offset;
 }
 
 void vm_context_set_stack_temporary_depth(VMContext &context, int depth) {
 #ifdef DEBUG
-  stack_in_use_as_temporary = depth;
+  if (is_current_thread_context(context)) {
+    stack_in_use_as_temporary = depth;
+  }
 #endif
   context.execution.stack_in_use_as_temporary = depth;
 }
@@ -108,10 +128,12 @@ void vm_context_adjust_stack_temporary_depth(VMContext &context, int delta) {
 
 void vm_context_set_execution_frame(VMContext &context, object_t *object, program_t *program,
                                     object_t *previous, int type) {
-  current_object = object;
-  current_prog = program;
-  previous_ob = previous;
-  caller_type = type;
+  if (is_current_thread_context(context)) {
+    current_object = object;
+    current_prog = program;
+    previous_ob = previous;
+    caller_type = type;
+  }
   context.execution.current_object = object;
   context.execution.current_prog = program;
   context.execution.previous_ob = previous;
@@ -119,23 +141,31 @@ void vm_context_set_execution_frame(VMContext &context, object_t *object, progra
 }
 
 void vm_context_set_current_error_context(VMContext &context, error_context_t *error_context) {
-  current_error_context = error_context;
+  if (is_current_thread_context(context)) {
+    current_error_context = error_context;
+  }
   context.error.current_error_context = error_context;
 }
 
 void vm_context_set_too_deep_error(VMContext &context, int value) {
-  too_deep_error = value;
+  if (is_current_thread_context(context)) {
+    too_deep_error = value;
+  }
   context.error.too_deep_error = value;
 }
 
 void vm_context_set_max_eval_error(VMContext &context, int value) {
-  max_eval_error = value;
+  if (is_current_thread_context(context)) {
+    max_eval_error = value;
+  }
   context.error.max_eval_error = value;
 }
 
 void vm_context_set_error_flags(VMContext &context, int too_deep, int max_eval) {
-  too_deep_error = too_deep;
-  max_eval_error = max_eval;
+  if (is_current_thread_context(context)) {
+    too_deep_error = too_deep;
+    max_eval_error = max_eval;
+  }
   context.error.too_deep_error = too_deep;
   context.error.max_eval_error = max_eval;
 }
@@ -158,18 +188,20 @@ VMExecutionState vm_context_capture_execution() {
 }
 
 void vm_context_apply_execution(VMContext &context, const VMExecutionState &execution) {
-  current_object = execution.current_object;
-  command_giver = execution.command_giver;
-  current_interactive = execution.current_interactive;
-  previous_ob = execution.previous_ob;
-  current_prog = execution.current_prog;
-  caller_type = execution.caller_type;
-  call_origin = execution.call_origin;
-  function_index_offset = execution.function_index_offset;
-  variable_index_offset = execution.variable_index_offset;
+  if (is_current_thread_context(context)) {
+    current_object = execution.current_object;
+    command_giver = execution.command_giver;
+    current_interactive = execution.current_interactive;
+    previous_ob = execution.previous_ob;
+    current_prog = execution.current_prog;
+    caller_type = execution.caller_type;
+    call_origin = execution.call_origin;
+    function_index_offset = execution.function_index_offset;
+    variable_index_offset = execution.variable_index_offset;
 #ifdef DEBUG
-  stack_in_use_as_temporary = execution.stack_in_use_as_temporary;
+    stack_in_use_as_temporary = execution.stack_in_use_as_temporary;
 #endif
+  }
   context.execution = execution;
 }
 
@@ -178,6 +210,9 @@ void vm_context_reset_execution(VMContext &context) {
 }
 
 void vm_context_sync_execution(VMContext &context) {
+  if (!is_current_thread_context(context)) {
+    return;
+  }
   context.execution = vm_context_capture_execution();
 }
 
@@ -204,7 +239,7 @@ uint64_t vm_context_object_store_sync_rejections() {
 }
 
 VMExecutionScope::VMExecutionScope(VMContext &context, const VMExecutionState &execution)
-    : context_(context), saved_(vm_context_capture_execution()) {
+    : context_(context), saved_(is_current_thread_context(context) ? vm_context_capture_execution() : context.execution) {
   vm_context_apply_execution(context_, execution);
 }
 
@@ -215,7 +250,7 @@ VMContextThreadScope::VMContextThreadScope(VMContext &context) : saved_(vm_conte
 VMContextThreadScope::~VMContextThreadScope() { vm_context_bind_thread(saved_); }
 
 VMCurrentInteractiveScope::VMCurrentInteractiveScope(VMContext &context, object_t *interactive)
-    : context_(context), saved_(current_interactive) {
+    : context_(context), saved_(context.execution.current_interactive) {
   vm_context_set_current_interactive(context_, interactive);
 }
 

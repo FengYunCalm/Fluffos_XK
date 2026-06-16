@@ -206,6 +206,98 @@ TEST_F(DriverTest, TestVmContextResetClearsThreadExecutionState) {
   ASSERT_EQ(execution.stack_in_use_as_temporary, 0);
 }
 
+TEST_F(DriverTest, TestDetachedVmContextSettersDoNotClobberThreadState) {
+  object_t* first = find_object("single/master.c");
+  object_t* second = find_object("single/simul_efun.c");
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+
+  current_object = master_ob;
+  command_giver = nullptr;
+  current_interactive = nullptr;
+  previous_ob = nullptr;
+  current_prog = nullptr;
+  caller_type = 0;
+  call_origin = 0;
+  function_index_offset = 0;
+  variable_index_offset = 0;
+#ifdef DEBUG
+  stack_in_use_as_temporary = 0;
+#endif
+  current_error_context = nullptr;
+  too_deep_error = 0;
+  max_eval_error = 0;
+  vm_context_sync_execution(vm_context());
+
+  VMContext detached;
+  error_context_t error_context{};
+  vm_context_set_current_object(detached, first);
+  vm_context_set_command_giver(detached, first);
+  vm_context_set_current_interactive(detached, first);
+  vm_context_set_previous_object(detached, second);
+  vm_context_set_current_program(detached, first->prog);
+  vm_context_set_caller_type(detached, ORIGIN_DRIVER);
+  vm_context_set_call_origin(detached, ORIGIN_EFUN);
+  vm_context_set_inherit_offsets(detached, 9, 13);
+  vm_context_set_stack_temporary_depth(detached, 4);
+  vm_context_set_current_error_context(detached, &error_context);
+  vm_context_set_error_flags(detached, 1, 1);
+
+  ASSERT_EQ(current_object, master_ob);
+  ASSERT_EQ(command_giver, nullptr);
+  ASSERT_EQ(current_interactive, nullptr);
+  ASSERT_EQ(previous_ob, nullptr);
+  ASSERT_EQ(current_prog, nullptr);
+  ASSERT_EQ(caller_type, 0);
+  ASSERT_EQ(call_origin, 0);
+  ASSERT_EQ(function_index_offset, 0);
+  ASSERT_EQ(variable_index_offset, 0);
+#ifdef DEBUG
+  ASSERT_EQ(stack_in_use_as_temporary, 0);
+#endif
+  ASSERT_EQ(current_error_context, nullptr);
+  ASSERT_EQ(too_deep_error, 0);
+  ASSERT_EQ(max_eval_error, 0);
+
+  ASSERT_EQ(detached.execution.current_object, first);
+  ASSERT_EQ(detached.execution.command_giver, first);
+  ASSERT_EQ(detached.execution.current_interactive, first);
+  ASSERT_EQ(detached.execution.previous_ob, second);
+  ASSERT_EQ(detached.execution.current_prog, first->prog);
+  ASSERT_EQ(detached.execution.caller_type, ORIGIN_DRIVER);
+  ASSERT_EQ(detached.execution.call_origin, ORIGIN_EFUN);
+  ASSERT_EQ(detached.execution.function_index_offset, 9);
+  ASSERT_EQ(detached.execution.variable_index_offset, 13);
+  ASSERT_EQ(detached.execution.stack_in_use_as_temporary, 4);
+  ASSERT_EQ(detached.error.current_error_context, &error_context);
+  ASSERT_EQ(detached.error.too_deep_error, 1);
+  ASSERT_EQ(detached.error.max_eval_error, 1);
+
+  VMExecutionState applied;
+  applied.current_object = second;
+  applied.current_prog = second->prog;
+  applied.previous_ob = first;
+  applied.caller_type = ORIGIN_CALL_OTHER;
+  vm_context_apply_execution(detached, applied);
+  ASSERT_EQ(current_object, master_ob);
+  ASSERT_EQ(current_prog, nullptr);
+  ASSERT_EQ(previous_ob, nullptr);
+  ASSERT_EQ(caller_type, 0);
+  ASSERT_EQ(detached.execution.current_object, second);
+  ASSERT_EQ(detached.execution.current_prog, second->prog);
+  ASSERT_EQ(detached.execution.previous_ob, first);
+  ASSERT_EQ(detached.execution.caller_type, ORIGIN_CALL_OTHER);
+
+  detached.execution.current_object = first;
+  vm_context_sync_execution(detached);
+  ASSERT_EQ(detached.execution.current_object, first);
+
+  vm_context_reset_execution(detached);
+  ASSERT_EQ(current_object, master_ob);
+  ASSERT_EQ(detached.execution.current_object, nullptr);
+  ASSERT_EQ(detached.execution.current_prog, nullptr);
+}
+
 TEST_F(DriverTest, TestVmCurrentInteractiveScopeRestoresState) {
   object_t* obj = find_object("single/master.c");
   ASSERT_NE(obj, nullptr);
