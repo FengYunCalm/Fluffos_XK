@@ -115,6 +115,22 @@ static thread_local int num_objects_this_thread = 0;
 static thread_local object_t *restrict_destruct;
 #endif
 
+void vm_context_set_load_object_depth(VMContext &context, int depth) {
+  num_objects_this_thread = depth;
+  context.object_store.load_object_depth = depth;
+}
+
+void vm_context_adjust_load_object_depth(VMContext &context, int delta) {
+  vm_context_set_load_object_depth(context, num_objects_this_thread + delta);
+}
+
+void vm_context_set_restricted_destruct_object(VMContext &context, object_t *object) {
+#ifndef NO_ENVIRONMENT
+  restrict_destruct = object;
+#endif
+  context.object_store.restricted_destruct_object = object;
+}
+
 object_t *obj_list, *obj_list_destruct;
 #ifdef DEBUG
 object_t *obj_list_dangling = 0;
@@ -445,7 +461,8 @@ object_t *load_object(const char *lname, int callcreate) {
   if (!pname) {
     error("Read access denied.\n");
   }
-  if (++num_objects_this_thread > inherit_chain_size) {
+  vm_context_adjust_load_object_depth(vm_context(), 1);
+  if (num_objects_this_thread > inherit_chain_size) {
     error("Inherit chain too deep: > %d when trying to load '%s'.\n", inherit_chain_size, lname);
   }
 #ifdef PACKAGE_UIDS
@@ -476,7 +493,7 @@ object_t *load_object(const char *lname, int callcreate) {
     save_command_giver(command_giver);
     ob = load_virtual_object(actualname, 0);
     restore_command_giver();
-    num_objects_this_thread--;
+    vm_context_adjust_load_object_depth(vm_context(), -1);
     return ob;
   }
   /*
@@ -558,12 +575,12 @@ object_t *load_object(const char *lname, int callcreate) {
       ob = load_object(name, 1);
       /* sigh, loading the inherited file removed us */
       if (!ob) {
-        num_objects_this_thread--;
+        vm_context_adjust_load_object_depth(vm_context(), -1);
         return nullptr;
       }
       ob->load_time = get_current_time();
     }
-    num_objects_this_thread--;
+    vm_context_adjust_load_object_depth(vm_context(), -1);
     return ob;
   }
   ob = get_empty_object(prog->num_variables_total);
@@ -604,7 +621,7 @@ object_t *load_object(const char *lname, int callcreate) {
   }
 
   ob->load_time = get_current_time();
-  num_objects_this_thread--;
+  vm_context_adjust_load_object_depth(vm_context(), -1);
 
   return ob;
 }
@@ -633,7 +650,7 @@ object_t *clone_object(const char *str1, int num_arg) {
 
   save_command_giver(command_giver);
 
-  num_objects_this_thread = 0;
+  vm_context_set_load_object_depth(vm_context(), 0);
   ob = find_object(str1);
   if (ob && !object_visible(ob)) {
     ob = nullptr;
@@ -949,9 +966,9 @@ void destruct_object(object_t *ob) {
      */
     push_object(super);
 
-    restrict_destruct = ob->contains;
+    vm_context_set_restricted_destruct_object(vm_context(), ob->contains);
     (void)apply(APPLY_MOVE, ob->contains, 1, ORIGIN_DRIVER);
-    restrict_destruct = save_restrict_destruct;
+    vm_context_set_restricted_destruct_object(vm_context(), save_restrict_destruct);
     /* OUCH! we could be dested by this. -Beek */
     if (ob->flags & O_DESTRUCTED) {
       return;
@@ -1911,9 +1928,9 @@ void _error_handler(char *err) {
 [[noreturn]] void error_handler(char *err) {
 /* in case we're going to jump out of load_object */
 #ifndef NO_ENVIRONMENT
-  restrict_destruct = nullptr;
+  vm_context_set_restricted_destruct_object(vm_context(), nullptr);
 #endif
-  num_objects_this_thread = 0; /* reset the count */
+  vm_context_set_load_object_depth(vm_context(), 0); /* reset the count */
 
   if (((current_error_context->save_csp + 1)->framekind & FRAME_MASK) == FRAME_CATCH) {
     /* user catches this error */

@@ -573,6 +573,7 @@ bool pop_next_main_task(OwnerMainTask *out, bool claim_owner) {
 bool owner_execution_state_cleared() {
   const auto &execution = vm_context().execution;
   const auto &error = vm_context().error;
+  const auto &object_store = vm_context().object_store;
   return execution.current_object == nullptr && execution.command_giver == nullptr &&
          execution.current_interactive == nullptr && execution.previous_ob == nullptr &&
          execution.current_prog == nullptr && execution.caller_type == 0 &&
@@ -581,7 +582,8 @@ bool owner_execution_state_cleared() {
          execution.stack_in_use_as_temporary == 0 &&
          error.current_error_context == nullptr && error.too_deep_error == 0 &&
          error.max_eval_error == 0 && error.error_depth == 0 &&
-         error.mudlib_error_depth == 0;
+         error.mudlib_error_depth == 0 && object_store.load_object_depth == 0 &&
+         object_store.restricted_destruct_object == nullptr;
 }
 
 constexpr std::array<const char *, 18> kRegisteredOwnerLpcTasks = {

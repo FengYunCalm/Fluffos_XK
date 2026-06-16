@@ -29,6 +29,8 @@ struct VMObjectStoreState {
   object_t *debug_dangling_objects{nullptr};
   bool main_thread_owned{false};
   uint64_t sync_rejections{0};
+  int load_object_depth{0};
+  object_t *restricted_destruct_object{nullptr};
 };
 
 struct VMOwnerState {
@@ -83,6 +85,9 @@ void vm_context_set_error_flags(VMContext &context, int too_deep, int max_eval);
 void vm_context_set_error_depths(VMContext &context, int error_depth, int mudlib_error_depth);
 void vm_context_adjust_error_depth(VMContext &context, int delta);
 void vm_context_adjust_mudlib_error_depth(VMContext &context, int delta);
+void vm_context_set_load_object_depth(VMContext &context, int depth);
+void vm_context_adjust_load_object_depth(VMContext &context, int delta);
+void vm_context_set_restricted_destruct_object(VMContext &context, object_t *object);
 void vm_context_reset_execution(VMContext &context);
 VMExecutionState vm_context_capture_execution();
 void vm_context_apply_execution(VMContext &context, const VMExecutionState &execution);

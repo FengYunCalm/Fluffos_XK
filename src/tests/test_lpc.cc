@@ -96,6 +96,8 @@ TEST_F(DriverTest, TestVmContextTracksTopLevelState) {
   ASSERT_EQ(vm_context().error.mudlib_error_depth, 0);
   ASSERT_EQ(vm_context().object_store.objects, obj_list);
   ASSERT_EQ(vm_context().object_store.destructed_objects, obj_list_destruct);
+  ASSERT_EQ(vm_context().object_store.load_object_depth, 0);
+  ASSERT_EQ(vm_context().object_store.restricted_destruct_object, nullptr);
 }
 
 TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
@@ -335,6 +337,29 @@ TEST_F(DriverTest, TestVmErrorFlagsSyncContext) {
   ASSERT_EQ(vm_context().error.max_eval_error, 0);
   ASSERT_EQ(vm_context().error.error_depth, 0);
   ASSERT_EQ(vm_context().error.mudlib_error_depth, 0);
+}
+
+TEST_F(DriverTest, TestVmObjectLifecycleStateSyncsContext) {
+  object_t* obj = find_object("single/master.c");
+  ASSERT_NE(obj, nullptr);
+
+  vm_context_set_load_object_depth(vm_context(), 0);
+  vm_context_set_restricted_destruct_object(vm_context(), nullptr);
+  ASSERT_EQ(vm_context().object_store.load_object_depth, 0);
+  ASSERT_EQ(vm_context().object_store.restricted_destruct_object, nullptr);
+
+  vm_context_adjust_load_object_depth(vm_context(), 2);
+  ASSERT_EQ(vm_context().object_store.load_object_depth, 2);
+
+  vm_context_adjust_load_object_depth(vm_context(), -1);
+  ASSERT_EQ(vm_context().object_store.load_object_depth, 1);
+
+  vm_context_set_restricted_destruct_object(vm_context(), obj);
+  ASSERT_EQ(vm_context().object_store.restricted_destruct_object, obj);
+
+  clear_state();
+  ASSERT_EQ(vm_context().object_store.load_object_depth, 0);
+  ASSERT_EQ(vm_context().object_store.restricted_destruct_object, nullptr);
 }
 
 TEST_F(DriverTest, TestVmContextThreadScopeBindsThreadLocalContext) {
