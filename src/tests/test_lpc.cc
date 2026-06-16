@@ -648,16 +648,38 @@ TEST_F(DriverTest, TestVmOwnerMainQueueDispatchesWithOwnerScope) {
   ASSERT_NE(obj, nullptr);
   vm_owner_set_id(obj, "owner/test/main-queue");
 
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
   bool ran = false;
   std::string seen_owner;
+  long active_owners_during_callback = 0;
+  auto* before = vm_owner_thread_status();
+  auto before_claims = mapping_number(before, "main_owner_claims");
+  auto before_releases = mapping_number(before, "main_owner_releases");
+  free_mapping(before);
+
   auto task_id = vm_owner_enqueue_main_task(obj, "unit_main", "dispatch", [&] {
     ran = true;
     seen_owner = vm_context().owner.current_owner_id;
+    auto* running = vm_owner_thread_status();
+    active_owners_during_callback = mapping_number(running, "main_active_owners");
+    free_mapping(running);
   });
   ASSERT_GT(task_id, 0u);
   ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
   ASSERT_TRUE(ran);
   ASSERT_EQ(seen_owner, "owner/test/main-queue");
+  ASSERT_EQ(active_owners_during_callback, 1);
+
+  auto* after = vm_owner_thread_status();
+  ASSERT_EQ(mapping_number(after, "main_active_owners"), 0);
+  ASSERT_EQ(mapping_number(after, "main_owner_claims"), before_claims + 1);
+  ASSERT_EQ(mapping_number(after, "main_owner_releases"), before_releases + 1);
+  free_mapping(after);
 
   auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
     auto* value = find_string_in_mapping(map, key);
