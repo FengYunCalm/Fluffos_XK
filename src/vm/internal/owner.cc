@@ -82,11 +82,13 @@ struct OwnerMailboxTask {
   uint64_t task_id;
   uint64_t sequence;
   uint64_t owner_epoch;
+  VMObjectHandle target_handle;
   std::string owner_id;
   std::string task_type;
   std::string task_key;
   std::string target_object;
   object_t *target{nullptr};
+  bool has_target_handle{false};
 };
 
 struct OwnerTaskTrace {
@@ -138,6 +140,7 @@ struct OwnerCommitTrace {
 struct OwnerFutureRecord {
   uint64_t future_id;
   uint64_t target_task_id;
+  VMObjectHandle target_handle;
   std::string source_owner_id;
   std::string target_owner_id;
   std::string message_type;
@@ -145,6 +148,7 @@ struct OwnerFutureRecord {
   std::string state;
   std::string result_key;
   std::string error;
+  bool has_target_handle{false};
 };
 
 struct OwnerMainTask {
@@ -415,7 +419,7 @@ uint64_t append_owner_task_trace_threadsafe(const OwnerMailboxTask &task, const 
 }
 
 mapping_t *owner_future_mapping(const OwnerFutureRecord &record) {
-  auto *map = allocate_mapping(12);
+  auto *map = allocate_mapping(17);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "future_id", static_cast<long>(record.future_id));
   add_mapping_pair(map, "target_task_id", static_cast<long>(record.target_task_id));
@@ -428,7 +432,17 @@ mapping_t *owner_future_mapping(const OwnerFutureRecord &record) {
   add_mapping_string(map, "error", record.error.c_str());
   add_mapping_pair(map, "requires_owner_message_completion", record.state == "pending" ? 1 : 0);
   add_mapping_pair(map, "direct_cross_owner_write", 0);
+  add_mapping_pair(map, "has_target_handle", record.has_target_handle ? 1 : 0);
+  add_mapping_pair(map, "target_handle_current",
+                   !record.has_target_handle || vm_object_handle_is_current(record.target_handle) ? 1 : 0);
+  add_mapping_pair(map, "target_object_id", static_cast<long>(record.target_handle.object_id));
+  add_mapping_string(map, "target_object_path", record.target_handle.object_path.c_str());
+  add_mapping_pair(map, "target_owner_epoch", static_cast<long>(record.target_handle.owner_epoch));
   return map;
+}
+
+bool owner_message_target_current(const OwnerMailboxTask &task) {
+  return !task.has_target_handle || vm_object_handle_is_current(task.target_handle);
 }
 
 void complete_owner_future_locked(uint64_t future_id, const char *state, const char *result_key, const char *error) {
@@ -459,7 +473,7 @@ void update_owner_message_trace_state_for_task_locked(uint64_t target_task_id, c
 }
 
 void complete_owner_future_for_task_locked(uint64_t target_task_id, const char *state, const char *result_key,
-                                           const char *error) {
+                                            const char *error) {
   for (auto &entry : owner_futures) {
     if (entry.second.target_task_id == target_task_id && entry.second.state == "pending") {
       entry.second.state = normalize_task_text(state, "completed");
@@ -473,6 +487,14 @@ void complete_owner_future_for_task_locked(uint64_t target_task_id, const char *
       }
       return;
     }
+  }
+}
+
+void complete_owner_message_task_locked(const OwnerMailboxTask &task) {
+  if (owner_message_target_current(task)) {
+    complete_owner_future_for_task_locked(task.task_id, "completed", task.task_key.c_str(), "");
+  } else {
+    complete_owner_future_for_task_locked(task.task_id, "failed", "", "stale target");
   }
 }
 
@@ -803,7 +825,7 @@ void owner_thread_loop() {
           append_owner_task_trace_threadsafe(task, "thread_message_dispatched");
           owner_thread_message_dispatched.fetch_add(1, std::memory_order_relaxed);
           std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-          complete_owner_future_for_task_locked(task.task_id, "completed", task.task_key.c_str(), "");
+          complete_owner_message_task_locked(task);
         } else if (task.task_type == "compute_result") {
           append_owner_task_trace_threadsafe(task, "thread_compute_result_completed");
           std::lock_guard<std::mutex> lock(owner_runtime_mutex);
@@ -1339,7 +1361,9 @@ mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
     auto task = queue.front();
     queue.pop_front();
     append_owner_task_trace(task, "drained");
-    if (task.task_type == "owner_message" || task.task_type == "compute_result") {
+    if (task.task_type == "owner_message") {
+      complete_owner_message_task_locked(task);
+    } else if (task.task_type == "compute_result") {
       complete_owner_future_for_task_locked(task.task_id, "completed", task.task_key.c_str(), "");
     }
     record_owner_mailbox_task_drained(task);
@@ -1411,7 +1435,9 @@ mapping_t *vm_owner_schedule(int limit) {
       break;
     }
     append_owner_task_trace(task, "dispatched");
-    if (task.task_type == "owner_message" || task.task_type == "compute_result") {
+    if (task.task_type == "owner_message") {
+      complete_owner_message_task_locked(task);
+    } else if (task.task_type == "compute_result") {
       complete_owner_future_for_task_locked(task.task_id, "completed", task.task_key.c_str(), "");
     }
     record_owner_mailbox_task_drained(task);
@@ -1510,10 +1536,11 @@ mapping_t *vm_owner_access_trace(int limit) {
   return map;
 }
 
-mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *target_owner_id, const char *message_type,
-                                   const char *payload_key) {
+mapping_t *submit_owner_message(const char *source_owner_id, const char *target_owner_id, const char *message_type,
+                                const char *payload_key, const VMObjectHandle *target_handle) {
   std::string source_owner = normalize_owner_id(source_owner_id);
-  std::string target_owner = normalize_owner_id(target_owner_id);
+  std::string target_owner = target_handle && !target_handle->owner_id.empty() ? target_handle->owner_id
+                                                                              : normalize_owner_id(target_owner_id);
   std::string normalized_type = normalize_task_text(message_type, "message");
   std::string normalized_payload = normalize_task_text(payload_key, "");
   auto message_id = next_message_trace_id.fetch_add(1, std::memory_order_relaxed);
@@ -1521,10 +1548,15 @@ mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *targ
   OwnerMailboxTask task;
   task.task_id = next_mailbox_task_id.fetch_add(1, std::memory_order_relaxed);
   task.sequence = total_enqueued.fetch_add(1, std::memory_order_relaxed) + 1;
-  task.owner_epoch = 0;
+  task.owner_epoch = target_handle ? target_handle->owner_epoch : 0;
   task.owner_id = target_owner;
   task.task_type = "owner_message";
   task.task_key = normalized_type;
+  task.has_target_handle = target_handle != nullptr;
+  if (target_handle) {
+    task.target_handle = *target_handle;
+    task.target_object = target_handle->object_path;
+  }
   auto target_task_id = task.task_id;
 
   OwnerMessageTrace trace;
@@ -1540,6 +1572,10 @@ mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *targ
   OwnerFutureRecord future;
   future.future_id = message_id;
   future.target_task_id = target_task_id;
+  future.has_target_handle = target_handle != nullptr;
+  if (target_handle) {
+    future.target_handle = *target_handle;
+  }
   future.source_owner_id = source_owner;
   future.target_owner_id = target_owner;
   future.message_type = normalized_type;
@@ -1561,7 +1597,7 @@ mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *targ
     owner_runtime_cv.notify_one();
   }
 
-  auto *map = allocate_mapping(11);
+  auto *map = allocate_mapping(16);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "message_id", static_cast<long>(message_id));
   add_mapping_pair(map, "future_id", static_cast<long>(message_id));
@@ -1573,7 +1609,23 @@ mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *targ
   add_mapping_pair(map, "requires_owner_mailbox", 1);
   add_mapping_pair(map, "message_only_cross_owner", 1);
   add_mapping_pair(map, "direct_cross_owner_write", 0);
+  add_mapping_pair(map, "has_target_handle", target_handle ? 1 : 0);
+  add_mapping_pair(map, "target_handle_current",
+                   !target_handle || vm_object_handle_is_current(*target_handle) ? 1 : 0);
+  add_mapping_pair(map, "target_object_id", target_handle ? static_cast<long>(target_handle->object_id) : 0);
+  add_mapping_string(map, "target_object_path", target_handle ? target_handle->object_path.c_str() : "");
+  add_mapping_pair(map, "target_owner_epoch", target_handle ? static_cast<long>(target_handle->owner_epoch) : 0);
   return map;
+}
+
+mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *target_owner_id, const char *message_type,
+                                   const char *payload_key) {
+  return submit_owner_message(source_owner_id, target_owner_id, message_type, payload_key, nullptr);
+}
+
+mapping_t *vm_owner_submit_object_message(const char *source_owner_id, const VMObjectHandle &target_handle,
+                                          const char *message_type, const char *payload_key) {
+  return submit_owner_message(source_owner_id, target_handle.owner_id.c_str(), message_type, payload_key, &target_handle);
 }
 
 mapping_t *vm_owner_message_trace(int limit) {

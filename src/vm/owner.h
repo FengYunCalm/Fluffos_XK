@@ -5,6 +5,7 @@
 #include <functional>
 
 struct mapping_t;
+struct VMObjectHandle;
 struct object_t;
 
 constexpr int VM_MULTICORE_MODE_OFF = 0;
@@ -49,7 +50,9 @@ mapping_t *vm_owner_schedule(int limit);
 mapping_t *vm_owner_task_trace(int limit);
 mapping_t *vm_owner_access_trace(int limit);
 mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *target_owner_id, const char *message_type,
-                                   const char *payload_key);
+                                    const char *payload_key);
+mapping_t *vm_owner_submit_object_message(const char *source_owner_id, const VMObjectHandle &target_handle,
+                                          const char *message_type, const char *payload_key);
 mapping_t *vm_owner_message_trace(int limit);
 mapping_t *vm_owner_future_poll(uint64_t future_id);
 mapping_t *vm_owner_record_commit_boundary(const char *source_owner_id, const char *target_owner_id,

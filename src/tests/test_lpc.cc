@@ -2323,6 +2323,66 @@ TEST_F(DriverTest, TestVmOwnerPurgeFailsPendingFuture) {
   free_mapping(message_trace);
 }
 
+TEST_F(DriverTest, TestVmOwnerObjectMessageFailsStaleTargetHandle) {
+  const char* old_owner = "owner/test/future/object-old";
+  const char* new_owner = "owner/test/future/object-new";
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  object_t* obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+  vm_owner_set_id(obj, old_owner);
+  auto handle = vm_object_handle(obj);
+
+  auto* submitted = vm_owner_submit_object_message("owner/test/future/object-source", handle,
+                                                   "object_method", "object/payload");
+  auto future_id = mapping_number(submitted, "future_id");
+  auto target_task_id = mapping_number(submitted, "target_task_id");
+  ASSERT_EQ(mapping_number(submitted, "has_target_handle"), 1);
+  ASSERT_EQ(mapping_number(submitted, "target_handle_current"), 1);
+  free_mapping(submitted);
+
+  vm_owner_set_id(obj, new_owner);
+  free_mapping(vm_owner_drain_mailbox(old_owner, 1));
+
+  auto* failed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+  ASSERT_EQ(mapping_number(failed, "success"), 1);
+  ASSERT_EQ(mapping_number(failed, "requires_owner_message_completion"), 0);
+  ASSERT_EQ(mapping_number(failed, "has_target_handle"), 1);
+  ASSERT_EQ(mapping_number(failed, "target_handle_current"), 0);
+  ASSERT_STREQ(mapping_string(failed, "state"), "failed");
+  ASSERT_STREQ(mapping_string(failed, "error"), "stale target");
+  free_mapping(failed);
+
+  auto* owner_status = vm_object_store_owner_status(old_owner);
+  ASSERT_EQ(mapping_number(owner_status, "pending_messages"), 0);
+  free_mapping(owner_status);
+
+  auto* message_trace = vm_owner_message_trace(1);
+  auto* message_events = find_string_in_mapping(message_trace, "events");
+  ASSERT_NE(message_events, nullptr);
+  ASSERT_EQ(message_events->type, T_ARRAY);
+  ASSERT_EQ(message_events->u.arr->size, 1);
+  auto* message_event = message_events->u.arr->item[0].u.map;
+  ASSERT_EQ(mapping_number(message_event, "target_task_id"), target_task_id);
+  ASSERT_STREQ(mapping_string(message_event, "state"), "failed");
+  free_mapping(message_trace);
+
+  vm_owner_clear_id(obj);
+  destruct_object(obj);
+}
+
 TEST_F(DriverTest, TestVmOwnerFuturePollReportsUnknownFuture) {
   auto mapping_number = [](mapping_t* map, const char* key) -> long {
     auto* value = find_string_in_mapping(map, key);
