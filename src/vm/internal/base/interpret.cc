@@ -1262,7 +1262,7 @@ static void add_svalue_type_name(outbuffer_t *buf, svalue_t *val) {
 
 void push_control_stack(int frkind) {
   if (csp == &control_stack[CFG_MAX_CALL_DEPTH - 1]) {
-    too_deep_error = 1;
+    vm_context_set_too_deep_error(vm_context(), 1);
     error("Too deep recursion.\n");
   }
   csp++;
@@ -1637,7 +1637,7 @@ unsigned char fake_program = F_RETURN;
  */
 void setup_fake_frame(funptr_t *fun) {
   if (csp == &control_stack[CFG_MAX_CALL_DEPTH - 1]) {
-    too_deep_error = 1;
+    vm_context_set_too_deep_error(vm_context(), 1);
     error("Too deep recursion.\n");
   }
   csp++;
@@ -2028,7 +2028,7 @@ void eval_instruction(char *p) {
       debug_message("Eval interrupted: object %s cost limit reached, limit: %ld usec.\n",
                     current_object->obname, max_eval_cost);
       set_eval(max_eval_cost);
-      max_eval_error = 1;
+      vm_context_set_max_eval_error(vm_context(), 1);
       error("Too long evaluation. Execution aborted.\n");
     }
     /*
@@ -4131,7 +4131,7 @@ static void do_catch(char *pc, unsigned short new_pc_offset) {
       error("Can't catch eval cost too big error.\n");
     }
     if (too_deep_error) {
-      too_deep_error = 0;
+      vm_context_set_too_deep_error(vm_context(), 0);
     }
   }
   pop_context(&econ);

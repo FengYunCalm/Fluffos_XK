@@ -572,12 +572,14 @@ bool pop_next_main_task(OwnerMainTask *out, bool claim_owner) {
 
 bool owner_execution_state_cleared() {
   const auto &execution = vm_context().execution;
+  const auto &error = vm_context().error;
   return execution.current_object == nullptr && execution.command_giver == nullptr &&
          execution.current_interactive == nullptr && execution.previous_ob == nullptr &&
          execution.current_prog == nullptr && execution.caller_type == 0 &&
          execution.call_origin == 0 &&
          execution.function_index_offset == 0 && execution.variable_index_offset == 0 &&
-         vm_context().error.current_error_context == nullptr;
+         error.current_error_context == nullptr && error.too_deep_error == 0 &&
+         error.max_eval_error == 0;
 }
 
 constexpr std::array<const char *, 18> kRegisteredOwnerLpcTasks = {
