@@ -574,6 +574,10 @@ static void do_output(char *str) {
 #endif
 }
 
+#ifdef OLD_ED
+static void enqueue_ed_callback(object_t *owner, const char *function, array_t *args);
+#endif
+
 static void free_ed_buffer(object_t *who) {
   clrbuf();
 #ifdef OLD_ED
@@ -594,11 +598,7 @@ static void free_ed_buffer(object_t *who) {
     set_prompt("> ");
 
     /* make this "safe" */
-    set_eval(max_eval_cost);
-    VMOwnerScope owner_scope(vm_context(), vm_owner_id(exit_ob), vm_owner_epoch(exit_ob));
-    vm_owner_record_task_trace(vm_owner_id(exit_ob), "ed_callback", exit_fn, vm_owner_epoch(exit_ob),
-                               "dispatched");
-    safe_apply(exit_fn, exit_ob, 0, ORIGIN_INTERNAL);
+    enqueue_ed_callback(exit_ob, exit_fn, allocate_empty_array(0));
     FREE(exit_fn);
     free_object(&exit_ob, "ed EOF");
     return;
@@ -617,6 +617,56 @@ static void free_ed_buffer(object_t *who) {
 #endif
   return;
 }
+
+#ifdef OLD_ED
+struct EdQueuedCallback {
+  object_t *owner{nullptr};
+  char *function{nullptr};
+  array_t *args{nullptr};
+};
+
+static void free_ed_queued_callback(EdQueuedCallback *task) {
+  if (!task) {
+    return;
+  }
+  if (task->function) {
+    FREE(task->function);
+  }
+  if (task->owner) {
+    free_object(&task->owner, "ed queued callback");
+  }
+  if (task->args) {
+    free_array(task->args);
+  }
+  delete task;
+}
+
+static void execute_ed_queued_callback(EdQueuedCallback *task) {
+  set_eval(max_eval_cost);
+  push_some_svalues(task->args->item, task->args->size);
+  VMOwnerScope owner_scope(vm_context(), vm_owner_id(task->owner), vm_owner_epoch(task->owner));
+  vm_owner_record_task_trace(vm_owner_id(task->owner), "ed_callback", task->function,
+                             vm_owner_epoch(task->owner), "dispatched");
+  safe_apply(task->function, task->owner, task->args->size, ORIGIN_INTERNAL);
+  free_ed_queued_callback(task);
+}
+
+static void enqueue_ed_callback(object_t *owner, const char *function, array_t *args) {
+  auto *task = new EdQueuedCallback;
+  task->owner = owner;
+  add_ref(task->owner, "ed queued callback");
+  task->function = alloc_cstring(function, "ed queued callback");
+  task->args = args;
+  auto task_id = vm_owner_enqueue_main_task(owner, "ed_callback", function,
+                                           [task] { execute_ed_queued_callback(task); },
+                                           [task] { free_ed_queued_callback(task); });
+  if (task_id == 0) {
+    execute_ed_queued_callback(task);
+    return;
+  }
+  vm_owner_drain_main_tasks(64);
+}
+#endif
 
 #define putcntl(X) \
   *line++ = '^';   \
@@ -820,13 +870,14 @@ static int dowrite(int from, int to, const char *fname, int apflg) {
 
 #ifdef OLD_ED
   if (ED_BUFFER->write_fn) {
-    push_malloced_string(add_slash(fname));
-    push_number(1);
-    set_eval(max_eval_cost);
-    VMOwnerScope owner_scope(vm_context(), vm_owner_id(ED_BUFFER->exit_ob), vm_owner_epoch(ED_BUFFER->exit_ob));
-    vm_owner_record_task_trace(vm_owner_id(ED_BUFFER->exit_ob), "ed_callback", ED_BUFFER->write_fn,
-                               vm_owner_epoch(ED_BUFFER->exit_ob), "dispatched");
-    safe_apply(ED_BUFFER->write_fn, ED_BUFFER->exit_ob, 2, ORIGIN_INTERNAL);
+    auto *args = allocate_empty_array(2);
+    args->item[0].type = T_STRING;
+    args->item[0].subtype = STRING_MALLOC;
+    args->item[0].u.string = add_slash(fname);
+    args->item[1].type = T_NUMBER;
+    args->item[1].subtype = 0;
+    args->item[1].u.number = 1;
+    enqueue_ed_callback(ED_BUFFER->exit_ob, ED_BUFFER->write_fn, args);
   }
 #endif
 
