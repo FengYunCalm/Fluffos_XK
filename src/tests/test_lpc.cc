@@ -844,6 +844,7 @@ TEST_F(DriverTest, TestVmOwnerHeartbeatStaleOwnerSkipsExecution) {
     if (std::string(mapping_string(event, "task_type")) == "heartbeat" &&
         std::string(mapping_string(event, "state")) == "stale") {
       saw_stale = true;
+      ASSERT_STREQ(mapping_string(event, "owner_id"), "owner/test/heartbeat-stale-old");
     }
   }
   ASSERT_TRUE(saw_stale);

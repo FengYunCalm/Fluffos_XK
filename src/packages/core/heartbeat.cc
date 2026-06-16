@@ -127,7 +127,7 @@ void call_heart_beat() {
     }
 
     if (curr_hb->owner_id != vm_owner_id(ob) || curr_hb->owner_epoch != vm_owner_epoch(ob)) {
-      vm_owner_record_task_trace(vm_owner_id(ob), "heartbeat", "heart_beat", vm_owner_epoch(ob), "stale");
+      vm_owner_record_task_trace(curr_hb->owner_id.c_str(), "heartbeat", "heart_beat", curr_hb->owner_epoch, "stale");
       continue;
     }
     vm_owner_enqueue_main_task(ob, "heartbeat", "heart_beat", [ob] { execute_heart_beat(ob); });

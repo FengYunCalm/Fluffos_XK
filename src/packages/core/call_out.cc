@@ -219,8 +219,8 @@ static void execute_call_out(pending_call_t *cop) {
   }
 
   if ((cop->owner_id && strcmp(cop->owner_id, vm_owner_id(ob)) != 0) || cop->owner_epoch != vm_owner_epoch(ob)) {
-    vm_owner_record_task_trace(vm_owner_id(ob), "call_out", cop->ob ? cop->function.s : "<function>",
-                               vm_owner_epoch(ob), "stale");
+    vm_owner_record_task_trace(cop->owner_id ? cop->owner_id : vm_owner_default_id(), "call_out",
+                               cop->ob ? cop->function.s : "<function>", cop->owner_epoch, "stale");
     free_call(cop);
     return;
   }
