@@ -1397,6 +1397,55 @@ TEST_F(DriverTest, TestVmOwnerThreadExperimentIsOptInAndDispatchesMailboxTasks) 
   free_mapping(stopped);
 }
 
+TEST_F(DriverTest, TestVmOwnerThreadDrainsPendingOwnerMessages) {
+  const char* owner = "owner/test/thread/pending-message";
+
+  vm_owner_thread_stop();
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* submitted = vm_owner_submit_message("owner/test/thread/source", owner, "message", "payload/thread");
+  ASSERT_EQ(mapping_number(submitted, "success"), 1);
+  auto future_id = mapping_number(submitted, "future_id");
+  free_mapping(submitted);
+
+  auto* owner_status = vm_object_store_owner_status(owner);
+  ASSERT_EQ(mapping_number(owner_status, "pending_messages"), 1);
+  free_mapping(owner_status);
+
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 100; i++) {
+    auto* status = vm_owner_mailbox_status(owner);
+    auto depth = mapping_number(status, "owner_queue_depth");
+    free_mapping(status);
+    if (depth == 0) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  owner_status = vm_object_store_owner_status(owner);
+  ASSERT_EQ(mapping_number(owner_status, "pending_messages"), 0);
+  free_mapping(owner_status);
+
+  auto* future = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+  ASSERT_EQ(mapping_number(future, "success"), 1);
+  ASSERT_STREQ(mapping_string(future, "state"), "completed");
+  free_mapping(future);
+
+  vm_owner_thread_stop();
+}
+
 TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
   const char* owner = "owner/test/thread/safe-experiment";
 

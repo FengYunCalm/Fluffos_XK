@@ -1524,6 +1524,7 @@ mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *targ
   bool notify_owner_thread = false;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    vm_object_store_record_message(target_owner.c_str(), target_task_id);
     owner_futures[future.future_id] = std::move(future);
     owner_message_traces.push_back(std::move(trace));
     while (owner_message_traces.size() > kOwnerMessageTraceLimit) {
@@ -1532,7 +1533,6 @@ mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *targ
     enqueue_owner_task_locked(std::move(task), target_owner, &notify_owner_thread);
   }
   total_message_traced.fetch_add(1, std::memory_order_relaxed);
-  vm_object_store_record_message(target_owner.c_str(), target_task_id);
   if (notify_owner_thread) {
     owner_runtime_cv.notify_one();
   }
