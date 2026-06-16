@@ -131,6 +131,7 @@ void clear_state() {
   vm_context_set_caller_type(vm_context(), 0);
   vm_context_set_call_origin(vm_context(), 0);
   vm_context_set_inherit_offsets(vm_context(), 0, 0);
+  vm_context_set_stack_temporary_depth(vm_context(), 0);
   vm_context_set_current_error_context(vm_context(), nullptr);
   vm_context_set_error_flags(vm_context(), 0, 0);
   vm_context_reset_execution(vm_context());

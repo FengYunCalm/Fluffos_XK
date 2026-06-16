@@ -88,6 +88,7 @@ TEST_F(DriverTest, TestVmContextTracksTopLevelState) {
   ASSERT_EQ(vm_context().execution.call_origin, 0);
   ASSERT_EQ(vm_context().execution.function_index_offset, 0);
   ASSERT_EQ(vm_context().execution.variable_index_offset, 0);
+  ASSERT_EQ(vm_context().execution.stack_in_use_as_temporary, 0);
   ASSERT_EQ(vm_context().error.current_error_context, nullptr);
   ASSERT_EQ(vm_context().error.too_deep_error, 0);
   ASSERT_EQ(vm_context().error.max_eval_error, 0);
@@ -104,6 +105,7 @@ TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
   caller_type = 0;
   vm_context_set_call_origin(vm_context(), 0);
   vm_context_set_inherit_offsets(vm_context(), 0, 0);
+  vm_context_set_stack_temporary_depth(vm_context(), 0);
   vm_context_sync_execution(vm_context());
 
   object_t* obj = find_object("single/master.c");
@@ -119,6 +121,7 @@ TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
   scoped.call_origin = ORIGIN_EFUN;
   scoped.function_index_offset = 7;
   scoped.variable_index_offset = 11;
+  scoped.stack_in_use_as_temporary = 2;
 
   {
     VMExecutionScope scope(vm_context(), scoped);
@@ -131,6 +134,9 @@ TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
     ASSERT_EQ(call_origin, ORIGIN_EFUN);
     ASSERT_EQ(function_index_offset, 7);
     ASSERT_EQ(variable_index_offset, 11);
+#ifdef DEBUG
+    ASSERT_EQ(stack_in_use_as_temporary, 2);
+#endif
     ASSERT_EQ(vm_context().execution.current_object, obj);
     ASSERT_EQ(vm_context().execution.command_giver, obj);
     ASSERT_EQ(vm_context().execution.current_interactive, obj);
@@ -140,6 +146,7 @@ TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
     ASSERT_EQ(vm_context().execution.call_origin, ORIGIN_EFUN);
     ASSERT_EQ(vm_context().execution.function_index_offset, 7);
     ASSERT_EQ(vm_context().execution.variable_index_offset, 11);
+    ASSERT_EQ(vm_context().execution.stack_in_use_as_temporary, 2);
   }
 
   ASSERT_EQ(current_object, master_ob);
@@ -151,6 +158,9 @@ TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
   ASSERT_EQ(call_origin, 0);
   ASSERT_EQ(function_index_offset, 0);
   ASSERT_EQ(variable_index_offset, 0);
+#ifdef DEBUG
+  ASSERT_EQ(stack_in_use_as_temporary, 0);
+#endif
   ASSERT_EQ(vm_context().execution.current_object, master_ob);
   ASSERT_EQ(vm_context().execution.command_giver, nullptr);
   ASSERT_EQ(vm_context().execution.current_interactive, nullptr);
@@ -160,6 +170,7 @@ TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
   ASSERT_EQ(vm_context().execution.call_origin, 0);
   ASSERT_EQ(vm_context().execution.function_index_offset, 0);
   ASSERT_EQ(vm_context().execution.variable_index_offset, 0);
+  ASSERT_EQ(vm_context().execution.stack_in_use_as_temporary, 0);
 }
 
 TEST_F(DriverTest, TestVmCurrentInteractiveScopeRestoresState) {
@@ -230,6 +241,7 @@ TEST_F(DriverTest, TestVmExecutionFrameSettersSyncContext) {
   vm_context_set_caller_type(vm_context(), ORIGIN_LOCAL);
   vm_context_set_call_origin(vm_context(), ORIGIN_CALL_OTHER);
   vm_context_set_inherit_offsets(vm_context(), 3, 5);
+  vm_context_set_stack_temporary_depth(vm_context(), 2);
   ASSERT_EQ(current_object, second);
   ASSERT_EQ(current_prog, second->prog);
   ASSERT_EQ(previous_ob, first);
@@ -237,6 +249,9 @@ TEST_F(DriverTest, TestVmExecutionFrameSettersSyncContext) {
   ASSERT_EQ(call_origin, ORIGIN_CALL_OTHER);
   ASSERT_EQ(function_index_offset, 3);
   ASSERT_EQ(variable_index_offset, 5);
+#ifdef DEBUG
+  ASSERT_EQ(stack_in_use_as_temporary, 2);
+#endif
   ASSERT_EQ(vm_context().execution.current_object, second);
   ASSERT_EQ(vm_context().execution.current_prog, second->prog);
   ASSERT_EQ(vm_context().execution.previous_ob, first);
@@ -244,10 +259,18 @@ TEST_F(DriverTest, TestVmExecutionFrameSettersSyncContext) {
   ASSERT_EQ(vm_context().execution.call_origin, ORIGIN_CALL_OTHER);
   ASSERT_EQ(vm_context().execution.function_index_offset, 3);
   ASSERT_EQ(vm_context().execution.variable_index_offset, 5);
+  ASSERT_EQ(vm_context().execution.stack_in_use_as_temporary, 2);
+
+  vm_context_adjust_stack_temporary_depth(vm_context(), -1);
+#ifdef DEBUG
+  ASSERT_EQ(stack_in_use_as_temporary, 1);
+#endif
+  ASSERT_EQ(vm_context().execution.stack_in_use_as_temporary, 1);
 
   vm_context_set_execution_frame(vm_context(), master_ob, nullptr, nullptr, 0);
   vm_context_set_call_origin(vm_context(), 0);
   vm_context_set_inherit_offsets(vm_context(), 0, 0);
+  vm_context_set_stack_temporary_depth(vm_context(), 0);
 }
 
 TEST_F(DriverTest, TestVmErrorContextStackSyncsContext) {

@@ -94,6 +94,18 @@ void vm_context_set_inherit_offsets(VMContext &context, int function_offset, int
   context.execution.variable_index_offset = variable_offset;
 }
 
+void vm_context_set_stack_temporary_depth(VMContext &context, int depth) {
+#ifdef DEBUG
+  stack_in_use_as_temporary = depth;
+#endif
+  context.execution.stack_in_use_as_temporary = depth;
+}
+
+void vm_context_adjust_stack_temporary_depth(VMContext &context, int delta) {
+  vm_context_set_stack_temporary_depth(context,
+                                       context.execution.stack_in_use_as_temporary + delta);
+}
+
 void vm_context_set_execution_frame(VMContext &context, object_t *object, program_t *program,
                                     object_t *previous, int type) {
   current_object = object;
@@ -141,6 +153,9 @@ VMExecutionState vm_context_capture_execution() {
   execution.call_origin = call_origin;
   execution.function_index_offset = function_index_offset;
   execution.variable_index_offset = variable_index_offset;
+#ifdef DEBUG
+  execution.stack_in_use_as_temporary = stack_in_use_as_temporary;
+#endif
   return execution;
 }
 
@@ -154,6 +169,9 @@ void vm_context_apply_execution(VMContext &context, const VMExecutionState &exec
   call_origin = execution.call_origin;
   function_index_offset = execution.function_index_offset;
   variable_index_offset = execution.variable_index_offset;
+#ifdef DEBUG
+  stack_in_use_as_temporary = execution.stack_in_use_as_temporary;
+#endif
   context.execution = execution;
 }
 
