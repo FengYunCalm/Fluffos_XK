@@ -125,6 +125,9 @@ extern thread_local int too_deep_error;
 extern thread_local int max_eval_error;
 extern thread_local int function_index_offset;
 extern thread_local int variable_index_offset;
+#ifdef DEBUG
+extern thread_local int stack_in_use_as_temporary;
+#endif
 extern int simul_efun_is_loading;
 extern program_t fake_prog;
 extern thread_local svalue_t global_lvalue_byte;

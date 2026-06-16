@@ -2755,7 +2755,7 @@ void eval_instruction(char *p) {
         int flags = EXTRACT_UCHAR(pc++);
 
 #ifdef DEBUG
-        stack_in_use_as_temporary++;
+        vm_context_adjust_stack_temporary_depth(vm_context(), 1);
 #endif
         if (flags & FOREACH_MAPPING) {
           CHECK_TYPES(sp, T_MAPPING, 2, F_FOREACH);
@@ -2885,7 +2885,7 @@ void eval_instruction(char *p) {
         /* fallthrough */
       case F_EXIT_FOREACH:
 #ifdef DEBUG
-        stack_in_use_as_temporary--;
+        vm_context_adjust_stack_temporary_depth(vm_context(), -1);
 #endif
         if (sp->type == T_REF) {
           if (sp->u.ref->lvalue == &global_lvalue_codepoint_sv) {
@@ -3952,7 +3952,7 @@ void eval_instruction(char *p) {
       case F_TIME_EXPRESSION: {
         long sec, usec;
 #ifdef DEBUG
-        stack_in_use_as_temporary++;
+        vm_context_adjust_stack_temporary_depth(vm_context(), 1);
 #endif
         get_usec_clock(&sec, &usec);
         push_number(sec);
@@ -3966,7 +3966,7 @@ void eval_instruction(char *p) {
         usec = (sec - (sp - 1)->u.number) * 1000000 + (usec - sp->u.number);
         sp -= 2;
 #ifdef DEBUG
-        stack_in_use_as_temporary--;
+        vm_context_adjust_stack_temporary_depth(vm_context(), -1);
 #endif
         push_number(usec);
         break;
@@ -4884,7 +4884,7 @@ void reset_machine(int first) {
   } else {
     pop_n_elems(sp - start_of_stack + 1);
 #ifdef DEBUG
-    stack_in_use_as_temporary = 0;
+    vm_context_set_stack_temporary_depth(vm_context(), 0);
 #endif
   }
 }

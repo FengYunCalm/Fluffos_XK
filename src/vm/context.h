@@ -20,6 +20,7 @@ struct VMExecutionState {
   int call_origin{0};
   int function_index_offset{0};
   int variable_index_offset{0};
+  int stack_in_use_as_temporary{0};
 };
 
 struct VMObjectStoreState {
@@ -69,6 +70,8 @@ void vm_context_set_current_program(VMContext &context, program_t *program);
 void vm_context_set_caller_type(VMContext &context, int type);
 void vm_context_set_call_origin(VMContext &context, int origin);
 void vm_context_set_inherit_offsets(VMContext &context, int function_offset, int variable_offset);
+void vm_context_set_stack_temporary_depth(VMContext &context, int depth);
+void vm_context_adjust_stack_temporary_depth(VMContext &context, int delta);
 void vm_context_set_execution_frame(VMContext &context, object_t *object, program_t *program,
                                     object_t *previous, int type);
 void vm_context_set_current_error_context(VMContext &context, error_context_t *error_context);
