@@ -1991,7 +1991,7 @@ exit:
     debug_message("Error '%s' occurred while trying to print error trace -- trace suppressed.\n",
                   err);
   } else {
-    too_deep_error = max_eval_error = 0;
+    vm_context_set_error_flags(vm_context(), 0, 0);
   }
   if (current_error_context) {
     throw("error handler error");

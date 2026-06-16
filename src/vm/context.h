@@ -38,6 +38,8 @@ struct VMOwnerState {
 
 struct VMErrorState {
   error_context_t *current_error_context{nullptr};
+  int too_deep_error{0};
+  int max_eval_error{0};
 };
 
 struct VMContext {
@@ -70,6 +72,9 @@ void vm_context_set_inherit_offsets(VMContext &context, int function_offset, int
 void vm_context_set_execution_frame(VMContext &context, object_t *object, program_t *program,
                                     object_t *previous, int type);
 void vm_context_set_current_error_context(VMContext &context, error_context_t *error_context);
+void vm_context_set_too_deep_error(VMContext &context, int value);
+void vm_context_set_max_eval_error(VMContext &context, int value);
+void vm_context_set_error_flags(VMContext &context, int too_deep, int max_eval);
 void vm_context_reset_execution(VMContext &context);
 VMExecutionState vm_context_capture_execution();
 void vm_context_apply_execution(VMContext &context, const VMExecutionState &execution);

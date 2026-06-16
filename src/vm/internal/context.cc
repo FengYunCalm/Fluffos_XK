@@ -2,6 +2,7 @@
 
 #include "vm/context.h"
 
+#include "vm/internal/base/interpret.h"
 #include "vm/internal/base/machine.h"
 #include "vm/internal/simulate.h"
 
@@ -108,6 +109,23 @@ void vm_context_set_execution_frame(VMContext &context, object_t *object, progra
 void vm_context_set_current_error_context(VMContext &context, error_context_t *error_context) {
   current_error_context = error_context;
   context.error.current_error_context = error_context;
+}
+
+void vm_context_set_too_deep_error(VMContext &context, int value) {
+  too_deep_error = value;
+  context.error.too_deep_error = value;
+}
+
+void vm_context_set_max_eval_error(VMContext &context, int value) {
+  max_eval_error = value;
+  context.error.max_eval_error = value;
+}
+
+void vm_context_set_error_flags(VMContext &context, int too_deep, int max_eval) {
+  too_deep_error = too_deep;
+  max_eval_error = max_eval;
+  context.error.too_deep_error = too_deep;
+  context.error.max_eval_error = max_eval;
 }
 
 void vm_context_reset_execution(VMContext &context) { context.execution = VMExecutionState{}; }

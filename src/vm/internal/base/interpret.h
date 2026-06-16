@@ -8,6 +8,7 @@
 
 #include "vm/internal/base/program.h"
 #include "vm/internal/base/svalue.h"
+#include "vm/context.h"
 
 /*
  * Control stack element.
@@ -88,7 +89,7 @@ struct function_lookup_info_t {
 #define call_program(prog, offset) eval_instruction(prog->program + offset)
 
 #define CHECK_STACK_OVERFLOW(x) \
-  if (sp + (x) >= end_of_stack) SAFE(too_deep_error = 1; error("stack overflow");)
+  if (sp + (x) >= end_of_stack) SAFE(vm_context_set_too_deep_error(vm_context(), 1); error("stack overflow");)
 #define STACK_INC SAFE(CHECK_STACK_OVERFLOW(1); sp++;)
 
 #define push_svalue(x) SAFE(STACK_INC; assign_svalue_no_free(sp, x);)

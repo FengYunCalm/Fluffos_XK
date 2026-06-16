@@ -89,6 +89,8 @@ TEST_F(DriverTest, TestVmContextTracksTopLevelState) {
   ASSERT_EQ(vm_context().execution.function_index_offset, 0);
   ASSERT_EQ(vm_context().execution.variable_index_offset, 0);
   ASSERT_EQ(vm_context().error.current_error_context, nullptr);
+  ASSERT_EQ(vm_context().error.too_deep_error, 0);
+  ASSERT_EQ(vm_context().error.max_eval_error, 0);
   ASSERT_EQ(vm_context().object_store.objects, obj_list);
   ASSERT_EQ(vm_context().object_store.destructed_objects, obj_list_destruct);
 }
@@ -272,6 +274,32 @@ TEST_F(DriverTest, TestVmErrorContextStackSyncsContext) {
   pop_context(&first);
   ASSERT_EQ(current_error_context, nullptr);
   ASSERT_EQ(vm_context().error.current_error_context, nullptr);
+}
+
+TEST_F(DriverTest, TestVmErrorFlagsSyncContext) {
+  vm_context_set_error_flags(vm_context(), 0, 0);
+  ASSERT_EQ(too_deep_error, 0);
+  ASSERT_EQ(max_eval_error, 0);
+  ASSERT_EQ(vm_context().error.too_deep_error, 0);
+  ASSERT_EQ(vm_context().error.max_eval_error, 0);
+
+  vm_context_set_too_deep_error(vm_context(), 1);
+  ASSERT_EQ(too_deep_error, 1);
+  ASSERT_EQ(max_eval_error, 0);
+  ASSERT_EQ(vm_context().error.too_deep_error, 1);
+  ASSERT_EQ(vm_context().error.max_eval_error, 0);
+
+  vm_context_set_max_eval_error(vm_context(), 1);
+  ASSERT_EQ(too_deep_error, 1);
+  ASSERT_EQ(max_eval_error, 1);
+  ASSERT_EQ(vm_context().error.too_deep_error, 1);
+  ASSERT_EQ(vm_context().error.max_eval_error, 1);
+
+  clear_state();
+  ASSERT_EQ(too_deep_error, 0);
+  ASSERT_EQ(max_eval_error, 0);
+  ASSERT_EQ(vm_context().error.too_deep_error, 0);
+  ASSERT_EQ(vm_context().error.max_eval_error, 0);
 }
 
 TEST_F(DriverTest, TestVmContextThreadScopeBindsThreadLocalContext) {
