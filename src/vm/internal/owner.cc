@@ -320,6 +320,12 @@ void release_deferred_owner_targets_on_main() {
   }
 }
 
+void record_owner_mailbox_task_drained(const OwnerMailboxTask &task) {
+  if (task.task_type == "owner_message") {
+    vm_object_store_remove_message(task.owner_id.c_str(), task.task_id);
+  }
+}
+
 mapping_t *owner_access_trace_mapping(const OwnerAccessTrace &trace) {
   auto policy_mode = owner_access_policy_mode(trace.operation.c_str(), trace.cross_owner);
   auto *map = allocate_mapping(15);
@@ -749,6 +755,7 @@ void owner_thread_loop() {
           owner_mailboxes.erase(it);
         }
       }
+      record_owner_mailbox_task_drained(task);
 
       {
         VMOwnerScope owner_scope(vm_context(), task.owner_id.c_str(), task.owner_epoch);
@@ -1313,6 +1320,7 @@ mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
     if (task.task_type == "owner_message" || task.task_type == "compute_result") {
       complete_owner_future_for_task_locked(task.task_id, "completed", task.task_key.c_str(), "");
     }
+    record_owner_mailbox_task_drained(task);
     auto *task_map = owner_mailbox_task_mapping(task);
     tasks->item[i].type = T_MAPPING;
     tasks->item[i].subtype = 0;
@@ -1347,6 +1355,7 @@ mapping_t *vm_owner_purge_mailbox(const char *owner_id) {
       append_owner_task_trace(task, "purged");
     }
     for (auto &task : it->second) {
+      record_owner_mailbox_task_drained(task);
       release_owner_task_target(&task);
     }
   }
@@ -1380,6 +1389,7 @@ mapping_t *vm_owner_schedule(int limit) {
     if (task.task_type == "owner_message" || task.task_type == "compute_result") {
       complete_owner_future_for_task_locked(task.task_id, "completed", task.task_key.c_str(), "");
     }
+    record_owner_mailbox_task_drained(task);
     auto *task_map = owner_mailbox_task_mapping(task);
     tasks->item[dispatched].type = T_MAPPING;
     tasks->item[dispatched].subtype = 0;
@@ -1522,7 +1532,7 @@ mapping_t *vm_owner_submit_message(const char *source_owner_id, const char *targ
     enqueue_owner_task_locked(std::move(task), target_owner, &notify_owner_thread);
   }
   total_message_traced.fetch_add(1, std::memory_order_relaxed);
-  vm_object_store_record_message(target_owner.c_str());
+  vm_object_store_record_message(target_owner.c_str(), target_task_id);
   if (notify_owner_thread) {
     owner_runtime_cv.notify_one();
   }

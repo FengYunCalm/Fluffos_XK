@@ -763,6 +763,51 @@ TEST_F(DriverTest, TestVmObjectStoreTracksPendingCallouts) {
   vm_owner_clear_id(obj);
 }
 
+TEST_F(DriverTest, TestVmObjectStoreTracksPendingOwnerMessages) {
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+
+  auto assert_pending_messages = [&](const char* owner_id, long expected) {
+    auto* owner_status = vm_object_store_owner_status(owner_id);
+    ASSERT_EQ(mapping_number(owner_status, "pending_messages"), expected);
+    free_mapping(owner_status);
+  };
+
+  auto* drained = vm_owner_submit_message("owner/test/message/source", "owner/test/message/drain",
+                                         "message", "payload/drain");
+  ASSERT_EQ(mapping_number(drained, "success"), 1);
+  free_mapping(drained);
+  assert_pending_messages("owner/test/message/drain", 1);
+  auto* drain_result = vm_owner_drain_mailbox("owner/test/message/drain", 1);
+  ASSERT_EQ(mapping_number(drain_result, "drained"), 1);
+  free_mapping(drain_result);
+  assert_pending_messages("owner/test/message/drain", 0);
+
+  auto* scheduled = vm_owner_submit_message("owner/test/message/source", "owner/test/message/schedule",
+                                           "message", "payload/schedule");
+  ASSERT_EQ(mapping_number(scheduled, "success"), 1);
+  free_mapping(scheduled);
+  assert_pending_messages("owner/test/message/schedule", 1);
+  auto* schedule_result = vm_owner_schedule(1);
+  ASSERT_EQ(mapping_number(schedule_result, "dispatched"), 1);
+  free_mapping(schedule_result);
+  assert_pending_messages("owner/test/message/schedule", 0);
+
+  auto* purged = vm_owner_submit_message("owner/test/message/source", "owner/test/message/purge",
+                                        "message", "payload/purge");
+  ASSERT_EQ(mapping_number(purged, "success"), 1);
+  free_mapping(purged);
+  assert_pending_messages("owner/test/message/purge", 1);
+  auto* purge_result = vm_owner_purge_mailbox("owner/test/message/purge");
+  ASSERT_EQ(mapping_number(purge_result, "purged"), 1);
+  free_mapping(purge_result);
+  assert_pending_messages("owner/test/message/purge", 0);
+}
+
 TEST_F(DriverTest, TestVmOwnerHeartbeatStaleOwnerSkipsExecution) {
   object_t* obj = load_object_for_test("single/void");
   ASSERT_NE(obj, nullptr);

@@ -30,6 +30,7 @@ struct ObjectShardRecord {
   uint64_t messages{0};
   std::unordered_set<uint64_t> active_heartbeats;
   std::unordered_set<uint64_t> pending_callouts;
+  std::unordered_set<uint64_t> pending_messages;
 };
 
 std::mutex object_store_mutex;
@@ -90,7 +91,7 @@ void sync_record_activity_locked(const ObjectRecord &record) {
 }
 
 mapping_t *shard_mapping(const ObjectShardRecord &shard) {
-  auto *map = allocate_mapping(9);
+  auto *map = allocate_mapping(10);
   add_mapping_string(map, "owner_id", shard.owner_id.c_str());
   add_mapping_pair(map, "objects", static_cast<long>(shard.objects.size()));
   add_mapping_pair(map, "registered", static_cast<long>(shard.registered));
@@ -100,6 +101,7 @@ mapping_t *shard_mapping(const ObjectShardRecord &shard) {
   add_mapping_pair(map, "callouts", static_cast<long>(shard.callouts));
   add_mapping_pair(map, "pending_callouts", static_cast<long>(shard.pending_callouts.size()));
   add_mapping_pair(map, "messages", static_cast<long>(shard.messages));
+  add_mapping_pair(map, "pending_messages", static_cast<long>(shard.pending_messages.size()));
   return map;
 }
 }  // namespace
@@ -243,9 +245,21 @@ void vm_object_store_remove_heartbeat(object_t *object) {
   shard_for_owner(record.owner_id).active_heartbeats.erase(record.object_id);
 }
 
-void vm_object_store_record_message(const char *owner_id) {
+void vm_object_store_record_message(const char *owner_id, uint64_t task_id) {
   std::lock_guard<std::mutex> lock(object_store_mutex);
-  shard_for_owner(safe_owner_id(owner_id)).messages++;
+  auto &shard = shard_for_owner(safe_owner_id(owner_id));
+  shard.messages++;
+  if (task_id != 0) {
+    shard.pending_messages.insert(task_id);
+  }
+}
+
+void vm_object_store_remove_message(const char *owner_id, uint64_t task_id) {
+  if (task_id == 0) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(object_store_mutex);
+  shard_for_owner(safe_owner_id(owner_id)).pending_messages.erase(task_id);
 }
 
 mapping_t *vm_object_store_status() {

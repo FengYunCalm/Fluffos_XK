@@ -26,7 +26,8 @@ void vm_object_store_record_callout(object_t *object, uint64_t callout_id);
 void vm_object_store_remove_callout(const char *owner_id, uint64_t callout_id);
 void vm_object_store_record_heartbeat(object_t *object);
 void vm_object_store_remove_heartbeat(object_t *object);
-void vm_object_store_record_message(const char *owner_id);
+void vm_object_store_record_message(const char *owner_id, uint64_t task_id);
+void vm_object_store_remove_message(const char *owner_id, uint64_t task_id);
 mapping_t *vm_object_store_status();
 mapping_t *vm_object_store_owner_status(const char *owner_id);
 
