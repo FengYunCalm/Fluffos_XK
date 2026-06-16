@@ -25,7 +25,7 @@ bool owner_payload_safe(svalue_t *value, int depth, std::string *error) {
       }
       return true;
     case T_MAPPING:
-      for (unsigned int i = 0; i <= value->u.map->table_size; i++) {
+      for (unsigned int i = 0; i < value->u.map->table_size; i++) {
         for (auto *node = value->u.map->table[i]; node; node = node->next) {
           if (node->values[0].type != T_STRING) {
             *error = "owner payload mapping keys must be strings";
