@@ -39,6 +39,14 @@ mixed call_target(object target)
   return call_other(target, "dummy");
 }
 
+mapping call_owner_async_echo(object target)
+{
+  return owner_call_async(target, "owner_async_echo", ([
+    "payload_key": "cross-owner/echo/v1",
+    "value": 41,
+  ]));
+}
+
 mapping owner_lpc_probe()
 {
   return ([

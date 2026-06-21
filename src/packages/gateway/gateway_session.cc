@@ -19,6 +19,8 @@
 #include <unordered_map>
 #include <vector>
 
+uint64_t gateway_enqueue_pending_command_internal(object_t *user);
+
 namespace {
 std::unordered_map<std::string, std::unique_ptr<GatewaySession>> g_gateway_sessions;
 std::unordered_map<object_t *, GatewaySession *> g_gateway_obj_to_session;
@@ -38,6 +40,60 @@ void gateway_debugf(const char *fmt, ...) {
   vsnprintf(buffer, sizeof(buffer), fmt, args);
   va_end(args);
   debug_message("%s", buffer);
+}
+
+std::string gateway_pending_command_snapshot(interactive_t *user) {
+  if (!user || !(user->iflags & CMD_IN_BUF) || user->text_end < user->text_start) {
+    return {};
+  }
+
+  if (user->iflags & SINGLE_CHAR) {
+    if (user->text_start >= user->text_end) {
+      return {};
+    }
+    auto c = user->text[user->text_start];
+    if (c == 8 || c == 127) {
+      return {};
+    }
+    return std::string(1, c);
+  }
+
+  auto end = user->text_start;
+  while (end < user->text_end && user->text[end] != '\n' && user->text[end] != '\r') {
+    end++;
+  }
+  return std::string(user->text + user->text_start, user->text + end);
+}
+
+svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, size_t snapshot_bytes) {
+  svalue_t payload{};
+  auto pending_bytes = user && user->text_end >= user->text_start ? user->text_end - user->text_start : 0;
+
+  payload.type = T_MAPPING;
+  payload.u.map = allocate_mapping(21);
+  add_mapping_string(payload.u.map, "payload_model", "gateway_command_buffer_metadata_v1");
+  add_mapping_string(payload.u.map, "payload_policy", "no_raw_command_text_in_trace");
+  add_mapping_string(payload.u.map, "input_source", "interactive_text_buffer");
+  add_mapping_string(payload.u.map, "command_text_snapshot_policy", "owner_private_redacted_from_trace");
+  add_mapping_pair(payload.u.map, "command_text_snapshot_ready", snapshot_ready ? 1 : 0);
+  add_mapping_pair(payload.u.map, "command_text_snapshot_bytes", static_cast<long>(snapshot_bytes));
+  add_mapping_pair(payload.u.map, "command_text_snapshot_redacted", snapshot_ready ? 1 : 0);
+  add_mapping_string(payload.u.map, "command_executor_blocker",
+                     snapshot_ready ? "ordinary_lpc_not_ready" : "interactive_command_buffer_not_snapshotted");
+  add_mapping_string(payload.u.map, "command_consume_model", "owner_owned_snapshot_main_thread_consume");
+  add_mapping_pair(payload.u.map, "command_consume_snapshot_ready", snapshot_ready ? 1 : 0);
+  add_mapping_pair(payload.u.map, "command_consume_executor_ready", snapshot_ready ? 1 : 0);
+  add_mapping_string(payload.u.map, "command_consume_blocker", snapshot_ready ? "" : "interactive_command_buffer_not_snapshotted");
+  add_mapping_string(payload.u.map, "execution_frame_restore_policy", "owner_executor_vmcontext_restore");
+  add_mapping_pair(payload.u.map, "execution_frame_restore_ready", 1);
+  add_mapping_string(payload.u.map, "execution_frame_restore_blocker", "");
+  add_mapping_string(payload.u.map, "session_id", user && user->gateway_session_id ? user->gateway_session_id : "");
+  add_mapping_pair(payload.u.map, "pending_bytes", pending_bytes);
+  add_mapping_pair(payload.u.map, "text_start", user ? user->text_start : 0);
+  add_mapping_pair(payload.u.map, "text_end", user ? user->text_end : 0);
+  add_mapping_pair(payload.u.map, "cmd_in_buf", user && (user->iflags & CMD_IN_BUF) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "gateway_session", user && (user->iflags & GATEWAY_SESSION) ? 1 : 0);
+  return payload;
 }
 
 void cleanup_temp_gateway_interactive(object_t *owner) {
@@ -76,12 +132,10 @@ void gateway_command_callback(evutil_socket_t /*fd*/, short /*what*/, void *arg)
   }
 
   if (user->ob && !(user->ob->flags & O_DESTRUCTED)) {
-    vm_owner_enqueue_main_task(user->ob, "gateway", "process_user_command", [user] {
-      set_eval(max_eval_cost);
-      process_user_command(user);
-      vm_context_set_current_interactive(vm_context(), nullptr);
-    });
-    vm_owner_drain_main_tasks(64);
+    auto task_id = gateway_enqueue_pending_command_internal(user->ob);
+    if (task_id != 0) {
+      vm_owner_drain_main_tasks(64);
+    }
   } else {
     set_eval(max_eval_cost);
     process_user_command(user);
@@ -187,6 +241,35 @@ void gateway_cleanup_master_sessions(int master_fd) {
 
 bool gateway_is_session(object_t *ob) {
   return ob && ob->interactive && (ob->interactive->iflags & GATEWAY_SESSION);
+}
+
+uint64_t gateway_enqueue_pending_command_internal(object_t *user) {
+  if (!gateway_is_session(user) || !user->interactive || !user->obname || (user->flags & O_DESTRUCTED)) {
+    return 0;
+  }
+
+  auto *ip = user->interactive;
+  auto command_snapshot = gateway_pending_command_snapshot(ip);
+  auto snapshot_ready = (ip->iflags & CMD_IN_BUF) != 0;
+  auto payload = gateway_command_task_payload(ip, snapshot_ready, command_snapshot.size());
+  auto task_id = vm_owner_enqueue_main_task_with_payload(
+      user, "gateway", "process_user_command", "gateway_command_input", &payload, [ip, command_snapshot] {
+        set_eval(max_eval_cost);
+        process_user_command_snapshot(ip, command_snapshot.c_str(), command_snapshot.size());
+        vm_context_set_current_interactive(vm_context(), nullptr);
+      }, nullptr, "gateway_command_execution_frame_v1", "owner_scope_current_interactive_command_giver",
+      "owner_owned_snapshot_main_thread_consume", "", true, true, "owner_executor_vmcontext_restore", "",
+      snapshot_ready ? command_snapshot.c_str() : nullptr, command_snapshot.size());
+  free_svalue(&payload, "gateway_command_task_payload");
+  return task_id;
+}
+
+int gateway_process_pending_command_internal(object_t *user) {
+  if (!gateway_is_session(user) || !user->interactive) {
+    return 0;
+  }
+  gateway_command_callback(0, 0, user->interactive);
+  return 1;
 }
 
 void gateway_session_exec_update(object_t *new_ob, object_t *old_ob) {
@@ -562,13 +645,16 @@ void f_gateway_session_info() {
     return;
   }
 
-  map = allocate_mapping(6);
+  map = allocate_mapping(9);
   add_mapping_string(map, "session_id", sess->session_id.c_str());
   add_mapping_string(map, "ip", sess->real_ip.c_str());
   add_mapping_pair(map, "port", sess->real_port);
   add_mapping_pair(map, "master_fd", sess->master_fd);
   add_mapping_pair(map, "connected_at", sess->connected_at);
   add_mapping_pair(map, "last_active", sess->last_active);
+  add_mapping_string(map, "object_name", sess->user_ob->obname);
+  add_mapping_string(map, "owner_id", vm_owner_id(sess->user_ob));
+  add_mapping_pair(map, "owner_epoch", static_cast<long>(vm_owner_epoch(sess->user_ob)));
   push_refed_mapping(map);
 }
 

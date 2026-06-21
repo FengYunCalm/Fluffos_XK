@@ -20,6 +20,8 @@
 #include <cstring>            // for NULL, memcpy, strlen, etc
 #include <unistd.h>           // for gethostname
 #include <memory>             // for unique_ptr
+#include <string>             // for string
+#include <vector>             // for vector
 // Network stuff
 #ifndef _WIN32
 #include <netdb.h>        // for addrinfo, freeaddrinfo, etc
@@ -54,6 +56,9 @@ extern void update_load_av();
  */
 static char *get_user_command(interactive_t * /*ip*/);
 static char *first_cmd_in_buf(interactive_t * /*ip*/);
+static int consume_user_command_snapshot(interactive_t * /*ip*/, const char * /*command_snapshot*/,
+                                         size_t /*command_snapshot_length*/);
+static int process_user_command_text(interactive_t * /*ip*/, char * /*user_command*/);
 static int call_function_interactive(interactive_t * /*i*/, char * /*str*/);
 static void print_prompt(interactive_t * /*ip*/);
 
@@ -1137,6 +1142,65 @@ static char *get_user_command(interactive_t *ip) {
   return user_command;
 } /* get_user_command() */
 
+static int consume_user_command_snapshot(interactive_t *ip, const char *command_snapshot,
+                                         size_t command_snapshot_length) {
+  if (!ip || !ip->ob || (ip->ob->flags & O_DESTRUCTED) || !command_snapshot) {
+    return 0;
+  }
+  if (!(ip->iflags & CMD_IN_BUF)) {
+    return 0;
+  }
+  if (!clean_buf(ip)) {
+    return 0;
+  }
+
+  if (ip->iflags & SINGLE_CHAR) {
+    if (ip->text_start >= ip->text_end) {
+      return 0;
+    }
+    auto c = ip->text[ip->text_start];
+    if (c == 8 || c == 127) {
+      c = 0;
+    }
+    if (!((command_snapshot_length == 0 && c == 0) ||
+          (command_snapshot_length == 1 && command_snapshot[0] == c))) {
+      return 0;
+    }
+    ip->text[ip->text_start++] = 0;
+    if (!clean_buf(ip)) {
+      ip->iflags &= ~CMD_IN_BUF;
+    }
+  } else {
+    auto start = ip->text_start;
+    auto end = start;
+    while (end < ip->text_end && ip->text[end] != '\n' && ip->text[end] != '\r') {
+      end++;
+    }
+    if (end >= ip->text_end || command_snapshot_length != static_cast<size_t>(end - start) ||
+        (command_snapshot_length > 0 && memcmp(command_snapshot, ip->text + start, command_snapshot_length) != 0)) {
+      return 0;
+    }
+    ip->text_start = end;
+    if (ip->text_start + 1 < ip->text_end &&
+        ((ip->text[ip->text_start] == '\r' && ip->text[ip->text_start + 1] == '\n') ||
+         (ip->text[ip->text_start] == '\n' && ip->text[ip->text_start + 1] == '\r'))) {
+      ip->text[ip->text_start++] = 0;
+    }
+    ip->text[ip->text_start++] = 0;
+    if (!cmd_in_buf(ip)) {
+      ip->iflags &= ~CMD_IN_BUF;
+    }
+  }
+
+  save_command_giver(ip->ob);
+  if (ip->iflags & NOECHO) {
+    set_localecho(command_giver->interactive, true);
+    ip->iflags &= ~NOECHO;
+  }
+  ip->last_time = get_current_time();
+  return 1;
+}
+
 static int escape_command(interactive_t *ip, const char *user_command) {
   if (user_command[0] != '!') {
     return 0;
@@ -1197,14 +1261,8 @@ static void process_input(interactive_t *ip, char *user_command) {
  * This function calls get_user_command() to get a user command.
  * One user command is processed per execution of this function.
  */
-int process_user_command(interactive_t *ip) {
-  char *user_command;
-
-  /*
-   * WARNING: get_user_command() sets command_giver via
-   * save_command_giver(), but only when the return is non-zero!
-   */
-  if (!(user_command = get_user_command(ip))) {
+static int process_user_command_text(interactive_t *ip, char *user_command) {
+  if (!user_command) {
     return 0;
   }
 
@@ -1293,6 +1351,33 @@ exit:
   vm_context_set_current_interactive(vm_context(), nullptr);
   restore_command_giver();
   return 1;
+}
+
+int process_user_command(interactive_t *ip) {
+  char *user_command;
+
+  /*
+   * WARNING: get_user_command() sets command_giver via
+   * save_command_giver(), but only when the return is non-zero!
+   */
+  if (!(user_command = get_user_command(ip))) {
+    return 0;
+  }
+  return process_user_command_text(ip, user_command);
+}
+
+int process_user_command_snapshot(interactive_t *ip, const char *command_snapshot, size_t command_snapshot_length) {
+  if (!consume_user_command_snapshot(ip, command_snapshot, command_snapshot_length)) {
+    return 0;
+  }
+
+  std::vector<char> user_command;
+  user_command.reserve(command_snapshot_length + 1);
+  if (command_snapshot_length > 0) {
+    user_command.insert(user_command.end(), command_snapshot, command_snapshot + command_snapshot_length);
+  }
+  user_command.push_back('\0');
+  return process_user_command_text(ip, user_command.data());
 }
 
 /*

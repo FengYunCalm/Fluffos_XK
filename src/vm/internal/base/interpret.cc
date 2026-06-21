@@ -4889,6 +4889,19 @@ void reset_machine(int first) {
   }
 }
 
+long vm_eval_stack_depth() {
+  if (sp < start_of_stack) {
+    return 0;
+  }
+  return static_cast<long>(sp - start_of_stack + 1);
+}
+
+long vm_eval_stack_capacity() { return CFG_EVALUATOR_STACK_SIZE; }
+
+bool vm_eval_stack_thread_local_storage_ready() {
+  return start_of_stack != nullptr && end_of_stack == start_of_stack + CFG_EVALUATOR_STACK_SIZE;
+}
+
 static const char *get_arg(int a, int b) {
   static char buff[50];
   char *from, *to;

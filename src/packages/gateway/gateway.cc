@@ -60,16 +60,30 @@ void gateway_apply_receive(object_t *user, svalue_t *data_sv) {
     return;
   }
 
-  save_command_giver(user);
-  {
-    VMOwnerScope owner_scope(vm_context(), vm_owner_id(user), vm_owner_epoch(user));
-    VMCurrentInteractiveScope interactive_scope(vm_context(), user);
-    vm_owner_record_task_trace(vm_owner_id(user), "gateway", "gateway_receive", vm_owner_epoch(user), "dispatched");
-    set_eval(max_eval_cost);
-    push_svalue(data_sv);
-    safe_apply("gateway_receive", user, 1, ORIGIN_DRIVER);
+  auto payload = std::shared_ptr<svalue_t>(new svalue_t{},
+                                           [](svalue_t *value) {
+                                             free_svalue(value, "gateway_receive_payload");
+                                             delete value;
+                                           });
+  assign_svalue_no_free(payload.get(), data_sv);
+
+  if (vm_owner_enqueue_main_task(user, "gateway", "gateway_receive", [user, payload] {
+        if (!gateway_object_valid_local(user)) {
+          return;
+        }
+        save_command_giver(user);
+        {
+          VMCurrentInteractiveScope interactive_scope(vm_context(), user);
+          vm_owner_record_task_trace(vm_owner_id(user), "gateway", "gateway_receive", vm_owner_epoch(user),
+                                     "dispatched");
+          set_eval(max_eval_cost);
+          push_svalue(payload.get());
+          safe_apply("gateway_receive", user, 1, ORIGIN_DRIVER);
+        }
+        restore_command_giver();
+      }) != 0) {
+    vm_owner_drain_main_tasks(64);
   }
-  restore_command_giver();
 }
 
 svalue_t json_to_gateway_svalue(const nlohmann::json &value) {
@@ -568,6 +582,19 @@ void gateway_listener_error_cb(evconnlistener * /*listener*/, void * /*ctx*/) {
 
 int gateway_svalue_to_json_string(const svalue_t *sv, std::string *out) {
   return gateway_svalue_to_json_string_impl(sv, out);
+}
+
+// C++ regression hook for gateway owner-scope tests; not part of the LPC/runtime API.
+bool gateway_dispatch_message_for_test(int fd, const char *payload) {
+  if (!payload) {
+    return false;
+  }
+  try {
+    gateway_dispatch_message(fd, nlohmann::json::parse(payload));
+    return true;
+  } catch (...) {
+    return false;
+  }
 }
 
 GatewayMaster::~GatewayMaster() {

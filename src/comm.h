@@ -6,6 +6,8 @@
 #ifndef COMM_H
 #define COMM_H
 
+#include <cstddef>
+
 #include <event2/util.h>
 
 /*
@@ -48,6 +50,7 @@ void shutdown_external_ports();
 void set_prompt(const char *);
 void get_user_data(struct interactive_t *);
 int process_user_command(struct interactive_t *);
+int process_user_command_snapshot(struct interactive_t *, const char *, size_t);
 int set_call(struct object_t *, struct sentence_t *, int);
 void remove_interactive(struct object_t *, int);
 

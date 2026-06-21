@@ -216,6 +216,24 @@ void vm_context_sync_execution(VMContext &context) {
   context.execution = vm_context_capture_execution();
 }
 
+void vm_context_sync_eval_stack(VMContext &context) {
+  if (!is_current_thread_context(context)) {
+    return;
+  }
+  auto sync_count = context.eval_stack.sync_count + 1;
+  context.eval_stack.owner_id = context.owner.current_owner_id;
+  context.eval_stack.owner_epoch = context.owner.current_owner_epoch;
+  context.eval_stack.depth = vm_eval_stack_depth();
+  context.eval_stack.capacity = vm_eval_stack_capacity();
+  context.eval_stack.thread_local_storage = vm_eval_stack_thread_local_storage_ready();
+  context.eval_stack.context_bound = true;
+  context.eval_stack.owner_bound = !context.owner.current_owner_id.empty();
+  context.eval_stack.empty = context.eval_stack.depth == 0;
+  context.eval_stack.sync_count = sync_count;
+}
+
+void vm_context_clear_eval_stack(VMContext &context) { context.eval_stack = VMEvalStackState{}; }
+
 void vm_context_sync_object_store(VMContext &context) {
   if (!can_sync_object_store_to_context(context)) {
     clear_object_store_snapshot(context.object_store);
