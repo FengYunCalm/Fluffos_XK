@@ -4902,6 +4902,17 @@ bool vm_eval_stack_thread_local_storage_ready() {
   return start_of_stack != nullptr && end_of_stack == start_of_stack + CFG_EVALUATOR_STACK_SIZE;
 }
 
+long vm_control_stack_depth() {
+  if (csp == nullptr || csp < control_stack) {
+    return 0;
+  }
+  return static_cast<long>(csp - control_stack + 1);
+}
+
+long vm_control_stack_capacity() { return CFG_MAX_CALL_DEPTH; }
+
+bool vm_control_stack_thread_local_storage_ready() { return control_stack == &_control_stack[5]; }
+
 static const char *get_arg(int a, int b) {
   static char buff[50];
   char *from, *to;

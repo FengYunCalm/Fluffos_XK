@@ -60,6 +60,18 @@ struct VMEvalStackState {
   uint64_t sync_count{0};
 };
 
+struct VMControlStackState {
+  std::string owner_id;
+  uint64_t owner_epoch{0};
+  long depth{0};
+  long capacity{0};
+  bool thread_local_storage{false};
+  bool context_bound{false};
+  bool owner_bound{false};
+  bool empty{true};
+  uint64_t sync_count{0};
+};
+
 struct VMContext {
   time_t boot_time{0};
   event_base *event_loop{nullptr};
@@ -68,6 +80,7 @@ struct VMContext {
   VMExecutionState execution;
   VMErrorState error;
   VMEvalStackState eval_stack;
+  VMControlStackState control_stack;
   VMObjectStoreState object_store;
 };
 
@@ -108,6 +121,8 @@ void vm_context_apply_execution(VMContext &context, const VMExecutionState &exec
 void vm_context_sync_execution(VMContext &context);
 void vm_context_sync_eval_stack(VMContext &context);
 void vm_context_clear_eval_stack(VMContext &context);
+void vm_context_sync_control_stack(VMContext &context);
+void vm_context_clear_control_stack(VMContext &context);
 void vm_context_sync_object_store(VMContext &context);
 uint64_t vm_context_object_store_sync_rejections();
 
