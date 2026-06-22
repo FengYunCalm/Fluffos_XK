@@ -3195,6 +3195,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(gateway_contract, "command_executor_readiness_gate_count"), 7);
     ASSERT_EQ(mapping_number(gateway_contract, "command_executor_satisfied_gate_count"), 6);
     ASSERT_EQ(mapping_number(gateway_contract, "command_executor_blocked_gate_count"), 1);
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_side_effect_readiness_gate_model"),
+                 "all_side_effect_gates_required_before_activation");
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_readiness_gate_count"), 5);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_satisfied_gate_count"), 1);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_blocked_gate_count"), 4);
     auto* command_executor_gates = mapping_array(gateway_contract, "command_executor_readiness_gates");
     ASSERT_NE(command_executor_gates, nullptr);
     ASSERT_EQ(command_executor_gates->size, 7);
@@ -3226,6 +3231,37 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(command_executor_gate("gateway_command_executor_activation"), "satisfied"), 0);
     ASSERT_STREQ(mapping_string(command_executor_gate("gateway_command_executor_activation"), "blocker"),
                  "interactive_command_side_effects_main_thread_bound");
+    auto* command_side_effect_gates = mapping_array(gateway_contract, "command_side_effect_readiness_gates");
+    ASSERT_NE(command_side_effect_gates, nullptr);
+    ASSERT_EQ(command_side_effect_gates->size, 5);
+    std::unordered_map<std::string, mapping_t*> command_side_effect_gates_by_name;
+    for (int i = 0; i < command_side_effect_gates->size; i++) {
+      ASSERT_EQ(command_side_effect_gates->item[i].type, T_MAPPING);
+      auto* gate = command_side_effect_gates->item[i].u.map;
+      command_side_effect_gates_by_name[mapping_string(gate, "gate")] = gate;
+      ASSERT_NE(mapping_string(gate, "model"), nullptr);
+      ASSERT_NE(mapping_string(gate, "blocker"), nullptr);
+      ASSERT_NE(mapping_string(gate, "next_action"), nullptr);
+    }
+    auto command_side_effect_gate = [&](const std::string& gate_name) -> mapping_t* {
+      auto it = command_side_effect_gates_by_name.find(gate_name);
+      EXPECT_NE(it, command_side_effect_gates_by_name.end());
+      return it == command_side_effect_gates_by_name.end() ? nullptr : it->second;
+    };
+    ASSERT_EQ(mapping_number(command_side_effect_gate("interactive_buffer_consume"), "satisfied"), 1);
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_buffer_consume"), "blocker"), "");
+    ASSERT_EQ(mapping_number(command_side_effect_gate("input_to_get_char_state"), "satisfied"), 0);
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("input_to_get_char_state"), "blocker"),
+                 "input_to_get_char_state_main_thread_bound");
+    ASSERT_EQ(mapping_number(command_side_effect_gate("process_input_add_action_parser"), "satisfied"), 0);
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("process_input_add_action_parser"), "blocker"),
+                 "add_action_parser_command_giver_main_thread_bound");
+    ASSERT_EQ(mapping_number(command_side_effect_gate("prompt_telnet_reschedule_io"), "satisfied"), 0);
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("prompt_telnet_reschedule_io"), "blocker"),
+                 "prompt_telnet_reschedule_main_thread_bound");
+    ASSERT_EQ(mapping_number(command_side_effect_gate("interactive_mode_flags"), "satisfied"), 0);
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_mode_flags"), "blocker"),
+                 "interactive_mode_flags_main_thread_bound");
     ASSERT_EQ(mapping_number(gateway_contract, "ordinary_lpc_ready_required"), 0);
     ASSERT_EQ(mapping_number(gateway_contract, "main_required"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "next_blocker"),

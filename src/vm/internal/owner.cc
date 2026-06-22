@@ -228,6 +228,19 @@ constexpr std::array<VMContextReadinessGate, 7> kGatewayCommandExecutorReadiness
      kGatewayCommandExecutorActivationBlocker, "migrate_interactive_command_side_effects_before_activation", 0},
 }};
 
+constexpr std::array<VMContextReadinessGate, 5> kGatewayCommandSideEffectReadinessGates = {{
+    {"interactive_buffer_consume", "owner_snapshot_main_thread_consume", "",
+     "keep_snapshot_consume_before_executor_activation", 1},
+    {"input_to_get_char_state", "interactive_input_callback_state",
+     "input_to_get_char_state_main_thread_bound", "isolate_input_callback_state_from_interactive_t", 0},
+    {"process_input_add_action_parser", "interactive_command_parser_state",
+     "add_action_parser_command_giver_main_thread_bound", "migrate_parser_state_to_owner_context", 0},
+    {"prompt_telnet_reschedule_io", "interactive_output_reschedule_state",
+     "prompt_telnet_reschedule_main_thread_bound", "move_prompt_and_reschedule_side_effects_to_main_reply_queue", 0},
+    {"interactive_mode_flags", "interactive_flags_echo_mxp_ed_state",
+     "interactive_mode_flags_main_thread_bound", "split_echo_mxp_ed_mode_mutations_from_owner_command_execution", 0},
+}};
+
 constexpr std::array<VMContextReadinessGate, 13> kVMContextOrdinaryLpcReadinessGates = {{
     {"thread_local_vm_context", "thread_local_vm_context", "", "keep_thread_local_context_binding", 1},
     {"execution_state_contextualized", "vm_context_execution_snapshot", "", "keep_execution_state_api_only", 1},
@@ -899,6 +912,26 @@ long gateway_command_executor_satisfied_readiness_gate_count() {
   return count;
 }
 
+array_t *gateway_command_side_effect_readiness_gates_array() {
+  auto *gates = allocate_array(static_cast<int>(kGatewayCommandSideEffectReadinessGates.size()));
+  for (size_t i = 0; i < kGatewayCommandSideEffectReadinessGates.size(); i++) {
+    gates->item[i].type = T_MAPPING;
+    gates->item[i].subtype = 0;
+    gates->item[i].u.map = vm_context_readiness_gate_mapping(kGatewayCommandSideEffectReadinessGates[i]);
+  }
+  return gates;
+}
+
+long gateway_command_side_effect_satisfied_readiness_gate_count() {
+  long count = 0;
+  for (const auto &gate : kGatewayCommandSideEffectReadinessGates) {
+    if (gate.satisfied) {
+      count++;
+    }
+  }
+  return count;
+}
+
 array_t *string_array_from_contract(const std::array<const char *, 5> &values) {
   auto *array = allocate_array(static_cast<int>(values.size()));
   for (size_t i = 0; i < values.size(); i++) {
@@ -1010,7 +1043,7 @@ array_t *gateway_owner_task_contract_entries_array() {
 }
 
 mapping_t *gateway_owner_task_contract_mapping() {
-  auto *map = allocate_mapping(36);
+  auto *map = allocate_mapping(44);
   add_mapping_pair(map, "contract_version", 1);
   add_mapping_string(map, "input_model", "owner_main_queue_bridge");
   add_mapping_string(map, "executor_migration_state", "main_required_before_owner_executor");
@@ -1045,6 +1078,18 @@ mapping_t *gateway_owner_task_contract_mapping() {
   auto *command_executor_gates = gateway_command_executor_readiness_gates_array();
   add_mapping_array(map, "command_executor_readiness_gates", command_executor_gates);
   free_array(command_executor_gates);
+  add_mapping_string(map, "command_side_effect_readiness_gate_model",
+                     "all_side_effect_gates_required_before_activation");
+  add_mapping_pair(map, "command_side_effect_readiness_gate_count",
+                   static_cast<long>(kGatewayCommandSideEffectReadinessGates.size()));
+  const auto command_side_effect_satisfied_gates = gateway_command_side_effect_satisfied_readiness_gate_count();
+  add_mapping_pair(map, "command_side_effect_satisfied_gate_count", command_side_effect_satisfied_gates);
+  add_mapping_pair(map, "command_side_effect_blocked_gate_count",
+                   static_cast<long>(kGatewayCommandSideEffectReadinessGates.size()) -
+                       command_side_effect_satisfied_gates);
+  auto *command_side_effect_gates = gateway_command_side_effect_readiness_gates_array();
+  add_mapping_array(map, "command_side_effect_readiness_gates", command_side_effect_gates);
+  free_array(command_side_effect_gates);
   add_mapping_pair(map, "ordinary_lpc_ready_required", 0);
   add_mapping_pair(map, "main_required", 1);
   add_mapping_pair(map, "task_count", static_cast<long>(kGatewayOwnerTaskContracts.size()));

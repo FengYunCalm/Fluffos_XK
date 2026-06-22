@@ -261,8 +261,10 @@ void assert_gateway_contract_entry(mapping contract, string task_key,
 void assert_gateway_owner_task_contract(mapping contract) {
     mixed *tasks = contract["tasks"];
     mixed *command_executor_gates = contract["command_executor_readiness_gates"];
+    mixed *command_side_effect_gates = contract["command_side_effect_readiness_gates"];
     mapping task_by_key = ([]);
     mapping command_executor_gate_by_name = ([]);
+    mapping command_side_effect_gate_by_name = ([]);
     int i;
 
     ASSERT(mapp(contract));
@@ -305,6 +307,11 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ(7, contract["command_executor_readiness_gate_count"]);
     ASSERT_EQ(6, contract["command_executor_satisfied_gate_count"]);
     ASSERT_EQ(1, contract["command_executor_blocked_gate_count"]);
+    ASSERT_EQ("all_side_effect_gates_required_before_activation",
+              contract["command_side_effect_readiness_gate_model"]);
+    ASSERT_EQ(5, contract["command_side_effect_readiness_gate_count"]);
+    ASSERT_EQ(1, contract["command_side_effect_satisfied_gate_count"]);
+    ASSERT_EQ(4, contract["command_side_effect_blocked_gate_count"]);
     ASSERT(arrayp(command_executor_gates));
     ASSERT_EQ(7, sizeof(command_executor_gates));
     for (i = 0; i < sizeof(command_executor_gates); i++) {
@@ -333,6 +340,33 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ(0, command_executor_gate_by_name["gateway_command_executor_activation"]["satisfied"]);
     ASSERT_EQ("interactive_command_side_effects_main_thread_bound",
               command_executor_gate_by_name["gateway_command_executor_activation"]["blocker"]);
+    ASSERT(arrayp(command_side_effect_gates));
+    ASSERT_EQ(5, sizeof(command_side_effect_gates));
+    for (i = 0; i < sizeof(command_side_effect_gates); i++) {
+        mapping gate = command_side_effect_gates[i];
+
+        ASSERT(mapp(gate));
+        ASSERT(stringp(gate["gate"]));
+        ASSERT(stringp(gate["model"]));
+        ASSERT(intp(gate["satisfied"]));
+        ASSERT(stringp(gate["blocker"]));
+        ASSERT(stringp(gate["next_action"]));
+        command_side_effect_gate_by_name[gate["gate"]] = gate;
+    }
+    ASSERT_EQ(1, command_side_effect_gate_by_name["interactive_buffer_consume"]["satisfied"]);
+    ASSERT_EQ("", command_side_effect_gate_by_name["interactive_buffer_consume"]["blocker"]);
+    ASSERT_EQ(0, command_side_effect_gate_by_name["input_to_get_char_state"]["satisfied"]);
+    ASSERT_EQ("input_to_get_char_state_main_thread_bound",
+              command_side_effect_gate_by_name["input_to_get_char_state"]["blocker"]);
+    ASSERT_EQ(0, command_side_effect_gate_by_name["process_input_add_action_parser"]["satisfied"]);
+    ASSERT_EQ("add_action_parser_command_giver_main_thread_bound",
+              command_side_effect_gate_by_name["process_input_add_action_parser"]["blocker"]);
+    ASSERT_EQ(0, command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["satisfied"]);
+    ASSERT_EQ("prompt_telnet_reschedule_main_thread_bound",
+              command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["blocker"]);
+    ASSERT_EQ(0, command_side_effect_gate_by_name["interactive_mode_flags"]["satisfied"]);
+    ASSERT_EQ("interactive_mode_flags_main_thread_bound",
+              command_side_effect_gate_by_name["interactive_mode_flags"]["blocker"]);
     ASSERT_EQ(0, contract["ordinary_lpc_ready_required"]);
     ASSERT_EQ(1, contract["main_required"]);
     ASSERT_EQ("gateway_command_executor_activation",
