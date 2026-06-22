@@ -7698,6 +7698,16 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_EQ(mapping_number(payload, "process_input_add_action_parser_command_text_redacted"), 1);
         ASSERT_FALSE(mapping_has_string_key(payload, "process_input_add_action_parser_command_giver"));
         ASSERT_FALSE(mapping_has_string_key(payload, "process_input_add_action_parser_command_text"));
+        ASSERT_STREQ(mapping_string(payload, "interactive_mode_flags_state_policy"),
+                     "redacted_interactive_mode_flags_v1");
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_flags_state_snapshot_ready"), 1);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_flags_state_redacted"), 1);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_noecho"), 0);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_noescape"), 0);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_single_char"), 0);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_was_single_char"), 0);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_using_mxp"), 0);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_ed_buffer_active"), 0);
         ASSERT_STREQ(mapping_string(payload, "command_executor_blocker"),
                      "interactive_command_side_effects_main_thread_bound");
         ASSERT_STREQ(mapping_string(payload, "command_consume_model"), "owner_owned_snapshot_main_thread_consume");
@@ -7918,6 +7928,13 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveGetCharState) {
         ASSERT_EQ(mapping_number(payload, "input_callback_carryover_count"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_function_redacted"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_object_redacted"), 1);
+        ASSERT_STREQ(mapping_string(payload, "interactive_mode_flags_state_policy"),
+                     "redacted_interactive_mode_flags_v1");
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_noecho"), 1);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_noescape"), 1);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_single_char"), 1);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_was_single_char"), 0);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_ed_buffer_active"), 0);
         ASSERT_FALSE(mapping_has_string_key(payload, "input_callback_function"));
         ASSERT_FALSE(mapping_has_string_key(payload, "input_callback_object"));
         ASSERT_FALSE(mapping_has_string_key(payload, "command_text"));
