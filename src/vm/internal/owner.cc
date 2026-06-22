@@ -227,8 +227,8 @@ constexpr std::array<VMContextReadinessGate, 11> kVMContextOrdinaryLpcReadinessG
      "keep_value_stack_synced_to_owner_vm_context", 1},
     {"apply_return_owner_local", "thread_local_owner_apply_return", "",
      "keep_apply_return_synced_to_owner_vm_context", 1},
-    {"object_refs_owner_local", "object_handle_boundary", "bare_object_pointer_cross_owner_refs",
-     "replace_cross_owner_object_refs_with_object_handle", 0},
+    {"object_refs_owner_local", "object_handle_boundary", "",
+     "keep_cross_owner_object_refs_handle_or_frozen_payload_only", 1},
     {"object_store_owner_local_complete", "owner_local_object_store", "global_index_bridge_active",
      "retire_global_index_bridge_after_owner_local_canonical_store", 0},
 }};
@@ -986,7 +986,7 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_string(map, "command_stale_target_status", "owner_epoch_mismatch");
   add_mapping_string(map, "command_executor_readiness_gate_model", "all_gates_required_before_owner_executor");
   add_mapping_string(map, "command_executor_next_gate", "ordinary_lpc_ready");
-  add_mapping_string(map, "command_executor_next_blocker", "object_refs_owner_local");
+  add_mapping_string(map, "command_executor_next_blocker", "object_store_owner_local_complete");
   add_mapping_pair(map, "command_executor_readiness_gate_count",
                    static_cast<long>(kGatewayCommandExecutorReadinessGates.size()));
   const auto command_executor_satisfied_gates = gateway_command_executor_satisfied_readiness_gate_count();
@@ -1002,8 +1002,8 @@ mapping_t *gateway_owner_task_contract_mapping() {
   auto *tasks = gateway_owner_task_contract_entries_array();
   add_mapping_array(map, "tasks", tasks);
   free_array(tasks);
-  add_mapping_string(map, "next_blocker", "object_refs_owner_local");
-  add_mapping_string(map, "next_blocker_chain", "ordinary_lpc_ready/object_refs_owner_local");
+  add_mapping_string(map, "next_blocker", "object_store_owner_local_complete");
+  add_mapping_string(map, "next_blocker_chain", "ordinary_lpc_ready/object_store_owner_local_complete");
   return map;
 }
 
@@ -1018,7 +1018,7 @@ long vm_context_satisfied_readiness_gate_count() {
 }
 
 mapping_t *vm_context_contract_mapping() {
-  auto *contract = allocate_mapping(53);
+  auto *contract = allocate_mapping(61);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "context_model", "thread_local_vm_context");
   add_mapping_string(contract, "execution_state_model", "vm_context_execution_snapshot");
@@ -1027,7 +1027,7 @@ mapping_t *vm_context_contract_mapping() {
   add_mapping_string(contract, "object_store_model", "main_thread_owned_snapshot");
   add_mapping_string(contract, "object_store_off_main_policy", "sync_rejected");
   add_mapping_pair(contract, "ordinary_lpc_ready", 0);
-  add_mapping_string(contract, "ordinary_lpc_blocker", "object_refs_and_object_store_not_owner_local");
+  add_mapping_string(contract, "ordinary_lpc_blocker", "object_store_not_owner_local");
   add_mapping_pair(contract, "controlled_lpc_ready", 1);
   add_mapping_string(contract, "controlled_lpc_policy", "descriptor_manifest_only");
   add_mapping_string(contract, "eval_stack_model", "thread_local_owner_execution_stack");
@@ -1051,7 +1051,14 @@ mapping_t *vm_context_contract_mapping() {
   add_mapping_pair(contract, "apply_return_owner_bound_on_executor", 1);
   add_mapping_pair(contract, "apply_return_cleared_after_task", 1);
   add_mapping_pair(contract, "apply_return_owner_local", 1);
-  add_mapping_pair(contract, "object_refs_owner_local", 0);
+  add_mapping_string(contract, "object_refs_model", "object_handle_boundary");
+  add_mapping_pair(contract, "object_refs_owner_local", 1);
+  add_mapping_string(contract, "cross_owner_object_refs_policy", "object_handle_or_frozen_payload_only");
+  add_mapping_pair(contract, "cross_owner_payload_rejects_objects", 1);
+  add_mapping_pair(contract, "cross_owner_result_rejects_objects", 1);
+  add_mapping_pair(contract, "owner_message_target_handle_guard", 1);
+  add_mapping_pair(contract, "owner_executor_same_owner_object_refs_only", 1);
+  add_mapping_pair(contract, "ordinary_lpc_object_store_gate_required", 1);
   add_mapping_pair(contract, "error_state_contextualized", 1);
   add_mapping_pair(contract, "execution_state_contextualized", 1);
   add_mapping_pair(contract, "owner_scope_contextualized", 1);
@@ -1060,7 +1067,7 @@ mapping_t *vm_context_contract_mapping() {
                    static_cast<long>(vm_context_object_store_sync_rejections()));
   add_mapping_pair(contract, "off_main_object_store_sync_allowed", 0);
   add_mapping_string(contract, "ordinary_lpc_readiness_gate_model", "all_gates_required_before_open");
-  add_mapping_string(contract, "ordinary_lpc_next_blocker", "object_refs_owner_local");
+  add_mapping_string(contract, "ordinary_lpc_next_blocker", "object_store_owner_local_complete");
   add_mapping_pair(contract, "ordinary_lpc_readiness_gate_count",
                    static_cast<long>(kVMContextOrdinaryLpcReadinessGates.size()));
   const auto satisfied_gates = vm_context_satisfied_readiness_gate_count();
@@ -2847,6 +2854,43 @@ mapping_t *vm_owner_lpc_canary(object_t *target, const char *owner_id, const cha
 }
 
 mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char *method) {
+  auto normalized_owner_id = std::string(normalize_owner_id(owner_id));
+  auto method_name = std::string(normalize_task_text(method, ""));
+  auto target_name = std::string(owner_object_name(target));
+  auto target_owner_id = std::string(normalize_owner_id(target ? vm_owner_id(target) : nullptr));
+  auto *descriptor = find_owner_lpc_task_descriptor(method_name);
+  auto allowed = descriptor ? 1 : 0;
+
+  if (target && normalized_owner_id != target_owner_id) {
+    auto *map = allocate_mapping(24);
+    add_mapping_pair(map, "success", 0);
+    add_mapping_pair(map, "future_id", 0);
+    add_mapping_pair(map, "task_id", 0);
+    add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
+    add_mapping_string(map, "target_owner_id", target_owner_id.c_str());
+    add_mapping_string(map, "task_type", "lpc_task");
+    add_mapping_string(map, "method", method_name.c_str());
+    add_mapping_string(map, "target_object", target_name.c_str());
+    add_mapping_pair(map, "owner_epoch", static_cast<long>(vm_owner_epoch(target)));
+    add_mapping_string(map, "executor_mode", "rejected");
+    add_mapping_string(map, "route", "owner_executor");
+    add_mapping_string(map, "result_policy", "none");
+    add_mapping_string(map, "contract_reason", "owner lpc task target owner mismatch");
+    add_mapping_string(map, "state", "rejected");
+    add_mapping_string(map, "error", "owner lpc task target owner mismatch");
+    add_mapping_pair(map, "requires_owner_thread", 0);
+    add_mapping_pair(map, "requires_owner_message_completion", 0);
+    add_mapping_pair(map, "payload_frozen", 1);
+    add_mapping_pair(map, "registered_task", 0);
+    add_mapping_pair(map, "frozen_result_required", 0);
+    add_mapping_pair(map, "ordinary_lpc_default_closed", 1);
+    add_mapping_pair(map, "direct_cross_owner_write", 0);
+    add_mapping_owned_mapping(map, "task_contract",
+                              owner_task_contract_entry("rejected", "owner_executor", 0, 0, 1,
+                                                        "owner lpc task target owner mismatch"));
+    return map;
+  }
+
   OwnerMailboxTask task;
   uint64_t task_id;
   auto future_id = next_message_trace_id.fetch_add(1, std::memory_order_relaxed);
@@ -2855,20 +2899,15 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
   task.task_id = next_mailbox_task_id.fetch_add(1, std::memory_order_relaxed);
   task.sequence = total_enqueued.fetch_add(1, std::memory_order_relaxed) + 1;
   task.owner_epoch = target ? vm_owner_epoch(target) : 0;
-  task.owner_id = normalize_owner_id(owner_id);
+  task.owner_id = normalized_owner_id;
   task.task_type = "lpc_task";
-  task.task_key = normalize_task_text(method, "");
-  task.target_object = owner_object_name(target);
+  task.task_key = method_name;
+  task.target_object = target_name;
   task.target = target;
   if (task.target) {
     add_ref(task.target, "owner lpc task");
   }
   task_id = task.task_id;
-  auto normalized_owner_id = task.owner_id;
-  auto target_name = task.target_object;
-  auto method_name = task.task_key;
-  auto *descriptor = find_owner_lpc_task_descriptor(method_name);
-  auto allowed = descriptor ? 1 : 0;
 
   OwnerFutureRecord future;
   future.future_id = future_id;
