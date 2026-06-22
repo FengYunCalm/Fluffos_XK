@@ -77,7 +77,7 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
 #endif
 
   payload.type = T_MAPPING;
-  payload.u.map = allocate_mapping(31);
+  payload.u.map = allocate_mapping(40);
   add_mapping_string(payload.u.map, "payload_model", "gateway_command_buffer_metadata_v1");
   add_mapping_string(payload.u.map, "payload_policy", "no_raw_command_text_in_trace");
   add_mapping_string(payload.u.map, "input_source", "interactive_text_buffer");
@@ -95,6 +95,16 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_pair(payload.u.map, "input_callback_carryover_count", input_callback_carryover_count);
   add_mapping_pair(payload.u.map, "input_callback_function_redacted", input_callback_active);
   add_mapping_pair(payload.u.map, "input_callback_object_redacted", input_callback_active);
+  add_mapping_string(payload.u.map, "process_input_add_action_parser_state_policy",
+                     "redacted_process_input_add_action_parser_state_v1");
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_state_snapshot_ready", 1);
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_state_redacted", 1);
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_has_process_input",
+                   user && (user->iflags & HAS_PROCESS_INPUT) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_safe_parse_fallback", 1);
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_requires_command_giver", 1);
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_command_giver_redacted", 1);
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_command_text_redacted", snapshot_ready ? 1 : 0);
   add_mapping_string(payload.u.map, "command_executor_blocker",
                      snapshot_ready ? "interactive_command_side_effects_main_thread_bound"
                                     : "interactive_command_buffer_not_snapshotted");
