@@ -4902,6 +4902,20 @@ bool vm_eval_stack_thread_local_storage_ready() {
   return start_of_stack != nullptr && end_of_stack == start_of_stack + CFG_EVALUATOR_STACK_SIZE;
 }
 
+long vm_value_stack_depth() { return vm_eval_stack_depth(); }
+
+long vm_value_stack_capacity() { return CFG_EVALUATOR_STACK_SIZE; }
+
+long vm_value_stack_lvalue_ref_count() {
+  long count = 0;
+  for (auto *ref = global_ref_list; ref != nullptr; ref = ref->next) {
+    count++;
+  }
+  return count;
+}
+
+bool vm_value_stack_thread_local_storage_ready() { return vm_eval_stack_thread_local_storage_ready(); }
+
 long vm_control_stack_depth() {
   if (csp == nullptr || csp < control_stack) {
     return 0;
