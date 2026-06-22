@@ -106,7 +106,7 @@ constexpr std::array<OwnerExecutorTaskDescriptor, 10> kOwnerExecutorTaskDescript
     {"lpc_task", "lpc_task_allowlist", OwnerExecutorDispatchKind::LpcTask, "executor_safe_allowlist",
      "owner_executor", "registered LPC tasks only; ordinary LPC remains default closed", 1, 1, 0, 0, 1, 0},
     {"lpc", "lpc", OwnerExecutorDispatchKind::RejectLpc, "rejected", "owner_executor",
-     "ordinary LPC is default closed", 1, 0, 0, 1, 1, 0},
+     "ordinary LPC dispatch path is not implemented", 1, 0, 0, 1, 1, 0},
     {"owner_state", "owner_state", OwnerExecutorDispatchKind::GuardOwnerState, "rejected", "owner_executor",
      "owner state mutation is guarded off-main", 1, 0, 0, 1, 1, 0},
     {"owner_message", "owner_message_mailbox", OwnerExecutorDispatchKind::OwnerMessage, "executor_safe",
@@ -213,7 +213,7 @@ constexpr std::array<VMContextReadinessGate, 5> kGatewayCommandExecutorReadiness
      "keep_gateway_command_frame_restore_without_lpc_execution", 1},
 }};
 
-constexpr std::array<VMContextReadinessGate, 12> kVMContextOrdinaryLpcReadinessGates = {{
+constexpr std::array<VMContextReadinessGate, 13> kVMContextOrdinaryLpcReadinessGates = {{
     {"thread_local_vm_context", "thread_local_vm_context", "", "keep_thread_local_context_binding", 1},
     {"execution_state_contextualized", "vm_context_execution_snapshot", "", "keep_execution_state_api_only", 1},
     {"owner_scope_contextualized", "vm_context_owner_scope", "", "keep_owner_scope_api_only", 1},
@@ -231,8 +231,10 @@ constexpr std::array<VMContextReadinessGate, 12> kVMContextOrdinaryLpcReadinessG
      "keep_cross_owner_object_refs_handle_or_frozen_payload_only", 1},
     {"object_store_owner_local_complete", "owner_local_object_store", "",
      "keep_owner_local_store_canonical_without_global_fallback", 1},
-    {"ordinary_lpc_activation_policy", "default_closed_activation_gate", "ordinary_lpc_default_closed",
-     "open_only_after_explicit_activation_tests", 0},
+    {"ordinary_lpc_activation_policy", "default_closed_explicit_open_policy", "",
+     "keep_default_closed_until_dispatch_path_ready", 1},
+    {"ordinary_lpc_dispatch_path", "ordinary_lpc_executor_dispatch", "ordinary_lpc_dispatch_not_implemented",
+     "implement_generic_owner_lpc_dispatch_before_open", 0},
 }};
 
 struct OwnerComputeResultField {
@@ -988,7 +990,7 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_string(map, "command_stale_target_status", "owner_epoch_mismatch");
   add_mapping_string(map, "command_executor_readiness_gate_model", "all_gates_required_before_owner_executor");
   add_mapping_string(map, "command_executor_next_gate", "ordinary_lpc_ready");
-  add_mapping_string(map, "command_executor_next_blocker", "ordinary_lpc_activation_policy");
+  add_mapping_string(map, "command_executor_next_blocker", "ordinary_lpc_dispatch_path");
   add_mapping_pair(map, "command_executor_readiness_gate_count",
                    static_cast<long>(kGatewayCommandExecutorReadinessGates.size()));
   const auto command_executor_satisfied_gates = gateway_command_executor_satisfied_readiness_gate_count();
@@ -1004,8 +1006,8 @@ mapping_t *gateway_owner_task_contract_mapping() {
   auto *tasks = gateway_owner_task_contract_entries_array();
   add_mapping_array(map, "tasks", tasks);
   free_array(tasks);
-  add_mapping_string(map, "next_blocker", "ordinary_lpc_activation_policy");
-  add_mapping_string(map, "next_blocker_chain", "ordinary_lpc_ready/ordinary_lpc_activation_policy");
+  add_mapping_string(map, "next_blocker", "ordinary_lpc_dispatch_path");
+  add_mapping_string(map, "next_blocker_chain", "ordinary_lpc_ready/ordinary_lpc_dispatch_path");
   return map;
 }
 
@@ -1020,7 +1022,7 @@ long vm_context_satisfied_readiness_gate_count() {
 }
 
 mapping_t *vm_context_contract_mapping() {
-  auto *contract = allocate_mapping(61);
+  auto *contract = allocate_mapping(66);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "context_model", "thread_local_vm_context");
   add_mapping_string(contract, "execution_state_model", "vm_context_execution_snapshot");
@@ -1029,7 +1031,7 @@ mapping_t *vm_context_contract_mapping() {
   add_mapping_string(contract, "object_store_model", "owner_local_object_store");
   add_mapping_string(contract, "object_store_off_main_policy", "owner_local_lookup_only");
   add_mapping_pair(contract, "ordinary_lpc_ready", 0);
-  add_mapping_string(contract, "ordinary_lpc_blocker", "ordinary_lpc_activation_policy");
+  add_mapping_string(contract, "ordinary_lpc_blocker", "ordinary_lpc_dispatch_path");
   add_mapping_pair(contract, "controlled_lpc_ready", 1);
   add_mapping_string(contract, "controlled_lpc_policy", "descriptor_manifest_only");
   add_mapping_string(contract, "eval_stack_model", "thread_local_owner_execution_stack");
@@ -1063,7 +1065,12 @@ mapping_t *vm_context_contract_mapping() {
   add_mapping_pair(contract, "ordinary_lpc_object_store_gate_required", 1);
   add_mapping_pair(contract, "object_store_owner_local_complete", 1);
   add_mapping_pair(contract, "ordinary_lpc_activation_required", 1);
-  add_mapping_string(contract, "ordinary_lpc_activation_policy", "default_closed_until_explicit_open");
+  add_mapping_pair(contract, "ordinary_lpc_activation_policy_ready", 1);
+  add_mapping_pair(contract, "ordinary_lpc_default_closed", 1);
+  add_mapping_pair(contract, "ordinary_lpc_explicit_open_required", 1);
+  add_mapping_string(contract, "ordinary_lpc_activation_policy", "default_closed_explicit_open");
+  add_mapping_string(contract, "ordinary_lpc_activation_rollout", "closed_until_dispatch_path_and_tests");
+  add_mapping_string(contract, "ordinary_lpc_activation_rollback", "disable_before_dispatch_path");
   add_mapping_pair(contract, "error_state_contextualized", 1);
   add_mapping_pair(contract, "execution_state_contextualized", 1);
   add_mapping_pair(contract, "owner_scope_contextualized", 1);
@@ -1072,7 +1079,7 @@ mapping_t *vm_context_contract_mapping() {
                    static_cast<long>(vm_context_object_store_sync_rejections()));
   add_mapping_pair(contract, "off_main_object_store_sync_allowed", 0);
   add_mapping_string(contract, "ordinary_lpc_readiness_gate_model", "all_gates_required_before_open");
-  add_mapping_string(contract, "ordinary_lpc_next_blocker", "ordinary_lpc_activation_policy");
+  add_mapping_string(contract, "ordinary_lpc_next_blocker", "ordinary_lpc_dispatch_path");
   add_mapping_pair(contract, "ordinary_lpc_readiness_gate_count",
                    static_cast<long>(kVMContextOrdinaryLpcReadinessGates.size()));
   const auto satisfied_gates = vm_context_satisfied_readiness_gate_count();
@@ -2867,7 +2874,7 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
   auto allowed = descriptor ? 1 : 0;
 
   if (target && normalized_owner_id != target_owner_id) {
-    auto *map = allocate_mapping(24);
+    auto *map = allocate_mapping(27);
     add_mapping_pair(map, "success", 0);
     add_mapping_pair(map, "future_id", 0);
     add_mapping_pair(map, "task_id", 0);
@@ -2889,6 +2896,9 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
     add_mapping_pair(map, "registered_task", 0);
     add_mapping_pair(map, "frozen_result_required", 0);
     add_mapping_pair(map, "ordinary_lpc_default_closed", 1);
+    add_mapping_pair(map, "ordinary_lpc_activation_policy_ready", 1);
+    add_mapping_string(map, "ordinary_lpc_activation_policy", "default_closed_explicit_open");
+    add_mapping_string(map, "ordinary_lpc_next_blocker", "ordinary_lpc_dispatch_path");
     add_mapping_pair(map, "direct_cross_owner_write", 0);
     add_mapping_owned_mapping(map, "task_contract",
                               owner_task_contract_entry("rejected", "owner_executor", 0, 0, 1,
@@ -2940,7 +2950,7 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
     owner_runtime_cv.notify_one();
   }
 
-  auto *map = allocate_mapping(20);
+  auto *map = allocate_mapping(23);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "future_id", static_cast<long>(future_id));
   add_mapping_pair(map, "task_id", static_cast<long>(task_id));
@@ -2959,6 +2969,9 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
   add_mapping_pair(map, "registered_task", allowed);
   add_mapping_pair(map, "frozen_result_required", descriptor ? descriptor->frozen_result_required : 0);
   add_mapping_pair(map, "ordinary_lpc_default_closed", 1);
+  add_mapping_pair(map, "ordinary_lpc_activation_policy_ready", 1);
+  add_mapping_string(map, "ordinary_lpc_activation_policy", "default_closed_explicit_open");
+  add_mapping_string(map, "ordinary_lpc_next_blocker", "ordinary_lpc_dispatch_path");
   add_mapping_pair(map, "direct_cross_owner_write", descriptor ? descriptor->direct_cross_owner_write : 0);
   if (descriptor) {
     add_mapping_owned_mapping(map, "task_contract", owner_lpc_task_contract_entry(*descriptor));
@@ -3843,7 +3856,7 @@ void vm_owner_thread_stop() {
 
 mapping_t *vm_owner_thread_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(85);
+  auto *map = allocate_mapping(90);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
   add_mapping_pair(map, "thread_count", static_cast<long>(owner_threads.size()));
@@ -3951,11 +3964,15 @@ mapping_t *vm_owner_thread_status() {
                    static_cast<long>(owner_executor_same_owner_claim_conflicts.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_active_claims", static_cast<long>(active_owner_claim_counts.size()));
   add_mapping_pair(map, "ordinary_lpc_default_closed", 1);
+  add_mapping_pair(map, "ordinary_lpc_activation_policy_ready", 1);
+  add_mapping_pair(map, "ordinary_lpc_explicit_open_required", 1);
+  add_mapping_string(map, "ordinary_lpc_activation_policy", "default_closed_explicit_open");
+  add_mapping_string(map, "ordinary_lpc_next_blocker", "ordinary_lpc_dispatch_path");
   add_mapping_string(map, "executor_contract_version", kOwnerExecutorContractVersion);
   add_mapping_string(map, "executor_model", "owner_executor");
   add_mapping_string(map, "executor_dispatch_model", "descriptor_manifest");
   add_mapping_string(map, "executor_lpc_model", "default_closed_allowlist");
-  add_mapping_string(map, "ordinary_lpc_default_policy", "default_closed");
+  add_mapping_string(map, "ordinary_lpc_default_policy", "default_closed_explicit_open");
   auto *allowlist = owner_lpc_task_allowlist_array();
   add_mapping_pair(map, "lpc_task_allowlist_count", static_cast<long>(kOwnerLpcTaskDescriptors.size()));
   add_mapping_array(map, "lpc_task_allowlist", allowlist);
@@ -3995,7 +4012,7 @@ mapping_t *vm_owner_thread_status() {
 
 mapping_t *vm_owner_runtime_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(77);
+  auto *map = allocate_mapping(82);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
   add_mapping_string(map, "multicore_mode_name", vm_multicore_mode_name(vm_multicore_mode()));
@@ -4082,11 +4099,15 @@ mapping_t *vm_owner_runtime_status() {
                    static_cast<long>(owner_executor_same_owner_claim_conflicts.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_active_claims", static_cast<long>(active_owner_claim_counts.size()));
   add_mapping_pair(map, "ordinary_lpc_default_closed", 1);
+  add_mapping_pair(map, "ordinary_lpc_activation_policy_ready", 1);
+  add_mapping_pair(map, "ordinary_lpc_explicit_open_required", 1);
+  add_mapping_string(map, "ordinary_lpc_activation_policy", "default_closed_explicit_open");
+  add_mapping_string(map, "ordinary_lpc_next_blocker", "ordinary_lpc_dispatch_path");
   add_mapping_string(map, "executor_contract_version", kOwnerExecutorContractVersion);
   add_mapping_string(map, "executor_model", "owner_executor");
   add_mapping_string(map, "executor_dispatch_model", "descriptor_manifest");
   add_mapping_string(map, "executor_lpc_model", "default_closed_allowlist");
-  add_mapping_string(map, "ordinary_lpc_default_policy", "default_closed");
+  add_mapping_string(map, "ordinary_lpc_default_policy", "default_closed_explicit_open");
   auto *allowlist = owner_lpc_task_allowlist_array();
   add_mapping_pair(map, "lpc_task_allowlist_count", static_cast<long>(kOwnerLpcTaskDescriptors.size()));
   add_mapping_array(map, "lpc_task_allowlist", allowlist);
