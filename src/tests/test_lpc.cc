@@ -7708,6 +7708,19 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_EQ(mapping_number(payload, "interactive_mode_was_single_char"), 0);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_using_mxp"), 0);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_ed_buffer_active"), 0);
+        ASSERT_STREQ(mapping_string(payload, "prompt_telnet_reschedule_state_policy"),
+                     "redacted_prompt_telnet_reschedule_io_v1");
+        ASSERT_EQ(mapping_number(payload, "prompt_telnet_reschedule_state_snapshot_ready"), 1);
+        ASSERT_EQ(mapping_number(payload, "prompt_telnet_reschedule_state_redacted"), 1);
+        ASSERT_EQ(mapping_number(payload, "prompt_has_write_prompt"), 1);
+        ASSERT_EQ(mapping_number(payload, "prompt_text_redacted"), 1);
+        ASSERT_EQ(mapping_number(payload, "prompt_write_prompt_apply_required"), 1);
+        ASSERT_EQ(mapping_number(payload, "telnet_handle_active"), 0);
+        ASSERT_EQ(mapping_number(payload, "telnet_using_telnet"), 0);
+        ASSERT_EQ(mapping_number(payload, "telnet_suppress_ga"), 0);
+        ASSERT_EQ(mapping_number(payload, "telnet_ga_required"), 0);
+        ASSERT_EQ(mapping_number(payload, "reschedule_cmd_in_buf"), 1);
+        ASSERT_FALSE(mapping_has_string_key(payload, "prompt_text"));
         ASSERT_STREQ(mapping_string(payload, "command_executor_blocker"),
                      "interactive_command_side_effects_main_thread_bound");
         ASSERT_STREQ(mapping_string(payload, "command_consume_model"), "owner_owned_snapshot_main_thread_consume");

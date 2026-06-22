@@ -77,7 +77,7 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
 #endif
 
   payload.type = T_MAPPING;
-  payload.u.map = allocate_mapping(50);
+  payload.u.map = allocate_mapping(64);
   add_mapping_string(payload.u.map, "payload_model", "gateway_command_buffer_metadata_v1");
   add_mapping_string(payload.u.map, "payload_policy", "no_raw_command_text_in_trace");
   add_mapping_string(payload.u.map, "input_source", "interactive_text_buffer");
@@ -114,6 +114,20 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_pair(payload.u.map, "interactive_mode_was_single_char", user && (user->iflags & WAS_SINGLE_CHAR) ? 1 : 0);
   add_mapping_pair(payload.u.map, "interactive_mode_using_mxp", user && (user->iflags & USING_MXP) ? 1 : 0);
   add_mapping_pair(payload.u.map, "interactive_mode_ed_buffer_active", user && user->ed_buffer ? 1 : 0);
+  add_mapping_string(payload.u.map, "prompt_telnet_reschedule_state_policy",
+                     "redacted_prompt_telnet_reschedule_io_v1");
+  add_mapping_pair(payload.u.map, "prompt_telnet_reschedule_state_snapshot_ready", 1);
+  add_mapping_pair(payload.u.map, "prompt_telnet_reschedule_state_redacted", 1);
+  add_mapping_pair(payload.u.map, "prompt_has_write_prompt", user && (user->iflags & HAS_WRITE_PROMPT) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "prompt_text_redacted", user && user->prompt ? 1 : 0);
+  add_mapping_pair(payload.u.map, "prompt_write_prompt_apply_required",
+                   user && (user->iflags & HAS_WRITE_PROMPT) && !user->ed_buffer ? 1 : 0);
+  add_mapping_pair(payload.u.map, "telnet_handle_active", user && user->telnet ? 1 : 0);
+  add_mapping_pair(payload.u.map, "telnet_using_telnet", user && (user->iflags & USING_TELNET) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "telnet_suppress_ga", user && (user->iflags & SUPPRESS_GA) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "telnet_ga_required",
+                   user && user->telnet && (user->iflags & USING_TELNET) && !(user->iflags & SUPPRESS_GA) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "reschedule_cmd_in_buf", user && (user->iflags & CMD_IN_BUF) ? 1 : 0);
   add_mapping_string(payload.u.map, "command_executor_blocker",
                      snapshot_ready ? "interactive_command_side_effects_main_thread_bound"
                                     : "interactive_command_buffer_not_snapshotted");
