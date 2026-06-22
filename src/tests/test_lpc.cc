@@ -2627,7 +2627,7 @@ TEST_F(DriverTest, TestVmOwnerExecutorCommandFrameRestoreDispatchesWithoutLpc) {
   ASSERT_EQ(mapping_number(vm_context_contract, "control_stack_owner_local"), 1);
   ASSERT_EQ(mapping_number(vm_context_contract, "value_stack_owner_local"), 1);
   ASSERT_EQ(mapping_number(vm_context_contract, "apply_return_owner_local"), 1);
-  ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_next_blocker"), "object_store_owner_local_complete");
+  ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_next_blocker"), "ordinary_lpc_activation_policy");
   free_mapping(running);
 
   auto* trace = vm_owner_task_trace(16);
@@ -2977,10 +2977,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(vm_context_contract, "execution_state_model"), "vm_context_execution_snapshot");
     ASSERT_STREQ(mapping_string(vm_context_contract, "owner_state_model"), "vm_context_owner_scope");
     ASSERT_STREQ(mapping_string(vm_context_contract, "error_state_model"), "vm_context_error_snapshot");
-    ASSERT_STREQ(mapping_string(vm_context_contract, "object_store_model"), "main_thread_owned_snapshot");
-    ASSERT_STREQ(mapping_string(vm_context_contract, "object_store_off_main_policy"), "sync_rejected");
+    ASSERT_STREQ(mapping_string(vm_context_contract, "object_store_model"), "owner_local_object_store");
+    ASSERT_STREQ(mapping_string(vm_context_contract, "object_store_off_main_policy"), "owner_local_lookup_only");
     ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_ready"), 0);
-    ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_blocker"), "object_store_not_owner_local");
+    ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_blocker"), "ordinary_lpc_activation_policy");
     ASSERT_EQ(mapping_number(vm_context_contract, "controlled_lpc_ready"), 1);
     ASSERT_STREQ(mapping_string(vm_context_contract, "controlled_lpc_policy"), "descriptor_manifest_only");
     ASSERT_STREQ(mapping_string(vm_context_contract, "eval_stack_model"),
@@ -3017,21 +3017,25 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(vm_context_contract, "owner_message_target_handle_guard"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "owner_executor_same_owner_object_refs_only"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_object_store_gate_required"), 1);
+    ASSERT_EQ(mapping_number(vm_context_contract, "object_store_owner_local_complete"), 1);
+    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_activation_required"), 1);
+    ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_activation_policy"),
+                 "default_closed_until_explicit_open");
     ASSERT_EQ(mapping_number(vm_context_contract, "error_state_contextualized"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "execution_state_contextualized"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "owner_scope_contextualized"), 1);
-    ASSERT_EQ(mapping_number(vm_context_contract, "object_store_main_thread_only"), 1);
+    ASSERT_EQ(mapping_number(vm_context_contract, "object_store_main_thread_only"), 0);
     ASSERT_GE(mapping_number(vm_context_contract, "object_store_sync_rejections"), 0);
     ASSERT_EQ(mapping_number(vm_context_contract, "off_main_object_store_sync_allowed"), 0);
     ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_readiness_gate_model"),
                  "all_gates_required_before_open");
-    ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_next_blocker"), "object_store_owner_local_complete");
-    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_readiness_gate_count"), 11);
-    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_satisfied_gate_count"), 10);
+    ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_next_blocker"), "ordinary_lpc_activation_policy");
+    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_readiness_gate_count"), 12);
+    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_satisfied_gate_count"), 11);
     ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_blocked_gate_count"), 1);
     auto* readiness_gates = mapping_array(vm_context_contract, "ordinary_lpc_readiness_gates");
     ASSERT_NE(readiness_gates, nullptr);
-    ASSERT_EQ(readiness_gates->size, 11);
+    ASSERT_EQ(readiness_gates->size, 12);
     std::unordered_map<std::string, mapping_t*> gates_by_name;
     for (int i = 0; i < readiness_gates->size; i++) {
       ASSERT_EQ(readiness_gates->item[i].type, T_MAPPING);
@@ -3069,9 +3073,13 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gate_entry("object_refs_owner_local"), "blocker"), "");
     ASSERT_STREQ(mapping_string(gate_entry("object_refs_owner_local"), "next_action"),
                  "keep_cross_owner_object_refs_handle_or_frozen_payload_only");
-    ASSERT_EQ(mapping_number(gate_entry("object_store_owner_local_complete"), "satisfied"), 0);
-    ASSERT_STREQ(mapping_string(gate_entry("object_store_owner_local_complete"), "blocker"),
-                 "global_index_bridge_active");
+    ASSERT_EQ(mapping_number(gate_entry("object_store_owner_local_complete"), "satisfied"), 1);
+    ASSERT_STREQ(mapping_string(gate_entry("object_store_owner_local_complete"), "blocker"), "");
+    ASSERT_STREQ(mapping_string(gate_entry("object_store_owner_local_complete"), "next_action"),
+                 "keep_owner_local_store_canonical_without_global_fallback");
+    ASSERT_EQ(mapping_number(gate_entry("ordinary_lpc_activation_policy"), "satisfied"), 0);
+    ASSERT_STREQ(mapping_string(gate_entry("ordinary_lpc_activation_policy"), "blocker"),
+                 "ordinary_lpc_default_closed");
 
     auto* frozen_payload_contract = mapping_entry(status, "frozen_payload_contract");
     ASSERT_NE(frozen_payload_contract, nullptr);
@@ -3161,7 +3169,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "all_gates_required_before_owner_executor");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_gate"), "ordinary_lpc_ready");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_blocker"),
-                 "object_store_owner_local_complete");
+                 "ordinary_lpc_activation_policy");
     ASSERT_EQ(mapping_number(gateway_contract, "command_executor_readiness_gate_count"), 5);
     ASSERT_EQ(mapping_number(gateway_contract, "command_executor_satisfied_gate_count"), 5);
     ASSERT_EQ(mapping_number(gateway_contract, "command_executor_blocked_gate_count"), 0);
@@ -3194,9 +3202,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(gateway_contract, "ordinary_lpc_ready_required"), 0);
     ASSERT_EQ(mapping_number(gateway_contract, "main_required"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "next_blocker"),
-                 "object_store_owner_local_complete");
+                 "ordinary_lpc_activation_policy");
     ASSERT_STREQ(mapping_string(gateway_contract, "next_blocker_chain"),
-                 "ordinary_lpc_ready/object_store_owner_local_complete");
+                 "ordinary_lpc_ready/ordinary_lpc_activation_policy");
     auto* gateway_tasks = mapping_array(gateway_contract, "tasks");
     ASSERT_NE(gateway_tasks, nullptr);
     ASSERT_EQ(gateway_tasks->size, 4);
@@ -5275,12 +5283,15 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
     EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
     return value && value->type == T_STRING ? value->u.string : "";
   };
-  auto expect_global_bridge_contract = [&](mapping_t* map) {
-    ASSERT_EQ(mapping_number(map, "global_live_object_bridge_ready"), 1);
-    ASSERT_STREQ(mapping_string(map, "global_live_object_bridge_source"), "ObjectTable.global_live_object_bridge");
-    ASSERT_EQ(mapping_number(map, "global_record_bridge_ready"), 1);
-    ASSERT_STREQ(mapping_string(map, "global_record_bridge_source"), "global_object_records");
-    ASSERT_STREQ(mapping_string(map, "owner_local_store_complete_blocker"), "global_index_bridge_active");
+  auto expect_owner_local_store_complete_contract = [&](mapping_t* map) {
+    ASSERT_EQ(mapping_number(map, "owner_local_store_complete"), 1);
+    ASSERT_STREQ(mapping_string(map, "owner_local_store_complete_blocker"), "");
+    ASSERT_EQ(mapping_number(map, "uses_global_object_table"), 0);
+    ASSERT_EQ(mapping_number(map, "global_index_bridge"), 0);
+    ASSERT_EQ(mapping_number(map, "global_live_object_bridge_ready"), 0);
+    ASSERT_STREQ(mapping_string(map, "global_live_object_bridge_source"), "");
+    ASSERT_EQ(mapping_number(map, "global_record_bridge_ready"), 0);
+    ASSERT_STREQ(mapping_string(map, "global_record_bridge_source"), "");
   };
   auto expect_no_lookup_global_live_object = [&](mapping_t* map) {
     ASSERT_EQ(mapping_number(map, "owner_local_global_live_object_found"), 0);
@@ -5337,13 +5348,13 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
   ASSERT_STREQ(mapping_string(before, "store_kind"), "vm_object_store");
   ASSERT_STREQ(mapping_string(before, "status_model"), "object_store_status");
   ASSERT_STREQ(mapping_string(before, "directory_model"), "owner_local_object_directory");
-  ASSERT_STREQ(mapping_string(before, "storage_model"), "global_index_bridge");
+  ASSERT_STREQ(mapping_string(before, "storage_model"), "owner_local_store");
   ASSERT_EQ(mapping_number(before, "owner_local_global_bridge_consistent"), 1);
   ASSERT_EQ(mapping_number(before, "owner_local_to_global_bridge_consistent"), 1);
   ASSERT_EQ(mapping_number(before, "global_to_owner_local_bridge_consistent"), 1);
   ASSERT_STREQ(mapping_string(before, "owner_local_global_bridge_check"), "bidirectional");
   ASSERT_STREQ(mapping_string(before, "owner_local_global_bridge_source"), "vm_object_shard");
-  expect_global_bridge_contract(before);
+  expect_owner_local_store_complete_contract(before);
   ASSERT_EQ(mapping_number(before, "owner_local_orphan_record_total"), 0);
   ASSERT_EQ(mapping_number(before, "owner_local_to_global_mismatch_record_total"), 0);
   ASSERT_EQ(mapping_number(before, "global_to_owner_local_record_mismatch_record_total"), 0);
@@ -5386,9 +5397,9 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
   ASSERT_STREQ(mapping_string(old_lookup_before, "owner_local_record_source"), "vm_object_shard.local_records");
   ASSERT_EQ(mapping_number(old_lookup_before, "owner_local_canonical_record_ready"), 1);
   ASSERT_EQ(mapping_number(old_lookup_before, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(old_lookup_before, "owner_local_store_complete"), 0);
-  ASSERT_STREQ(mapping_string(old_lookup_before, "owner_local_store_complete_blocker"), "global_index_bridge_active");
-  ASSERT_EQ(mapping_number(old_lookup_before, "global_index_bridge"), 1);
+  ASSERT_EQ(mapping_number(old_lookup_before, "owner_local_store_complete"), 1);
+  ASSERT_STREQ(mapping_string(old_lookup_before, "owner_local_store_complete_blocker"), "");
+  ASSERT_EQ(mapping_number(old_lookup_before, "global_index_bridge"), 0);
   expect_no_lookup_global_live_object(old_lookup_before);
   expect_no_lookup_global_record_id_scan(old_lookup_before);
   expect_no_lookup_global_record_pointer(old_lookup_before);
@@ -5444,13 +5455,13 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
   ASSERT_STREQ(mapping_string(status, "store_kind"), "vm_object_store");
   ASSERT_STREQ(mapping_string(status, "status_model"), "object_store_status");
   ASSERT_STREQ(mapping_string(status, "directory_model"), "owner_local_object_directory");
-  ASSERT_STREQ(mapping_string(status, "storage_model"), "global_index_bridge");
+  ASSERT_STREQ(mapping_string(status, "storage_model"), "owner_local_store");
   ASSERT_EQ(mapping_number(status, "owner_local_global_bridge_consistent"), 1);
   ASSERT_EQ(mapping_number(status, "owner_local_to_global_bridge_consistent"), 1);
   ASSERT_EQ(mapping_number(status, "global_to_owner_local_bridge_consistent"), 1);
   ASSERT_STREQ(mapping_string(status, "owner_local_global_bridge_check"), "bidirectional");
   ASSERT_STREQ(mapping_string(status, "owner_local_global_bridge_source"), "vm_object_shard");
-  expect_global_bridge_contract(status);
+  expect_owner_local_store_complete_contract(status);
   ASSERT_GE(mapping_number(status, "owner_local_record_total"), 1);
   ASSERT_GE(mapping_number(status, "owner_local_object_ref_total"), 1);
   ASSERT_GE(mapping_number(status, "owner_local_object_ref_index_total"), 1);
@@ -5462,9 +5473,9 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
   ASSERT_EQ(mapping_number(status, "owner_local_record_index_ready"), 1);
   ASSERT_EQ(mapping_number(status, "owner_local_canonical_record_ready"), 1);
   ASSERT_EQ(mapping_number(status, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(status, "owner_local_store_complete"), 0);
-  ASSERT_EQ(mapping_number(status, "uses_global_object_table"), 1);
-  ASSERT_EQ(mapping_number(status, "global_index_bridge"), 1);
+  ASSERT_EQ(mapping_number(status, "owner_local_store_complete"), 1);
+  ASSERT_EQ(mapping_number(status, "uses_global_object_table"), 0);
+  ASSERT_EQ(mapping_number(status, "global_index_bridge"), 0);
   ASSERT_EQ(mapping_number(status, "global_record_bridge_consistent"), 1);
   ASSERT_EQ(mapping_number(status, "global_record_bridge_retirement_ready"), 1);
   ASSERT_EQ(mapping_number(status, "global_record_total"), mapping_number(status, "registered_objects"));
@@ -5575,10 +5586,10 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
   ASSERT_EQ(mapping_number(new_owner, "owner_local_directory_ready"), 1);
   ASSERT_EQ(mapping_number(new_owner, "owner_local_path_index_ready"), 1);
   ASSERT_EQ(mapping_number(new_owner, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(new_owner, "uses_global_object_table"), 1);
-  ASSERT_EQ(mapping_number(new_owner, "owner_local_store_complete"), 0);
-  ASSERT_EQ(mapping_number(new_owner, "global_index_bridge"), 1);
-  expect_global_bridge_contract(new_owner);
+  ASSERT_EQ(mapping_number(new_owner, "uses_global_object_table"), 0);
+  ASSERT_EQ(mapping_number(new_owner, "owner_local_store_complete"), 1);
+  ASSERT_EQ(mapping_number(new_owner, "global_index_bridge"), 0);
+  expect_owner_local_store_complete_contract(new_owner);
   auto* shard_contract = find_string_in_mapping(new_owner, "vm_object_shard");
   ASSERT_NE(shard_contract, nullptr);
   ASSERT_EQ(shard_contract ? shard_contract->type : T_INVALID, T_MAPPING);
@@ -5586,7 +5597,7 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
   ASSERT_STREQ(mapping_string(shard_contract->u.map, "status_model"), "owner_status_record");
   ASSERT_STREQ(mapping_string(shard_contract->u.map, "execution_model"), "owner_execution_shard");
   ASSERT_STREQ(mapping_string(shard_contract->u.map, "directory_model"), "owner_local_object_directory");
-  ASSERT_STREQ(mapping_string(shard_contract->u.map, "storage_model"), "global_index_bridge");
+  ASSERT_STREQ(mapping_string(shard_contract->u.map, "storage_model"), "owner_local_store");
   ASSERT_EQ(mapping_number(shard_contract->u.map, "object_directory_count"), 1);
   ASSERT_EQ(mapping_number(shard_contract->u.map, "owner_local_record_count"), 1);
   ASSERT_EQ(mapping_number(shard_contract->u.map, "owner_local_destructed_record_count"), 0);
@@ -5611,9 +5622,9 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
                "vm_object_shard.destructed_path_index");
   ASSERT_EQ(mapping_number(shard_contract->u.map, "owner_local_directory_ready"), 1);
   ASSERT_EQ(mapping_number(shard_contract->u.map, "owner_local_directory_from_shard"), 1);
-  ASSERT_EQ(mapping_number(shard_contract->u.map, "owner_local_store_complete"), 0);
-  ASSERT_EQ(mapping_number(shard_contract->u.map, "global_index_bridge"), 1);
-  expect_global_bridge_contract(shard_contract->u.map);
+  ASSERT_EQ(mapping_number(shard_contract->u.map, "owner_local_store_complete"), 1);
+  ASSERT_EQ(mapping_number(shard_contract->u.map, "global_index_bridge"), 0);
+  expect_owner_local_store_complete_contract(shard_contract->u.map);
   auto* directory = find_string_in_mapping(new_owner, "object_directory");
   ASSERT_NE(directory, nullptr);
   ASSERT_EQ(directory->type, T_ARRAY);
@@ -5666,8 +5677,8 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
   ASSERT_STREQ(mapping_string(new_lookup_after, "owner_local_path_index_source"), "vm_object_shard.object_path_index");
   ASSERT_EQ(mapping_number(new_lookup_after, "owner_local_canonical_record_ready"), 1);
   ASSERT_EQ(mapping_number(new_lookup_after, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(new_lookup_after, "owner_local_store_complete"), 0);
-  ASSERT_STREQ(mapping_string(new_lookup_after, "owner_local_store_complete_blocker"), "global_index_bridge_active");
+  ASSERT_EQ(mapping_number(new_lookup_after, "owner_local_store_complete"), 1);
+  ASSERT_STREQ(mapping_string(new_lookup_after, "owner_local_store_complete_blocker"), "");
   ASSERT_EQ(mapping_number(new_lookup_after, "owner_mismatch"), 0);
   ASSERT_STREQ(mapping_string(new_lookup_after, "record_owner_id"), "owner/test/migration/b");
   ASSERT_STREQ(mapping_string(new_lookup_after, "object_path"), handle.object_path.c_str());
@@ -5711,9 +5722,8 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
   ASSERT_EQ(mapping_number(missing_object_lookup, "found"), 0);
   ASSERT_EQ(mapping_number(missing_object_lookup, "owner_local_canonical_record_ready"), 1);
   ASSERT_EQ(mapping_number(missing_object_lookup, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(missing_object_lookup, "owner_local_store_complete"), 0);
-  ASSERT_STREQ(mapping_string(missing_object_lookup, "owner_local_store_complete_blocker"),
-               "global_index_bridge_active");
+  ASSERT_EQ(mapping_number(missing_object_lookup, "owner_local_store_complete"), 1);
+  ASSERT_STREQ(mapping_string(missing_object_lookup, "owner_local_store_complete_blocker"), "");
   ASSERT_EQ(mapping_number(missing_object_lookup, "global_record_bridge_retirement_ready"), 1);
   ASSERT_EQ(mapping_number(missing_object_lookup, "owner_local_global_record_found"), 0);
   ASSERT_STREQ(mapping_string(missing_object_lookup, "owner_local_global_record_source"), "");
@@ -5739,9 +5749,8 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
   ASSERT_EQ(mapping_number(missing_path_lookup, "found"), 0);
   ASSERT_EQ(mapping_number(missing_path_lookup, "owner_local_canonical_record_ready"), 1);
   ASSERT_EQ(mapping_number(missing_path_lookup, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(missing_path_lookup, "owner_local_store_complete"), 0);
-  ASSERT_STREQ(mapping_string(missing_path_lookup, "owner_local_store_complete_blocker"),
-               "global_index_bridge_active");
+  ASSERT_EQ(mapping_number(missing_path_lookup, "owner_local_store_complete"), 1);
+  ASSERT_STREQ(mapping_string(missing_path_lookup, "owner_local_store_complete_blocker"), "");
   ASSERT_EQ(mapping_number(missing_path_lookup, "global_record_bridge_retirement_ready"), 1);
   ASSERT_EQ(mapping_number(missing_path_lookup, "owner_local_global_record_found"), 0);
   ASSERT_STREQ(mapping_string(missing_path_lookup, "owner_local_global_record_source"), "");
@@ -5776,12 +5785,15 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
     EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
     return value && value->type == T_STRING ? value->u.string : "";
   };
-  auto expect_global_bridge_contract = [&](mapping_t* map) {
-    ASSERT_EQ(mapping_number(map, "global_live_object_bridge_ready"), 1);
-    ASSERT_STREQ(mapping_string(map, "global_live_object_bridge_source"), "ObjectTable.global_live_object_bridge");
-    ASSERT_EQ(mapping_number(map, "global_record_bridge_ready"), 1);
-    ASSERT_STREQ(mapping_string(map, "global_record_bridge_source"), "global_object_records");
-    ASSERT_STREQ(mapping_string(map, "owner_local_store_complete_blocker"), "global_index_bridge_active");
+  auto expect_owner_local_store_complete_contract = [&](mapping_t* map) {
+    ASSERT_EQ(mapping_number(map, "owner_local_store_complete"), 1);
+    ASSERT_STREQ(mapping_string(map, "owner_local_store_complete_blocker"), "");
+    ASSERT_EQ(mapping_number(map, "uses_global_object_table"), 0);
+    ASSERT_EQ(mapping_number(map, "global_index_bridge"), 0);
+    ASSERT_EQ(mapping_number(map, "global_live_object_bridge_ready"), 0);
+    ASSERT_STREQ(mapping_string(map, "global_live_object_bridge_source"), "");
+    ASSERT_EQ(mapping_number(map, "global_record_bridge_ready"), 0);
+    ASSERT_STREQ(mapping_string(map, "global_record_bridge_source"), "");
   };
   auto expect_no_lookup_global_live_object = [&](mapping_t* map) {
     ASSERT_EQ(mapping_number(map, "owner_local_global_live_object_found"), 0);
@@ -5791,17 +5803,17 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
   auto* missing_owner = vm_object_store_owner_status("owner/test/store/missing");
   ASSERT_EQ(mapping_number(missing_owner, "objects"), 0);
   ASSERT_EQ(mapping_number(missing_owner, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(missing_owner, "owner_local_store_complete"), 0);
-  ASSERT_EQ(mapping_number(missing_owner, "global_index_bridge"), 1);
-  expect_global_bridge_contract(missing_owner);
+  ASSERT_EQ(mapping_number(missing_owner, "owner_local_store_complete"), 1);
+  ASSERT_EQ(mapping_number(missing_owner, "global_index_bridge"), 0);
+  expect_owner_local_store_complete_contract(missing_owner);
   auto* missing_owner_shard_contract = find_string_in_mapping(missing_owner, "vm_object_shard");
   ASSERT_NE(missing_owner_shard_contract, nullptr);
   ASSERT_EQ(missing_owner_shard_contract ? missing_owner_shard_contract->type : T_INVALID, T_MAPPING);
   ASSERT_EQ(mapping_number(missing_owner_shard_contract->u.map, "owner_local_store_ready"), 1);
-  expect_global_bridge_contract(missing_owner_shard_contract->u.map);
+  expect_owner_local_store_complete_contract(missing_owner_shard_contract->u.map);
   free_mapping(missing_owner);
 
-  object_t* obj = load_object_for_test("single/void");
+  object_t* obj = clone_object("single/void", 0);
   ASSERT_NE(obj, nullptr);
   vm_owner_set_id(obj, "owner/test/store/destruct");
   vm_object_store_register(obj);
@@ -5832,8 +5844,8 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
   ASSERT_EQ(mapping_number(before, "owner_local_live_path_index_consistent"), 1);
   ASSERT_EQ(mapping_number(before, "owner_local_destructed_path_index_consistent"), 1);
   ASSERT_EQ(mapping_number(before, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(before, "owner_local_store_complete"), 0);
-  expect_global_bridge_contract(before);
+  ASSERT_EQ(mapping_number(before, "owner_local_store_complete"), 1);
+  expect_owner_local_store_complete_contract(before);
   auto before_destructed = mapping_number(before, "destructed");
   free_mapping(before);
   auto* lookup_before = vm_object_store_owner_lookup_status("owner/test/store/destruct", handle.object_id);
@@ -5858,8 +5870,8 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
   ASSERT_EQ(mapping_number(lookup_before, "owner_local_destructed_path_index_found"), 0);
   ASSERT_EQ(mapping_number(lookup_before, "owner_local_canonical_record_ready"), 1);
   ASSERT_EQ(mapping_number(lookup_before, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(lookup_before, "owner_local_store_complete"), 0);
-  ASSERT_STREQ(mapping_string(lookup_before, "owner_local_store_complete_blocker"), "global_index_bridge_active");
+  ASSERT_EQ(mapping_number(lookup_before, "owner_local_store_complete"), 1);
+  ASSERT_STREQ(mapping_string(lookup_before, "owner_local_store_complete_blocker"), "");
   expect_no_lookup_global_live_object(lookup_before);
   ASSERT_STREQ(mapping_string(lookup_before, "owner_local_path_index_source"), "vm_object_shard.object_path_index");
   ASSERT_STREQ(mapping_string(lookup_before, "owner_local_record_source"), "vm_object_shard.local_records");
@@ -5885,9 +5897,8 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
   ASSERT_EQ(mapping_number(path_lookup_before, "owner_local_destructed_path_index_found"), 0);
   ASSERT_EQ(mapping_number(path_lookup_before, "owner_local_canonical_record_ready"), 1);
   ASSERT_EQ(mapping_number(path_lookup_before, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(path_lookup_before, "owner_local_store_complete"), 0);
-  ASSERT_STREQ(mapping_string(path_lookup_before, "owner_local_store_complete_blocker"),
-               "global_index_bridge_active");
+  ASSERT_EQ(mapping_number(path_lookup_before, "owner_local_store_complete"), 1);
+  ASSERT_STREQ(mapping_string(path_lookup_before, "owner_local_store_complete_blocker"), "");
   expect_no_lookup_global_live_object(path_lookup_before);
   ASSERT_STREQ(mapping_string(path_lookup_before, "owner_local_path_index_source"),
                "vm_object_shard.object_path_index");
@@ -5910,13 +5921,13 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
   ASSERT_STREQ(mapping_string(store_after_destruct, "store_kind"), "vm_object_store");
   ASSERT_STREQ(mapping_string(store_after_destruct, "status_model"), "object_store_status");
   ASSERT_STREQ(mapping_string(store_after_destruct, "directory_model"), "owner_local_object_directory");
-  ASSERT_STREQ(mapping_string(store_after_destruct, "storage_model"), "global_index_bridge");
+  ASSERT_STREQ(mapping_string(store_after_destruct, "storage_model"), "owner_local_store");
   ASSERT_EQ(mapping_number(store_after_destruct, "owner_local_global_bridge_consistent"), 1);
   ASSERT_EQ(mapping_number(store_after_destruct, "owner_local_to_global_bridge_consistent"), 1);
   ASSERT_EQ(mapping_number(store_after_destruct, "global_to_owner_local_bridge_consistent"), 1);
   ASSERT_STREQ(mapping_string(store_after_destruct, "owner_local_global_bridge_check"), "bidirectional");
   ASSERT_STREQ(mapping_string(store_after_destruct, "owner_local_global_bridge_source"), "vm_object_shard");
-  expect_global_bridge_contract(store_after_destruct);
+  expect_owner_local_store_complete_contract(store_after_destruct);
   ASSERT_GE(mapping_number(store_after_destruct, "owner_local_destructed_record_total"), 1);
   ASSERT_EQ(mapping_number(store_after_destruct, "owner_local_object_ref_total"),
             mapping_number(store_after_destruct, "owner_local_object_ref_index_total"));
@@ -5928,9 +5939,9 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
   ASSERT_EQ(mapping_number(store_after_destruct, "owner_local_record_index_ready"), 1);
   ASSERT_EQ(mapping_number(store_after_destruct, "owner_local_canonical_record_ready"), 1);
   ASSERT_EQ(mapping_number(store_after_destruct, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(store_after_destruct, "owner_local_store_complete"), 0);
-  ASSERT_EQ(mapping_number(store_after_destruct, "uses_global_object_table"), 1);
-  ASSERT_EQ(mapping_number(store_after_destruct, "global_index_bridge"), 1);
+  ASSERT_EQ(mapping_number(store_after_destruct, "owner_local_store_complete"), 1);
+  ASSERT_EQ(mapping_number(store_after_destruct, "uses_global_object_table"), 0);
+  ASSERT_EQ(mapping_number(store_after_destruct, "global_index_bridge"), 0);
   ASSERT_EQ(mapping_number(store_after_destruct, "global_record_bridge_consistent"), 1);
   ASSERT_EQ(mapping_number(store_after_destruct, "global_record_bridge_retirement_ready"), 1);
   ASSERT_EQ(mapping_number(store_after_destruct, "global_live_object_bridge_retirement_ready"), 1);
@@ -5957,8 +5968,8 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
   ASSERT_EQ(mapping_number(after, "owner_local_destructed_path_index_consistent"), 1);
   ASSERT_EQ(mapping_number(after, "owner_local_canonical_record_ready"), 1);
   ASSERT_EQ(mapping_number(after, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(after, "owner_local_store_complete"), 0);
-  expect_global_bridge_contract(after);
+  ASSERT_EQ(mapping_number(after, "owner_local_store_complete"), 1);
+  expect_owner_local_store_complete_contract(after);
   ASSERT_EQ(mapping_number(after, "destructed"), before_destructed + 1);
   free_mapping(after);
   auto* lookup_after = vm_object_store_owner_lookup_status("owner/test/store/destruct", handle.object_id);
@@ -5985,8 +5996,8 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
                "vm_object_shard.destructed_path_index");
   ASSERT_EQ(mapping_number(lookup_after, "owner_local_canonical_record_ready"), 1);
   ASSERT_EQ(mapping_number(lookup_after, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(lookup_after, "owner_local_store_complete"), 0);
-  ASSERT_STREQ(mapping_string(lookup_after, "owner_local_store_complete_blocker"), "global_index_bridge_active");
+  ASSERT_EQ(mapping_number(lookup_after, "owner_local_store_complete"), 1);
+  ASSERT_STREQ(mapping_string(lookup_after, "owner_local_store_complete_blocker"), "");
   ASSERT_EQ(mapping_number(lookup_after, "destructed"), 1);
   free_mapping(lookup_after);
   auto* path_lookup_after =
@@ -6013,9 +6024,8 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
                "vm_object_shard.destructed_path_index");
   ASSERT_EQ(mapping_number(path_lookup_after, "owner_local_canonical_record_ready"), 1);
   ASSERT_EQ(mapping_number(path_lookup_after, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(path_lookup_after, "owner_local_store_complete"), 0);
-  ASSERT_STREQ(mapping_string(path_lookup_after, "owner_local_store_complete_blocker"),
-               "global_index_bridge_active");
+  ASSERT_EQ(mapping_number(path_lookup_after, "owner_local_store_complete"), 1);
+  ASSERT_STREQ(mapping_string(path_lookup_after, "owner_local_store_complete_blocker"), "");
   free_mapping(path_lookup_after);
 
   vm_owner_set_id(obj, "owner/test/store/destruct-after");
@@ -6036,8 +6046,8 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
   ASSERT_EQ(mapping_number(moved_after_destruct, "owner_local_live_path_index_consistent"), 1);
   ASSERT_EQ(mapping_number(moved_after_destruct, "owner_local_destructed_path_index_consistent"), 1);
   ASSERT_EQ(mapping_number(moved_after_destruct, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(moved_after_destruct, "owner_local_store_complete"), 0);
-  expect_global_bridge_contract(moved_after_destruct);
+  ASSERT_EQ(mapping_number(moved_after_destruct, "owner_local_store_complete"), 1);
+  expect_owner_local_store_complete_contract(moved_after_destruct);
   auto* empty_shard_contract = find_string_in_mapping(moved_after_destruct, "vm_object_shard");
   ASSERT_NE(empty_shard_contract, nullptr);
   ASSERT_EQ(empty_shard_contract ? empty_shard_contract->type : T_INVALID, T_MAPPING);
@@ -6057,9 +6067,9 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
   ASSERT_EQ(mapping_number(empty_shard_contract->u.map, "owner_local_directory_ready"), 1);
   ASSERT_EQ(mapping_number(empty_shard_contract->u.map, "owner_local_directory_from_shard"), 1);
   ASSERT_EQ(mapping_number(empty_shard_contract->u.map, "owner_local_store_ready"), 1);
-  ASSERT_EQ(mapping_number(empty_shard_contract->u.map, "owner_local_store_complete"), 0);
-  ASSERT_EQ(mapping_number(empty_shard_contract->u.map, "global_index_bridge"), 1);
-  expect_global_bridge_contract(empty_shard_contract->u.map);
+  ASSERT_EQ(mapping_number(empty_shard_contract->u.map, "owner_local_store_complete"), 1);
+  ASSERT_EQ(mapping_number(empty_shard_contract->u.map, "global_index_bridge"), 0);
+  expect_owner_local_store_complete_contract(empty_shard_contract->u.map);
   free_mapping(moved_after_destruct);
   auto* moved_lookup_after_destruct =
       vm_object_store_owner_lookup_status("owner/test/store/destruct-after", handle.object_id);
