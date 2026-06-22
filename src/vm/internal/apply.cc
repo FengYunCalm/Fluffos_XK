@@ -18,6 +18,21 @@
 // global static result
 thread_local svalue_t apply_ret_value;
 
+bool vm_apply_return_thread_local_storage_ready() { return true; }
+
+int vm_apply_return_value_type() { return apply_ret_value.type; }
+
+int vm_apply_return_value_subtype() { return apply_ret_value.subtype; }
+
+bool vm_apply_return_empty() {
+  return apply_ret_value.type == T_NUMBER && (apply_ret_value.subtype & T_UNDEFINED);
+}
+
+void vm_apply_return_clear() {
+  free_svalue(&apply_ret_value, "vm_apply_return_clear");
+  apply_ret_value = const0u;
+}
+
 int convert_type(int /*type*/);
 
 int convert_type(int type) {

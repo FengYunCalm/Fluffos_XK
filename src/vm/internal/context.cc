@@ -2,6 +2,7 @@
 
 #include "vm/context.h"
 
+#include "vm/internal/apply.h"
 #include "vm/internal/base/interpret.h"
 #include "vm/internal/base/machine.h"
 #include "vm/internal/simulate.h"
@@ -253,6 +254,29 @@ void vm_context_sync_value_stack(VMContext &context) {
 }
 
 void vm_context_clear_value_stack(VMContext &context) { context.value_stack = VMValueStackState{}; }
+
+void vm_context_sync_apply_return(VMContext &context) {
+  if (!is_current_thread_context(context)) {
+    return;
+  }
+  auto sync_count = context.apply_return.sync_count + 1;
+  context.apply_return.owner_id = context.owner.current_owner_id;
+  context.apply_return.owner_epoch = context.owner.current_owner_epoch;
+  context.apply_return.value_type = vm_apply_return_value_type();
+  context.apply_return.value_subtype = vm_apply_return_value_subtype();
+  context.apply_return.thread_local_storage = vm_apply_return_thread_local_storage_ready();
+  context.apply_return.context_bound = true;
+  context.apply_return.owner_bound = !context.owner.current_owner_id.empty();
+  context.apply_return.empty = vm_apply_return_empty();
+  context.apply_return.sync_count = sync_count;
+}
+
+void vm_context_clear_apply_return(VMContext &context) {
+  if (is_current_thread_context(context)) {
+    vm_apply_return_clear();
+  }
+  context.apply_return = VMApplyReturnState{};
+}
 
 void vm_context_sync_control_stack(VMContext &context) {
   if (!is_current_thread_context(context)) {

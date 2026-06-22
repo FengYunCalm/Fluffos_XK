@@ -225,8 +225,8 @@ constexpr std::array<VMContextReadinessGate, 11> kVMContextOrdinaryLpcReadinessG
      "keep_control_stack_synced_to_owner_vm_context", 1},
     {"value_stack_owner_local", "thread_local_owner_value_stack", "",
      "keep_value_stack_synced_to_owner_vm_context", 1},
-    {"apply_return_owner_local", "owner_execution_frame", "apply_return_process_global",
-     "move_apply_return_state_to_vm_context_or_owner_frame", 0},
+    {"apply_return_owner_local", "thread_local_owner_apply_return", "",
+     "keep_apply_return_synced_to_owner_vm_context", 1},
     {"object_refs_owner_local", "object_handle_boundary", "bare_object_pointer_cross_owner_refs",
      "replace_cross_owner_object_refs_with_object_handle", 0},
     {"object_store_owner_local_complete", "owner_local_object_store", "global_index_bridge_active",
@@ -283,6 +283,9 @@ std::atomic<uint64_t> owner_thread_control_stack_leak_detected{0};
 std::atomic<uint64_t> owner_thread_value_stack_owner_bound{0};
 std::atomic<uint64_t> owner_thread_value_stack_cleared{0};
 std::atomic<uint64_t> owner_thread_value_stack_leak_detected{0};
+std::atomic<uint64_t> owner_thread_apply_return_owner_bound{0};
+std::atomic<uint64_t> owner_thread_apply_return_cleared{0};
+std::atomic<uint64_t> owner_thread_apply_return_leak_detected{0};
 std::atomic<uint64_t> owner_thread_lpc_canary_flag_cleared{0};
 std::atomic<uint64_t> owner_thread_context_leak_detected{0};
 std::atomic<uint64_t> owner_thread_lpc_rejected{0};
@@ -983,7 +986,7 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_string(map, "command_stale_target_status", "owner_epoch_mismatch");
   add_mapping_string(map, "command_executor_readiness_gate_model", "all_gates_required_before_owner_executor");
   add_mapping_string(map, "command_executor_next_gate", "ordinary_lpc_ready");
-  add_mapping_string(map, "command_executor_next_blocker", "apply_return_owner_local");
+  add_mapping_string(map, "command_executor_next_blocker", "object_refs_owner_local");
   add_mapping_pair(map, "command_executor_readiness_gate_count",
                    static_cast<long>(kGatewayCommandExecutorReadinessGates.size()));
   const auto command_executor_satisfied_gates = gateway_command_executor_satisfied_readiness_gate_count();
@@ -999,8 +1002,8 @@ mapping_t *gateway_owner_task_contract_mapping() {
   auto *tasks = gateway_owner_task_contract_entries_array();
   add_mapping_array(map, "tasks", tasks);
   free_array(tasks);
-  add_mapping_string(map, "next_blocker", "apply_return_owner_local");
-  add_mapping_string(map, "next_blocker_chain", "ordinary_lpc_ready/apply_return_owner_local");
+  add_mapping_string(map, "next_blocker", "object_refs_owner_local");
+  add_mapping_string(map, "next_blocker_chain", "ordinary_lpc_ready/object_refs_owner_local");
   return map;
 }
 
@@ -1015,7 +1018,7 @@ long vm_context_satisfied_readiness_gate_count() {
 }
 
 mapping_t *vm_context_contract_mapping() {
-  auto *contract = allocate_mapping(48);
+  auto *contract = allocate_mapping(53);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "context_model", "thread_local_vm_context");
   add_mapping_string(contract, "execution_state_model", "vm_context_execution_snapshot");
@@ -1024,7 +1027,7 @@ mapping_t *vm_context_contract_mapping() {
   add_mapping_string(contract, "object_store_model", "main_thread_owned_snapshot");
   add_mapping_string(contract, "object_store_off_main_policy", "sync_rejected");
   add_mapping_pair(contract, "ordinary_lpc_ready", 0);
-  add_mapping_string(contract, "ordinary_lpc_blocker", "apply_return_and_object_store_not_owner_local");
+  add_mapping_string(contract, "ordinary_lpc_blocker", "object_refs_and_object_store_not_owner_local");
   add_mapping_pair(contract, "controlled_lpc_ready", 1);
   add_mapping_string(contract, "controlled_lpc_policy", "descriptor_manifest_only");
   add_mapping_string(contract, "eval_stack_model", "thread_local_owner_execution_stack");
@@ -1043,7 +1046,11 @@ mapping_t *vm_context_contract_mapping() {
   add_mapping_pair(contract, "value_stack_owner_bound_on_executor", 1);
   add_mapping_pair(contract, "value_stack_cleared_after_task", 1);
   add_mapping_pair(contract, "value_stack_owner_local", 1);
-  add_mapping_pair(contract, "apply_return_owner_local", 0);
+  add_mapping_string(contract, "apply_return_model", "thread_local_owner_apply_return");
+  add_mapping_pair(contract, "apply_return_thread_local", 1);
+  add_mapping_pair(contract, "apply_return_owner_bound_on_executor", 1);
+  add_mapping_pair(contract, "apply_return_cleared_after_task", 1);
+  add_mapping_pair(contract, "apply_return_owner_local", 1);
   add_mapping_pair(contract, "object_refs_owner_local", 0);
   add_mapping_pair(contract, "error_state_contextualized", 1);
   add_mapping_pair(contract, "execution_state_contextualized", 1);
@@ -1053,7 +1060,7 @@ mapping_t *vm_context_contract_mapping() {
                    static_cast<long>(vm_context_object_store_sync_rejections()));
   add_mapping_pair(contract, "off_main_object_store_sync_allowed", 0);
   add_mapping_string(contract, "ordinary_lpc_readiness_gate_model", "all_gates_required_before_open");
-  add_mapping_string(contract, "ordinary_lpc_next_blocker", "apply_return_owner_local");
+  add_mapping_string(contract, "ordinary_lpc_next_blocker", "object_refs_owner_local");
   add_mapping_pair(contract, "ordinary_lpc_readiness_gate_count",
                    static_cast<long>(kVMContextOrdinaryLpcReadinessGates.size()));
   const auto satisfied_gates = vm_context_satisfied_readiness_gate_count();
@@ -2072,6 +2079,7 @@ bool owner_execution_state_cleared() {
   const auto &eval_stack = vm_context().eval_stack;
   const auto &control_stack = vm_context().control_stack;
   const auto &value_stack = vm_context().value_stack;
+  const auto &apply_return = vm_context().apply_return;
   const auto &object_store = vm_context().object_store;
   return execution.current_object == nullptr && execution.command_giver == nullptr &&
          execution.current_interactive == nullptr && execution.previous_ob == nullptr &&
@@ -2080,7 +2088,7 @@ bool owner_execution_state_cleared() {
          execution.function_index_offset == 0 && execution.variable_index_offset == 0 &&
          execution.stack_in_use_as_temporary == 0 && eval_stack.empty && !eval_stack.owner_bound &&
          control_stack.empty && !control_stack.owner_bound && value_stack.empty &&
-         !value_stack.owner_bound &&
+         !value_stack.owner_bound && apply_return.empty && !apply_return.owner_bound &&
          error.current_error_context == nullptr && error.too_deep_error == 0 &&
          error.max_eval_error == 0 && error.error_depth == 0 &&
          error.mudlib_error_depth == 0 && object_store.load_object_depth == 0 &&
@@ -2108,11 +2116,14 @@ void record_owner_context_cleanup(const OwnerMailboxTask &task) {
   vm_context_sync_eval_stack(vm_context());
   vm_context_sync_control_stack(vm_context());
   vm_context_sync_value_stack(vm_context());
+  vm_context_clear_apply_return(vm_context());
+  vm_context_sync_apply_return(vm_context());
   auto owner_cleared = vm_context().owner.current_owner_id.empty() &&
                        vm_context().owner.current_owner_epoch == 0;
   auto eval_stack_cleared = vm_context().eval_stack.empty && !vm_context().eval_stack.owner_bound;
   auto control_stack_cleared = vm_context().control_stack.empty && !vm_context().control_stack.owner_bound;
   auto value_stack_cleared = vm_context().value_stack.empty && !vm_context().value_stack.owner_bound;
+  auto apply_return_cleared = vm_context().apply_return.empty && !vm_context().apply_return.owner_bound;
   auto execution_cleared = owner_execution_state_cleared();
   auto canary_cleared = !vm_context().owner.lpc_canary_active && !vm_context().owner.controlled_lpc_active;
 
@@ -2137,11 +2148,16 @@ void record_owner_context_cleanup(const OwnerMailboxTask &task) {
   } else {
     owner_thread_value_stack_leak_detected.fetch_add(1, std::memory_order_relaxed);
   }
+  if (apply_return_cleared) {
+    owner_thread_apply_return_cleared.fetch_add(1, std::memory_order_relaxed);
+  } else {
+    owner_thread_apply_return_leak_detected.fetch_add(1, std::memory_order_relaxed);
+  }
   if (canary_cleared) {
     owner_thread_lpc_canary_flag_cleared.fetch_add(1, std::memory_order_relaxed);
   }
   if (!owner_cleared || !execution_cleared || !eval_stack_cleared || !control_stack_cleared ||
-      !value_stack_cleared || !canary_cleared) {
+      !value_stack_cleared || !apply_return_cleared || !canary_cleared) {
     append_owner_task_trace_threadsafe(task, "thread_context_leak_detected");
     owner_thread_context_leak_detected.fetch_add(1, std::memory_order_relaxed);
   }
@@ -2321,6 +2337,8 @@ class OwnerExecutor {
     vm_context_sync_eval_stack(vm_context());
     vm_context_sync_control_stack(vm_context());
     vm_context_sync_value_stack(vm_context());
+    vm_context_clear_apply_return(vm_context());
+    vm_context_sync_apply_return(vm_context());
   }
 
   std::string claim_next_owner() {
@@ -2388,6 +2406,12 @@ class OwnerExecutor {
           vm_context().value_stack.owner_id == task.owner_id &&
           vm_context().value_stack.owner_epoch == task.owner_epoch) {
         owner_thread_value_stack_owner_bound.fetch_add(1, std::memory_order_relaxed);
+      }
+      vm_context_sync_apply_return(vm_context());
+      if (vm_context().apply_return.thread_local_storage && vm_context().apply_return.context_bound &&
+          vm_context().apply_return.owner_id == task.owner_id &&
+          vm_context().apply_return.owner_epoch == task.owner_epoch) {
+        owner_thread_apply_return_owner_bound.fetch_add(1, std::memory_order_relaxed);
       }
       append_owner_task_trace_threadsafe(task, "thread_dispatched");
       owner_executor_runnable_task_dispatched.fetch_add(1, std::memory_order_relaxed);
@@ -3775,7 +3799,7 @@ void vm_owner_thread_stop() {
 
 mapping_t *vm_owner_thread_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(82);
+  auto *map = allocate_mapping(85);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
   add_mapping_pair(map, "thread_count", static_cast<long>(owner_threads.size()));
@@ -3809,6 +3833,12 @@ mapping_t *vm_owner_thread_status() {
                    static_cast<long>(owner_thread_value_stack_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_value_stack_leak_detected",
                    static_cast<long>(owner_thread_value_stack_leak_detected.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_apply_return_owner_bound",
+                   static_cast<long>(owner_thread_apply_return_owner_bound.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_apply_return_cleared",
+                   static_cast<long>(owner_thread_apply_return_cleared.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_apply_return_leak_detected",
+                   static_cast<long>(owner_thread_apply_return_leak_detected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_canary_flag_cleared",
                    static_cast<long>(owner_thread_lpc_canary_flag_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_context_leak_detected",
@@ -3921,7 +3951,7 @@ mapping_t *vm_owner_thread_status() {
 
 mapping_t *vm_owner_runtime_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(74);
+  auto *map = allocate_mapping(77);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
   add_mapping_string(map, "multicore_mode_name", vm_multicore_mode_name(vm_multicore_mode()));
@@ -3990,6 +4020,12 @@ mapping_t *vm_owner_runtime_status() {
                    static_cast<long>(owner_thread_value_stack_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_value_stack_leak_detected",
                    static_cast<long>(owner_thread_value_stack_leak_detected.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_apply_return_owner_bound",
+                   static_cast<long>(owner_thread_apply_return_owner_bound.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_apply_return_cleared",
+                   static_cast<long>(owner_thread_apply_return_cleared.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_apply_return_leak_detected",
+                   static_cast<long>(owner_thread_apply_return_leak_detected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_probe_executed",
                    static_cast<long>(owner_executor_probe_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_main_required_skipped",

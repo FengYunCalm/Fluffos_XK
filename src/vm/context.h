@@ -74,6 +74,18 @@ struct VMValueStackState {
   uint64_t sync_count{0};
 };
 
+struct VMApplyReturnState {
+  std::string owner_id;
+  uint64_t owner_epoch{0};
+  int value_type{0};
+  int value_subtype{0};
+  bool thread_local_storage{false};
+  bool context_bound{false};
+  bool owner_bound{false};
+  bool empty{true};
+  uint64_t sync_count{0};
+};
+
 struct VMControlStackState {
   std::string owner_id;
   uint64_t owner_epoch{0};
@@ -95,6 +107,7 @@ struct VMContext {
   VMErrorState error;
   VMEvalStackState eval_stack;
   VMValueStackState value_stack;
+  VMApplyReturnState apply_return;
   VMControlStackState control_stack;
   VMObjectStoreState object_store;
 };
@@ -138,6 +151,8 @@ void vm_context_sync_eval_stack(VMContext &context);
 void vm_context_clear_eval_stack(VMContext &context);
 void vm_context_sync_value_stack(VMContext &context);
 void vm_context_clear_value_stack(VMContext &context);
+void vm_context_sync_apply_return(VMContext &context);
+void vm_context_clear_apply_return(VMContext &context);
 void vm_context_sync_control_stack(VMContext &context);
 void vm_context_clear_control_stack(VMContext &context);
 void vm_context_sync_object_store(VMContext &context);

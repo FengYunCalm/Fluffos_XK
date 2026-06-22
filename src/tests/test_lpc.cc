@@ -2583,6 +2583,9 @@ TEST_F(DriverTest, TestVmOwnerExecutorCommandFrameRestoreDispatchesWithoutLpc) {
   auto before_value_stack_owner_bound = mapping_number(before, "thread_value_stack_owner_bound");
   auto before_value_stack_cleared = mapping_number(before, "thread_value_stack_cleared");
   auto before_value_stack_leaks = mapping_number(before, "thread_value_stack_leak_detected");
+  auto before_apply_return_owner_bound = mapping_number(before, "thread_apply_return_owner_bound");
+  auto before_apply_return_cleared = mapping_number(before, "thread_apply_return_cleared");
+  auto before_apply_return_leaks = mapping_number(before, "thread_apply_return_leak_detected");
   auto before_context_leaks = mapping_number(before, "thread_context_leak_detected");
   free_mapping(before);
 
@@ -2613,6 +2616,9 @@ TEST_F(DriverTest, TestVmOwnerExecutorCommandFrameRestoreDispatchesWithoutLpc) {
   ASSERT_GE(mapping_number(running, "thread_value_stack_owner_bound"), before_value_stack_owner_bound + 1);
   ASSERT_GE(mapping_number(running, "thread_value_stack_cleared"), before_value_stack_cleared + 1);
   ASSERT_EQ(mapping_number(running, "thread_value_stack_leak_detected"), before_value_stack_leaks);
+  ASSERT_GE(mapping_number(running, "thread_apply_return_owner_bound"), before_apply_return_owner_bound + 1);
+  ASSERT_GE(mapping_number(running, "thread_apply_return_cleared"), before_apply_return_cleared + 1);
+  ASSERT_EQ(mapping_number(running, "thread_apply_return_leak_detected"), before_apply_return_leaks);
   ASSERT_EQ(mapping_number(running, "thread_context_leak_detected"), before_context_leaks);
   ASSERT_EQ(mapping_number(running, "ordinary_lpc_default_closed"), 1);
   auto* vm_context_contract = mapping_entry(running, "vm_context_contract");
@@ -2620,7 +2626,8 @@ TEST_F(DriverTest, TestVmOwnerExecutorCommandFrameRestoreDispatchesWithoutLpc) {
   ASSERT_EQ(mapping_number(vm_context_contract, "eval_stack_owner_local"), 1);
   ASSERT_EQ(mapping_number(vm_context_contract, "control_stack_owner_local"), 1);
   ASSERT_EQ(mapping_number(vm_context_contract, "value_stack_owner_local"), 1);
-  ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_next_blocker"), "apply_return_owner_local");
+  ASSERT_EQ(mapping_number(vm_context_contract, "apply_return_owner_local"), 1);
+  ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_next_blocker"), "object_refs_owner_local");
   free_mapping(running);
 
   auto* trace = vm_owner_task_trace(16);
@@ -2974,7 +2981,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(vm_context_contract, "object_store_off_main_policy"), "sync_rejected");
     ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_ready"), 0);
     ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_blocker"),
-                 "apply_return_and_object_store_not_owner_local");
+                 "object_refs_and_object_store_not_owner_local");
     ASSERT_EQ(mapping_number(vm_context_contract, "controlled_lpc_ready"), 1);
     ASSERT_STREQ(mapping_string(vm_context_contract, "controlled_lpc_policy"), "descriptor_manifest_only");
     ASSERT_STREQ(mapping_string(vm_context_contract, "eval_stack_model"),
@@ -2996,7 +3003,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(vm_context_contract, "value_stack_owner_bound_on_executor"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "value_stack_cleared_after_task"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "value_stack_owner_local"), 1);
-    ASSERT_EQ(mapping_number(vm_context_contract, "apply_return_owner_local"), 0);
+    ASSERT_STREQ(mapping_string(vm_context_contract, "apply_return_model"),
+                 "thread_local_owner_apply_return");
+    ASSERT_EQ(mapping_number(vm_context_contract, "apply_return_thread_local"), 1);
+    ASSERT_EQ(mapping_number(vm_context_contract, "apply_return_owner_bound_on_executor"), 1);
+    ASSERT_EQ(mapping_number(vm_context_contract, "apply_return_cleared_after_task"), 1);
+    ASSERT_EQ(mapping_number(vm_context_contract, "apply_return_owner_local"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "object_refs_owner_local"), 0);
     ASSERT_EQ(mapping_number(vm_context_contract, "error_state_contextualized"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "execution_state_contextualized"), 1);
@@ -3006,10 +3018,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(vm_context_contract, "off_main_object_store_sync_allowed"), 0);
     ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_readiness_gate_model"),
                  "all_gates_required_before_open");
-    ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_next_blocker"), "apply_return_owner_local");
+    ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_next_blocker"), "object_refs_owner_local");
     ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_readiness_gate_count"), 11);
-    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_satisfied_gate_count"), 8);
-    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_blocked_gate_count"), 3);
+    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_satisfied_gate_count"), 9);
+    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_blocked_gate_count"), 2);
     auto* readiness_gates = mapping_array(vm_context_contract, "ordinary_lpc_readiness_gates");
     ASSERT_NE(readiness_gates, nullptr);
     ASSERT_EQ(readiness_gates->size, 11);
@@ -3042,9 +3054,13 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gate_entry("value_stack_owner_local"), "model"),
                  "thread_local_owner_value_stack");
     ASSERT_STREQ(mapping_string(gate_entry("value_stack_owner_local"), "blocker"), "");
-    ASSERT_EQ(mapping_number(gate_entry("apply_return_owner_local"), "satisfied"), 0);
-    ASSERT_STREQ(mapping_string(gate_entry("apply_return_owner_local"), "blocker"),
-                 "apply_return_process_global");
+    ASSERT_EQ(mapping_number(gate_entry("apply_return_owner_local"), "satisfied"), 1);
+    ASSERT_STREQ(mapping_string(gate_entry("apply_return_owner_local"), "model"),
+                 "thread_local_owner_apply_return");
+    ASSERT_STREQ(mapping_string(gate_entry("apply_return_owner_local"), "blocker"), "");
+    ASSERT_EQ(mapping_number(gate_entry("object_refs_owner_local"), "satisfied"), 0);
+    ASSERT_STREQ(mapping_string(gate_entry("object_refs_owner_local"), "blocker"),
+                 "bare_object_pointer_cross_owner_refs");
     ASSERT_EQ(mapping_number(gate_entry("object_store_owner_local_complete"), "satisfied"), 0);
     ASSERT_STREQ(mapping_string(gate_entry("object_store_owner_local_complete"), "blocker"),
                  "global_index_bridge_active");
@@ -3137,7 +3153,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "all_gates_required_before_owner_executor");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_gate"), "ordinary_lpc_ready");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_blocker"),
-                 "apply_return_owner_local");
+                 "object_refs_owner_local");
     ASSERT_EQ(mapping_number(gateway_contract, "command_executor_readiness_gate_count"), 5);
     ASSERT_EQ(mapping_number(gateway_contract, "command_executor_satisfied_gate_count"), 5);
     ASSERT_EQ(mapping_number(gateway_contract, "command_executor_blocked_gate_count"), 0);
@@ -3170,9 +3186,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(gateway_contract, "ordinary_lpc_ready_required"), 0);
     ASSERT_EQ(mapping_number(gateway_contract, "main_required"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "next_blocker"),
-                 "apply_return_owner_local");
+                 "object_refs_owner_local");
     ASSERT_STREQ(mapping_string(gateway_contract, "next_blocker_chain"),
-                 "ordinary_lpc_ready/apply_return_owner_local");
+                 "ordinary_lpc_ready/object_refs_owner_local");
     auto* gateway_tasks = mapping_array(gateway_contract, "tasks");
     ASSERT_NE(gateway_tasks, nullptr);
     ASSERT_EQ(gateway_tasks->size, 4);

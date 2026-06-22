@@ -41,6 +41,12 @@ inline const char *origin_to_name(const int origin) {
 // used by routines that want to return a pointer to an svalue
 extern thread_local struct svalue_t apply_ret_value;
 
+bool vm_apply_return_thread_local_storage_ready();
+int vm_apply_return_value_type();
+int vm_apply_return_value_subtype();
+bool vm_apply_return_empty();
+void vm_apply_return_clear();
+
 // Call a specific function on a specific object
 // Result are stored in a global value, no need to free.
 svalue_t *safe_apply(const char *, struct object_t *, int, int);
