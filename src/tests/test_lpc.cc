@@ -3497,6 +3497,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(gateway_command, "executor_safe"), 0);
     ASSERT_EQ(mapping_number(gateway_command, "main_required"), 0);
     ASSERT_EQ(mapping_number(gateway_command, "rejected"), 1);
+    ASSERT_EQ(mapping_number(gateway_command, "side_effect_snapshot_gate_count"), 5);
+    ASSERT_EQ(mapping_number(gateway_command, "side_effect_snapshot_ready_count"), 5);
+    ASSERT_EQ(mapping_number(gateway_command, "side_effect_observability_ready"), 1);
+    ASSERT_EQ(mapping_number(gateway_command, "side_effect_activation_ready"), 0);
+    ASSERT_STREQ(mapping_string(gateway_command, "activation_blocker"),
+                 "interactive_command_side_effects_main_thread_bound");
 
     auto* mailbox_message = mapping_entry(contract, "owner_message_mailbox");
     ASSERT_EQ(mapping_number(mailbox_message, "executor_safe"), 1);

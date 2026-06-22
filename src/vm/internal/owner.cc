@@ -986,6 +986,20 @@ long gateway_command_side_effect_snapshot_ready_gate_count() {
   return count;
 }
 
+mapping_t *gateway_command_activation_contract_entry(const OwnerExecutorTaskDescriptor &descriptor) {
+  auto *map = owner_task_contract_entry(descriptor.executor_mode, descriptor.route, descriptor.executor_safe,
+                                        descriptor.main_required, descriptor.rejected, descriptor.reason);
+  const auto gate_count = static_cast<long>(kGatewayCommandSideEffectReadinessGates.size());
+  const auto satisfied_gates = gateway_command_side_effect_satisfied_readiness_gate_count();
+  const auto snapshot_ready_gates = gateway_command_side_effect_snapshot_ready_gate_count();
+  add_mapping_pair(map, "side_effect_snapshot_gate_count", gate_count);
+  add_mapping_pair(map, "side_effect_snapshot_ready_count", snapshot_ready_gates);
+  add_mapping_pair(map, "side_effect_observability_ready", snapshot_ready_gates == gate_count ? 1 : 0);
+  add_mapping_pair(map, "side_effect_activation_ready", satisfied_gates == gate_count ? 1 : 0);
+  add_mapping_string(map, "activation_blocker", kGatewayCommandExecutorActivationBlocker);
+  return map;
+}
+
 array_t *string_array_from_contract(const std::array<const char *, 5> &values) {
   auto *array = allocate_array(static_cast<int>(values.size()));
   for (size_t i = 0; i < values.size(); i++) {
@@ -1274,10 +1288,7 @@ mapping_t *owner_task_contract_mapping() {
                                                       command_frame_restore->main_required,
                                                       command_frame_restore->rejected, command_frame_restore->reason));
   add_mapping_owned_mapping(contract, "gateway_command_executor_activation",
-                            owner_task_contract_entry(gateway_command->executor_mode, gateway_command->route,
-                                                      gateway_command->executor_safe,
-                                                      gateway_command->main_required,
-                                                      gateway_command->rejected, gateway_command->reason));
+                            gateway_command_activation_contract_entry(*gateway_command));
   add_mapping_owned_mapping(contract, "owner_message_mailbox",
                             owner_task_route_contract_entry(kOwnerTaskExecutorSafeContract));
   add_mapping_owned_mapping(contract, "owner_message_target_handle",

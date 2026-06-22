@@ -614,6 +614,12 @@ void assert_owner_executor_contract(mapping status) {
                           "owner_executor", 1, 0, 0);
     assert_contract_entry(contract, "gateway_command_executor_activation", "rejected",
                           "owner_executor", 0, 0, 1);
+    ASSERT_EQ(5, contract["gateway_command_executor_activation"]["side_effect_snapshot_gate_count"]);
+    ASSERT_EQ(5, contract["gateway_command_executor_activation"]["side_effect_snapshot_ready_count"]);
+    ASSERT_EQ(1, contract["gateway_command_executor_activation"]["side_effect_observability_ready"]);
+    ASSERT_EQ(0, contract["gateway_command_executor_activation"]["side_effect_activation_ready"]);
+    ASSERT_EQ("interactive_command_side_effects_main_thread_bound",
+              contract["gateway_command_executor_activation"]["activation_blocker"]);
     assert_contract_entry(contract, "owner_message_mailbox", "executor_safe",
                           "owner_executor", 1, 0, 0);
     assert_owner_message_route_contract(contract, "owner_message_mailbox", 1, 0);
