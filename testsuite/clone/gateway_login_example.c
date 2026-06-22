@@ -7,6 +7,8 @@ private string last_disconnect_code = 0;
 private string last_disconnect_text = 0;
 private string last_input_to_line = 0;
 private string last_input_to_token = 0;
+private string last_get_char_value = 0;
+private string last_get_char_token = 0;
 
 void logon() {
   write("Normal login path reached.\n");
@@ -38,6 +40,19 @@ int enable_gateway_input_to() {
 string query_last_input_to_line() { return last_input_to_line; }
 
 string query_last_input_to_token() { return last_input_to_token; }
+
+void gateway_get_char_callback(string value, string token) {
+  last_get_char_value = value;
+  last_get_char_token = token;
+}
+
+int enable_gateway_get_char() {
+  return get_char("gateway_get_char_callback", 3, "char-token");
+}
+
+string query_last_get_char_value() { return last_get_char_value; }
+
+string query_last_get_char_token() { return last_get_char_token; }
 
 void gateway_receive(mixed data) {
   last_gateway_payload = data;

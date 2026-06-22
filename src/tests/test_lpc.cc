@@ -7818,6 +7818,111 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveInputToState) {
   free_object(&ob, "TestGatewayCommandPayloadSnapshotsActiveInputToState");
 }
 
+TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveGetCharState) {
+  auto *ob = create_gateway_session_for_test("gw-test-command-get-char", "/clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  ASSERT_NE(ob->interactive, nullptr);
+  ASSERT_TRUE(gateway_is_session(ob));
+  auto owner_epoch = vm_owner_epoch(ob);
+
+  auto mapping_number = [](mapping_t *map, const char *key) -> long {
+    auto *value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t *map, const char *key) -> const char * {
+    auto *value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+  auto mapping_has_string_key = [](mapping_t *map, const char *key) -> bool {
+    auto *keys = mapping_indices(map);
+    bool found = false;
+    for (int i = 0; keys && i < keys->size; i++) {
+      if (keys->item[i].type == T_STRING && std::strcmp(keys->item[i].u.string, key) == 0) {
+        found = true;
+        break;
+      }
+    }
+    if (keys) {
+      free_array(keys);
+    }
+    return found;
+  };
+
+  auto *enabled = call_lpc_method(ob, "enable_gateway_get_char");
+  ASSERT_NE(enabled, nullptr);
+  ASSERT_EQ(enabled->type, T_NUMBER);
+  ASSERT_EQ(enabled->u.number, 1);
+  ASSERT_NE(ob->interactive->input_to, nullptr);
+  ASSERT_EQ(ob->interactive->num_carry, 1);
+  ASSERT_TRUE((ob->interactive->iflags & SINGLE_CHAR) != 0);
+  ASSERT_TRUE((ob->interactive->iflags & NOECHO) != 0);
+  ASSERT_TRUE((ob->interactive->iflags & NOESC) != 0);
+
+  ASSERT_EQ(gateway_inject_input_internal(ob, "z"), 1);
+  ASSERT_EQ(gateway_process_pending_command_internal(ob), 1);
+
+  auto *value = call_lpc_method(ob, "query_last_get_char_value");
+  ASSERT_NE(value, nullptr);
+  ASSERT_EQ(value->type, T_STRING);
+  ASSERT_STREQ(value->u.string, "z");
+  auto *token = call_lpc_method(ob, "query_last_get_char_token");
+  ASSERT_NE(token, nullptr);
+  ASSERT_EQ(token->type, T_STRING);
+  ASSERT_STREQ(token->u.string, "char-token");
+
+  auto *trace = vm_owner_task_trace(64);
+  ASSERT_NE(trace, nullptr);
+  ASSERT_EQ(mapping_number(trace, "success"), 1);
+  auto *events_value = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events_value, nullptr);
+  ASSERT_EQ(events_value ? events_value->type : T_INVALID, T_ARRAY);
+  bool found_command_task = false;
+  if (events_value && events_value->type == T_ARRAY) {
+    for (int i = 0; i < events_value->u.arr->size; i++) {
+      auto *event = events_value->u.arr->item[i].u.map;
+      if (std::string(mapping_string(event, "task_type")) == "gateway" &&
+          std::string(mapping_string(event, "task_key")) == "process_user_command" &&
+          std::string(mapping_string(event, "state")) == "main_queued" &&
+          std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
+          mapping_number(event, "owner_epoch") == static_cast<long>(owner_epoch)) {
+        auto *payload_value = find_string_in_mapping(event, "payload");
+        ASSERT_NE(payload_value, nullptr);
+        ASSERT_EQ(payload_value ? payload_value->type : T_INVALID, T_MAPPING);
+        auto *payload = payload_value->u.map;
+        if (std::string(mapping_string(payload, "session_id")) != "gw-test-command-get-char") {
+          continue;
+        }
+        found_command_task = true;
+        ASSERT_STREQ(mapping_string(payload, "input_callback_state_policy"), "redacted_input_to_get_char_state_v1");
+        ASSERT_EQ(mapping_number(payload, "input_callback_state_snapshot_ready"), 1);
+        ASSERT_EQ(mapping_number(payload, "input_callback_state_redacted"), 1);
+        ASSERT_EQ(mapping_number(payload, "input_callback_active"), 1);
+        ASSERT_EQ(mapping_number(payload, "input_callback_single_char"), 1);
+        ASSERT_EQ(mapping_number(payload, "input_callback_noescape"), 1);
+        ASSERT_EQ(mapping_number(payload, "input_callback_noecho"), 1);
+        ASSERT_EQ(mapping_number(payload, "input_callback_carryover_count"), 1);
+        ASSERT_EQ(mapping_number(payload, "input_callback_function_redacted"), 1);
+        ASSERT_EQ(mapping_number(payload, "input_callback_object_redacted"), 1);
+        ASSERT_FALSE(mapping_has_string_key(payload, "input_callback_function"));
+        ASSERT_FALSE(mapping_has_string_key(payload, "input_callback_object"));
+        ASSERT_FALSE(mapping_has_string_key(payload, "command_text"));
+      }
+    }
+  }
+  ASSERT_TRUE(found_command_task);
+  free_mapping(trace);
+
+  add_ref(ob, "TestGatewayCommandPayloadSnapshotsActiveGetCharState");
+  ASSERT_EQ(gateway_destroy_session_internal("gw-test-command-get-char", "test_done", "done"), 1);
+  ASSERT_EQ(ob->interactive, nullptr);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayCommandPayloadSnapshotsActiveGetCharState");
+}
+
 TEST_F(DriverTest, TestGatewayCommandMainQueueDropsStaleOwnerEpoch) {
   auto *ob = create_gateway_session_for_test("gw-test-command-stale", "/clone/gateway_login_example");
   ASSERT_NE(ob, nullptr);
