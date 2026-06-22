@@ -5,6 +5,8 @@ private mixed last_gateway_payload = 0;
 private mapping last_gateway_receive_context = ([]);
 private string last_disconnect_code = 0;
 private string last_disconnect_text = 0;
+private string last_input_to_line = 0;
+private string last_input_to_token = 0;
 
 void logon() {
   write("Normal login path reached.\n");
@@ -23,6 +25,19 @@ mapping query_last_gateway_receive_context() { return last_gateway_receive_conte
 string query_last_disconnect_code() { return last_disconnect_code; }
 
 string query_last_disconnect_text() { return last_disconnect_text; }
+
+void gateway_input_to_callback(string line, string token) {
+  last_input_to_line = line;
+  last_input_to_token = token;
+}
+
+int enable_gateway_input_to() {
+  return input_to("gateway_input_to_callback", 3, "carry-token");
+}
+
+string query_last_input_to_line() { return last_input_to_line; }
+
+string query_last_input_to_token() { return last_input_to_token; }
 
 void gateway_receive(mixed data) {
   last_gateway_payload = data;
