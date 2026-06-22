@@ -54,8 +54,8 @@ void assert_vm_context_contract(mapping contract) {
     ASSERT_EQ("vm_context_error_snapshot", contract["error_state_model"]);
     ASSERT_EQ("owner_local_object_store", contract["object_store_model"]);
     ASSERT_EQ("owner_local_lookup_only", contract["object_store_off_main_policy"]);
-    ASSERT_EQ(0, contract["ordinary_lpc_ready"]);
-    ASSERT_EQ("ordinary_lpc_dispatch_path", contract["ordinary_lpc_blocker"]);
+    ASSERT_EQ(1, contract["ordinary_lpc_ready"]);
+    ASSERT_EQ("", contract["ordinary_lpc_blocker"]);
     ASSERT_EQ(1, contract["controlled_lpc_ready"]);
     ASSERT_EQ("descriptor_manifest_only", contract["controlled_lpc_policy"]);
     ASSERT_EQ("thread_local_owner_execution_stack", contract["eval_stack_model"]);
@@ -91,13 +91,16 @@ void assert_vm_context_contract(mapping contract) {
     ASSERT_EQ(1, contract["object_store_owner_local_complete"]);
     ASSERT_EQ(1, contract["ordinary_lpc_activation_required"]);
     ASSERT_EQ(1, contract["ordinary_lpc_activation_policy_ready"]);
+    ASSERT_EQ(1, contract["ordinary_lpc_dispatch_path_ready"]);
     ASSERT_EQ(1, contract["ordinary_lpc_default_closed"]);
     ASSERT_EQ(1, contract["ordinary_lpc_explicit_open_required"]);
+    ASSERT_EQ("generic_owner_lpc_dispatch",
+              contract["ordinary_lpc_dispatch_model"]);
     ASSERT_EQ("default_closed_explicit_open",
               contract["ordinary_lpc_activation_policy"]);
-    ASSERT_EQ("closed_until_dispatch_path_and_tests",
+    ASSERT_EQ("explicit_open_only_until_gateway_migration",
               contract["ordinary_lpc_activation_rollout"]);
-    ASSERT_EQ("disable_before_dispatch_path",
+    ASSERT_EQ("disable_explicit_open_submission",
               contract["ordinary_lpc_activation_rollback"]);
     ASSERT_EQ(1, contract["error_state_contextualized"]);
     ASSERT_EQ(1, contract["execution_state_contextualized"]);
@@ -107,10 +110,10 @@ void assert_vm_context_contract(mapping contract) {
     ASSERT_EQ(0, contract["off_main_object_store_sync_allowed"]);
     ASSERT_EQ("all_gates_required_before_open",
               contract["ordinary_lpc_readiness_gate_model"]);
-    ASSERT_EQ("ordinary_lpc_dispatch_path", contract["ordinary_lpc_next_blocker"]);
+    ASSERT_EQ("", contract["ordinary_lpc_next_blocker"]);
     ASSERT_EQ(13, contract["ordinary_lpc_readiness_gate_count"]);
-    ASSERT_EQ(12, contract["ordinary_lpc_satisfied_gate_count"]);
-    ASSERT_EQ(1, contract["ordinary_lpc_blocked_gate_count"]);
+    ASSERT_EQ(13, contract["ordinary_lpc_satisfied_gate_count"]);
+    ASSERT_EQ(0, contract["ordinary_lpc_blocked_gate_count"]);
     ASSERT(arrayp(gates));
     ASSERT_EQ(13, sizeof(gates));
     for (i = 0; i < sizeof(gates); i++) {
@@ -159,9 +162,10 @@ void assert_vm_context_contract(mapping contract) {
     ASSERT_EQ("", gate_by_name["ordinary_lpc_activation_policy"]["blocker"]);
     ASSERT_EQ("keep_default_closed_until_dispatch_path_ready",
               gate_by_name["ordinary_lpc_activation_policy"]["next_action"]);
-    ASSERT_EQ(0, gate_by_name["ordinary_lpc_dispatch_path"]["satisfied"]);
-    ASSERT_EQ("ordinary_lpc_dispatch_not_implemented",
-              gate_by_name["ordinary_lpc_dispatch_path"]["blocker"]);
+    ASSERT_EQ(1, gate_by_name["ordinary_lpc_dispatch_path"]["satisfied"]);
+    ASSERT_EQ("", gate_by_name["ordinary_lpc_dispatch_path"]["blocker"]);
+    ASSERT_EQ("keep_generic_dispatch_explicit_open_and_frozen_result_guarded",
+              gate_by_name["ordinary_lpc_dispatch_path"]["next_action"]);
 }
 
 void assert_frozen_payload_contract(mapping contract) {
@@ -272,7 +276,7 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("owner_private_redacted_from_trace",
               contract["command_text_snapshot_policy"]);
     ASSERT_EQ(1, contract["command_text_snapshot_ready"]);
-    ASSERT_EQ("ordinary_lpc_not_ready",
+    ASSERT_EQ("gateway_command_executor_not_migrated",
               contract["command_executor_blocker"]);
     ASSERT_EQ("owner_owned_snapshot_main_thread_consume",
               contract["command_consume_model"]);
@@ -295,14 +299,14 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("owner_epoch_mismatch", contract["command_stale_target_status"]);
     ASSERT_EQ("all_gates_required_before_owner_executor",
               contract["command_executor_readiness_gate_model"]);
-    ASSERT_EQ("ordinary_lpc_ready", contract["command_executor_next_gate"]);
-    ASSERT_EQ("ordinary_lpc_dispatch_path",
+    ASSERT_EQ("gateway_command_executor_activation", contract["command_executor_next_gate"]);
+    ASSERT_EQ("gateway_command_executor_not_migrated",
               contract["command_executor_next_blocker"]);
-    ASSERT_EQ(5, contract["command_executor_readiness_gate_count"]);
-    ASSERT_EQ(5, contract["command_executor_satisfied_gate_count"]);
-    ASSERT_EQ(0, contract["command_executor_blocked_gate_count"]);
+    ASSERT_EQ(7, contract["command_executor_readiness_gate_count"]);
+    ASSERT_EQ(6, contract["command_executor_satisfied_gate_count"]);
+    ASSERT_EQ(1, contract["command_executor_blocked_gate_count"]);
     ASSERT(arrayp(command_executor_gates));
-    ASSERT_EQ(5, sizeof(command_executor_gates));
+    ASSERT_EQ(7, sizeof(command_executor_gates));
     for (i = 0; i < sizeof(command_executor_gates); i++) {
         mapping gate = command_executor_gates[i];
 
@@ -324,11 +328,16 @@ void assert_gateway_owner_task_contract(mapping contract) {
               command_executor_gate_by_name["owner_executor_command_consume_entry"]["blocker"]);
     ASSERT_EQ(1, command_executor_gate_by_name["owner_executor_frame_restore"]["satisfied"]);
     ASSERT_EQ("", command_executor_gate_by_name["owner_executor_frame_restore"]["blocker"]);
+    ASSERT_EQ(1, command_executor_gate_by_name["ordinary_lpc_ready"]["satisfied"]);
+    ASSERT_EQ("", command_executor_gate_by_name["ordinary_lpc_ready"]["blocker"]);
+    ASSERT_EQ(0, command_executor_gate_by_name["gateway_command_executor_activation"]["satisfied"]);
+    ASSERT_EQ("gateway_command_executor_not_migrated",
+              command_executor_gate_by_name["gateway_command_executor_activation"]["blocker"]);
     ASSERT_EQ(0, contract["ordinary_lpc_ready_required"]);
     ASSERT_EQ(1, contract["main_required"]);
-    ASSERT_EQ("ordinary_lpc_dispatch_path",
+    ASSERT_EQ("gateway_command_executor_activation",
               contract["next_blocker"]);
-    ASSERT_EQ("ordinary_lpc_ready/ordinary_lpc_dispatch_path",
+    ASSERT_EQ("gateway_command_executor/gateway_command_executor_activation",
               contract["next_blocker_chain"]);
     ASSERT(arrayp(tasks));
     ASSERT_EQ(4, sizeof(tasks));
@@ -401,13 +410,14 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("owner_executor_v1", status["executor_contract_version"]);
     ASSERT_EQ("owner_executor", status["executor_model"]);
     ASSERT_EQ("descriptor_manifest", status["executor_dispatch_model"]);
-    ASSERT_EQ("default_closed_allowlist", status["executor_lpc_model"]);
+    ASSERT_EQ("default_closed_explicit_open", status["executor_lpc_model"]);
     ASSERT_EQ("default_closed_explicit_open", status["ordinary_lpc_default_policy"]);
     ASSERT_EQ(1, status["ordinary_lpc_default_closed"]);
     ASSERT_EQ(1, status["ordinary_lpc_activation_policy_ready"]);
+    ASSERT_EQ(1, status["ordinary_lpc_dispatch_path_ready"]);
     ASSERT_EQ(1, status["ordinary_lpc_explicit_open_required"]);
     ASSERT_EQ("default_closed_explicit_open", status["ordinary_lpc_activation_policy"]);
-    ASSERT_EQ("ordinary_lpc_dispatch_path", status["ordinary_lpc_next_blocker"]);
+    ASSERT_EQ("", status["ordinary_lpc_next_blocker"]);
     ASSERT(arrayp(lpc_contracts));
     ASSERT_EQ(1, sizeof(lpc_contracts));
     readonly_contract = lpc_contracts[0];
@@ -426,7 +436,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(0, readonly_contract["direct_cross_owner_write"]);
     ASSERT(stringp(readonly_contract["reason"]));
     ASSERT(arrayp(dispatch_contracts));
-    ASSERT_EQ(10, sizeof(dispatch_contracts));
+    ASSERT_EQ(11, sizeof(dispatch_contracts));
     for (i = 0; i < sizeof(dispatch_contracts); i++) {
         mapping entry = dispatch_contracts[i];
 
@@ -443,6 +453,8 @@ void assert_owner_executor_contract(mapping status) {
                           "lpc_canary", "executor_safe", 1, 1, 0);
     assert_dispatch_entry(dispatch_contract, "lpc_task", "lpc_task_allowlist",
                           "lpc_task", "executor_safe_allowlist", 1, 1, 0);
+    assert_dispatch_entry(dispatch_contract, "ordinary_lpc", "ordinary_lpc_dispatch",
+                          "ordinary_lpc", "executor_safe_explicit_open", 1, 1, 0);
     assert_dispatch_entry(dispatch_contract, "owner_message",
                           "owner_message_mailbox", "owner_message",
                           "executor_safe", 1, 1, 0);
@@ -466,6 +478,10 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT(intp(status["executor_safe_task_dispatched"]));
     ASSERT(intp(status["executor_command_consume_entry_executed"]));
     ASSERT(intp(status["executor_command_frame_restore_entry_executed"]));
+    ASSERT(intp(status["thread_ordinary_lpc_executed"]));
+    ASSERT(intp(status["thread_ordinary_lpc_succeeded"]));
+    ASSERT(intp(status["thread_ordinary_lpc_failed"]));
+    ASSERT(intp(status["thread_ordinary_lpc_rejected"]));
     ASSERT(intp(status["thread_eval_stack_owner_bound"]));
     ASSERT(intp(status["thread_eval_stack_cleared"]));
     ASSERT(intp(status["thread_eval_stack_leak_detected"]));
@@ -515,6 +531,17 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT(arrayp(nested_lpc_contracts));
     ASSERT_EQ(1, sizeof(nested_lpc_contracts));
     ASSERT_EQ("owner_task_readonly", nested_lpc_contracts[0]["method"]);
+    assert_contract_entry(contract, "ordinary_lpc", "executor_safe_explicit_open",
+                          "owner_executor", 1, 0, 0);
+    ASSERT_EQ("generic_owner_lpc_dispatch", contract["ordinary_lpc"]["dispatch_model"]);
+    ASSERT_EQ("default_closed_explicit_open", contract["ordinary_lpc"]["activation_policy"]);
+    ASSERT_EQ(1, contract["ordinary_lpc"]["default_closed"]);
+    ASSERT_EQ(1, contract["ordinary_lpc"]["explicit_open_required"]);
+    ASSERT_EQ(1, contract["ordinary_lpc"]["requires_target"]);
+    ASSERT_EQ(1, contract["ordinary_lpc"]["requires_owner_thread"]);
+    ASSERT_EQ(1, contract["ordinary_lpc"]["requires_owner_message_completion"]);
+    ASSERT_EQ(1, contract["ordinary_lpc"]["frozen_result_required"]);
+    ASSERT_EQ(0, contract["ordinary_lpc"]["direct_cross_owner_write"]);
     assert_contract_entry(contract, "lpc", "rejected", "owner_executor", 0, 0, 1);
 }
 

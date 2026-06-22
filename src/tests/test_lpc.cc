@@ -2622,12 +2622,12 @@ TEST_F(DriverTest, TestVmOwnerExecutorCommandFrameRestoreDispatchesWithoutLpc) {
   ASSERT_EQ(mapping_number(running, "thread_context_leak_detected"), before_context_leaks);
   ASSERT_EQ(mapping_number(running, "ordinary_lpc_default_closed"), 1);
   auto* vm_context_contract = mapping_entry(running, "vm_context_contract");
-  ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_ready"), 0);
+  ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_ready"), 1);
   ASSERT_EQ(mapping_number(vm_context_contract, "eval_stack_owner_local"), 1);
   ASSERT_EQ(mapping_number(vm_context_contract, "control_stack_owner_local"), 1);
   ASSERT_EQ(mapping_number(vm_context_contract, "value_stack_owner_local"), 1);
   ASSERT_EQ(mapping_number(vm_context_contract, "apply_return_owner_local"), 1);
-  ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_next_blocker"), "ordinary_lpc_dispatch_path");
+  ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_next_blocker"), "");
   free_mapping(running);
 
   auto* trace = vm_owner_task_trace(16);
@@ -2967,13 +2967,14 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(status, "executor_contract_version"), "owner_executor_v1");
     ASSERT_STREQ(mapping_string(status, "executor_model"), "owner_executor");
     ASSERT_STREQ(mapping_string(status, "executor_dispatch_model"), "descriptor_manifest");
-    ASSERT_STREQ(mapping_string(status, "executor_lpc_model"), "default_closed_allowlist");
+    ASSERT_STREQ(mapping_string(status, "executor_lpc_model"), "default_closed_explicit_open");
     ASSERT_STREQ(mapping_string(status, "ordinary_lpc_default_policy"), "default_closed_explicit_open");
     ASSERT_EQ(mapping_number(status, "ordinary_lpc_default_closed"), 1);
     ASSERT_EQ(mapping_number(status, "ordinary_lpc_activation_policy_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "ordinary_lpc_dispatch_path_ready"), 1);
     ASSERT_EQ(mapping_number(status, "ordinary_lpc_explicit_open_required"), 1);
     ASSERT_STREQ(mapping_string(status, "ordinary_lpc_activation_policy"), "default_closed_explicit_open");
-    ASSERT_STREQ(mapping_string(status, "ordinary_lpc_next_blocker"), "ordinary_lpc_dispatch_path");
+    ASSERT_STREQ(mapping_string(status, "ordinary_lpc_next_blocker"), "");
     auto* vm_context_contract = mapping_entry(status, "vm_context_contract");
     ASSERT_NE(vm_context_contract, nullptr);
     ASSERT_EQ(mapping_number(vm_context_contract, "contract_version"), 1);
@@ -2983,8 +2984,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(vm_context_contract, "error_state_model"), "vm_context_error_snapshot");
     ASSERT_STREQ(mapping_string(vm_context_contract, "object_store_model"), "owner_local_object_store");
     ASSERT_STREQ(mapping_string(vm_context_contract, "object_store_off_main_policy"), "owner_local_lookup_only");
-    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_ready"), 0);
-    ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_blocker"), "ordinary_lpc_dispatch_path");
+    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_ready"), 1);
+    ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_blocker"), "");
     ASSERT_EQ(mapping_number(vm_context_contract, "controlled_lpc_ready"), 1);
     ASSERT_STREQ(mapping_string(vm_context_contract, "controlled_lpc_policy"), "descriptor_manifest_only");
     ASSERT_STREQ(mapping_string(vm_context_contract, "eval_stack_model"),
@@ -3024,14 +3025,17 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(vm_context_contract, "object_store_owner_local_complete"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_activation_required"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_activation_policy_ready"), 1);
+    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_dispatch_path_ready"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_default_closed"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_explicit_open_required"), 1);
+    ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_dispatch_model"),
+                 "generic_owner_lpc_dispatch");
     ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_activation_policy"),
                  "default_closed_explicit_open");
     ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_activation_rollout"),
-                 "closed_until_dispatch_path_and_tests");
+                 "explicit_open_only_until_gateway_migration");
     ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_activation_rollback"),
-                 "disable_before_dispatch_path");
+                 "disable_explicit_open_submission");
     ASSERT_EQ(mapping_number(vm_context_contract, "error_state_contextualized"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "execution_state_contextualized"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "owner_scope_contextualized"), 1);
@@ -3040,10 +3044,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(vm_context_contract, "off_main_object_store_sync_allowed"), 0);
     ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_readiness_gate_model"),
                  "all_gates_required_before_open");
-    ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_next_blocker"), "ordinary_lpc_dispatch_path");
+    ASSERT_STREQ(mapping_string(vm_context_contract, "ordinary_lpc_next_blocker"), "");
     ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_readiness_gate_count"), 13);
-    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_satisfied_gate_count"), 12);
-    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_blocked_gate_count"), 1);
+    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_satisfied_gate_count"), 13);
+    ASSERT_EQ(mapping_number(vm_context_contract, "ordinary_lpc_blocked_gate_count"), 0);
     auto* readiness_gates = mapping_array(vm_context_contract, "ordinary_lpc_readiness_gates");
     ASSERT_NE(readiness_gates, nullptr);
     ASSERT_EQ(readiness_gates->size, 13);
@@ -3092,9 +3096,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gate_entry("ordinary_lpc_activation_policy"), "blocker"), "");
     ASSERT_STREQ(mapping_string(gate_entry("ordinary_lpc_activation_policy"), "next_action"),
                  "keep_default_closed_until_dispatch_path_ready");
-    ASSERT_EQ(mapping_number(gate_entry("ordinary_lpc_dispatch_path"), "satisfied"), 0);
-    ASSERT_STREQ(mapping_string(gate_entry("ordinary_lpc_dispatch_path"), "blocker"),
-                 "ordinary_lpc_dispatch_not_implemented");
+    ASSERT_EQ(mapping_number(gate_entry("ordinary_lpc_dispatch_path"), "satisfied"), 1);
+    ASSERT_STREQ(mapping_string(gate_entry("ordinary_lpc_dispatch_path"), "blocker"), "");
+    ASSERT_STREQ(mapping_string(gate_entry("ordinary_lpc_dispatch_path"), "next_action"),
+                 "keep_generic_dispatch_explicit_open_and_frozen_result_guarded");
 
     auto* frozen_payload_contract = mapping_entry(status, "frozen_payload_contract");
     ASSERT_NE(frozen_payload_contract, nullptr);
@@ -3160,7 +3165,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "owner_private_redacted_from_trace");
     ASSERT_EQ(mapping_number(gateway_contract, "command_text_snapshot_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_blocker"),
-                 "ordinary_lpc_not_ready");
+                 "gateway_command_executor_not_migrated");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_consume_model"),
                  "owner_owned_snapshot_main_thread_consume");
     ASSERT_EQ(mapping_number(gateway_contract, "command_consume_snapshot_ready"), 1);
@@ -3182,15 +3187,16 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gateway_contract, "command_stale_target_status"), "owner_epoch_mismatch");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_readiness_gate_model"),
                  "all_gates_required_before_owner_executor");
-    ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_gate"), "ordinary_lpc_ready");
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_gate"),
+                 "gateway_command_executor_activation");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_blocker"),
-                 "ordinary_lpc_dispatch_path");
-    ASSERT_EQ(mapping_number(gateway_contract, "command_executor_readiness_gate_count"), 5);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_executor_satisfied_gate_count"), 5);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_executor_blocked_gate_count"), 0);
+                 "gateway_command_executor_not_migrated");
+    ASSERT_EQ(mapping_number(gateway_contract, "command_executor_readiness_gate_count"), 7);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_executor_satisfied_gate_count"), 6);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_executor_blocked_gate_count"), 1);
     auto* command_executor_gates = mapping_array(gateway_contract, "command_executor_readiness_gates");
     ASSERT_NE(command_executor_gates, nullptr);
-    ASSERT_EQ(command_executor_gates->size, 5);
+    ASSERT_EQ(command_executor_gates->size, 7);
     std::unordered_map<std::string, mapping_t*> command_executor_gates_by_name;
     for (int i = 0; i < command_executor_gates->size; i++) {
       ASSERT_EQ(command_executor_gates->item[i].type, T_MAPPING);
@@ -3214,12 +3220,17 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(command_executor_gate("owner_executor_command_consume_entry"), "blocker"), "");
     ASSERT_EQ(mapping_number(command_executor_gate("owner_executor_frame_restore"), "satisfied"), 1);
     ASSERT_STREQ(mapping_string(command_executor_gate("owner_executor_frame_restore"), "blocker"), "");
+    ASSERT_EQ(mapping_number(command_executor_gate("ordinary_lpc_ready"), "satisfied"), 1);
+    ASSERT_STREQ(mapping_string(command_executor_gate("ordinary_lpc_ready"), "blocker"), "");
+    ASSERT_EQ(mapping_number(command_executor_gate("gateway_command_executor_activation"), "satisfied"), 0);
+    ASSERT_STREQ(mapping_string(command_executor_gate("gateway_command_executor_activation"), "blocker"),
+                 "gateway_command_executor_not_migrated");
     ASSERT_EQ(mapping_number(gateway_contract, "ordinary_lpc_ready_required"), 0);
     ASSERT_EQ(mapping_number(gateway_contract, "main_required"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "next_blocker"),
-                 "ordinary_lpc_dispatch_path");
+                 "gateway_command_executor_activation");
     ASSERT_STREQ(mapping_string(gateway_contract, "next_blocker_chain"),
-                 "ordinary_lpc_ready/ordinary_lpc_dispatch_path");
+                 "gateway_command_executor/gateway_command_executor_activation");
     auto* gateway_tasks = mapping_array(gateway_contract, "tasks");
     ASSERT_NE(gateway_tasks, nullptr);
     ASSERT_EQ(gateway_tasks->size, 4);
@@ -3318,7 +3329,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
 
     auto* dispatch_contracts = mapping_array(status, "executor_task_dispatch_contracts");
     ASSERT_NE(dispatch_contracts, nullptr);
-    ASSERT_EQ(dispatch_contracts->size, 10);
+    ASSERT_EQ(dispatch_contracts->size, 11);
     std::unordered_map<std::string, mapping_t*> dispatch_by_type;
     for (int i = 0; i < dispatch_contracts->size; i++) {
       ASSERT_EQ(dispatch_contracts->item[i].type, T_MAPPING);
@@ -3350,6 +3361,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     assert_dispatch("lpc_probe", "lpc_probe", "lpc_probe", "executor_safe", 1, 1, 0);
     assert_dispatch("lpc_canary", "lpc_canary", "lpc_canary", "executor_safe", 1, 1, 0);
     assert_dispatch("lpc_task", "lpc_task_allowlist", "lpc_task", "executor_safe_allowlist", 1, 1, 0);
+    assert_dispatch("ordinary_lpc", "ordinary_lpc_dispatch", "ordinary_lpc", "executor_safe_explicit_open", 1, 1, 0);
     assert_dispatch("owner_message", "owner_message_mailbox", "owner_message", "executor_safe", 1, 1, 0);
     assert_dispatch("command_consume", "owner_executor_command_consumer", "command_consume", "executor_safe", 1,
                     1, 0);
@@ -3406,11 +3418,28 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(nested_lpc_contracts->item[0].type, T_MAPPING);
     ASSERT_STREQ(mapping_string(nested_lpc_contracts->item[0].u.map, "method"), "owner_task_readonly");
 
-    auto* ordinary_lpc = mapping_entry(contract, "lpc");
-    ASSERT_STREQ(mapping_string(ordinary_lpc, "executor_mode"), "rejected");
-    ASSERT_EQ(mapping_number(ordinary_lpc, "executor_safe"), 0);
+    auto* ordinary_lpc = mapping_entry(contract, "ordinary_lpc");
+    ASSERT_STREQ(mapping_string(ordinary_lpc, "executor_mode"), "executor_safe_explicit_open");
+    ASSERT_STREQ(mapping_string(ordinary_lpc, "route"), "owner_executor");
+    ASSERT_EQ(mapping_number(ordinary_lpc, "executor_safe"), 1);
     ASSERT_EQ(mapping_number(ordinary_lpc, "main_required"), 0);
-    ASSERT_EQ(mapping_number(ordinary_lpc, "rejected"), 1);
+    ASSERT_EQ(mapping_number(ordinary_lpc, "rejected"), 0);
+    ASSERT_STREQ(mapping_string(ordinary_lpc, "dispatch_model"), "generic_owner_lpc_dispatch");
+    ASSERT_STREQ(mapping_string(ordinary_lpc, "activation_policy"), "default_closed_explicit_open");
+    ASSERT_EQ(mapping_number(ordinary_lpc, "default_closed"), 1);
+    ASSERT_EQ(mapping_number(ordinary_lpc, "explicit_open_required"), 1);
+    ASSERT_EQ(mapping_number(ordinary_lpc, "requires_target"), 1);
+    ASSERT_EQ(mapping_number(ordinary_lpc, "requires_owner_thread"), 1);
+    ASSERT_EQ(mapping_number(ordinary_lpc, "requires_owner_message_completion"), 1);
+    ASSERT_EQ(mapping_number(ordinary_lpc, "frozen_result_required"), 1);
+    ASSERT_EQ(mapping_number(ordinary_lpc, "direct_cross_owner_write"), 0);
+
+    auto* legacy_lpc = mapping_entry(contract, "lpc");
+    ASSERT_STREQ(mapping_string(legacy_lpc, "executor_mode"), "rejected");
+    ASSERT_STREQ(mapping_string(legacy_lpc, "route"), "owner_executor");
+    ASSERT_EQ(mapping_number(legacy_lpc, "executor_safe"), 0);
+    ASSERT_EQ(mapping_number(legacy_lpc, "main_required"), 0);
+    ASSERT_EQ(mapping_number(legacy_lpc, "rejected"), 1);
   };
 
   auto* runtime_status = vm_owner_runtime_status();
@@ -4034,7 +4063,7 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredReadonlyLpcTaskWithMultipleWor
   ASSERT_EQ(mapping_number(submitted, "ordinary_lpc_default_closed"), 1);
   ASSERT_EQ(mapping_number(submitted, "ordinary_lpc_activation_policy_ready"), 1);
   ASSERT_STREQ(mapping_string(submitted, "ordinary_lpc_activation_policy"), "default_closed_explicit_open");
-  ASSERT_STREQ(mapping_string(submitted, "ordinary_lpc_next_blocker"), "ordinary_lpc_dispatch_path");
+  ASSERT_STREQ(mapping_string(submitted, "ordinary_lpc_next_blocker"), "");
   ASSERT_EQ(mapping_number(submitted, "direct_cross_owner_write"), 0);
   ASSERT_EQ(mapping_number(submitted, "owner_epoch"), static_cast<long>(owner_epoch));
   ASSERT_STREQ(mapping_string(submitted, "task_type"), "lpc_task");
@@ -4211,6 +4240,215 @@ TEST_F(DriverTest, TestVmOwnerLpcTaskRejectsTargetOwnerMismatchAtSubmit) {
   destruct_object(probe);
 }
 
+TEST_F(DriverTest, TestVmOwnerOrdinaryLpcRequiresExplicitOpen) {
+  const char* owner = "owner/test/thread/ordinary-lpc-closed";
+  const char* other_owner = "owner/test/thread/ordinary-lpc-other";
+
+  vm_owner_thread_stop();
+  object_t* probe = load_object_for_test("single/void");
+  ASSERT_NE(probe, nullptr);
+  vm_owner_set_id(probe, owner);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+  auto mapping_entry = [](mapping_t* map, const char* key) -> mapping_t* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_MAPPING);
+    return value && value->type == T_MAPPING ? value->u.map : nullptr;
+  };
+
+  auto* before_runtime = vm_owner_runtime_status();
+  auto before_pending_futures = mapping_number(before_runtime, "pending_futures");
+  free_mapping(before_runtime);
+  auto* before_queue = vm_owner_mailbox_status(owner);
+  auto before_depth = mapping_number(before_queue, "owner_queue_depth");
+  free_mapping(before_queue);
+
+  auto* closed = vm_owner_ordinary_lpc_task(probe, owner, "owner_task_player", 0);
+  ASSERT_EQ(mapping_number(closed, "success"), 0);
+  ASSERT_EQ(mapping_number(closed, "future_id"), 0);
+  ASSERT_EQ(mapping_number(closed, "task_id"), 0);
+  ASSERT_STREQ(mapping_string(closed, "task_type"), "ordinary_lpc");
+  ASSERT_STREQ(mapping_string(closed, "method"), "owner_task_player");
+  ASSERT_STREQ(mapping_string(closed, "state"), "rejected");
+  ASSERT_STREQ(mapping_string(closed, "error"), "ordinary LPC requires explicit open");
+  ASSERT_STREQ(mapping_string(closed, "contract_reason"), "ordinary LPC requires explicit open");
+  ASSERT_STREQ(mapping_string(closed, "executor_mode"), "rejected");
+  ASSERT_EQ(mapping_number(closed, "requires_owner_thread"), 0);
+  ASSERT_EQ(mapping_number(closed, "requires_owner_message_completion"), 0);
+  ASSERT_EQ(mapping_number(closed, "ordinary_lpc_explicit_open"), 0);
+  ASSERT_EQ(mapping_number(closed, "ordinary_lpc_dispatch_path_ready"), 1);
+  ASSERT_STREQ(mapping_string(closed, "ordinary_lpc_next_blocker"), "");
+  auto* closed_contract = mapping_entry(closed, "task_contract");
+  ASSERT_EQ(mapping_number(closed_contract, "rejected"), 1);
+  free_mapping(closed);
+
+  auto* mismatch = vm_owner_ordinary_lpc_task(probe, other_owner, "owner_task_player", 1);
+  ASSERT_EQ(mapping_number(mismatch, "success"), 0);
+  ASSERT_EQ(mapping_number(mismatch, "future_id"), 0);
+  ASSERT_EQ(mapping_number(mismatch, "task_id"), 0);
+  ASSERT_STREQ(mapping_string(mismatch, "owner_id"), other_owner);
+  ASSERT_STREQ(mapping_string(mismatch, "target_owner_id"), owner);
+  ASSERT_STREQ(mapping_string(mismatch, "state"), "rejected");
+  ASSERT_STREQ(mapping_string(mismatch, "error"), "ordinary LPC target owner mismatch");
+  ASSERT_EQ(mapping_number(mismatch, "ordinary_lpc_explicit_open"), 1);
+  free_mapping(mismatch);
+
+  auto* after_runtime = vm_owner_runtime_status();
+  ASSERT_EQ(mapping_number(after_runtime, "pending_futures"), before_pending_futures);
+  free_mapping(after_runtime);
+  auto* after_queue = vm_owner_mailbox_status(owner);
+  ASSERT_EQ(mapping_number(after_queue, "owner_queue_depth"), before_depth);
+  free_mapping(after_queue);
+
+  destruct_object(probe);
+}
+
+TEST_F(DriverTest, TestVmOwnerThreadRunsExplicitOpenOrdinaryLpcTask) {
+  const char* owner = "owner/test/thread/ordinary-lpc-open";
+  ASSERT_TRUE(vm_context_is_main_thread());
+
+  vm_owner_thread_stop();
+  object_t* probe = load_object_for_test("single/void");
+  ASSERT_NE(probe, nullptr);
+  vm_owner_set_id(probe, owner);
+  auto owner_epoch = vm_owner_epoch(probe);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+  auto mapping_entry = [](mapping_t* map, const char* key) -> mapping_t* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_MAPPING);
+    return value && value->type == T_MAPPING ? value->u.map : nullptr;
+  };
+
+  auto* before = vm_owner_thread_status();
+  auto before_executed = mapping_number(before, "thread_ordinary_lpc_executed");
+  auto before_succeeded = mapping_number(before, "thread_ordinary_lpc_succeeded");
+  auto before_failed = mapping_number(before, "thread_ordinary_lpc_failed");
+  auto before_rejected = mapping_number(before, "thread_ordinary_lpc_rejected");
+  auto before_context_leaks = mapping_number(before, "thread_context_leak_detected");
+  auto before_safe_dispatched = mapping_number(before, "executor_safe_task_dispatched");
+  free_mapping(before);
+  auto* before_runtime = vm_owner_runtime_status();
+  auto before_pending_futures = mapping_number(before_runtime, "pending_futures");
+  free_mapping(before_runtime);
+
+  auto* submitted = vm_owner_ordinary_lpc_task(probe, owner, "owner_task_player", 1);
+  auto task_id = mapping_number(submitted, "task_id");
+  auto future_id = mapping_number(submitted, "future_id");
+  ASSERT_EQ(mapping_number(submitted, "success"), 1);
+  ASSERT_GT(task_id, 0);
+  ASSERT_GT(future_id, 0);
+  ASSERT_STREQ(mapping_string(submitted, "task_type"), "ordinary_lpc");
+  ASSERT_STREQ(mapping_string(submitted, "method"), "owner_task_player");
+  ASSERT_EQ(mapping_number(submitted, "owner_epoch"), static_cast<long>(owner_epoch));
+  ASSERT_STREQ(mapping_string(submitted, "executor_mode"), "executor_safe_explicit_open");
+  ASSERT_STREQ(mapping_string(submitted, "route"), "owner_executor");
+  ASSERT_STREQ(mapping_string(submitted, "result_policy"), "frozen_result_required");
+  ASSERT_STREQ(mapping_string(submitted, "contract_reason"),
+               "generic owner LPC dispatch requires explicit open and frozen result");
+  ASSERT_EQ(mapping_number(submitted, "requires_owner_thread"), 1);
+  ASSERT_EQ(mapping_number(submitted, "requires_owner_message_completion"), 1);
+  ASSERT_EQ(mapping_number(submitted, "ordinary_lpc_explicit_open"), 1);
+  ASSERT_EQ(mapping_number(submitted, "ordinary_lpc_dispatch_path_ready"), 1);
+  ASSERT_EQ(mapping_number(submitted, "frozen_result_required"), 1);
+  auto* submitted_contract = mapping_entry(submitted, "task_contract");
+  ASSERT_STREQ(mapping_string(submitted_contract, "dispatch_model"), "generic_owner_lpc_dispatch");
+  ASSERT_EQ(mapping_number(submitted_contract, "explicit_open_required"), 1);
+  ASSERT_EQ(mapping_number(submitted_contract, "frozen_result_required"), 1);
+  free_mapping(submitted);
+
+  auto* pending_runtime = vm_owner_runtime_status();
+  ASSERT_EQ(mapping_number(pending_runtime, "pending_futures"), before_pending_futures + 1);
+  free_mapping(pending_runtime);
+  auto* pending_future = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+  ASSERT_STREQ(mapping_string(pending_future, "state"), "pending");
+  ASSERT_EQ(mapping_number(pending_future, "target_task_id"), task_id);
+  ASSERT_EQ(mapping_number(pending_future, "requires_owner_message_completion"), 1);
+  free_mapping(pending_future);
+
+  vm_owner_thread_start(2);
+  for (int i = 0; i < 100; i++) {
+    auto* polled = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+    auto completed = std::string(mapping_string(polled, "state")) == "completed";
+    free_mapping(polled);
+    if (completed) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  auto* running = vm_owner_thread_status();
+  ASSERT_GE(mapping_number(running, "thread_ordinary_lpc_executed"), before_executed + 1);
+  ASSERT_GE(mapping_number(running, "thread_ordinary_lpc_succeeded"), before_succeeded + 1);
+  ASSERT_EQ(mapping_number(running, "thread_ordinary_lpc_failed"), before_failed);
+  ASSERT_EQ(mapping_number(running, "thread_ordinary_lpc_rejected"), before_rejected);
+  ASSERT_GE(mapping_number(running, "executor_safe_task_dispatched"), before_safe_dispatched + 1);
+  ASSERT_EQ(mapping_number(running, "thread_context_leak_detected"), before_context_leaks);
+  free_mapping(running);
+
+  auto* completed_future = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+  ASSERT_EQ(mapping_number(completed_future, "success"), 1);
+  ASSERT_STREQ(mapping_string(completed_future, "state"), "completed");
+  ASSERT_STREQ(mapping_string(completed_future, "result_key"), "owner_task_player");
+  ASSERT_EQ(mapping_number(completed_future, "requires_owner_message_completion"), 0);
+  ASSERT_EQ(mapping_number(completed_future, "frozen_result"), 1);
+  auto* result = find_string_in_mapping(completed_future, "result");
+  ASSERT_NE(result, nullptr);
+  ASSERT_EQ(result->type, T_NUMBER);
+  ASSERT_EQ(result->u.number, 1);
+  free_mapping(completed_future);
+
+  auto* trace = vm_owner_task_trace(32);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  int ordinary_lpc_succeeded = 0;
+  for (int i = 0; i < events->u.arr->size; i++) {
+    auto* event = events->u.arr->item[i].u.map;
+    if (mapping_number(event, "task_id") == task_id &&
+        std::string(mapping_string(event, "task_type")) == "ordinary_lpc" &&
+        std::string(mapping_string(event, "state")) == "thread_ordinary_lpc_succeeded") {
+      ordinary_lpc_succeeded = 1;
+      ASSERT_STREQ(mapping_string(event, "task_key"), "owner_task_player");
+      ASSERT_STREQ(mapping_string(event, "owner_id"), owner);
+    }
+  }
+  ASSERT_EQ(ordinary_lpc_succeeded, 1);
+  free_mapping(trace);
+
+  auto* completed_runtime = vm_owner_runtime_status();
+  ASSERT_EQ(mapping_number(completed_runtime, "pending_futures"), before_pending_futures);
+  free_mapping(completed_runtime);
+
+  vm_owner_thread_stop();
+  ASSERT_TRUE(vm_context_is_main_thread());
+  destruct_object(probe);
+}
+
 TEST_F(DriverTest, TestVmOwnerThreadRejectsUnregisteredLpcTask) {
   const char* owner = "owner/test/thread/lpc-task-reject";
   ASSERT_TRUE(vm_context_is_main_thread());
@@ -4256,7 +4494,7 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsUnregisteredLpcTask) {
   ASSERT_STREQ(mapping_string(submitted, "executor_mode"), "rejected");
   ASSERT_STREQ(mapping_string(submitted, "route"), "owner_executor");
   ASSERT_STREQ(mapping_string(submitted, "result_policy"), "none");
-  ASSERT_STREQ(mapping_string(submitted, "contract_reason"), "ordinary LPC is default closed");
+  ASSERT_STREQ(mapping_string(submitted, "contract_reason"), "ordinary LPC remains default closed");
   ASSERT_EQ(mapping_number(submitted, "frozen_result_required"), 0);
   auto* submitted_contract = mapping_entry(submitted, "task_contract");
   ASSERT_STREQ(mapping_string(submitted_contract, "executor_mode"), "rejected");
@@ -4364,7 +4602,7 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsRegisteredDomainLpcTasks) {
     ASSERT_GT(future_id, 0);
     ASSERT_EQ(mapping_number(submitted, "registered_task"), 0) << method;
     ASSERT_STREQ(mapping_string(submitted, "executor_mode"), "rejected") << method;
-    ASSERT_STREQ(mapping_string(submitted, "contract_reason"), "ordinary LPC is default closed") << method;
+    ASSERT_STREQ(mapping_string(submitted, "contract_reason"), "ordinary LPC remains default closed") << method;
     auto* task_contract = mapping_entry(submitted, "task_contract");
     ASSERT_EQ(mapping_number(task_contract, "rejected"), 1) << method;
     free_mapping(submitted);
@@ -7342,7 +7580,7 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_GT(mapping_number(payload, "command_text_snapshot_bytes"), 0);
         ASSERT_EQ(mapping_number(payload, "command_text_snapshot_redacted"), 1);
         ASSERT_STREQ(mapping_string(payload, "command_executor_blocker"),
-                     "ordinary_lpc_not_ready");
+                     "gateway_command_executor_not_migrated");
         ASSERT_STREQ(mapping_string(payload, "command_consume_model"), "owner_owned_snapshot_main_thread_consume");
         ASSERT_EQ(mapping_number(payload, "command_consume_snapshot_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "command_consume_executor_ready"), 1);

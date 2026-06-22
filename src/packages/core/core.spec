@@ -414,6 +414,7 @@ mapping owner_query_object_snapshot(object);
 mapping vm_owner_lpc_probe(object, string, string);
 mapping vm_owner_lpc_canary(object, string, string);
 mapping vm_owner_lpc_task(object, string, string);
+mapping vm_owner_ordinary_lpc_task(object, string, string, int);
 int vm_owner_thread_start(int);
 int vm_owner_thread_stop();
 mapping vm_owner_thread_status();

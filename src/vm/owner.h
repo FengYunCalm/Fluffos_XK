@@ -94,6 +94,7 @@ mapping_t *vm_owner_commit_trace(int limit);
 mapping_t *vm_owner_lpc_probe(object_t *target, const char *owner_id, const char *method);
 mapping_t *vm_owner_lpc_canary(object_t *target, const char *owner_id, const char *method);
 mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char *method);
+mapping_t *vm_owner_ordinary_lpc_task(object_t *target, const char *owner_id, const char *method, int explicit_open);
 void vm_owner_thread_start(int requested_threads);
 void vm_owner_thread_stop();
 mapping_t *vm_owner_thread_status();

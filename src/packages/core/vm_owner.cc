@@ -272,6 +272,19 @@ void f_vm_owner_lpc_task() {
 }
 #endif
 
+#ifdef F_VM_OWNER_ORDINARY_LPC_TASK
+void f_vm_owner_ordinary_lpc_task() {
+  auto *explicit_open = sp;
+  auto *method = sp - 1;
+  auto *owner_id = sp - 2;
+  auto *target = sp - 3;
+  auto *result = vm_owner_ordinary_lpc_task(target->u.ob, owner_id->u.string, method->u.string,
+                                           explicit_open->u.number != 0);
+  pop_n_elems(4);
+  push_refed_mapping(result);
+}
+#endif
+
 #ifdef F_VM_CONTEXT_IS_MAIN_THREAD
 void f_vm_context_is_main_thread() { push_number(vm_context_is_main_thread() ? 1 : 0); }
 #endif
