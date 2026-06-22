@@ -278,6 +278,11 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("owner_private_redacted_from_trace",
               contract["command_text_snapshot_policy"]);
     ASSERT_EQ(1, contract["command_text_snapshot_ready"]);
+    ASSERT_EQ("redacted_input_to_get_char_state_v1",
+              contract["command_input_callback_state_policy"]);
+    ASSERT_EQ(1, contract["command_input_callback_snapshot_ready"]);
+    ASSERT_EQ("input_to_get_char_state_main_thread_bound",
+              contract["command_input_callback_blocker"]);
     ASSERT_EQ("interactive_command_side_effects_main_thread_bound",
               contract["command_executor_blocker"]);
     ASSERT_EQ("owner_owned_snapshot_main_thread_consume",

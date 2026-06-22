@@ -3164,6 +3164,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gateway_contract, "command_text_snapshot_policy"),
                  "owner_private_redacted_from_trace");
     ASSERT_EQ(mapping_number(gateway_contract, "command_text_snapshot_ready"), 1);
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_input_callback_state_policy"),
+                 "redacted_input_to_get_char_state_v1");
+    ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_snapshot_ready"), 1);
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_input_callback_blocker"),
+                 "input_to_get_char_state_main_thread_bound");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_blocker"),
                  "interactive_command_side_effects_main_thread_bound");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_consume_model"),
@@ -7672,6 +7677,16 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_EQ(mapping_number(payload, "command_text_snapshot_ready"), 1);
         ASSERT_GT(mapping_number(payload, "command_text_snapshot_bytes"), 0);
         ASSERT_EQ(mapping_number(payload, "command_text_snapshot_redacted"), 1);
+        ASSERT_STREQ(mapping_string(payload, "input_callback_state_policy"), "redacted_input_to_get_char_state_v1");
+        ASSERT_EQ(mapping_number(payload, "input_callback_state_snapshot_ready"), 1);
+        ASSERT_EQ(mapping_number(payload, "input_callback_state_redacted"), 1);
+        ASSERT_EQ(mapping_number(payload, "input_callback_active"), 0);
+        ASSERT_EQ(mapping_number(payload, "input_callback_single_char"), 0);
+        ASSERT_EQ(mapping_number(payload, "input_callback_noescape"), 0);
+        ASSERT_EQ(mapping_number(payload, "input_callback_noecho"), 0);
+        ASSERT_EQ(mapping_number(payload, "input_callback_carryover_count"), 0);
+        ASSERT_EQ(mapping_number(payload, "input_callback_function_redacted"), 0);
+        ASSERT_EQ(mapping_number(payload, "input_callback_object_redacted"), 0);
         ASSERT_STREQ(mapping_string(payload, "command_executor_blocker"),
                      "interactive_command_side_effects_main_thread_bound");
         ASSERT_STREQ(mapping_string(payload, "command_consume_model"), "owner_owned_snapshot_main_thread_consume");

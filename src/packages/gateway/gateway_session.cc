@@ -68,9 +68,16 @@ std::string gateway_pending_command_snapshot(interactive_t *user) {
 svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, size_t snapshot_bytes) {
   svalue_t payload{};
   auto pending_bytes = user && user->text_end >= user->text_start ? user->text_end - user->text_start : 0;
+#if defined(F_INPUT_TO) || defined(F_GET_CHAR)
+  auto input_callback_active = user && user->input_to ? 1 : 0;
+  auto input_callback_carryover_count = user ? user->num_carry : 0;
+#else
+  auto input_callback_active = 0;
+  auto input_callback_carryover_count = 0;
+#endif
 
   payload.type = T_MAPPING;
-  payload.u.map = allocate_mapping(21);
+  payload.u.map = allocate_mapping(31);
   add_mapping_string(payload.u.map, "payload_model", "gateway_command_buffer_metadata_v1");
   add_mapping_string(payload.u.map, "payload_policy", "no_raw_command_text_in_trace");
   add_mapping_string(payload.u.map, "input_source", "interactive_text_buffer");
@@ -78,6 +85,16 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_pair(payload.u.map, "command_text_snapshot_ready", snapshot_ready ? 1 : 0);
   add_mapping_pair(payload.u.map, "command_text_snapshot_bytes", static_cast<long>(snapshot_bytes));
   add_mapping_pair(payload.u.map, "command_text_snapshot_redacted", snapshot_ready ? 1 : 0);
+  add_mapping_string(payload.u.map, "input_callback_state_policy", "redacted_input_to_get_char_state_v1");
+  add_mapping_pair(payload.u.map, "input_callback_state_snapshot_ready", 1);
+  add_mapping_pair(payload.u.map, "input_callback_state_redacted", 1);
+  add_mapping_pair(payload.u.map, "input_callback_active", input_callback_active);
+  add_mapping_pair(payload.u.map, "input_callback_single_char", user && (user->iflags & SINGLE_CHAR) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "input_callback_noescape", user && (user->iflags & NOESC) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "input_callback_noecho", user && (user->iflags & NOECHO) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "input_callback_carryover_count", input_callback_carryover_count);
+  add_mapping_pair(payload.u.map, "input_callback_function_redacted", input_callback_active);
+  add_mapping_pair(payload.u.map, "input_callback_object_redacted", input_callback_active);
   add_mapping_string(payload.u.map, "command_executor_blocker",
                      snapshot_ready ? "interactive_command_side_effects_main_thread_bound"
                                     : "interactive_command_buffer_not_snapshotted");
