@@ -78,6 +78,7 @@ enum class OwnerExecutorDispatchKind {
   OwnerMessage,
   CommandConsume,
   CommandFrameRestore,
+  GatewayCommand,
   ComputeResult,
   Generic,
 };
@@ -97,7 +98,10 @@ struct OwnerExecutorTaskDescriptor {
   int requires_owner_main_queue;
 };
 
-constexpr std::array<OwnerExecutorTaskDescriptor, 11> kOwnerExecutorTaskDescriptors = {{
+constexpr const char *kGatewayCommandExecutorActivationBlocker =
+    "interactive_command_side_effects_main_thread_bound";
+
+constexpr std::array<OwnerExecutorTaskDescriptor, 12> kOwnerExecutorTaskDescriptors = {{
     {"executor_probe", "executor_probe", OwnerExecutorDispatchKind::ExecutorProbe, "executor_safe", "owner_executor",
      "diagnostic owner executor task", 1, 1, 0, 0, 1, 0},
     {"lpc_probe", "lpc_probe", OwnerExecutorDispatchKind::LpcProbe, "executor_safe", "owner_executor",
@@ -121,6 +125,9 @@ constexpr std::array<OwnerExecutorTaskDescriptor, 11> kOwnerExecutorTaskDescript
     {"command_frame_restore", "owner_executor_command_frame_restore", OwnerExecutorDispatchKind::CommandFrameRestore,
      "executor_safe", "owner_executor", "restores redacted gateway command execution frame without LPC execution", 1,
      1, 0, 0, 1, 0},
+    {"gateway_command", "gateway_command_executor_activation", OwnerExecutorDispatchKind::GatewayCommand,
+     "rejected", "owner_executor",
+     "gateway player command execution remains closed until interactive side effects are migrated", 1, 0, 0, 1, 1, 0},
     {"compute_result", "compute_result", OwnerExecutorDispatchKind::ComputeResult, "executor_safe",
      "owner_executor", "worker v2 result completion", 1, 1, 0, 0, 1, 0},
 }};
@@ -218,7 +225,7 @@ constexpr std::array<VMContextReadinessGate, 7> kGatewayCommandExecutorReadiness
     {"ordinary_lpc_ready", "ordinary_lpc_executor_dispatch", "",
      "keep_generic_lpc_dispatch_explicit_open_only", 1},
     {"gateway_command_executor_activation", "gateway_command_executor_rollout",
-     "gateway_command_executor_not_migrated", "migrate_gateway_command_after_lpc_dispatch_validation", 0},
+     kGatewayCommandExecutorActivationBlocker, "migrate_interactive_command_side_effects_before_activation", 0},
 }};
 
 constexpr std::array<VMContextReadinessGate, 13> kVMContextOrdinaryLpcReadinessGates = {{
@@ -305,6 +312,7 @@ std::atomic<uint64_t> owner_thread_owner_state_guarded{0};
 std::atomic<uint64_t> owner_thread_message_dispatched{0};
 std::atomic<uint64_t> owner_executor_command_consume_entry_executed{0};
 std::atomic<uint64_t> owner_executor_command_frame_restore_entry_executed{0};
+std::atomic<uint64_t> owner_thread_gateway_command_rejected{0};
 std::atomic<uint64_t> owner_thread_lpc_probe_executed{0};
 std::atomic<uint64_t> owner_thread_lpc_probe_failed{0};
 std::atomic<uint64_t> owner_thread_lpc_probe_guarded{0};
@@ -705,6 +713,8 @@ const char *owner_executor_dispatch_kind_name(OwnerExecutorDispatchKind kind) {
       return "command_consume";
     case OwnerExecutorDispatchKind::CommandFrameRestore:
       return "command_frame_restore";
+    case OwnerExecutorDispatchKind::GatewayCommand:
+      return "gateway_command";
     case OwnerExecutorDispatchKind::ComputeResult:
       return "compute_result";
     case OwnerExecutorDispatchKind::Generic:
@@ -1008,7 +1018,7 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_string(map, "command_input_source", "interactive_text_buffer");
   add_mapping_string(map, "command_text_snapshot_policy", "owner_private_redacted_from_trace");
   add_mapping_pair(map, "command_text_snapshot_ready", 1);
-  add_mapping_string(map, "command_executor_blocker", "gateway_command_executor_not_migrated");
+  add_mapping_string(map, "command_executor_blocker", kGatewayCommandExecutorActivationBlocker);
   add_mapping_string(map, "command_consume_model", "owner_owned_snapshot_main_thread_consume");
   add_mapping_pair(map, "command_consume_snapshot_ready", 1);
   add_mapping_pair(map, "command_consume_executor_ready", 1);
@@ -1025,7 +1035,7 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_string(map, "command_stale_target_status", "owner_epoch_mismatch");
   add_mapping_string(map, "command_executor_readiness_gate_model", "all_gates_required_before_owner_executor");
   add_mapping_string(map, "command_executor_next_gate", "gateway_command_executor_activation");
-  add_mapping_string(map, "command_executor_next_blocker", "gateway_command_executor_not_migrated");
+  add_mapping_string(map, "command_executor_next_blocker", kGatewayCommandExecutorActivationBlocker);
   add_mapping_pair(map, "command_executor_readiness_gate_count",
                    static_cast<long>(kGatewayCommandExecutorReadinessGates.size()));
   const auto command_executor_satisfied_gates = gateway_command_executor_satisfied_readiness_gate_count();
@@ -1130,11 +1140,12 @@ mapping_t *vm_context_contract_mapping() {
 }
 
 mapping_t *owner_task_contract_mapping() {
-  auto *contract = allocate_mapping(11);
+  auto *contract = allocate_mapping(12);
   const auto *executor_probe = find_owner_executor_task_descriptor("executor_probe");
   const auto *compute_result = find_owner_executor_task_descriptor("compute_result");
   const auto *command_consume = find_owner_executor_task_descriptor("command_consume");
   const auto *command_frame_restore = find_owner_executor_task_descriptor("command_frame_restore");
+  const auto *gateway_command = find_owner_executor_task_descriptor("gateway_command");
   const auto *ordinary_lpc = find_owner_executor_task_descriptor("ordinary_lpc");
   const auto *lpc = find_owner_executor_task_descriptor("lpc");
   add_mapping_owned_mapping(contract, "executor_probe",
@@ -1154,6 +1165,11 @@ mapping_t *owner_task_contract_mapping() {
                                                       command_frame_restore->executor_safe,
                                                       command_frame_restore->main_required,
                                                       command_frame_restore->rejected, command_frame_restore->reason));
+  add_mapping_owned_mapping(contract, "gateway_command_executor_activation",
+                            owner_task_contract_entry(gateway_command->executor_mode, gateway_command->route,
+                                                      gateway_command->executor_safe,
+                                                      gateway_command->main_required,
+                                                      gateway_command->rejected, gateway_command->reason));
   add_mapping_owned_mapping(contract, "owner_message_mailbox",
                             owner_task_route_contract_entry(kOwnerTaskExecutorSafeContract));
   add_mapping_owned_mapping(contract, "owner_message_target_handle",
@@ -2571,6 +2587,10 @@ class OwnerExecutor {
         break;
       case OwnerExecutorDispatchKind::CommandFrameRestore:
         run_owner_command_frame_restore(task);
+        break;
+      case OwnerExecutorDispatchKind::GatewayCommand:
+        append_owner_task_trace_threadsafe(task, "thread_gateway_command_rejected");
+        owner_thread_gateway_command_rejected.fetch_add(1, std::memory_order_relaxed);
         break;
       case OwnerExecutorDispatchKind::ComputeResult: {
         append_owner_task_trace_threadsafe(task, "thread_compute_result_completed");
@@ -4120,6 +4140,8 @@ mapping_t *vm_owner_thread_status() {
                    static_cast<long>(owner_executor_command_consume_entry_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_command_frame_restore_entry_executed",
                    static_cast<long>(owner_executor_command_frame_restore_entry_executed.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_gateway_command_rejected",
+                   static_cast<long>(owner_thread_gateway_command_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_probe_executed",
                    static_cast<long>(owner_thread_lpc_probe_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_probe_failed",
@@ -4290,6 +4312,8 @@ mapping_t *vm_owner_runtime_status() {
                    static_cast<long>(owner_executor_command_consume_entry_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_command_frame_restore_entry_executed",
                    static_cast<long>(owner_executor_command_frame_restore_entry_executed.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_gateway_command_rejected",
+                   static_cast<long>(owner_thread_gateway_command_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_eval_stack_owner_bound",
                    static_cast<long>(owner_thread_eval_stack_owner_bound.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_eval_stack_cleared",

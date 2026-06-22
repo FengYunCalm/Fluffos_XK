@@ -276,7 +276,7 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("owner_private_redacted_from_trace",
               contract["command_text_snapshot_policy"]);
     ASSERT_EQ(1, contract["command_text_snapshot_ready"]);
-    ASSERT_EQ("gateway_command_executor_not_migrated",
+    ASSERT_EQ("interactive_command_side_effects_main_thread_bound",
               contract["command_executor_blocker"]);
     ASSERT_EQ("owner_owned_snapshot_main_thread_consume",
               contract["command_consume_model"]);
@@ -300,7 +300,7 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("all_gates_required_before_owner_executor",
               contract["command_executor_readiness_gate_model"]);
     ASSERT_EQ("gateway_command_executor_activation", contract["command_executor_next_gate"]);
-    ASSERT_EQ("gateway_command_executor_not_migrated",
+    ASSERT_EQ("interactive_command_side_effects_main_thread_bound",
               contract["command_executor_next_blocker"]);
     ASSERT_EQ(7, contract["command_executor_readiness_gate_count"]);
     ASSERT_EQ(6, contract["command_executor_satisfied_gate_count"]);
@@ -331,7 +331,7 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ(1, command_executor_gate_by_name["ordinary_lpc_ready"]["satisfied"]);
     ASSERT_EQ("", command_executor_gate_by_name["ordinary_lpc_ready"]["blocker"]);
     ASSERT_EQ(0, command_executor_gate_by_name["gateway_command_executor_activation"]["satisfied"]);
-    ASSERT_EQ("gateway_command_executor_not_migrated",
+    ASSERT_EQ("interactive_command_side_effects_main_thread_bound",
               command_executor_gate_by_name["gateway_command_executor_activation"]["blocker"]);
     ASSERT_EQ(0, contract["ordinary_lpc_ready_required"]);
     ASSERT_EQ(1, contract["main_required"]);
@@ -436,7 +436,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(0, readonly_contract["direct_cross_owner_write"]);
     ASSERT(stringp(readonly_contract["reason"]));
     ASSERT(arrayp(dispatch_contracts));
-    ASSERT_EQ(11, sizeof(dispatch_contracts));
+    ASSERT_EQ(12, sizeof(dispatch_contracts));
     for (i = 0; i < sizeof(dispatch_contracts); i++) {
         mapping entry = dispatch_contracts[i];
 
@@ -464,6 +464,9 @@ void assert_owner_executor_contract(mapping status) {
     assert_dispatch_entry(dispatch_contract, "command_frame_restore",
                           "owner_executor_command_frame_restore", "command_frame_restore",
                           "executor_safe", 1, 1, 0);
+    assert_dispatch_entry(dispatch_contract, "gateway_command",
+                          "gateway_command_executor_activation", "gateway_command",
+                          "rejected", 1, 0, 1);
     assert_dispatch_entry(dispatch_contract, "compute_result", "compute_result",
                           "compute_result", "executor_safe", 1, 1, 0);
     assert_dispatch_entry(dispatch_contract, "lpc", "lpc", "reject_lpc",
@@ -478,6 +481,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT(intp(status["executor_safe_task_dispatched"]));
     ASSERT(intp(status["executor_command_consume_entry_executed"]));
     ASSERT(intp(status["executor_command_frame_restore_entry_executed"]));
+    ASSERT(intp(status["thread_gateway_command_rejected"]));
     ASSERT(intp(status["thread_ordinary_lpc_executed"]));
     ASSERT(intp(status["thread_ordinary_lpc_succeeded"]));
     ASSERT(intp(status["thread_ordinary_lpc_failed"]));
@@ -519,6 +523,8 @@ void assert_owner_executor_contract(mapping status) {
                           "owner_executor", 1, 0, 0);
     assert_contract_entry(contract, "owner_executor_command_frame_restore", "executor_safe",
                           "owner_executor", 1, 0, 0);
+    assert_contract_entry(contract, "gateway_command_executor_activation", "rejected",
+                          "owner_executor", 0, 0, 1);
     assert_contract_entry(contract, "owner_message_mailbox", "executor_safe",
                           "owner_executor", 1, 0, 0);
     assert_owner_message_route_contract(contract, "owner_message_mailbox", 1, 0);

@@ -3165,7 +3165,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "owner_private_redacted_from_trace");
     ASSERT_EQ(mapping_number(gateway_contract, "command_text_snapshot_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_blocker"),
-                 "gateway_command_executor_not_migrated");
+                 "interactive_command_side_effects_main_thread_bound");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_consume_model"),
                  "owner_owned_snapshot_main_thread_consume");
     ASSERT_EQ(mapping_number(gateway_contract, "command_consume_snapshot_ready"), 1);
@@ -3190,7 +3190,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_gate"),
                  "gateway_command_executor_activation");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_blocker"),
-                 "gateway_command_executor_not_migrated");
+                 "interactive_command_side_effects_main_thread_bound");
+    ASSERT_GE(mapping_number(status, "thread_gateway_command_rejected"), 0);
     ASSERT_EQ(mapping_number(gateway_contract, "command_executor_readiness_gate_count"), 7);
     ASSERT_EQ(mapping_number(gateway_contract, "command_executor_satisfied_gate_count"), 6);
     ASSERT_EQ(mapping_number(gateway_contract, "command_executor_blocked_gate_count"), 1);
@@ -3224,7 +3225,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(command_executor_gate("ordinary_lpc_ready"), "blocker"), "");
     ASSERT_EQ(mapping_number(command_executor_gate("gateway_command_executor_activation"), "satisfied"), 0);
     ASSERT_STREQ(mapping_string(command_executor_gate("gateway_command_executor_activation"), "blocker"),
-                 "gateway_command_executor_not_migrated");
+                 "interactive_command_side_effects_main_thread_bound");
     ASSERT_EQ(mapping_number(gateway_contract, "ordinary_lpc_ready_required"), 0);
     ASSERT_EQ(mapping_number(gateway_contract, "main_required"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "next_blocker"),
@@ -3329,7 +3330,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
 
     auto* dispatch_contracts = mapping_array(status, "executor_task_dispatch_contracts");
     ASSERT_NE(dispatch_contracts, nullptr);
-    ASSERT_EQ(dispatch_contracts->size, 11);
+    ASSERT_EQ(dispatch_contracts->size, 12);
     std::unordered_map<std::string, mapping_t*> dispatch_by_type;
     for (int i = 0; i < dispatch_contracts->size; i++) {
       ASSERT_EQ(dispatch_contracts->item[i].type, T_MAPPING);
@@ -3367,6 +3368,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                     1, 0);
     assert_dispatch("command_frame_restore", "owner_executor_command_frame_restore", "command_frame_restore",
                     "executor_safe", 1, 1, 0);
+    assert_dispatch("gateway_command", "gateway_command_executor_activation", "gateway_command", "rejected", 1, 0,
+                    1);
     assert_dispatch("compute_result", "compute_result", "compute_result", "executor_safe", 1, 1, 0);
     assert_dispatch("lpc", "lpc", "reject_lpc", "rejected", 1, 0, 1);
     assert_dispatch("owner_state", "owner_state", "guard_owner_state", "rejected", 1, 0, 1);
@@ -3391,6 +3394,13 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(command_frame_restore, "executor_safe"), 1);
     ASSERT_EQ(mapping_number(command_frame_restore, "main_required"), 0);
     ASSERT_EQ(mapping_number(command_frame_restore, "rejected"), 0);
+
+    auto* gateway_command = mapping_entry(contract, "gateway_command_executor_activation");
+    ASSERT_STREQ(mapping_string(gateway_command, "executor_mode"), "rejected");
+    ASSERT_STREQ(mapping_string(gateway_command, "route"), "owner_executor");
+    ASSERT_EQ(mapping_number(gateway_command, "executor_safe"), 0);
+    ASSERT_EQ(mapping_number(gateway_command, "main_required"), 0);
+    ASSERT_EQ(mapping_number(gateway_command, "rejected"), 1);
 
     auto* mailbox_message = mapping_entry(contract, "owner_message_mailbox");
     ASSERT_EQ(mapping_number(mailbox_message, "executor_safe"), 1);
@@ -3769,26 +3779,28 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
 
   auto lpc_task = vm_owner_enqueue_task(owner, "lpc", "off-main-dummy");
   auto state_task = vm_owner_enqueue_task(owner, "owner_state", "single-owner-state");
+  auto gateway_command_task = vm_owner_enqueue_task(owner, "gateway_command", "player-command-activation");
   auto message_task = vm_owner_enqueue_task(owner, "owner_message", "cross-owner-message");
   ASSERT_GT(lpc_task, 0u);
   ASSERT_GT(state_task, lpc_task);
-  ASSERT_GT(message_task, state_task);
+  ASSERT_GT(gateway_command_task, state_task);
+  ASSERT_GT(message_task, gateway_command_task);
 
   auto* queued = vm_owner_mailbox_status(owner);
-  ASSERT_EQ(mapping_number(queued, "owner_queue_depth"), 3);
-  ASSERT_EQ(mapping_number(queued, "owner_executor_runnable_queue_depth"), 3);
+  ASSERT_EQ(mapping_number(queued, "owner_queue_depth"), 4);
+  ASSERT_EQ(mapping_number(queued, "owner_executor_runnable_queue_depth"), 4);
   ASSERT_EQ(mapping_number(queued, "owner_executor_safe_queue_depth"), 1);
   ASSERT_EQ(mapping_number(queued, "owner_main_required_queue_depth"), 0);
-  ASSERT_GE(mapping_number(queued, "executor_runnable_queue_depth"), 3);
+  ASSERT_GE(mapping_number(queued, "executor_runnable_queue_depth"), 4);
   ASSERT_GE(mapping_number(queued, "executor_safe_queue_depth"), 1);
   free_mapping(queued);
   auto* queued_thread = vm_owner_thread_status();
-  ASSERT_GE(mapping_number(queued_thread, "executor_runnable_queue_depth"), 3);
+  ASSERT_GE(mapping_number(queued_thread, "executor_runnable_queue_depth"), 4);
   auto* queued_fairness = find_string_in_mapping(queued_thread, "executor_queue_fairness");
   ASSERT_NE(queued_fairness, nullptr);
   ASSERT_EQ(queued_fairness->type, T_MAPPING);
   ASSERT_GE(mapping_number(queued_fairness->u.map, "executor_runnable_owner_count"), 1);
-  ASSERT_GE(mapping_number(queued_fairness->u.map, "max_executor_runnable_backlog"), 3);
+  ASSERT_GE(mapping_number(queued_fairness->u.map, "max_executor_runnable_backlog"), 4);
   ASSERT_GE(mapping_number(queued_fairness->u.map, "max_executor_safe_backlog"), 1);
   free_mapping(queued_thread);
 
@@ -3806,17 +3818,19 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
   auto* running = vm_owner_thread_status();
   ASSERT_GE(mapping_number(running, "thread_lpc_rejected"), 1);
   ASSERT_GE(mapping_number(running, "thread_owner_state_guarded"), 1);
+  ASSERT_GE(mapping_number(running, "thread_gateway_command_rejected"), 1);
   ASSERT_GE(mapping_number(running, "thread_message_dispatched"), 1);
-  ASSERT_EQ(mapping_number(running, "executor_runnable_task_dispatched"), before_runnable + 3);
+  ASSERT_EQ(mapping_number(running, "executor_runnable_task_dispatched"), before_runnable + 4);
   ASSERT_EQ(mapping_number(running, "executor_safe_task_dispatched"), before_safe + 1);
   free_mapping(running);
 
-  auto* trace = vm_owner_task_trace(12);
+  auto* trace = vm_owner_task_trace(16);
   auto* events = find_string_in_mapping(trace, "events");
   ASSERT_NE(events, nullptr);
   ASSERT_EQ(events->type, T_ARRAY);
   int lpc_rejected = 0;
   int state_guarded = 0;
+  int gateway_command_rejected = 0;
   int message_dispatched = 0;
   for (int i = 0; i < events->u.arr->size; i++) {
     auto* event = events->u.arr->item[i].u.map;
@@ -3828,6 +3842,10 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
         std::string(mapping_string(event, "state")) == "thread_owner_state_guarded") {
       state_guarded = 1;
     }
+    if (mapping_number(event, "task_id") == static_cast<long>(gateway_command_task) &&
+        std::string(mapping_string(event, "state")) == "thread_gateway_command_rejected") {
+      gateway_command_rejected = 1;
+    }
     if (mapping_number(event, "task_id") == static_cast<long>(message_task) &&
         std::string(mapping_string(event, "state")) == "thread_message_dispatched") {
       message_dispatched = 1;
@@ -3835,6 +3853,7 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
   }
   ASSERT_EQ(lpc_rejected, 1);
   ASSERT_EQ(state_guarded, 1);
+  ASSERT_EQ(gateway_command_rejected, 1);
   ASSERT_EQ(message_dispatched, 1);
   free_mapping(trace);
 
@@ -7580,7 +7599,7 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_GT(mapping_number(payload, "command_text_snapshot_bytes"), 0);
         ASSERT_EQ(mapping_number(payload, "command_text_snapshot_redacted"), 1);
         ASSERT_STREQ(mapping_string(payload, "command_executor_blocker"),
-                     "gateway_command_executor_not_migrated");
+                     "interactive_command_side_effects_main_thread_bound");
         ASSERT_STREQ(mapping_string(payload, "command_consume_model"), "owner_owned_snapshot_main_thread_consume");
         ASSERT_EQ(mapping_number(payload, "command_consume_snapshot_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "command_consume_executor_ready"), 1);
