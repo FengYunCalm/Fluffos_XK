@@ -3242,6 +3242,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
       ASSERT_NE(mapping_string(gate, "model"), nullptr);
       ASSERT_NE(mapping_string(gate, "blocker"), nullptr);
       ASSERT_NE(mapping_string(gate, "next_action"), nullptr);
+      ASSERT_NE(mapping_string(gate, "state_owner"), nullptr);
+      ASSERT_NE(mapping_string(gate, "migration_boundary"), nullptr);
+      ASSERT_NE(mapping_string(gate, "side_effect_class"), nullptr);
+      ASSERT_GE(mapping_number(gate, "blocks_activation"), 0);
     }
     auto command_side_effect_gate = [&](const std::string& gate_name) -> mapping_t* {
       auto it = command_side_effect_gates_by_name.find(gate_name);
@@ -3249,19 +3253,53 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
       return it == command_side_effect_gates_by_name.end() ? nullptr : it->second;
     };
     ASSERT_EQ(mapping_number(command_side_effect_gate("interactive_buffer_consume"), "satisfied"), 1);
+    ASSERT_EQ(mapping_number(command_side_effect_gate("interactive_buffer_consume"), "blocks_activation"), 0);
     ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_buffer_consume"), "blocker"), "");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_buffer_consume"), "state_owner"),
+                 "owner_command_snapshot");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_buffer_consume"), "migration_boundary"),
+                 "main_thread_consume_before_executor_activation");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_buffer_consume"), "side_effect_class"),
+                 "input_buffer_consume");
     ASSERT_EQ(mapping_number(command_side_effect_gate("input_to_get_char_state"), "satisfied"), 0);
+    ASSERT_EQ(mapping_number(command_side_effect_gate("input_to_get_char_state"), "blocks_activation"), 1);
     ASSERT_STREQ(mapping_string(command_side_effect_gate("input_to_get_char_state"), "blocker"),
                  "input_to_get_char_state_main_thread_bound");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("input_to_get_char_state"), "state_owner"),
+                 "interactive_t");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("input_to_get_char_state"), "migration_boundary"),
+                 "owner_command_frame_input_callback_snapshot");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("input_to_get_char_state"), "side_effect_class"),
+                 "input_callback_state");
     ASSERT_EQ(mapping_number(command_side_effect_gate("process_input_add_action_parser"), "satisfied"), 0);
+    ASSERT_EQ(mapping_number(command_side_effect_gate("process_input_add_action_parser"), "blocks_activation"), 1);
     ASSERT_STREQ(mapping_string(command_side_effect_gate("process_input_add_action_parser"), "blocker"),
                  "add_action_parser_command_giver_main_thread_bound");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("process_input_add_action_parser"), "state_owner"),
+                 "interactive_t_and_command_giver");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("process_input_add_action_parser"), "migration_boundary"),
+                 "owner_command_parser_context");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("process_input_add_action_parser"), "side_effect_class"),
+                 "parser_command_giver_state");
     ASSERT_EQ(mapping_number(command_side_effect_gate("prompt_telnet_reschedule_io"), "satisfied"), 0);
+    ASSERT_EQ(mapping_number(command_side_effect_gate("prompt_telnet_reschedule_io"), "blocks_activation"), 1);
     ASSERT_STREQ(mapping_string(command_side_effect_gate("prompt_telnet_reschedule_io"), "blocker"),
                  "prompt_telnet_reschedule_main_thread_bound");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("prompt_telnet_reschedule_io"), "state_owner"),
+                 "interactive_t_and_network_io");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("prompt_telnet_reschedule_io"), "migration_boundary"),
+                 "main_reply_queue_after_owner_command");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("prompt_telnet_reschedule_io"), "side_effect_class"),
+                 "prompt_telnet_reschedule_io");
     ASSERT_EQ(mapping_number(command_side_effect_gate("interactive_mode_flags"), "satisfied"), 0);
+    ASSERT_EQ(mapping_number(command_side_effect_gate("interactive_mode_flags"), "blocks_activation"), 1);
     ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_mode_flags"), "blocker"),
                  "interactive_mode_flags_main_thread_bound");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_mode_flags"), "state_owner"), "interactive_t");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_mode_flags"), "migration_boundary"),
+                 "owner_command_frame_mode_delta");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_mode_flags"), "side_effect_class"),
+                 "echo_mxp_ed_mode_flags");
     ASSERT_EQ(mapping_number(gateway_contract, "ordinary_lpc_ready_required"), 0);
     ASSERT_EQ(mapping_number(gateway_contract, "main_required"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "next_blocker"),

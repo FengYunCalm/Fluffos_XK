@@ -351,22 +351,55 @@ void assert_gateway_owner_task_contract(mapping contract) {
         ASSERT(intp(gate["satisfied"]));
         ASSERT(stringp(gate["blocker"]));
         ASSERT(stringp(gate["next_action"]));
+        ASSERT(stringp(gate["state_owner"]));
+        ASSERT(stringp(gate["migration_boundary"]));
+        ASSERT(stringp(gate["side_effect_class"]));
+        ASSERT(intp(gate["blocks_activation"]));
         command_side_effect_gate_by_name[gate["gate"]] = gate;
     }
     ASSERT_EQ(1, command_side_effect_gate_by_name["interactive_buffer_consume"]["satisfied"]);
+    ASSERT_EQ(0, command_side_effect_gate_by_name["interactive_buffer_consume"]["blocks_activation"]);
     ASSERT_EQ("", command_side_effect_gate_by_name["interactive_buffer_consume"]["blocker"]);
+    ASSERT_EQ("owner_command_snapshot", command_side_effect_gate_by_name["interactive_buffer_consume"]["state_owner"]);
+    ASSERT_EQ("main_thread_consume_before_executor_activation",
+              command_side_effect_gate_by_name["interactive_buffer_consume"]["migration_boundary"]);
+    ASSERT_EQ("input_buffer_consume", command_side_effect_gate_by_name["interactive_buffer_consume"]["side_effect_class"]);
     ASSERT_EQ(0, command_side_effect_gate_by_name["input_to_get_char_state"]["satisfied"]);
+    ASSERT_EQ(1, command_side_effect_gate_by_name["input_to_get_char_state"]["blocks_activation"]);
     ASSERT_EQ("input_to_get_char_state_main_thread_bound",
               command_side_effect_gate_by_name["input_to_get_char_state"]["blocker"]);
+    ASSERT_EQ("interactive_t", command_side_effect_gate_by_name["input_to_get_char_state"]["state_owner"]);
+    ASSERT_EQ("owner_command_frame_input_callback_snapshot",
+              command_side_effect_gate_by_name["input_to_get_char_state"]["migration_boundary"]);
+    ASSERT_EQ("input_callback_state", command_side_effect_gate_by_name["input_to_get_char_state"]["side_effect_class"]);
     ASSERT_EQ(0, command_side_effect_gate_by_name["process_input_add_action_parser"]["satisfied"]);
+    ASSERT_EQ(1, command_side_effect_gate_by_name["process_input_add_action_parser"]["blocks_activation"]);
     ASSERT_EQ("add_action_parser_command_giver_main_thread_bound",
               command_side_effect_gate_by_name["process_input_add_action_parser"]["blocker"]);
+    ASSERT_EQ("interactive_t_and_command_giver",
+              command_side_effect_gate_by_name["process_input_add_action_parser"]["state_owner"]);
+    ASSERT_EQ("owner_command_parser_context",
+              command_side_effect_gate_by_name["process_input_add_action_parser"]["migration_boundary"]);
+    ASSERT_EQ("parser_command_giver_state",
+              command_side_effect_gate_by_name["process_input_add_action_parser"]["side_effect_class"]);
     ASSERT_EQ(0, command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["satisfied"]);
+    ASSERT_EQ(1, command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["blocks_activation"]);
     ASSERT_EQ("prompt_telnet_reschedule_main_thread_bound",
               command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["blocker"]);
+    ASSERT_EQ("interactive_t_and_network_io",
+              command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["state_owner"]);
+    ASSERT_EQ("main_reply_queue_after_owner_command",
+              command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["migration_boundary"]);
+    ASSERT_EQ("prompt_telnet_reschedule_io",
+              command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["side_effect_class"]);
     ASSERT_EQ(0, command_side_effect_gate_by_name["interactive_mode_flags"]["satisfied"]);
+    ASSERT_EQ(1, command_side_effect_gate_by_name["interactive_mode_flags"]["blocks_activation"]);
     ASSERT_EQ("interactive_mode_flags_main_thread_bound",
               command_side_effect_gate_by_name["interactive_mode_flags"]["blocker"]);
+    ASSERT_EQ("interactive_t", command_side_effect_gate_by_name["interactive_mode_flags"]["state_owner"]);
+    ASSERT_EQ("owner_command_frame_mode_delta",
+              command_side_effect_gate_by_name["interactive_mode_flags"]["migration_boundary"]);
+    ASSERT_EQ("echo_mxp_ed_mode_flags", command_side_effect_gate_by_name["interactive_mode_flags"]["side_effect_class"]);
     ASSERT_EQ(0, contract["ordinary_lpc_ready_required"]);
     ASSERT_EQ(1, contract["main_required"]);
     ASSERT_EQ("gateway_command_executor_activation",

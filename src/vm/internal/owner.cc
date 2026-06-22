@@ -140,6 +140,18 @@ struct VMContextReadinessGate {
   int satisfied;
 };
 
+struct GatewayCommandSideEffectReadinessGate {
+  const char *gate;
+  const char *model;
+  const char *blocker;
+  const char *next_action;
+  const char *state_owner;
+  const char *migration_boundary;
+  const char *side_effect_class;
+  int blocks_activation;
+  int satisfied;
+};
+
 struct FrozenPayloadContractEntry {
   const char *path;
   const char *input_policy;
@@ -228,17 +240,22 @@ constexpr std::array<VMContextReadinessGate, 7> kGatewayCommandExecutorReadiness
      kGatewayCommandExecutorActivationBlocker, "migrate_interactive_command_side_effects_before_activation", 0},
 }};
 
-constexpr std::array<VMContextReadinessGate, 5> kGatewayCommandSideEffectReadinessGates = {{
+constexpr std::array<GatewayCommandSideEffectReadinessGate, 5> kGatewayCommandSideEffectReadinessGates = {{
     {"interactive_buffer_consume", "owner_snapshot_main_thread_consume", "",
-     "keep_snapshot_consume_before_executor_activation", 1},
+     "keep_snapshot_consume_before_executor_activation", "owner_command_snapshot",
+     "main_thread_consume_before_executor_activation", "input_buffer_consume", 0, 1},
     {"input_to_get_char_state", "interactive_input_callback_state",
-     "input_to_get_char_state_main_thread_bound", "isolate_input_callback_state_from_interactive_t", 0},
+     "input_to_get_char_state_main_thread_bound", "isolate_input_callback_state_from_interactive_t",
+     "interactive_t", "owner_command_frame_input_callback_snapshot", "input_callback_state", 1, 0},
     {"process_input_add_action_parser", "interactive_command_parser_state",
-     "add_action_parser_command_giver_main_thread_bound", "migrate_parser_state_to_owner_context", 0},
+     "add_action_parser_command_giver_main_thread_bound", "migrate_parser_state_to_owner_context",
+     "interactive_t_and_command_giver", "owner_command_parser_context", "parser_command_giver_state", 1, 0},
     {"prompt_telnet_reschedule_io", "interactive_output_reschedule_state",
-     "prompt_telnet_reschedule_main_thread_bound", "move_prompt_and_reschedule_side_effects_to_main_reply_queue", 0},
+     "prompt_telnet_reschedule_main_thread_bound", "move_prompt_and_reschedule_side_effects_to_main_reply_queue",
+     "interactive_t_and_network_io", "main_reply_queue_after_owner_command", "prompt_telnet_reschedule_io", 1, 0},
     {"interactive_mode_flags", "interactive_flags_echo_mxp_ed_state",
-     "interactive_mode_flags_main_thread_bound", "split_echo_mxp_ed_mode_mutations_from_owner_command_execution", 0},
+     "interactive_mode_flags_main_thread_bound", "split_echo_mxp_ed_mode_mutations_from_owner_command_execution",
+     "interactive_t", "owner_command_frame_mode_delta", "echo_mxp_ed_mode_flags", 1, 0},
 }};
 
 constexpr std::array<VMContextReadinessGate, 13> kVMContextOrdinaryLpcReadinessGates = {{
@@ -882,6 +899,21 @@ mapping_t *vm_context_readiness_gate_mapping(const VMContextReadinessGate &gate)
   return map;
 }
 
+mapping_t *gateway_command_side_effect_readiness_gate_mapping(
+    const GatewayCommandSideEffectReadinessGate &gate) {
+  auto *map = allocate_mapping(9);
+  add_mapping_string(map, "gate", gate.gate);
+  add_mapping_string(map, "model", gate.model);
+  add_mapping_pair(map, "satisfied", gate.satisfied);
+  add_mapping_string(map, "blocker", gate.blocker);
+  add_mapping_string(map, "next_action", gate.next_action);
+  add_mapping_string(map, "state_owner", gate.state_owner);
+  add_mapping_string(map, "migration_boundary", gate.migration_boundary);
+  add_mapping_string(map, "side_effect_class", gate.side_effect_class);
+  add_mapping_pair(map, "blocks_activation", gate.blocks_activation);
+  return map;
+}
+
 array_t *vm_context_readiness_gates_array() {
   auto *gates = allocate_array(static_cast<int>(kVMContextOrdinaryLpcReadinessGates.size()));
   for (size_t i = 0; i < kVMContextOrdinaryLpcReadinessGates.size(); i++) {
@@ -917,7 +949,8 @@ array_t *gateway_command_side_effect_readiness_gates_array() {
   for (size_t i = 0; i < kGatewayCommandSideEffectReadinessGates.size(); i++) {
     gates->item[i].type = T_MAPPING;
     gates->item[i].subtype = 0;
-    gates->item[i].u.map = vm_context_readiness_gate_mapping(kGatewayCommandSideEffectReadinessGates[i]);
+    gates->item[i].u.map =
+        gateway_command_side_effect_readiness_gate_mapping(kGatewayCommandSideEffectReadinessGates[i]);
   }
   return gates;
 }
