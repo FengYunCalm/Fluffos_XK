@@ -3205,6 +3205,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_readiness_gate_count"), 5);
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_satisfied_gate_count"), 1);
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_blocked_gate_count"), 4);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_snapshot_gate_count"), 5);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_snapshot_ready_count"), 5);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_observability_ready"), 1);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_activation_ready"), 0);
     auto* command_executor_gates = mapping_array(gateway_contract, "command_executor_readiness_gates");
     ASSERT_NE(command_executor_gates, nullptr);
     ASSERT_EQ(command_executor_gates->size, 7);
@@ -3250,6 +3254,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
       ASSERT_NE(mapping_string(gate, "state_owner"), nullptr);
       ASSERT_NE(mapping_string(gate, "migration_boundary"), nullptr);
       ASSERT_NE(mapping_string(gate, "side_effect_class"), nullptr);
+      ASSERT_NE(mapping_string(gate, "snapshot_policy"), nullptr);
+      ASSERT_EQ(mapping_number(gate, "snapshot_ready"), 1);
+      ASSERT_EQ(mapping_number(gate, "state_redacted"), 1);
       ASSERT_GE(mapping_number(gate, "blocks_activation"), 0);
     }
     auto command_side_effect_gate = [&](const std::string& gate_name) -> mapping_t* {
@@ -3266,6 +3273,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "main_thread_consume_before_executor_activation");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_buffer_consume"), "side_effect_class"),
                  "input_buffer_consume");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_buffer_consume"), "snapshot_policy"),
+                 "owner_private_command_text_snapshot_v1");
     ASSERT_EQ(mapping_number(command_side_effect_gate("input_to_get_char_state"), "satisfied"), 0);
     ASSERT_EQ(mapping_number(command_side_effect_gate("input_to_get_char_state"), "blocks_activation"), 1);
     ASSERT_STREQ(mapping_string(command_side_effect_gate("input_to_get_char_state"), "blocker"),
@@ -3276,6 +3285,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "owner_command_frame_input_callback_snapshot");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("input_to_get_char_state"), "side_effect_class"),
                  "input_callback_state");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("input_to_get_char_state"), "snapshot_policy"),
+                 "redacted_input_to_get_char_state_v1");
     ASSERT_EQ(mapping_number(command_side_effect_gate("process_input_add_action_parser"), "satisfied"), 0);
     ASSERT_EQ(mapping_number(command_side_effect_gate("process_input_add_action_parser"), "blocks_activation"), 1);
     ASSERT_STREQ(mapping_string(command_side_effect_gate("process_input_add_action_parser"), "blocker"),
@@ -3286,6 +3297,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "owner_command_parser_context");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("process_input_add_action_parser"), "side_effect_class"),
                  "parser_command_giver_state");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("process_input_add_action_parser"), "snapshot_policy"),
+                 "redacted_process_input_add_action_parser_state_v1");
     ASSERT_EQ(mapping_number(command_side_effect_gate("prompt_telnet_reschedule_io"), "satisfied"), 0);
     ASSERT_EQ(mapping_number(command_side_effect_gate("prompt_telnet_reschedule_io"), "blocks_activation"), 1);
     ASSERT_STREQ(mapping_string(command_side_effect_gate("prompt_telnet_reschedule_io"), "blocker"),
@@ -3296,6 +3309,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "main_reply_queue_after_owner_command");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("prompt_telnet_reschedule_io"), "side_effect_class"),
                  "prompt_telnet_reschedule_io");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("prompt_telnet_reschedule_io"), "snapshot_policy"),
+                 "redacted_prompt_telnet_reschedule_io_v1");
     ASSERT_EQ(mapping_number(command_side_effect_gate("interactive_mode_flags"), "satisfied"), 0);
     ASSERT_EQ(mapping_number(command_side_effect_gate("interactive_mode_flags"), "blocks_activation"), 1);
     ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_mode_flags"), "blocker"),
@@ -3305,6 +3320,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "owner_command_frame_mode_delta");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_mode_flags"), "side_effect_class"),
                  "echo_mxp_ed_mode_flags");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_mode_flags"), "snapshot_policy"),
+                 "redacted_interactive_mode_flags_v1");
     ASSERT_EQ(mapping_number(gateway_contract, "ordinary_lpc_ready_required"), 0);
     ASSERT_EQ(mapping_number(gateway_contract, "main_required"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "next_blocker"),

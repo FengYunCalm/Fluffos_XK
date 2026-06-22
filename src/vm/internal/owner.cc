@@ -148,6 +148,9 @@ struct GatewayCommandSideEffectReadinessGate {
   const char *state_owner;
   const char *migration_boundary;
   const char *side_effect_class;
+  const char *snapshot_policy;
+  int snapshot_ready;
+  int state_redacted;
   int blocks_activation;
   int satisfied;
 };
@@ -243,19 +246,24 @@ constexpr std::array<VMContextReadinessGate, 7> kGatewayCommandExecutorReadiness
 constexpr std::array<GatewayCommandSideEffectReadinessGate, 5> kGatewayCommandSideEffectReadinessGates = {{
     {"interactive_buffer_consume", "owner_snapshot_main_thread_consume", "",
      "keep_snapshot_consume_before_executor_activation", "owner_command_snapshot",
-     "main_thread_consume_before_executor_activation", "input_buffer_consume", 0, 1},
+     "main_thread_consume_before_executor_activation", "input_buffer_consume",
+     "owner_private_command_text_snapshot_v1", 1, 1, 0, 1},
     {"input_to_get_char_state", "interactive_input_callback_state",
      "input_to_get_char_state_main_thread_bound", "isolate_input_callback_state_from_interactive_t",
-     "interactive_t", "owner_command_frame_input_callback_snapshot", "input_callback_state", 1, 0},
+     "interactive_t", "owner_command_frame_input_callback_snapshot", "input_callback_state",
+     "redacted_input_to_get_char_state_v1", 1, 1, 1, 0},
     {"process_input_add_action_parser", "interactive_command_parser_state",
      "add_action_parser_command_giver_main_thread_bound", "migrate_parser_state_to_owner_context",
-     "interactive_t_and_command_giver", "owner_command_parser_context", "parser_command_giver_state", 1, 0},
+     "interactive_t_and_command_giver", "owner_command_parser_context", "parser_command_giver_state",
+     "redacted_process_input_add_action_parser_state_v1", 1, 1, 1, 0},
     {"prompt_telnet_reschedule_io", "interactive_output_reschedule_state",
      "prompt_telnet_reschedule_main_thread_bound", "move_prompt_and_reschedule_side_effects_to_main_reply_queue",
-     "interactive_t_and_network_io", "main_reply_queue_after_owner_command", "prompt_telnet_reschedule_io", 1, 0},
+     "interactive_t_and_network_io", "main_reply_queue_after_owner_command", "prompt_telnet_reschedule_io",
+     "redacted_prompt_telnet_reschedule_io_v1", 1, 1, 1, 0},
     {"interactive_mode_flags", "interactive_flags_echo_mxp_ed_state",
      "interactive_mode_flags_main_thread_bound", "split_echo_mxp_ed_mode_mutations_from_owner_command_execution",
-     "interactive_t", "owner_command_frame_mode_delta", "echo_mxp_ed_mode_flags", 1, 0},
+     "interactive_t", "owner_command_frame_mode_delta", "echo_mxp_ed_mode_flags",
+     "redacted_interactive_mode_flags_v1", 1, 1, 1, 0},
 }};
 
 constexpr std::array<VMContextReadinessGate, 13> kVMContextOrdinaryLpcReadinessGates = {{
@@ -901,7 +909,7 @@ mapping_t *vm_context_readiness_gate_mapping(const VMContextReadinessGate &gate)
 
 mapping_t *gateway_command_side_effect_readiness_gate_mapping(
     const GatewayCommandSideEffectReadinessGate &gate) {
-  auto *map = allocate_mapping(9);
+  auto *map = allocate_mapping(12);
   add_mapping_string(map, "gate", gate.gate);
   add_mapping_string(map, "model", gate.model);
   add_mapping_pair(map, "satisfied", gate.satisfied);
@@ -910,6 +918,9 @@ mapping_t *gateway_command_side_effect_readiness_gate_mapping(
   add_mapping_string(map, "state_owner", gate.state_owner);
   add_mapping_string(map, "migration_boundary", gate.migration_boundary);
   add_mapping_string(map, "side_effect_class", gate.side_effect_class);
+  add_mapping_string(map, "snapshot_policy", gate.snapshot_policy);
+  add_mapping_pair(map, "snapshot_ready", gate.snapshot_ready);
+  add_mapping_pair(map, "state_redacted", gate.state_redacted);
   add_mapping_pair(map, "blocks_activation", gate.blocks_activation);
   return map;
 }
@@ -959,6 +970,16 @@ long gateway_command_side_effect_satisfied_readiness_gate_count() {
   long count = 0;
   for (const auto &gate : kGatewayCommandSideEffectReadinessGates) {
     if (gate.satisfied) {
+      count++;
+    }
+  }
+  return count;
+}
+
+long gateway_command_side_effect_snapshot_ready_gate_count() {
+  long count = 0;
+  for (const auto &gate : kGatewayCommandSideEffectReadinessGates) {
+    if (gate.snapshot_ready) {
       count++;
     }
   }
@@ -1076,7 +1097,7 @@ array_t *gateway_owner_task_contract_entries_array() {
 }
 
 mapping_t *gateway_owner_task_contract_mapping() {
-  auto *map = allocate_mapping(47);
+  auto *map = allocate_mapping(56);
   add_mapping_pair(map, "contract_version", 1);
   add_mapping_string(map, "input_model", "owner_main_queue_bridge");
   add_mapping_string(map, "executor_migration_state", "main_required_before_owner_executor");
@@ -1116,13 +1137,19 @@ mapping_t *gateway_owner_task_contract_mapping() {
   free_array(command_executor_gates);
   add_mapping_string(map, "command_side_effect_readiness_gate_model",
                      "all_side_effect_gates_required_before_activation");
-  add_mapping_pair(map, "command_side_effect_readiness_gate_count",
-                   static_cast<long>(kGatewayCommandSideEffectReadinessGates.size()));
+  const auto command_side_effect_gate_count = static_cast<long>(kGatewayCommandSideEffectReadinessGates.size());
+  add_mapping_pair(map, "command_side_effect_readiness_gate_count", command_side_effect_gate_count);
   const auto command_side_effect_satisfied_gates = gateway_command_side_effect_satisfied_readiness_gate_count();
+  const auto command_side_effect_snapshot_ready_gates = gateway_command_side_effect_snapshot_ready_gate_count();
   add_mapping_pair(map, "command_side_effect_satisfied_gate_count", command_side_effect_satisfied_gates);
   add_mapping_pair(map, "command_side_effect_blocked_gate_count",
-                   static_cast<long>(kGatewayCommandSideEffectReadinessGates.size()) -
-                       command_side_effect_satisfied_gates);
+                   command_side_effect_gate_count - command_side_effect_satisfied_gates);
+  add_mapping_pair(map, "command_side_effect_snapshot_gate_count", command_side_effect_gate_count);
+  add_mapping_pair(map, "command_side_effect_snapshot_ready_count", command_side_effect_snapshot_ready_gates);
+  add_mapping_pair(map, "command_side_effect_observability_ready",
+                   command_side_effect_snapshot_ready_gates == command_side_effect_gate_count ? 1 : 0);
+  add_mapping_pair(map, "command_side_effect_activation_ready",
+                   command_side_effect_satisfied_gates == command_side_effect_gate_count ? 1 : 0);
   auto *command_side_effect_gates = gateway_command_side_effect_readiness_gates_array();
   add_mapping_array(map, "command_side_effect_readiness_gates", command_side_effect_gates);
   free_array(command_side_effect_gates);
