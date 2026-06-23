@@ -77,7 +77,7 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
 #endif
 
   payload.type = T_MAPPING;
-  payload.u.map = allocate_mapping(84);
+  payload.u.map = allocate_mapping(88);
   add_mapping_string(payload.u.map, "payload_model", "gateway_command_buffer_metadata_v1");
   add_mapping_string(payload.u.map, "payload_policy", "no_raw_command_text_in_trace");
   add_mapping_string(payload.u.map, "input_source", "interactive_text_buffer");
@@ -112,6 +112,10 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_pair(payload.u.map, "process_input_add_action_parser_requires_command_giver", 1);
   add_mapping_pair(payload.u.map, "process_input_add_action_parser_command_giver_redacted", 1);
   add_mapping_pair(payload.u.map, "process_input_add_action_parser_command_text_redacted", snapshot_ready ? 1 : 0);
+  add_mapping_string(payload.u.map, "process_input_apply_frame_model", "owner_command_frame_process_input_apply");
+  add_mapping_string(payload.u.map, "process_input_apply_frame_task_type", "interactive_command_parser");
+  add_mapping_pair(payload.u.map, "process_input_apply_frame_ready", 1);
+  add_mapping_pair(payload.u.map, "process_input_apply_frame_executor_ready", 0);
   add_mapping_string(payload.u.map, "process_input_add_action_parser_frame_model",
                      "owner_command_parser_context_v1");
   add_mapping_pair(payload.u.map, "process_input_add_action_parser_frame_ready", 1);

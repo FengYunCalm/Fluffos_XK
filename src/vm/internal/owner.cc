@@ -1111,7 +1111,7 @@ array_t *gateway_owner_task_contract_entries_array() {
 }
 
 mapping_t *gateway_owner_task_contract_mapping() {
-  auto *map = allocate_mapping(95);
+  auto *map = allocate_mapping(99);
   add_mapping_pair(map, "contract_version", 1);
   add_mapping_string(map, "input_model", "owner_main_queue_bridge");
   add_mapping_string(map, "executor_migration_state", "main_required_before_owner_executor");
@@ -1129,6 +1129,10 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_pair(map, "command_input_callback_mode_delta_ready", 1);
   add_mapping_pair(map, "command_input_callback_mode_delta_executor_ready", 0);
   add_mapping_string(map, "command_input_callback_blocker", "input_to_get_char_state_main_thread_bound");
+  add_mapping_string(map, "process_input_apply_frame_model", "owner_command_frame_process_input_apply");
+  add_mapping_string(map, "process_input_apply_frame_task_type", "interactive_command_parser");
+  add_mapping_pair(map, "process_input_apply_frame_ready", 1);
+  add_mapping_pair(map, "process_input_apply_frame_executor_ready", 0);
   add_mapping_string(map, "process_input_add_action_parser_frame_model", "owner_command_parser_context_v1");
   add_mapping_pair(map, "process_input_add_action_parser_frame_ready", 1);
   add_mapping_pair(map, "process_input_add_action_parser_frame_executor_ready", 0);

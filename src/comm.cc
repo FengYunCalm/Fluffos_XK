@@ -1342,6 +1342,18 @@ static void parse_user_command_in_owner_frame(char *user_command, object_t *pars
   safe_parse_command(user_command, parser_command_giver);
 }
 
+static svalue_t *apply_user_process_input_in_owner_frame(char *user_command,
+                                                        object_t *parser_command_giver) {
+  copy_and_push_string(user_command);
+  if (parser_command_giver && !(parser_command_giver->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(vm_owner_id(parser_command_giver), "interactive_command_parser",
+                               "process_input_apply", vm_owner_epoch(parser_command_giver),
+                               "frame_entered");
+  }
+  return owner_bound_safe_apply(APPLY_PROCESS_INPUT, parser_command_giver, 1, ORIGIN_DRIVER,
+                                "interactive");
+}
+
 static int handle_user_mxp_tag_filter_in_owner_frame(interactive_t *ip, const char *user_command) {
   if (!(ip->iflags & USING_MXP)) {
     return 1;
@@ -1385,8 +1397,7 @@ static void process_input(interactive_t *ip, char *user_command) {
    * support for things like command history and mud shell
    * programming languages.
   */
-  copy_and_push_string(user_command);
-  ret = owner_bound_safe_apply(APPLY_PROCESS_INPUT, command_giver, 1, ORIGIN_DRIVER, "interactive");
+  ret = apply_user_process_input_in_owner_frame(user_command, command_giver);
   if (!IP_VALID(ip, command_giver)) {
     return;
   }

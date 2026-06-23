@@ -3177,6 +3177,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_mode_delta_executor_ready"), 0);
     ASSERT_STREQ(mapping_string(gateway_contract, "command_input_callback_blocker"),
                  "input_to_get_char_state_main_thread_bound");
+    ASSERT_STREQ(mapping_string(gateway_contract, "process_input_apply_frame_model"),
+                 "owner_command_frame_process_input_apply");
+    ASSERT_STREQ(mapping_string(gateway_contract, "process_input_apply_frame_task_type"),
+                 "interactive_command_parser");
+    ASSERT_EQ(mapping_number(gateway_contract, "process_input_apply_frame_ready"), 1);
+    ASSERT_EQ(mapping_number(gateway_contract, "process_input_apply_frame_executor_ready"), 0);
     ASSERT_STREQ(mapping_string(gateway_contract, "process_input_add_action_parser_frame_model"),
                  "owner_command_parser_context_v1");
     ASSERT_EQ(mapping_number(gateway_contract, "process_input_add_action_parser_frame_ready"), 1);
@@ -7710,6 +7716,7 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
   ASSERT_NE(events_value, nullptr);
   ASSERT_EQ(events_value ? events_value->type : T_INVALID, T_ARRAY);
   bool found_command_task = false;
+  bool found_process_input_apply_frame_entered = false;
   bool found_parser_frame_entered = false;
   bool found_reply_task_queued = false;
   bool found_reply_task_dispatched = false;
@@ -7723,6 +7730,13 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         auto state = std::string(mapping_string(event, "state"));
         found_reply_task_queued = found_reply_task_queued || state == "main_queued";
         found_reply_task_dispatched = found_reply_task_dispatched || state == "main_dispatched";
+      }
+      if (std::string(mapping_string(event, "task_type")) == "interactive_command_parser" &&
+          std::string(mapping_string(event, "task_key")) == "process_input_apply" &&
+          std::string(mapping_string(event, "state")) == "frame_entered" &&
+          std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
+          mapping_number(event, "owner_epoch") == static_cast<long>(owner_epoch)) {
+        found_process_input_apply_frame_entered = true;
       }
       if (std::string(mapping_string(event, "task_type")) == "interactive_command_parser" &&
           std::string(mapping_string(event, "task_key")) == "safe_parse_command" &&
@@ -7798,6 +7812,12 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_EQ(mapping_number(payload, "process_input_add_action_parser_requires_command_giver"), 1);
         ASSERT_EQ(mapping_number(payload, "process_input_add_action_parser_command_giver_redacted"), 1);
         ASSERT_EQ(mapping_number(payload, "process_input_add_action_parser_command_text_redacted"), 1);
+        ASSERT_STREQ(mapping_string(payload, "process_input_apply_frame_model"),
+                     "owner_command_frame_process_input_apply");
+        ASSERT_STREQ(mapping_string(payload, "process_input_apply_frame_task_type"),
+                     "interactive_command_parser");
+        ASSERT_EQ(mapping_number(payload, "process_input_apply_frame_ready"), 1);
+        ASSERT_EQ(mapping_number(payload, "process_input_apply_frame_executor_ready"), 0);
         ASSERT_STREQ(mapping_string(payload, "process_input_add_action_parser_frame_model"),
                      "owner_command_parser_context_v1");
         ASSERT_EQ(mapping_number(payload, "process_input_add_action_parser_frame_ready"), 1);
@@ -7879,6 +7899,7 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
     }
   }
   ASSERT_TRUE(found_command_task);
+  ASSERT_TRUE(found_process_input_apply_frame_entered);
   ASSERT_TRUE(found_parser_frame_entered);
   ASSERT_TRUE(found_reply_task_queued);
   ASSERT_TRUE(found_reply_task_dispatched);

@@ -291,6 +291,12 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ(0, contract["command_input_callback_mode_delta_executor_ready"]);
     ASSERT_EQ("input_to_get_char_state_main_thread_bound",
               contract["command_input_callback_blocker"]);
+    ASSERT_EQ("owner_command_frame_process_input_apply",
+              contract["process_input_apply_frame_model"]);
+    ASSERT_EQ("interactive_command_parser",
+              contract["process_input_apply_frame_task_type"]);
+    ASSERT_EQ(1, contract["process_input_apply_frame_ready"]);
+    ASSERT_EQ(0, contract["process_input_apply_frame_executor_ready"]);
     ASSERT_EQ("owner_command_parser_context_v1",
               contract["process_input_add_action_parser_frame_model"]);
     ASSERT_EQ(1, contract["process_input_add_action_parser_frame_ready"]);
