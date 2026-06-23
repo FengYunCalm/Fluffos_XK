@@ -3212,6 +3212,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "main_mode_delta_queue_after_command_consume");
     ASSERT_EQ(mapping_number(gateway_contract, "command_mode_delta_terminal_mode_ready"), 1);
     ASSERT_EQ(mapping_number(gateway_contract, "command_mode_delta_ready"), 0);
+    ASSERT_STREQ(mapping_string(gateway_contract, "interactive_mode_mxp_tag_filter_model"),
+                 "owner_command_frame_mxp_tag_filter");
+    ASSERT_STREQ(mapping_string(gateway_contract, "interactive_mode_mxp_tag_filter_task_type"),
+                 "interactive_mode_flags");
+    ASSERT_EQ(mapping_number(gateway_contract, "interactive_mode_mxp_tag_filter_ready"), 1);
+    ASSERT_EQ(mapping_number(gateway_contract, "interactive_mode_mxp_tag_filter_executor_ready"), 0);
     ASSERT_STREQ(mapping_string(gateway_contract, "raw_input_trace_policy"),
                  "no_raw_command_text_in_trace");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_execution_frame_model"),
@@ -7806,6 +7812,13 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_EQ(mapping_number(payload, "interactive_mode_single_char"), 0);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_was_single_char"), 0);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_using_mxp"), 0);
+        ASSERT_STREQ(mapping_string(payload, "interactive_mode_mxp_tag_filter_model"),
+                     "owner_command_frame_mxp_tag_filter");
+        ASSERT_STREQ(mapping_string(payload, "interactive_mode_mxp_tag_filter_task_type"),
+                     "interactive_mode_flags");
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_mxp_tag_filter_ready"), 1);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_mxp_tag_filter_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_mxp_tag_filter_required"), 0);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_ed_buffer_active"), 0);
         ASSERT_STREQ(mapping_string(payload, "prompt_telnet_reschedule_state_policy"),
                      "redacted_prompt_telnet_reschedule_io_v1");
@@ -7852,6 +7865,80 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
   ASSERT_EQ(ob->interactive, nullptr);
   destruct_object(ob);
   free_object(&ob, "TestGatewayCommandTaskCarriesOwnerHandlePayload");
+}
+
+TEST_F(DriverTest, TestGatewayCommandMxpTagFilterFrame) {
+  auto *ob = create_gateway_session_for_test("gw-test-command-mxp", "/clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  ASSERT_NE(ob->interactive, nullptr);
+  ASSERT_TRUE(gateway_is_session(ob));
+  auto owner_epoch = vm_owner_epoch(ob);
+  ob->interactive->iflags |= USING_MXP;
+
+  auto mapping_number = [](mapping_t *map, const char *key) -> long {
+    auto *value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t *map, const char *key) -> const char * {
+    auto *value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  ASSERT_EQ(gateway_inject_input_internal(ob, " [xz"), 1);
+  ASSERT_EQ(gateway_process_pending_command_internal(ob), 1);
+
+  auto *trace = vm_owner_task_trace(64);
+  ASSERT_NE(trace, nullptr);
+  ASSERT_EQ(mapping_number(trace, "success"), 1);
+  auto *events_value = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events_value, nullptr);
+  ASSERT_EQ(events_value ? events_value->type : T_INVALID, T_ARRAY);
+  bool found_mxp_filter_frame = false;
+  bool found_command_payload = false;
+  if (events_value && events_value->type == T_ARRAY) {
+    for (int i = 0; i < events_value->u.arr->size; i++) {
+      auto *event = events_value->u.arr->item[i].u.map;
+      if (std::string(mapping_string(event, "task_type")) == "interactive_mode_flags" &&
+          std::string(mapping_string(event, "task_key")) == "mxp_tag_filter" &&
+          std::string(mapping_string(event, "state")) == "frame_entered" &&
+          std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
+          mapping_number(event, "owner_epoch") == static_cast<long>(owner_epoch)) {
+        found_mxp_filter_frame = true;
+      }
+      if (std::string(mapping_string(event, "task_type")) == "gateway" &&
+          std::string(mapping_string(event, "task_key")) == "process_user_command" &&
+          std::string(mapping_string(event, "state")) == "main_queued" &&
+          std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
+          mapping_number(event, "owner_epoch") == static_cast<long>(owner_epoch)) {
+        auto *payload_value = find_string_in_mapping(event, "payload");
+        ASSERT_NE(payload_value, nullptr);
+        ASSERT_EQ(payload_value ? payload_value->type : T_INVALID, T_MAPPING);
+        auto *payload = payload_value->u.map;
+        if (std::string(mapping_string(payload, "session_id")) != "gw-test-command-mxp") {
+          continue;
+        }
+        found_command_payload = true;
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_using_mxp"), 1);
+        ASSERT_STREQ(mapping_string(payload, "interactive_mode_mxp_tag_filter_model"),
+                     "owner_command_frame_mxp_tag_filter");
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_mxp_tag_filter_required"), 1);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_mxp_tag_filter_executor_ready"), 0);
+      }
+    }
+  }
+  ASSERT_TRUE(found_mxp_filter_frame);
+  ASSERT_TRUE(found_command_payload);
+  free_mapping(trace);
+
+  add_ref(ob, "TestGatewayCommandMxpTagFilterFrame");
+  ASSERT_EQ(gateway_destroy_session_internal("gw-test-command-mxp", "test_done", "done"), 1);
+  ASSERT_EQ(ob->interactive, nullptr);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayCommandMxpTagFilterFrame");
 }
 
 TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveInputToState) {

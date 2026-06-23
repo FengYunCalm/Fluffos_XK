@@ -1331,6 +1331,21 @@ static void parse_user_command_in_owner_frame(char *user_command, object_t *pars
   safe_parse_command(user_command, parser_command_giver);
 }
 
+static int handle_user_mxp_tag_filter_in_owner_frame(interactive_t *ip, const char *user_command) {
+  if (!(ip->iflags & USING_MXP)) {
+    return 1;
+  }
+  if (!(user_command[0] == ' ' && user_command[1] == '[' && user_command[3] == 'z')) {
+    return 1;
+  }
+
+  if (ip->ob && !(ip->ob->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(vm_owner_id(ip->ob), "interactive_mode_flags", "mxp_tag_filter",
+                               vm_owner_epoch(ip->ob), "frame_entered");
+  }
+  return on_receive_mxp_tag(ip, user_command) ? 1 : 0;
+}
+
 static void process_input(interactive_t *ip, char *user_command) {
   svalue_t *ret;
 
@@ -1400,12 +1415,8 @@ static int process_user_command_text(interactive_t *ip, char *user_command) {
     goto exit;
   }
 
-  if (ip->iflags & USING_MXP) {
-    if (user_command[0] == ' ' && user_command[1] == '[' && user_command[3] == 'z') {
-      if (!on_receive_mxp_tag(ip, user_command)) {
-        goto exit;
-      }
-    }
+  if (!handle_user_mxp_tag_filter_in_owner_frame(ip, user_command)) {
+    goto exit;
   }
 
   if (escape_command(ip, user_command)) {

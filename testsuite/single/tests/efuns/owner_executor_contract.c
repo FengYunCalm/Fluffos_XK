@@ -326,6 +326,12 @@ void assert_gateway_owner_task_contract(mapping contract) {
               contract["command_mode_delta_terminal_mode_boundary"]);
     ASSERT_EQ(1, contract["command_mode_delta_terminal_mode_ready"]);
     ASSERT_EQ(0, contract["command_mode_delta_ready"]);
+    ASSERT_EQ("owner_command_frame_mxp_tag_filter",
+              contract["interactive_mode_mxp_tag_filter_model"]);
+    ASSERT_EQ("interactive_mode_flags",
+              contract["interactive_mode_mxp_tag_filter_task_type"]);
+    ASSERT_EQ(1, contract["interactive_mode_mxp_tag_filter_ready"]);
+    ASSERT_EQ(0, contract["interactive_mode_mxp_tag_filter_executor_ready"]);
     ASSERT_EQ("no_raw_command_text_in_trace",
               contract["raw_input_trace_policy"]);
     ASSERT_EQ("gateway_command_execution_frame_v1",

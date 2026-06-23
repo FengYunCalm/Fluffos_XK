@@ -1111,7 +1111,7 @@ array_t *gateway_owner_task_contract_entries_array() {
 }
 
 mapping_t *gateway_owner_task_contract_mapping() {
-  auto *map = allocate_mapping(83);
+  auto *map = allocate_mapping(87);
   add_mapping_pair(map, "contract_version", 1);
   add_mapping_string(map, "input_model", "owner_main_queue_bridge");
   add_mapping_string(map, "executor_migration_state", "main_required_before_owner_executor");
@@ -1156,6 +1156,10 @@ mapping_t *gateway_owner_task_contract_mapping() {
                      "main_mode_delta_queue_after_command_consume");
   add_mapping_pair(map, "command_mode_delta_terminal_mode_ready", 1);
   add_mapping_pair(map, "command_mode_delta_ready", 0);
+  add_mapping_string(map, "interactive_mode_mxp_tag_filter_model", "owner_command_frame_mxp_tag_filter");
+  add_mapping_string(map, "interactive_mode_mxp_tag_filter_task_type", "interactive_mode_flags");
+  add_mapping_pair(map, "interactive_mode_mxp_tag_filter_ready", 1);
+  add_mapping_pair(map, "interactive_mode_mxp_tag_filter_executor_ready", 0);
   add_mapping_string(map, "raw_input_trace_policy", "no_raw_command_text_in_trace");
   add_mapping_string(map, "command_execution_frame_model", "gateway_command_execution_frame_v1");
   add_mapping_string(map, "command_execution_frame_policy", "owner_scope_current_interactive_command_giver");
