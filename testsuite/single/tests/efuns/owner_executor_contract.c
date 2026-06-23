@@ -575,12 +575,13 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT(mapp(boundary_contract));
     ASSERT_EQ(1, boundary_contract["contract_version"]);
     ASSERT_EQ("owner_executor_boundary_v1", boundary_contract["boundary_model"]);
-    ASSERT_EQ("header_module_active", boundary_contract["implementation_state"]);
+    ASSERT_EQ("compilation_unit_active", boundary_contract["implementation_state"]);
     ASSERT_EQ("OwnerExecutor", boundary_contract["class_name"]);
     ASSERT_EQ(1, boundary_contract["class_extracted"]);
     ASSERT_EQ(1, boundary_contract["module_extracted"]);
     ASSERT_EQ("vm/internal/owner_executor.h", boundary_contract["module_file"]);
-    ASSERT_EQ(0, boundary_contract["compilation_unit_extracted"]);
+    ASSERT_EQ(1, boundary_contract["compilation_unit_extracted"]);
+    ASSERT_EQ("vm/internal/owner_executor.cc", boundary_contract["compilation_unit_file"]);
     ASSERT_EQ(1, boundary_contract["depends_on_owner_cc_internal_state"]);
     ASSERT_EQ(1, boundary_contract["dependency_manifest_ready"]);
     ASSERT_EQ(1, boundary_contract["runtime_dependency_contract_version"]);

@@ -3204,12 +3204,13 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_NE(boundary_contract, nullptr);
     ASSERT_EQ(mapping_number(boundary_contract, "contract_version"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "boundary_model"), "owner_executor_boundary_v1");
-    ASSERT_STREQ(mapping_string(boundary_contract, "implementation_state"), "header_module_active");
+    ASSERT_STREQ(mapping_string(boundary_contract, "implementation_state"), "compilation_unit_active");
     ASSERT_STREQ(mapping_string(boundary_contract, "class_name"), "OwnerExecutor");
     ASSERT_EQ(mapping_number(boundary_contract, "class_extracted"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "module_extracted"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "module_file"), "vm/internal/owner_executor.h");
-    ASSERT_EQ(mapping_number(boundary_contract, "compilation_unit_extracted"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "compilation_unit_extracted"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "compilation_unit_file"), "vm/internal/owner_executor.cc");
     ASSERT_EQ(mapping_number(boundary_contract, "depends_on_owner_cc_internal_state"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "dependency_manifest_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "runtime_dependency_contract_version"), 1);

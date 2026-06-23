@@ -416,6 +416,7 @@ set(SRC
   "vm/internal/frozen_value.cc"
   "vm/internal/object_store.cc"
   "vm/internal/owner.cc"
+  "vm/internal/owner_executor.cc"
   "vm/internal/posix_timers.cc"
   "vm/internal/master.cc"
   "vm/internal/otable.cc"
