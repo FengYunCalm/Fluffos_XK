@@ -1318,7 +1318,7 @@ mapping_t *vm_context_contract_mapping() {
 }
 
 mapping_t *owner_executor_boundary_contract_mapping() {
-  auto *contract = allocate_mapping(35);
+  auto *contract = allocate_mapping(41);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "boundary_model", "owner_executor_boundary_v1");
   add_mapping_string(contract, "implementation_state", "header_module_active");
@@ -1339,6 +1339,12 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "metric_counter_dependency", 1);
   add_mapping_pair(contract, "future_completion_dependency", 1);
   add_mapping_pair(contract, "owner_runtime_facade_required", 1);
+  add_mapping_pair(contract, "owner_runtime_facade_ready", 1);
+  add_mapping_string(contract, "owner_runtime_facade_model", "owner_executor_runtime_facade_v1");
+  add_mapping_string(contract, "owner_runtime_facade_file", "vm/internal/owner.cc");
+  add_mapping_string(contract, "owner_runtime_facade_domains", "scheduler_state,mailbox_state,future_completion");
+  add_mapping_pair(contract, "owner_runtime_facade_scheduler_ready", 1);
+  add_mapping_pair(contract, "owner_runtime_facade_future_completion_ready", 1);
   add_mapping_string(contract, "compilation_unit_blocker", "owner_cc_anonymous_runtime_state");
   add_mapping_pair(contract, "claim_release_boundary_ready", 1);
   add_mapping_pair(contract, "budget_boundary_ready", 1);
@@ -2645,10 +2651,63 @@ void run_owner_command_frame_restore(const OwnerMailboxTask &task) {
   owner_executor_command_frame_restore_entry_executed.fetch_add(1, std::memory_order_relaxed);
 }
 
+class OwnerExecutorRuntime {
+ public:
+  std::string claim_next_owner() {
+    while (true) {
+      std::unique_lock<std::mutex> lock(owner_runtime_mutex);
+      owner_runtime_cv.wait(lock, [] { return owner_thread_stopping || !schedulable_owners.empty(); });
+      if (owner_thread_stopping) {
+        return "";
+      }
+      OwnerMailboxTask first_task;
+      if (!pop_next_schedulable_task(&first_task, true)) {
+        continue;
+      }
+      auto owner_id = first_task.owner_id;
+      owner_mailboxes[owner_id].push_front(std::move(first_task));
+      append_owner_executor_trace_locked(owner_id, "owner_claimed");
+      return owner_id;
+    }
+  }
+
+  bool pop_executor_task(const std::string &owner_id, OwnerMailboxTask *task) {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    return pop_next_executor_task_for_owner(owner_id, task);
+  }
+
+  void record_budget_yield_if_needed(const std::string &owner_id) {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    auto it = owner_mailboxes.find(owner_id);
+    if (it != owner_mailboxes.end() && owner_queue_has_thread_task(it->second)) {
+      record_owner_executor_budget_yield_locked(owner_id);
+    }
+  }
+
+  void release_owner_after_task(const std::string &owner_id) {
+    finish_active_owner_task(owner_id);
+  }
+
+  void complete_owner_message_task(const OwnerMailboxTask &task) {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    complete_owner_message_task_locked(task);
+  }
+
+  void complete_owner_compute_result_task(const OwnerMailboxTask &task) {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    complete_owner_compute_result_task_locked(task);
+  }
+};
+
+OwnerExecutorRuntime &owner_executor_runtime() {
+  static OwnerExecutorRuntime runtime;
+  return runtime;
+}
+
 #include "vm/internal/owner_executor.h"
 
 void owner_thread_loop() {
-  OwnerExecutor executor;
+  OwnerExecutor executor(owner_executor_runtime());
   executor.run();
 }
 }  // namespace

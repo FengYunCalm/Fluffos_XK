@@ -3222,6 +3222,14 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "metric_counter_dependency"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "future_completion_dependency"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_facade_required"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_facade_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_facade_model"),
+                 "owner_executor_runtime_facade_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_facade_file"), "vm/internal/owner.cc");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_facade_domains"),
+                 "scheduler_state,mailbox_state,future_completion");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_facade_scheduler_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_facade_future_completion_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "compilation_unit_blocker"),
                  "owner_cc_anonymous_runtime_state");
     ASSERT_EQ(mapping_number(boundary_contract, "claim_release_boundary_ready"), 1);

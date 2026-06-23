@@ -593,6 +593,12 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["metric_counter_dependency"]);
     ASSERT_EQ(1, boundary_contract["future_completion_dependency"]);
     ASSERT_EQ(1, boundary_contract["owner_runtime_facade_required"]);
+    ASSERT_EQ(1, boundary_contract["owner_runtime_facade_ready"]);
+    ASSERT_EQ("owner_executor_runtime_facade_v1", boundary_contract["owner_runtime_facade_model"]);
+    ASSERT_EQ("vm/internal/owner.cc", boundary_contract["owner_runtime_facade_file"]);
+    ASSERT_EQ("scheduler_state,mailbox_state,future_completion", boundary_contract["owner_runtime_facade_domains"]);
+    ASSERT_EQ(1, boundary_contract["owner_runtime_facade_scheduler_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_runtime_facade_future_completion_ready"]);
     ASSERT_EQ("owner_cc_anonymous_runtime_state", boundary_contract["compilation_unit_blocker"]);
     ASSERT_EQ(1, boundary_contract["claim_release_boundary_ready"]);
     ASSERT_EQ(1, boundary_contract["budget_boundary_ready"]);

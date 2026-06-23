@@ -4,6 +4,8 @@
 
 class OwnerExecutor {
  public:
+  explicit OwnerExecutor(OwnerExecutorRuntime &runtime) : runtime_(runtime) {}
+
   void run() {
     bind_context();
     while (true) {
@@ -12,11 +14,12 @@ class OwnerExecutor {
         return;
       }
       run_claimed_owner(claimed_owner);
-      finish_active_owner_task(claimed_owner);
+      runtime_.release_owner_after_task(claimed_owner);
     }
   }
 
  private:
+  OwnerExecutorRuntime &runtime_;
   VMContext owner_context_;
 
   void bind_context() {
@@ -36,42 +39,21 @@ class OwnerExecutor {
   }
 
   std::string claim_next_owner() {
-    while (true) {
-      std::unique_lock<std::mutex> lock(owner_runtime_mutex);
-      owner_runtime_cv.wait(lock, [] { return owner_thread_stopping || !schedulable_owners.empty(); });
-      if (owner_thread_stopping) {
-        return "";
-      }
-      OwnerMailboxTask first_task;
-      if (!pop_next_schedulable_task(&first_task, true)) {
-        continue;
-      }
-      auto owner_id = first_task.owner_id;
-      owner_mailboxes[owner_id].push_front(std::move(first_task));
-      append_owner_executor_trace_locked(owner_id, "owner_claimed");
-      return owner_id;
-    }
+    return runtime_.claim_next_owner();
   }
 
   void run_claimed_owner(const std::string &owner_id) {
     int budget_used = 0;
     while (budget_used < kOwnerExecutorTaskBudget) {
       OwnerMailboxTask task;
-      {
-        std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-        if (!pop_next_executor_task_for_owner(owner_id, &task)) {
-          break;
-        }
+      if (!runtime_.pop_executor_task(owner_id, &task)) {
+        break;
       }
       run_task(task);
       budget_used++;
     }
     if (budget_used >= kOwnerExecutorTaskBudget) {
-      std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-      auto it = owner_mailboxes.find(owner_id);
-      if (it != owner_mailboxes.end() && owner_queue_has_thread_task(it->second)) {
-        record_owner_executor_budget_yield_locked(owner_id);
-      }
+      runtime_.record_budget_yield_if_needed(owner_id);
     }
   }
 
@@ -151,8 +133,7 @@ class OwnerExecutor {
       case OwnerExecutorDispatchKind::OwnerMessage: {
         append_owner_task_trace_threadsafe(task, "thread_message_dispatched");
         owner_thread_message_dispatched.fetch_add(1, std::memory_order_relaxed);
-        std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-        complete_owner_message_task_locked(task);
+        runtime_.complete_owner_message_task(task);
         break;
       }
       case OwnerExecutorDispatchKind::CommandConsume:
@@ -169,8 +150,7 @@ class OwnerExecutor {
       case OwnerExecutorDispatchKind::ComputeResult: {
         append_owner_task_trace_threadsafe(task, "thread_compute_result_completed");
         owner_thread_compute_result_completed.fetch_add(1, std::memory_order_relaxed);
-        std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-        complete_owner_compute_result_task_locked(task);
+        runtime_.complete_owner_compute_result_task(task);
         break;
       }
       case OwnerExecutorDispatchKind::Generic:
