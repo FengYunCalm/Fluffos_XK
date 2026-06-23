@@ -285,6 +285,12 @@ void assert_gateway_owner_task_contract(mapping contract) {
               contract["command_input_callback_frame_model"]);
     ASSERT_EQ(1, contract["command_input_callback_frame_detach_ready"]);
     ASSERT_EQ(0, contract["command_input_callback_frame_executor_ready"]);
+    ASSERT_EQ("owner_command_frame_input_callback_apply",
+              contract["command_input_callback_apply_frame_model"]);
+    ASSERT_EQ("interactive_input_callback",
+              contract["command_input_callback_apply_frame_task_type"]);
+    ASSERT_EQ(1, contract["command_input_callback_apply_frame_ready"]);
+    ASSERT_EQ(0, contract["command_input_callback_apply_frame_executor_ready"]);
     ASSERT_EQ("owner_command_frame_input_callback_mode_delta",
               contract["command_input_callback_mode_delta_model"]);
     ASSERT_EQ(1, contract["command_input_callback_mode_delta_ready"]);

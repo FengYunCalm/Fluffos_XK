@@ -1746,6 +1746,34 @@ static UserInputCallbackModeDelta detach_user_input_callback_mode_delta(interact
   return delta;
 }
 
+static void apply_user_input_callback_in_owner_frame(UserInputCallbackFrame *frame, object_t *ob, char *str) {
+  copy_and_push_string(str);
+  if (frame->args) {
+    transfer_push_some_svalues(frame->args, frame->num_arg);
+    FREE(frame->args);
+    frame->args = nullptr;
+  }
+
+  if (frame->function) {
+    if (ob && !(ob->flags & O_DESTRUCTED)) {
+      vm_owner_record_task_trace(vm_owner_id(ob), "interactive_input_callback", frame->function,
+                                 vm_owner_epoch(ob), "frame_entered");
+    }
+    (void)owner_bound_safe_apply(frame->function, ob, frame->num_arg + 1, ORIGIN_INTERNAL,
+                                 "interactive_input_to");
+  } else {
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(frame->funp->hdr.owner),
+                             vm_owner_epoch(frame->funp->hdr.owner));
+    vm_owner_record_task_trace(vm_owner_id(frame->funp->hdr.owner), "interactive_input_callback", "<function>",
+                               vm_owner_epoch(frame->funp->hdr.owner), "frame_entered");
+    vm_owner_record_task_trace(vm_owner_id(frame->funp->hdr.owner), "interactive_input_to", "<function>",
+                               vm_owner_epoch(frame->funp->hdr.owner), "dispatched");
+    safe_call_function_pointer(frame->funp, frame->num_arg + 1);
+  }
+
+  pop_stack(); /* remove `function' from stack */
+}
+
 static int call_function_interactive(interactive_t *i, char *str) {
   object_t *ob;
   sentence_t *sent;
@@ -1781,30 +1809,9 @@ static int call_function_interactive(interactive_t *i, char *str) {
       return 0;
     }
 
-    copy_and_push_string(str);
-    /*
-     * If we have args, we have to push them onto the stack in the order they
-     * were in when we got them.  They will be popped off by the called
-     * function.
-     */
-    if (frame.args) {
-      transfer_push_some_svalues(frame.args, frame.num_arg);
-      FREE(frame.args);
-    }
-    /* current_object no longer set */
-    if (frame.function) {
-      (void)owner_bound_safe_apply(frame.function, ob, frame.num_arg + 1, ORIGIN_INTERNAL,
-                                   "interactive_input_to");
-    } else {
-      VMOwnerScope owner_scope(vm_context(), vm_owner_id(frame.funp->hdr.owner),
-                               vm_owner_epoch(frame.funp->hdr.owner));
-      vm_owner_record_task_trace(vm_owner_id(frame.funp->hdr.owner), "interactive_input_to", "<function>",
-                                 vm_owner_epoch(frame.funp->hdr.owner), "dispatched");
-      safe_call_function_pointer(frame.funp, frame.num_arg + 1);
-    }
+    apply_user_input_callback_in_owner_frame(&frame, ob, str);
     // NOTE: we can't use "i" here anymore, it is possible that it
     // has been freed.
-    pop_stack(); /* remove `function' from stack */
 
     ret = 1;
   }

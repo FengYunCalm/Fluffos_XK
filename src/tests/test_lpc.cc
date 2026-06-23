@@ -3171,6 +3171,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "owner_command_frame_input_callback_detach_v1");
     ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_frame_detach_ready"), 1);
     ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_frame_executor_ready"), 0);
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_input_callback_apply_frame_model"),
+                 "owner_command_frame_input_callback_apply");
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_input_callback_apply_frame_task_type"),
+                 "interactive_input_callback");
+    ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_apply_frame_ready"), 1);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_apply_frame_executor_ready"), 0);
     ASSERT_STREQ(mapping_string(gateway_contract, "command_input_callback_mode_delta_model"),
                  "owner_command_frame_input_callback_mode_delta");
     ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_mode_delta_ready"), 1);
@@ -7792,6 +7798,12 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
                      "owner_command_frame_input_callback_detach_v1");
         ASSERT_EQ(mapping_number(payload, "input_callback_frame_detach_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_frame_executor_ready"), 0);
+        ASSERT_STREQ(mapping_string(payload, "input_callback_apply_frame_model"),
+                     "owner_command_frame_input_callback_apply");
+        ASSERT_STREQ(mapping_string(payload, "input_callback_apply_frame_task_type"),
+                     "interactive_input_callback");
+        ASSERT_EQ(mapping_number(payload, "input_callback_apply_frame_ready"), 1);
+        ASSERT_EQ(mapping_number(payload, "input_callback_apply_frame_executor_ready"), 0);
         ASSERT_STREQ(mapping_string(payload, "input_callback_mode_delta_model"),
                      "owner_command_frame_input_callback_mode_delta");
         ASSERT_EQ(mapping_number(payload, "input_callback_mode_delta_ready"), 1);
@@ -8128,12 +8140,20 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveInputToState) {
   ASSERT_NE(events_value, nullptr);
   ASSERT_EQ(events_value ? events_value->type : T_INVALID, T_ARRAY);
   bool found_command_task = false;
+  bool found_input_callback_apply_frame_entered = false;
   bool found_noecho_localecho_frame_detached = false;
   bool found_localecho_restore_queued = false;
   bool found_localecho_restore_dispatched = false;
   if (events_value && events_value->type == T_ARRAY) {
     for (int i = 0; i < events_value->u.arr->size; i++) {
       auto *event = events_value->u.arr->item[i].u.map;
+      if (std::string(mapping_string(event, "task_type")) == "interactive_input_callback" &&
+          std::string(mapping_string(event, "task_key")) == "gateway_input_to_callback" &&
+          std::string(mapping_string(event, "state")) == "frame_entered" &&
+          std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
+          mapping_number(event, "owner_epoch") == static_cast<long>(owner_epoch)) {
+        found_input_callback_apply_frame_entered = true;
+      }
       if (std::string(mapping_string(event, "task_type")) == "interactive_mode_flags" &&
           std::string(mapping_string(event, "task_key")) == "noecho_localecho_restore" &&
           std::string(mapping_string(event, "state")) == "frame_detached" &&
@@ -8169,6 +8189,12 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveInputToState) {
                      "owner_command_frame_input_callback_detach_v1");
         ASSERT_EQ(mapping_number(payload, "input_callback_frame_detach_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_frame_executor_ready"), 0);
+        ASSERT_STREQ(mapping_string(payload, "input_callback_apply_frame_model"),
+                     "owner_command_frame_input_callback_apply");
+        ASSERT_STREQ(mapping_string(payload, "input_callback_apply_frame_task_type"),
+                     "interactive_input_callback");
+        ASSERT_EQ(mapping_number(payload, "input_callback_apply_frame_ready"), 1);
+        ASSERT_EQ(mapping_number(payload, "input_callback_apply_frame_executor_ready"), 0);
         ASSERT_STREQ(mapping_string(payload, "input_callback_mode_delta_model"),
                      "owner_command_frame_input_callback_mode_delta");
         ASSERT_EQ(mapping_number(payload, "input_callback_mode_delta_ready"), 1);
@@ -8202,6 +8228,7 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveInputToState) {
     }
   }
   ASSERT_TRUE(found_command_task);
+  ASSERT_TRUE(found_input_callback_apply_frame_entered);
   ASSERT_TRUE(found_noecho_localecho_frame_detached);
   ASSERT_TRUE(found_localecho_restore_queued);
   ASSERT_TRUE(found_localecho_restore_dispatched);
@@ -8278,6 +8305,7 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveGetCharState) {
   ASSERT_EQ(events_value ? events_value->type : T_INVALID, T_ARRAY);
   bool found_command_task = false;
   bool found_input_callback_frame_detached = false;
+  bool found_input_callback_apply_frame_entered = false;
   bool found_input_callback_mode_frame_detached = false;
   bool found_linemode_restore_queued = false;
   bool found_linemode_restore_dispatched = false;
@@ -8290,6 +8318,13 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveGetCharState) {
           std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
           mapping_number(event, "owner_epoch") == static_cast<long>(owner_epoch)) {
         found_input_callback_frame_detached = true;
+      }
+      if (std::string(mapping_string(event, "task_type")) == "interactive_input_callback" &&
+          std::string(mapping_string(event, "task_key")) == "gateway_get_char_callback" &&
+          std::string(mapping_string(event, "state")) == "frame_entered" &&
+          std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
+          mapping_number(event, "owner_epoch") == static_cast<long>(owner_epoch)) {
+        found_input_callback_apply_frame_entered = true;
       }
       if (std::string(mapping_string(event, "task_type")) == "interactive_input_callback_mode" &&
           std::string(mapping_string(event, "task_key")) == "input_to_get_char_mode_flags" &&
@@ -8326,6 +8361,12 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveGetCharState) {
                      "owner_command_frame_input_callback_detach_v1");
         ASSERT_EQ(mapping_number(payload, "input_callback_frame_detach_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_frame_executor_ready"), 0);
+        ASSERT_STREQ(mapping_string(payload, "input_callback_apply_frame_model"),
+                     "owner_command_frame_input_callback_apply");
+        ASSERT_STREQ(mapping_string(payload, "input_callback_apply_frame_task_type"),
+                     "interactive_input_callback");
+        ASSERT_EQ(mapping_number(payload, "input_callback_apply_frame_ready"), 1);
+        ASSERT_EQ(mapping_number(payload, "input_callback_apply_frame_executor_ready"), 0);
         ASSERT_STREQ(mapping_string(payload, "input_callback_mode_delta_model"),
                      "owner_command_frame_input_callback_mode_delta");
         ASSERT_EQ(mapping_number(payload, "input_callback_mode_delta_ready"), 1);
@@ -8357,6 +8398,7 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveGetCharState) {
   }
   ASSERT_TRUE(found_command_task);
   ASSERT_TRUE(found_input_callback_frame_detached);
+  ASSERT_TRUE(found_input_callback_apply_frame_entered);
   ASSERT_TRUE(found_input_callback_mode_frame_detached);
   ASSERT_TRUE(found_linemode_restore_queued);
   ASSERT_TRUE(found_linemode_restore_dispatched);
