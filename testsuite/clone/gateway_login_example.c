@@ -50,6 +50,15 @@ int enable_gateway_get_char() {
   return get_char("gateway_get_char_callback", 3, "char-token");
 }
 
+int enable_gateway_ed() {
+#ifdef __OLD_ED__
+  ed("/ed_test");
+  return 1;
+#else
+  return 0;
+#endif
+}
+
 string query_last_get_char_value() { return last_get_char_value; }
 
 string query_last_get_char_token() { return last_get_char_token; }

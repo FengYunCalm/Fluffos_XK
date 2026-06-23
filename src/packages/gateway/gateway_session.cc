@@ -77,7 +77,7 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
 #endif
 
   payload.type = T_MAPPING;
-  payload.u.map = allocate_mapping(76);
+  payload.u.map = allocate_mapping(81);
   add_mapping_string(payload.u.map, "payload_model", "gateway_command_buffer_metadata_v1");
   add_mapping_string(payload.u.map, "payload_policy", "no_raw_command_text_in_trace");
   add_mapping_string(payload.u.map, "input_source", "interactive_text_buffer");
@@ -143,6 +143,11 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_pair(payload.u.map, "interactive_mode_mxp_tag_filter_executor_ready", 0);
   add_mapping_pair(payload.u.map, "interactive_mode_mxp_tag_filter_required",
                    user && (user->iflags & USING_MXP) ? 1 : 0);
+  add_mapping_string(payload.u.map, "interactive_mode_ed_command_model", "owner_command_frame_ed_command");
+  add_mapping_string(payload.u.map, "interactive_mode_ed_command_task_type", "interactive_mode_flags");
+  add_mapping_pair(payload.u.map, "interactive_mode_ed_command_ready", 1);
+  add_mapping_pair(payload.u.map, "interactive_mode_ed_command_executor_ready", 0);
+  add_mapping_pair(payload.u.map, "interactive_mode_ed_command_required", user && user->ed_buffer ? 1 : 0);
   add_mapping_pair(payload.u.map, "interactive_mode_ed_buffer_active", user && user->ed_buffer ? 1 : 0);
   add_mapping_string(payload.u.map, "prompt_telnet_reschedule_state_policy",
                      "redacted_prompt_telnet_reschedule_io_v1");

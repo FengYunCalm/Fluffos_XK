@@ -1346,6 +1346,21 @@ static int handle_user_mxp_tag_filter_in_owner_frame(interactive_t *ip, const ch
   return on_receive_mxp_tag(ip, user_command) ? 1 : 0;
 }
 
+#ifdef OLD_ED
+static int handle_user_ed_command_in_owner_frame(interactive_t *ip, char *user_command) {
+  if (!ip->ed_buffer) {
+    return 0;
+  }
+
+  if (ip->ob && !(ip->ob->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(vm_owner_id(ip->ob), "interactive_mode_flags", "ed_command",
+                               vm_owner_epoch(ip->ob), "frame_entered");
+  }
+  ed_cmd(user_command);
+  return 1;
+}
+#endif
+
 static void process_input(interactive_t *ip, char *user_command) {
   svalue_t *ret;
 
@@ -1446,8 +1461,7 @@ static int process_user_command_text(interactive_t *ip, char *user_command) {
   }
 
 #ifdef OLD_ED
-  if (ip->ed_buffer) {
-    ed_cmd(user_command);
+  if (handle_user_ed_command_in_owner_frame(ip, user_command)) {
     goto exit;
   }
 #endif
