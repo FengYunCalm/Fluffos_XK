@@ -24,6 +24,8 @@ constexpr const char *kGlobalRecordScanBridgeSource = "global_object_records.pat
 constexpr const char *kOwnerLocalStoreCompleteBlockerGlobalIndexBridge = "global_index_bridge_active";
 constexpr const char *kOwnerLocalStoreCompleteBlockerGlobalObjectTable = "global_object_table_active";
 constexpr const char *kOwnerLocalStoreCompleteBlockerNotMarkedComplete = "owner_local_store_not_marked_complete";
+constexpr const char *kOwnerLocalDeferredDestructBlocker = "deferred_destruct_main_thread_list";
+constexpr const char *kGlobalIndexPhysicalRetirementBlocker = "global_object_records_compatibility_index";
 
 struct ObjectRecord {
   uint64_t object_id{0};
@@ -279,6 +281,30 @@ void add_mapping_map(mapping_t *map, const char *key_name, mapping_t *value) {
   slot->type = T_MAPPING;
   slot->u.map = value;
   value->ref++;
+}
+
+void add_owner_local_lifecycle_contract(mapping_t *map, bool lookup_resolve_ready,
+                                        bool canonical_write_ready) {
+  constexpr bool deferred_destruct_ready = false;
+  constexpr bool global_index_physical_retirement_ready = false;
+  const auto lifecycle_ready = lookup_resolve_ready && canonical_write_ready &&
+                               deferred_destruct_ready &&
+                               global_index_physical_retirement_ready;
+  add_mapping_pair(map, "owner_local_lifecycle_contract_version", 1);
+  add_mapping_pair(map, "owner_local_lookup_resolve_ready", lookup_resolve_ready ? 1 : 0);
+  add_mapping_pair(map, "owner_local_create_canonical_ready", canonical_write_ready ? 1 : 0);
+  add_mapping_pair(map, "owner_local_move_canonical_ready", canonical_write_ready ? 1 : 0);
+  add_mapping_pair(map, "owner_local_destruct_canonical_ready", canonical_write_ready ? 1 : 0);
+  add_mapping_pair(map, "owner_local_deferred_destruct_ready", deferred_destruct_ready ? 1 : 0);
+  add_mapping_string(map, "owner_local_deferred_destruct_blocker",
+                     deferred_destruct_ready ? "" : kOwnerLocalDeferredDestructBlocker);
+  add_mapping_pair(map, "global_index_physical_retirement_ready",
+                   global_index_physical_retirement_ready ? 1 : 0);
+  add_mapping_string(map, "global_index_physical_retirement_blocker",
+                     global_index_physical_retirement_ready ? "" : kGlobalIndexPhysicalRetirementBlocker);
+  add_mapping_pair(map, "owner_local_lifecycle_ready", lifecycle_ready ? 1 : 0);
+  add_mapping_string(map, "owner_local_lifecycle_blocker",
+                     lifecycle_ready ? "" : kOwnerLocalDeferredDestructBlocker);
 }
 
 VMObjectShard &shard_for_owner(const std::string &owner_id) {
@@ -1194,6 +1220,7 @@ mapping_t *vm_object_shard_contract_mapping(const VMObjectShard &shard, const Ow
   add_mapping_string(map, "global_live_object_bridge_source", store_complete ? "" : kGlobalLiveObjectBridgeSource);
   add_mapping_pair(map, "global_record_bridge_ready", store_complete ? 0 : 1);
   add_mapping_string(map, "global_record_bridge_source", store_complete ? "" : kGlobalRecordBridgeSource);
+  add_owner_local_lifecycle_contract(map, store_complete, shard_ready);
   add_mapping_pair(map, "contract_version", 1);
   return map;
 }
@@ -1419,6 +1446,7 @@ mapping_t *shard_mapping(const VMObjectShard &shard, const OwnerLocalBridgeSumma
   add_mapping_string(map, "global_live_object_bridge_source", store_complete ? "" : kGlobalLiveObjectBridgeSource);
   add_mapping_pair(map, "global_record_bridge_ready", store_complete ? 0 : 1);
   add_mapping_string(map, "global_record_bridge_source", store_complete ? "" : kGlobalRecordBridgeSource);
+  add_owner_local_lifecycle_contract(map, store_complete, shard_ready);
   free_mapping(shard_contract);
   free_mapping(status_record);
   free_mapping(execution_shard);
@@ -1891,6 +1919,8 @@ mapping_t *vm_object_store_status() {
   add_mapping_pair(map, "global_record_bridge_ready", owner_local_store_complete ? 0 : 1);
   add_mapping_string(map, "global_record_bridge_source",
                      owner_local_store_complete ? "" : kGlobalRecordBridgeSource);
+  add_owner_local_lifecycle_contract(map, owner_local_store_complete,
+                                     owner_local_bridge.owner_local_canonical_record_ready);
   add_mapping_pair(map, "owner_shards", static_cast<long>(owner_shards.size()));
   add_mapping_string(map, "default_owner_id", vm_owner_default_id());
   add_mapping_pair(map, "migration_count",
@@ -1955,6 +1985,7 @@ mapping_t *vm_object_store_owner_status(const char *owner_id) {
                        empty_store_complete ? "" : kGlobalLiveObjectBridgeSource);
     add_mapping_pair(map, "global_record_bridge_ready", empty_store_complete ? 0 : 1);
     add_mapping_string(map, "global_record_bridge_source", empty_store_complete ? "" : kGlobalRecordBridgeSource);
+    add_owner_local_lifecycle_contract(map, empty_store_complete, true);
     add_mapping_pair(map, "executor_ready", 0);
     free_mapping(shard_contract);
     free_array(object_directory);

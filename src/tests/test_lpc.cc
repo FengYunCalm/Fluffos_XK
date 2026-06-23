@@ -5839,6 +5839,20 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
     ASSERT_STREQ(mapping_string(map, "global_live_object_bridge_source"), "");
     ASSERT_EQ(mapping_number(map, "global_record_bridge_ready"), 0);
     ASSERT_STREQ(mapping_string(map, "global_record_bridge_source"), "");
+    ASSERT_EQ(mapping_number(map, "owner_local_lifecycle_contract_version"), 1);
+    ASSERT_EQ(mapping_number(map, "owner_local_lookup_resolve_ready"), 1);
+    ASSERT_EQ(mapping_number(map, "owner_local_create_canonical_ready"), 1);
+    ASSERT_EQ(mapping_number(map, "owner_local_move_canonical_ready"), 1);
+    ASSERT_EQ(mapping_number(map, "owner_local_destruct_canonical_ready"), 1);
+    ASSERT_EQ(mapping_number(map, "owner_local_deferred_destruct_ready"), 0);
+    ASSERT_STREQ(mapping_string(map, "owner_local_deferred_destruct_blocker"),
+                 "deferred_destruct_main_thread_list");
+    ASSERT_EQ(mapping_number(map, "global_index_physical_retirement_ready"), 0);
+    ASSERT_STREQ(mapping_string(map, "global_index_physical_retirement_blocker"),
+                 "global_object_records_compatibility_index");
+    ASSERT_EQ(mapping_number(map, "owner_local_lifecycle_ready"), 0);
+    ASSERT_STREQ(mapping_string(map, "owner_local_lifecycle_blocker"),
+                 "deferred_destruct_main_thread_list");
   };
   auto expect_no_lookup_global_live_object = [&](mapping_t* map) {
     ASSERT_EQ(mapping_number(map, "owner_local_global_live_object_found"), 0);
@@ -6341,6 +6355,20 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
     ASSERT_STREQ(mapping_string(map, "global_live_object_bridge_source"), "");
     ASSERT_EQ(mapping_number(map, "global_record_bridge_ready"), 0);
     ASSERT_STREQ(mapping_string(map, "global_record_bridge_source"), "");
+    ASSERT_EQ(mapping_number(map, "owner_local_lifecycle_contract_version"), 1);
+    ASSERT_EQ(mapping_number(map, "owner_local_lookup_resolve_ready"), 1);
+    ASSERT_EQ(mapping_number(map, "owner_local_create_canonical_ready"), 1);
+    ASSERT_EQ(mapping_number(map, "owner_local_move_canonical_ready"), 1);
+    ASSERT_EQ(mapping_number(map, "owner_local_destruct_canonical_ready"), 1);
+    ASSERT_EQ(mapping_number(map, "owner_local_deferred_destruct_ready"), 0);
+    ASSERT_STREQ(mapping_string(map, "owner_local_deferred_destruct_blocker"),
+                 "deferred_destruct_main_thread_list");
+    ASSERT_EQ(mapping_number(map, "global_index_physical_retirement_ready"), 0);
+    ASSERT_STREQ(mapping_string(map, "global_index_physical_retirement_blocker"),
+                 "global_object_records_compatibility_index");
+    ASSERT_EQ(mapping_number(map, "owner_local_lifecycle_ready"), 0);
+    ASSERT_STREQ(mapping_string(map, "owner_local_lifecycle_blocker"),
+                 "deferred_destruct_main_thread_list");
   };
   auto expect_no_lookup_global_live_object = [&](mapping_t* map) {
     ASSERT_EQ(mapping_number(map, "owner_local_global_live_object_found"), 0);
