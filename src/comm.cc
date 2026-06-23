@@ -124,6 +124,41 @@ void enqueue_user_localecho_restore(interactive_t *ip, object_t *reply_command_g
   vm_owner_drain_main_tasks(64);
 }
 
+enum class UserTerminalModeDelta { LineMode, CharMode };
+
+void run_user_terminal_mode_delta(interactive_t *ip, object_t *reply_command_giver,
+                                  UserTerminalModeDelta mode_delta) {
+  if (!IP_VALID(ip, reply_command_giver)) {
+    return;
+  }
+
+  save_command_giver(reply_command_giver);
+  VMCurrentInteractiveScope interactive_scope(vm_context(), reply_command_giver);
+  if (mode_delta == UserTerminalModeDelta::LineMode) {
+    set_linemode(ip, true);
+  } else {
+    set_charmode(ip, true);
+  }
+  restore_command_giver();
+}
+
+void enqueue_user_terminal_mode_delta(interactive_t *ip, object_t *reply_command_giver,
+                                      UserTerminalModeDelta mode_delta, const char *task_key) {
+  if (!IP_VALID(ip, reply_command_giver)) {
+    return;
+  }
+
+  auto task_id = vm_owner_enqueue_main_task(reply_command_giver, "command_mode_delta", task_key,
+                                            [ip, reply_command_giver, mode_delta] {
+                                              run_user_terminal_mode_delta(ip, reply_command_giver, mode_delta);
+                                            });
+  if (task_id == 0) {
+    run_user_terminal_mode_delta(ip, reply_command_giver, mode_delta);
+    return;
+  }
+  vm_owner_drain_main_tasks(64);
+}
+
 void run_user_command_reply_side_effects(interactive_t *ip, object_t *reply_command_giver) {
   if (!IP_VALID(ip, reply_command_giver)) {
     return;
@@ -1365,13 +1400,15 @@ static int process_user_command_text(interactive_t *ip, char *user_command) {
       ip->iflags |= WAS_SINGLE_CHAR;
       ip->iflags &= ~SINGLE_CHAR;
       ip->text_start = ip->text_end = *ip->text = 0;
-      set_linemode(ip, true);
+      enqueue_user_terminal_mode_delta(ip, command_giver, UserTerminalModeDelta::LineMode,
+                                       "single_char_escape_linemode");
     } else {
       if (ip->iflags & WAS_SINGLE_CHAR) {
         /* we now have a string ... switch back to char mode */
         ip->iflags &= ~WAS_SINGLE_CHAR;
         ip->iflags |= SINGLE_CHAR;
-        set_charmode(ip, true);
+        enqueue_user_terminal_mode_delta(ip, command_giver, UserTerminalModeDelta::CharMode,
+                                         "single_char_escape_charmode_restore");
         if (!IP_VALID(ip, command_giver)) {
           goto exit;
         }
@@ -1683,10 +1720,11 @@ static int call_function_interactive(interactive_t *i, char *str) {
       i->text_start = i->text_end = 0;
       i->text[0] = '\0';
       i->iflags &= ~CMD_IN_BUF;
-      set_linemode(i, true);
+      enqueue_user_terminal_mode_delta(i, ob, UserTerminalModeDelta::LineMode,
+                                       "get_char_linemode_restore");
     }
     if (was_noecho && !(i->iflags & NOECHO)) {
-      set_localecho(i, true);
+      enqueue_user_localecho_restore(i, ob);
     }
   }
   return ret;

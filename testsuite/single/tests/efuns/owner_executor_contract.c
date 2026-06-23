@@ -304,6 +304,13 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("main_reply_queue_after_command_consume",
               contract["command_mode_delta_localecho_restore_boundary"]);
     ASSERT_EQ(1, contract["command_mode_delta_localecho_restore_ready"]);
+    ASSERT_EQ("command_mode_delta",
+              contract["command_mode_delta_terminal_mode_task_type"]);
+    ASSERT_EQ("get_char_linemode_restore,single_char_escape_linemode,single_char_escape_charmode_restore",
+              contract["command_mode_delta_terminal_mode_task_keys"]);
+    ASSERT_EQ("main_mode_delta_queue_after_command_consume",
+              contract["command_mode_delta_terminal_mode_boundary"]);
+    ASSERT_EQ(1, contract["command_mode_delta_terminal_mode_ready"]);
     ASSERT_EQ(0, contract["command_mode_delta_ready"]);
     ASSERT_EQ("no_raw_command_text_in_trace",
               contract["raw_input_trace_policy"]);
