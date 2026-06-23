@@ -77,7 +77,7 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
 #endif
 
   payload.type = T_MAPPING;
-  payload.u.map = allocate_mapping(92);
+  payload.u.map = allocate_mapping(96);
   add_mapping_string(payload.u.map, "payload_model", "gateway_command_buffer_metadata_v1");
   add_mapping_string(payload.u.map, "payload_policy", "no_raw_command_text_in_trace");
   add_mapping_string(payload.u.map, "input_source", "interactive_text_buffer");
@@ -172,6 +172,11 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_pair(payload.u.map, "prompt_text_redacted", user && user->prompt ? 1 : 0);
   add_mapping_pair(payload.u.map, "prompt_write_prompt_apply_required",
                    user && (user->iflags & HAS_WRITE_PROMPT) && !user->ed_buffer ? 1 : 0);
+  add_mapping_string(payload.u.map, "prompt_write_prompt_apply_frame_model",
+                     "owner_command_frame_write_prompt_apply");
+  add_mapping_string(payload.u.map, "prompt_write_prompt_apply_frame_task_type", "command_reply");
+  add_mapping_pair(payload.u.map, "prompt_write_prompt_apply_frame_ready", 1);
+  add_mapping_pair(payload.u.map, "prompt_write_prompt_apply_frame_executor_ready", 0);
   add_mapping_pair(payload.u.map, "telnet_handle_active", user && user->telnet ? 1 : 0);
   add_mapping_pair(payload.u.map, "telnet_using_telnet", user && (user->iflags & USING_TELNET) ? 1 : 0);
   add_mapping_pair(payload.u.map, "telnet_suppress_ga", user && (user->iflags & SUPPRESS_GA) ? 1 : 0);

@@ -325,6 +325,12 @@ void assert_gateway_owner_task_contract(mapping contract) {
               contract["command_reply_queue_side_effects"]);
     ASSERT_EQ(1, contract["command_reply_queue_ready"]);
     ASSERT_EQ(1, contract["command_reply_queue_main_required"]);
+    ASSERT_EQ("owner_command_frame_write_prompt_apply",
+              contract["command_reply_write_prompt_apply_frame_model"]);
+    ASSERT_EQ("command_reply",
+              contract["command_reply_write_prompt_apply_frame_task_type"]);
+    ASSERT_EQ(1, contract["command_reply_write_prompt_apply_frame_ready"]);
+    ASSERT_EQ(0, contract["command_reply_write_prompt_apply_frame_executor_ready"]);
     ASSERT_EQ("owner_command_frame_mode_delta",
               contract["command_mode_delta_model"]);
     ASSERT_EQ("main_reply_queue_after_command_consume",

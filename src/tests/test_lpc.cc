@@ -3211,6 +3211,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "prompt_telnet_reschedule_io");
     ASSERT_EQ(mapping_number(gateway_contract, "command_reply_queue_ready"), 1);
     ASSERT_EQ(mapping_number(gateway_contract, "command_reply_queue_main_required"), 1);
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_reply_write_prompt_apply_frame_model"),
+                 "owner_command_frame_write_prompt_apply");
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_reply_write_prompt_apply_frame_task_type"),
+                 "command_reply");
+    ASSERT_EQ(mapping_number(gateway_contract, "command_reply_write_prompt_apply_frame_ready"), 1);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_reply_write_prompt_apply_frame_executor_ready"), 0);
     ASSERT_STREQ(mapping_string(gateway_contract, "command_mode_delta_model"),
                  "owner_command_frame_mode_delta");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_mode_delta_localecho_restore_boundary"),
@@ -7726,6 +7732,7 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
   bool found_parser_frame_entered = false;
   bool found_reply_task_queued = false;
   bool found_reply_task_dispatched = false;
+  bool found_write_prompt_apply_frame_entered = false;
   if (events_value && events_value->type == T_ARRAY) {
     for (int i = 0; i < events_value->u.arr->size; i++) {
       auto *event = events_value->u.arr->item[i].u.map;
@@ -7736,6 +7743,13 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         auto state = std::string(mapping_string(event, "state"));
         found_reply_task_queued = found_reply_task_queued || state == "main_queued";
         found_reply_task_dispatched = found_reply_task_dispatched || state == "main_dispatched";
+      }
+      if (std::string(mapping_string(event, "task_type")) == "command_reply" &&
+          std::string(mapping_string(event, "task_key")) == "write_prompt_apply" &&
+          std::string(mapping_string(event, "state")) == "frame_entered" &&
+          std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
+          mapping_number(event, "owner_epoch") == static_cast<long>(owner_epoch)) {
+        found_write_prompt_apply_frame_entered = true;
       }
       if (std::string(mapping_string(event, "task_type")) == "interactive_command_parser" &&
           std::string(mapping_string(event, "task_key")) == "process_input_apply" &&
@@ -7887,6 +7901,11 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_EQ(mapping_number(payload, "prompt_has_write_prompt"), 1);
         ASSERT_EQ(mapping_number(payload, "prompt_text_redacted"), 1);
         ASSERT_EQ(mapping_number(payload, "prompt_write_prompt_apply_required"), 1);
+        ASSERT_STREQ(mapping_string(payload, "prompt_write_prompt_apply_frame_model"),
+                     "owner_command_frame_write_prompt_apply");
+        ASSERT_STREQ(mapping_string(payload, "prompt_write_prompt_apply_frame_task_type"), "command_reply");
+        ASSERT_EQ(mapping_number(payload, "prompt_write_prompt_apply_frame_ready"), 1);
+        ASSERT_EQ(mapping_number(payload, "prompt_write_prompt_apply_frame_executor_ready"), 0);
         ASSERT_EQ(mapping_number(payload, "telnet_handle_active"), 0);
         ASSERT_EQ(mapping_number(payload, "telnet_using_telnet"), 0);
         ASSERT_EQ(mapping_number(payload, "telnet_suppress_ga"), 0);
@@ -7915,6 +7934,7 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
   ASSERT_TRUE(found_parser_frame_entered);
   ASSERT_TRUE(found_reply_task_queued);
   ASSERT_TRUE(found_reply_task_dispatched);
+  ASSERT_TRUE(found_write_prompt_apply_frame_entered);
   free_mapping(trace);
 
   add_ref(ob, "TestGatewayCommandTaskCarriesOwnerHandlePayload");

@@ -1858,6 +1858,14 @@ void set_prompt(const char *str) {
   }
 } /* set_prompt() */
 
+static svalue_t *apply_user_write_prompt_in_owner_frame(interactive_t *ip) {
+  if (ip && ip->ob && !(ip->ob->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(vm_owner_id(ip->ob), "command_reply", "write_prompt_apply",
+                               vm_owner_epoch(ip->ob), "frame_entered");
+  }
+  return owner_bound_safe_apply(APPLY_WRITE_PROMPT, ip->ob, 0, ORIGIN_DRIVER, "interactive");
+}
+
 /*
  * Print the prompt, but only if input_to not is disabled.
  */
@@ -1874,7 +1882,7 @@ static void print_prompt(interactive_t *ip) {
     tell_object(ip->ob, ip->prompt, strlen(ip->prompt));
   }
 #endif
-  else if (!owner_bound_safe_apply(APPLY_WRITE_PROMPT, ip->ob, 0, ORIGIN_DRIVER, "interactive")) {
+  else if (!apply_user_write_prompt_in_owner_frame(ip)) {
     ip->iflags &= ~HAS_WRITE_PROMPT;
     tell_object(ip->ob, ip->prompt, strlen(ip->prompt));
   }
