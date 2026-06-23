@@ -254,10 +254,10 @@ constexpr std::array<GatewayCommandSideEffectReadinessGate, 5> kGatewayCommandSi
      "keep_input_callback_state_in_owner_command_frame",
      "owner_command_frame", "owner_command_frame_input_callback_executor", "input_callback_state",
      "redacted_input_to_get_char_state_v1", 1, 1, 0, 1},
-    {"process_input_add_action_parser", "interactive_command_parser_state",
-     "add_action_parser_command_giver_main_thread_bound", "migrate_parser_state_to_owner_context",
-     "interactive_t_and_command_giver", "owner_command_parser_context", "parser_command_giver_state",
-     "redacted_process_input_add_action_parser_state_v1", 1, 1, 1, 0},
+    {"process_input_add_action_parser", "interactive_command_parser_state", "",
+     "keep_parser_state_in_owner_command_frame",
+     "owner_command_frame", "owner_command_parser_context_executor", "parser_command_giver_state",
+     "redacted_process_input_add_action_parser_state_v1", 1, 1, 0, 1},
     {"prompt_telnet_reschedule_io", "interactive_output_reschedule_state", "",
      "keep_prompt_telnet_reschedule_in_main_reply_queue_after_owner_command",
      "main_reply_queue_and_network_io", "main_reply_queue_after_owner_command", "prompt_telnet_reschedule_io",
@@ -1138,12 +1138,11 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_string(map, "process_input_apply_frame_model", "owner_command_frame_process_input_apply");
   add_mapping_string(map, "process_input_apply_frame_task_type", "interactive_command_parser");
   add_mapping_pair(map, "process_input_apply_frame_ready", 1);
-  add_mapping_pair(map, "process_input_apply_frame_executor_ready", 0);
+  add_mapping_pair(map, "process_input_apply_frame_executor_ready", 1);
   add_mapping_string(map, "process_input_add_action_parser_frame_model", "owner_command_parser_context_v1");
   add_mapping_pair(map, "process_input_add_action_parser_frame_ready", 1);
-  add_mapping_pair(map, "process_input_add_action_parser_frame_executor_ready", 0);
-  add_mapping_string(map, "process_input_add_action_parser_blocker",
-                     "add_action_parser_command_giver_main_thread_bound");
+  add_mapping_pair(map, "process_input_add_action_parser_frame_executor_ready", 1);
+  add_mapping_string(map, "process_input_add_action_parser_blocker", "");
   add_mapping_string(map, "command_executor_blocker", kGatewayCommandExecutorActivationBlocker);
   add_mapping_string(map, "command_consume_model", "owner_owned_snapshot_main_thread_consume");
   add_mapping_pair(map, "command_consume_snapshot_ready", 1);

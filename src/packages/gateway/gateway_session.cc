@@ -119,13 +119,12 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_string(payload.u.map, "process_input_apply_frame_model", "owner_command_frame_process_input_apply");
   add_mapping_string(payload.u.map, "process_input_apply_frame_task_type", "interactive_command_parser");
   add_mapping_pair(payload.u.map, "process_input_apply_frame_ready", 1);
-  add_mapping_pair(payload.u.map, "process_input_apply_frame_executor_ready", 0);
+  add_mapping_pair(payload.u.map, "process_input_apply_frame_executor_ready", 1);
   add_mapping_string(payload.u.map, "process_input_add_action_parser_frame_model",
                      "owner_command_parser_context_v1");
   add_mapping_pair(payload.u.map, "process_input_add_action_parser_frame_ready", 1);
-  add_mapping_pair(payload.u.map, "process_input_add_action_parser_frame_executor_ready", 0);
-  add_mapping_string(payload.u.map, "process_input_add_action_parser_blocker",
-                     "add_action_parser_command_giver_main_thread_bound");
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_frame_executor_ready", 1);
+  add_mapping_string(payload.u.map, "process_input_add_action_parser_blocker", "");
   add_mapping_string(payload.u.map, "interactive_mode_flags_state_policy", "redacted_interactive_mode_flags_v1");
   add_mapping_pair(payload.u.map, "interactive_mode_flags_state_snapshot_ready", 1);
   add_mapping_pair(payload.u.map, "interactive_mode_flags_state_redacted", 1);

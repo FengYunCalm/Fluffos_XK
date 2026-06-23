@@ -3286,13 +3286,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gateway_contract, "process_input_apply_frame_task_type"),
                  "interactive_command_parser");
     ASSERT_EQ(mapping_number(gateway_contract, "process_input_apply_frame_ready"), 1);
-    ASSERT_EQ(mapping_number(gateway_contract, "process_input_apply_frame_executor_ready"), 0);
+    ASSERT_EQ(mapping_number(gateway_contract, "process_input_apply_frame_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "process_input_add_action_parser_frame_model"),
                  "owner_command_parser_context_v1");
     ASSERT_EQ(mapping_number(gateway_contract, "process_input_add_action_parser_frame_ready"), 1);
-    ASSERT_EQ(mapping_number(gateway_contract, "process_input_add_action_parser_frame_executor_ready"), 0);
-    ASSERT_STREQ(mapping_string(gateway_contract, "process_input_add_action_parser_blocker"),
-                 "add_action_parser_command_giver_main_thread_bound");
+    ASSERT_EQ(mapping_number(gateway_contract, "process_input_add_action_parser_frame_executor_ready"), 1);
+    ASSERT_STREQ(mapping_string(gateway_contract, "process_input_add_action_parser_blocker"), "");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_blocker"),
                  "interactive_command_side_effects_main_thread_bound");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_consume_model"),
@@ -3373,8 +3372,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gateway_contract, "command_side_effect_readiness_gate_model"),
                  "all_side_effect_gates_required_before_activation");
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_readiness_gate_count"), 5);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_satisfied_gate_count"), 3);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_blocked_gate_count"), 2);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_satisfied_gate_count"), 4);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_blocked_gate_count"), 1);
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_snapshot_gate_count"), 5);
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_snapshot_ready_count"), 5);
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_observability_ready"), 1);
@@ -3456,14 +3455,13 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "input_callback_state");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("input_to_get_char_state"), "snapshot_policy"),
                  "redacted_input_to_get_char_state_v1");
-    ASSERT_EQ(mapping_number(command_side_effect_gate("process_input_add_action_parser"), "satisfied"), 0);
-    ASSERT_EQ(mapping_number(command_side_effect_gate("process_input_add_action_parser"), "blocks_activation"), 1);
-    ASSERT_STREQ(mapping_string(command_side_effect_gate("process_input_add_action_parser"), "blocker"),
-                 "add_action_parser_command_giver_main_thread_bound");
+    ASSERT_EQ(mapping_number(command_side_effect_gate("process_input_add_action_parser"), "satisfied"), 1);
+    ASSERT_EQ(mapping_number(command_side_effect_gate("process_input_add_action_parser"), "blocks_activation"), 0);
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("process_input_add_action_parser"), "blocker"), "");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("process_input_add_action_parser"), "state_owner"),
-                 "interactive_t_and_command_giver");
+                 "owner_command_frame");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("process_input_add_action_parser"), "migration_boundary"),
-                 "owner_command_parser_context");
+                 "owner_command_parser_context_executor");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("process_input_add_action_parser"), "side_effect_class"),
                  "parser_command_giver_state");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("process_input_add_action_parser"), "snapshot_policy"),
@@ -7968,13 +7966,12 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_STREQ(mapping_string(payload, "process_input_apply_frame_task_type"),
                      "interactive_command_parser");
         ASSERT_EQ(mapping_number(payload, "process_input_apply_frame_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "process_input_apply_frame_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "process_input_apply_frame_executor_ready"), 1);
         ASSERT_STREQ(mapping_string(payload, "process_input_add_action_parser_frame_model"),
                      "owner_command_parser_context_v1");
         ASSERT_EQ(mapping_number(payload, "process_input_add_action_parser_frame_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "process_input_add_action_parser_frame_executor_ready"), 0);
-        ASSERT_STREQ(mapping_string(payload, "process_input_add_action_parser_blocker"),
-                     "add_action_parser_command_giver_main_thread_bound");
+        ASSERT_EQ(mapping_number(payload, "process_input_add_action_parser_frame_executor_ready"), 1);
+        ASSERT_STREQ(mapping_string(payload, "process_input_add_action_parser_blocker"), "");
         ASSERT_FALSE(mapping_has_string_key(payload, "process_input_add_action_parser_command_giver"));
         ASSERT_FALSE(mapping_has_string_key(payload, "process_input_add_action_parser_command_text"));
         ASSERT_STREQ(mapping_string(payload, "interactive_mode_flags_state_policy"),
