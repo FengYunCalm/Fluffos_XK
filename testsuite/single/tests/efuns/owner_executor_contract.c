@@ -318,6 +318,12 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("main_reply_queue_after_command_consume",
               contract["command_mode_delta_localecho_restore_boundary"]);
     ASSERT_EQ(1, contract["command_mode_delta_localecho_restore_ready"]);
+    ASSERT_EQ("owner_command_frame_localecho_restore",
+              contract["interactive_mode_localecho_restore_model"]);
+    ASSERT_EQ("interactive_mode_flags",
+              contract["interactive_mode_localecho_restore_task_type"]);
+    ASSERT_EQ(1, contract["interactive_mode_localecho_restore_ready"]);
+    ASSERT_EQ(0, contract["interactive_mode_localecho_restore_executor_ready"]);
     ASSERT_EQ("command_mode_delta",
               contract["command_mode_delta_terminal_mode_task_type"]);
     ASSERT_EQ("get_char_linemode_restore,single_char_escape_linemode,single_char_escape_charmode_restore",

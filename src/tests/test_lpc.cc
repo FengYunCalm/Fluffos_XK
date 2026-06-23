@@ -3204,6 +3204,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gateway_contract, "command_mode_delta_localecho_restore_boundary"),
                  "main_reply_queue_after_command_consume");
     ASSERT_EQ(mapping_number(gateway_contract, "command_mode_delta_localecho_restore_ready"), 1);
+    ASSERT_STREQ(mapping_string(gateway_contract, "interactive_mode_localecho_restore_model"),
+                 "owner_command_frame_localecho_restore");
+    ASSERT_STREQ(mapping_string(gateway_contract, "interactive_mode_localecho_restore_task_type"),
+                 "interactive_mode_flags");
+    ASSERT_EQ(mapping_number(gateway_contract, "interactive_mode_localecho_restore_ready"), 1);
+    ASSERT_EQ(mapping_number(gateway_contract, "interactive_mode_localecho_restore_executor_ready"), 0);
     ASSERT_STREQ(mapping_string(gateway_contract, "command_mode_delta_terminal_mode_task_type"),
                  "command_mode_delta");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_mode_delta_terminal_mode_task_keys"),
@@ -7805,9 +7811,14 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_EQ(mapping_number(payload, "interactive_mode_flags_state_snapshot_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_flags_state_redacted"), 1);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_noecho"), 0);
+        ASSERT_STREQ(mapping_string(payload, "interactive_mode_localecho_restore_model"),
+                     "owner_command_frame_localecho_restore");
+        ASSERT_STREQ(mapping_string(payload, "interactive_mode_localecho_restore_task_type"),
+                     "interactive_mode_flags");
         ASSERT_STREQ(mapping_string(payload, "interactive_mode_localecho_restore_boundary"),
                      "main_reply_queue_after_command_consume");
         ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_ready"), 1);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_executor_ready"), 0);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_required"), 0);
         ASSERT_STREQ(mapping_string(payload, "interactive_mode_terminal_mode_delta_boundary"),
                      "main_mode_delta_queue_after_command_consume");
@@ -8096,11 +8107,19 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveInputToState) {
   ASSERT_NE(events_value, nullptr);
   ASSERT_EQ(events_value ? events_value->type : T_INVALID, T_ARRAY);
   bool found_command_task = false;
+  bool found_noecho_localecho_frame_detached = false;
   bool found_localecho_restore_queued = false;
   bool found_localecho_restore_dispatched = false;
   if (events_value && events_value->type == T_ARRAY) {
     for (int i = 0; i < events_value->u.arr->size; i++) {
       auto *event = events_value->u.arr->item[i].u.map;
+      if (std::string(mapping_string(event, "task_type")) == "interactive_mode_flags" &&
+          std::string(mapping_string(event, "task_key")) == "noecho_localecho_restore" &&
+          std::string(mapping_string(event, "state")) == "frame_detached" &&
+          std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
+          mapping_number(event, "owner_epoch") == static_cast<long>(owner_epoch)) {
+        found_noecho_localecho_frame_detached = true;
+      }
       if (std::string(mapping_string(event, "task_type")) == "command_reply" &&
           std::string(mapping_string(event, "task_key")) == "localecho_restore" &&
           std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
@@ -8138,9 +8157,14 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveInputToState) {
         ASSERT_EQ(mapping_number(payload, "input_callback_noescape"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_noecho"), 1);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_noecho"), 1);
+        ASSERT_STREQ(mapping_string(payload, "interactive_mode_localecho_restore_model"),
+                     "owner_command_frame_localecho_restore");
+        ASSERT_STREQ(mapping_string(payload, "interactive_mode_localecho_restore_task_type"),
+                     "interactive_mode_flags");
         ASSERT_STREQ(mapping_string(payload, "interactive_mode_localecho_restore_boundary"),
                      "main_reply_queue_after_command_consume");
         ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_ready"), 1);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_executor_ready"), 0);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_required"), 1);
         ASSERT_STREQ(mapping_string(payload, "interactive_mode_terminal_mode_delta_boundary"),
                      "main_mode_delta_queue_after_command_consume");
@@ -8157,6 +8181,7 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveInputToState) {
     }
   }
   ASSERT_TRUE(found_command_task);
+  ASSERT_TRUE(found_noecho_localecho_frame_detached);
   ASSERT_TRUE(found_localecho_restore_queued);
   ASSERT_TRUE(found_localecho_restore_dispatched);
   free_mapping(trace);

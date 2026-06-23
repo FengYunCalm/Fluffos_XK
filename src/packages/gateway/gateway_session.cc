@@ -77,7 +77,7 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
 #endif
 
   payload.type = T_MAPPING;
-  payload.u.map = allocate_mapping(81);
+  payload.u.map = allocate_mapping(84);
   add_mapping_string(payload.u.map, "payload_model", "gateway_command_buffer_metadata_v1");
   add_mapping_string(payload.u.map, "payload_policy", "no_raw_command_text_in_trace");
   add_mapping_string(payload.u.map, "input_source", "interactive_text_buffer");
@@ -122,9 +122,13 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_pair(payload.u.map, "interactive_mode_flags_state_snapshot_ready", 1);
   add_mapping_pair(payload.u.map, "interactive_mode_flags_state_redacted", 1);
   add_mapping_pair(payload.u.map, "interactive_mode_noecho", user && (user->iflags & NOECHO) ? 1 : 0);
+  add_mapping_string(payload.u.map, "interactive_mode_localecho_restore_model",
+                     "owner_command_frame_localecho_restore");
+  add_mapping_string(payload.u.map, "interactive_mode_localecho_restore_task_type", "interactive_mode_flags");
   add_mapping_string(payload.u.map, "interactive_mode_localecho_restore_boundary",
                      "main_reply_queue_after_command_consume");
   add_mapping_pair(payload.u.map, "interactive_mode_localecho_restore_ready", 1);
+  add_mapping_pair(payload.u.map, "interactive_mode_localecho_restore_executor_ready", 0);
   add_mapping_pair(payload.u.map, "interactive_mode_localecho_restore_required", user && (user->iflags & NOECHO) ? 1 : 0);
   add_mapping_string(payload.u.map, "interactive_mode_terminal_mode_delta_boundary",
                      "main_mode_delta_queue_after_command_consume");

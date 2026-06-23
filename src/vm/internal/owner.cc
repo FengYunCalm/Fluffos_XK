@@ -1111,7 +1111,7 @@ array_t *gateway_owner_task_contract_entries_array() {
 }
 
 mapping_t *gateway_owner_task_contract_mapping() {
-  auto *map = allocate_mapping(91);
+  auto *map = allocate_mapping(95);
   add_mapping_pair(map, "contract_version", 1);
   add_mapping_string(map, "input_model", "owner_main_queue_bridge");
   add_mapping_string(map, "executor_migration_state", "main_required_before_owner_executor");
@@ -1149,6 +1149,11 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_string(map, "command_mode_delta_localecho_restore_boundary",
                      "main_reply_queue_after_command_consume");
   add_mapping_pair(map, "command_mode_delta_localecho_restore_ready", 1);
+  add_mapping_string(map, "interactive_mode_localecho_restore_model",
+                     "owner_command_frame_localecho_restore");
+  add_mapping_string(map, "interactive_mode_localecho_restore_task_type", "interactive_mode_flags");
+  add_mapping_pair(map, "interactive_mode_localecho_restore_ready", 1);
+  add_mapping_pair(map, "interactive_mode_localecho_restore_executor_ready", 0);
   add_mapping_string(map, "command_mode_delta_terminal_mode_task_type", "command_mode_delta");
   add_mapping_string(map, "command_mode_delta_terminal_mode_task_keys",
                      "get_char_linemode_restore,single_char_escape_linemode,single_char_escape_charmode_restore");

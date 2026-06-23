@@ -124,6 +124,21 @@ void enqueue_user_localecho_restore(interactive_t *ip, object_t *reply_command_g
   vm_owner_drain_main_tasks(64);
 }
 
+int detach_user_noecho_localecho_restore_in_owner_frame(interactive_t *ip, object_t *reply_command_giver) {
+  if (!ip || !(ip->iflags & NOECHO)) {
+    return 0;
+  }
+
+  ip->iflags &= ~NOECHO;
+  if (IP_VALID(ip, reply_command_giver)) {
+    vm_owner_record_task_trace(vm_owner_id(reply_command_giver), "interactive_mode_flags",
+                               "noecho_localecho_restore", vm_owner_epoch(reply_command_giver),
+                               "frame_detached");
+  }
+  enqueue_user_localecho_restore(ip, reply_command_giver);
+  return 1;
+}
+
 enum class UserTerminalModeDelta { LineMode, CharMode };
 
 void run_user_terminal_mode_delta(interactive_t *ip, object_t *reply_command_giver,
@@ -1231,10 +1246,9 @@ static char *get_user_command(interactive_t *ip) {
   debug(connections, "get_user_command: user_command = (%s)\n", user_command);
   save_command_giver(ip->ob);
 
-  if ((ip->iflags & NOECHO)) {
+  if (ip->iflags & NOECHO) {
     /* must not enable echo before the user input is received */
-    ip->iflags &= ~NOECHO;
-    enqueue_user_localecho_restore(ip, command_giver);
+    detach_user_noecho_localecho_restore_in_owner_frame(ip, command_giver);
   }
 
   ip->last_time = get_current_time();
@@ -1292,10 +1306,7 @@ static int consume_user_command_snapshot(interactive_t *ip, const char *command_
   }
 
   save_command_giver(ip->ob);
-  if (ip->iflags & NOECHO) {
-    ip->iflags &= ~NOECHO;
-    enqueue_user_localecho_restore(ip, command_giver);
-  }
+  detach_user_noecho_localecho_restore_in_owner_frame(ip, command_giver);
   ip->last_time = get_current_time();
   return 1;
 }
