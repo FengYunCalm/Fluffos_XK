@@ -3200,6 +3200,32 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "owner_future_frozen_result_required");
     ASSERT_EQ(mapping_number(frozen_path("domain_task"), "frozen_result_required"), 1);
 
+    auto* boundary_contract = mapping_entry(status, "owner_executor_boundary_contract");
+    ASSERT_NE(boundary_contract, nullptr);
+    ASSERT_EQ(mapping_number(boundary_contract, "contract_version"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "boundary_model"), "owner_executor_boundary_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "implementation_state"), "embedded_class_active");
+    ASSERT_STREQ(mapping_string(boundary_contract, "class_name"), "OwnerExecutor");
+    ASSERT_EQ(mapping_number(boundary_contract, "class_extracted"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "module_extracted"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "claim_release_boundary_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "budget_boundary_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "thread_context_boundary_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "dispatch_manifest_boundary_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "same_owner_serial_required"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "main_required_tasks_excluded"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "target_handle_messages_main_required"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "compute_result_executor_safe"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_rejected"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_executor_activation_ready"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "ordinary_lpc_default_closed"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "ordinary_lpc_explicit_open_required"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "ordinary_lpc_policy"),
+                 "explicit_open_same_owner_only");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_surface_expanded"), 0);
+    ASSERT_STREQ(mapping_string(boundary_contract, "next_refactor_target"),
+                 "extract_owner_executor_module_without_expanding_lpc_surface");
+
     auto* gateway_contract = mapping_entry(status, "gateway_owner_task_contract");
     ASSERT_NE(gateway_contract, nullptr);
     ASSERT_EQ(mapping_number(gateway_contract, "contract_version"), 1);

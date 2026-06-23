@@ -556,6 +556,7 @@ void assert_owner_executor_contract(mapping status) {
     mapping vm_context_contract = status["vm_context_contract"];
     mapping frozen_payload_contract = status["frozen_payload_contract"];
     mapping gateway_contract = status["gateway_owner_task_contract"];
+    mapping boundary_contract = status["owner_executor_boundary_contract"];
     mapping fairness = status["executor_queue_fairness"];
     mixed *lpc_contracts = status["executor_lpc_task_contracts"];
     mixed *dispatch_contracts = status["executor_task_dispatch_contracts"];
@@ -571,6 +572,29 @@ void assert_owner_executor_contract(mapping status) {
     assert_frozen_payload_contract(frozen_payload_contract);
     ASSERT(mapp(gateway_contract));
     assert_gateway_owner_task_contract(gateway_contract);
+    ASSERT(mapp(boundary_contract));
+    ASSERT_EQ(1, boundary_contract["contract_version"]);
+    ASSERT_EQ("owner_executor_boundary_v1", boundary_contract["boundary_model"]);
+    ASSERT_EQ("embedded_class_active", boundary_contract["implementation_state"]);
+    ASSERT_EQ("OwnerExecutor", boundary_contract["class_name"]);
+    ASSERT_EQ(1, boundary_contract["class_extracted"]);
+    ASSERT_EQ(0, boundary_contract["module_extracted"]);
+    ASSERT_EQ(1, boundary_contract["claim_release_boundary_ready"]);
+    ASSERT_EQ(1, boundary_contract["budget_boundary_ready"]);
+    ASSERT_EQ(1, boundary_contract["thread_context_boundary_ready"]);
+    ASSERT_EQ(1, boundary_contract["dispatch_manifest_boundary_ready"]);
+    ASSERT_EQ(1, boundary_contract["same_owner_serial_required"]);
+    ASSERT_EQ(1, boundary_contract["main_required_tasks_excluded"]);
+    ASSERT_EQ(1, boundary_contract["target_handle_messages_main_required"]);
+    ASSERT_EQ(1, boundary_contract["compute_result_executor_safe"]);
+    ASSERT_EQ(1, boundary_contract["gateway_command_rejected"]);
+    ASSERT_EQ(0, boundary_contract["gateway_command_executor_activation_ready"]);
+    ASSERT_EQ(1, boundary_contract["ordinary_lpc_default_closed"]);
+    ASSERT_EQ(1, boundary_contract["ordinary_lpc_explicit_open_required"]);
+    ASSERT_EQ("explicit_open_same_owner_only", boundary_contract["ordinary_lpc_policy"]);
+    ASSERT_EQ(0, boundary_contract["lpc_surface_expanded"]);
+    ASSERT_EQ("extract_owner_executor_module_without_expanding_lpc_surface",
+              boundary_contract["next_refactor_target"]);
     ASSERT(mapp(fairness));
     ASSERT_EQ("owner_executor_v1", status["executor_contract_version"]);
     ASSERT_EQ("owner_executor", status["executor_model"]);

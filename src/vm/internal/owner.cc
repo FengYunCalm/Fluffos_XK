@@ -1317,6 +1317,32 @@ mapping_t *vm_context_contract_mapping() {
   return contract;
 }
 
+mapping_t *owner_executor_boundary_contract_mapping() {
+  auto *contract = allocate_mapping(21);
+  add_mapping_pair(contract, "contract_version", 1);
+  add_mapping_string(contract, "boundary_model", "owner_executor_boundary_v1");
+  add_mapping_string(contract, "implementation_state", "embedded_class_active");
+  add_mapping_string(contract, "class_name", "OwnerExecutor");
+  add_mapping_pair(contract, "class_extracted", 1);
+  add_mapping_pair(contract, "module_extracted", 0);
+  add_mapping_pair(contract, "claim_release_boundary_ready", 1);
+  add_mapping_pair(contract, "budget_boundary_ready", 1);
+  add_mapping_pair(contract, "thread_context_boundary_ready", 1);
+  add_mapping_pair(contract, "dispatch_manifest_boundary_ready", 1);
+  add_mapping_pair(contract, "same_owner_serial_required", 1);
+  add_mapping_pair(contract, "main_required_tasks_excluded", 1);
+  add_mapping_pair(contract, "target_handle_messages_main_required", 1);
+  add_mapping_pair(contract, "compute_result_executor_safe", 1);
+  add_mapping_pair(contract, "gateway_command_rejected", 1);
+  add_mapping_pair(contract, "gateway_command_executor_activation_ready", 0);
+  add_mapping_pair(contract, "ordinary_lpc_default_closed", 1);
+  add_mapping_pair(contract, "ordinary_lpc_explicit_open_required", 1);
+  add_mapping_string(contract, "ordinary_lpc_policy", "explicit_open_same_owner_only");
+  add_mapping_pair(contract, "lpc_surface_expanded", 0);
+  add_mapping_string(contract, "next_refactor_target", "extract_owner_executor_module_without_expanding_lpc_surface");
+  return contract;
+}
+
 mapping_t *owner_task_contract_mapping() {
   auto *contract = allocate_mapping(12);
   const auto *executor_probe = find_owner_executor_task_descriptor("executor_probe");
@@ -4261,7 +4287,7 @@ void vm_owner_thread_stop() {
 
 mapping_t *vm_owner_thread_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(95);
+  auto *map = allocate_mapping(96);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
   add_mapping_pair(map, "thread_count", static_cast<long>(owner_threads.size()));
@@ -4403,6 +4429,7 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_owned_mapping(map, "vm_context_contract", vm_context_contract_mapping());
   add_mapping_owned_mapping(map, "frozen_payload_contract", frozen_payload_contract_mapping());
   add_mapping_owned_mapping(map, "gateway_owner_task_contract", gateway_owner_task_contract_mapping());
+  add_mapping_owned_mapping(map, "owner_executor_boundary_contract", owner_executor_boundary_contract_mapping());
   add_mapping_owned_mapping(map, "executor_queue_fairness", owner_queue_fairness_mapping());
   add_mapping_pair(map, "deferred_target_releases", static_cast<long>(owner_deferred_target_releases.size()));
   add_mapping_pair(map, "thread_starts", static_cast<long>(owner_thread_starts.load(std::memory_order_relaxed)));
@@ -4428,7 +4455,7 @@ mapping_t *vm_owner_thread_status() {
 
 mapping_t *vm_owner_runtime_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(87);
+  auto *map = allocate_mapping(88);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
   add_mapping_string(map, "multicore_mode_name", vm_multicore_mode_name(vm_multicore_mode()));
@@ -4549,6 +4576,7 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_owned_mapping(map, "vm_context_contract", vm_context_contract_mapping());
   add_mapping_owned_mapping(map, "frozen_payload_contract", frozen_payload_contract_mapping());
   add_mapping_owned_mapping(map, "gateway_owner_task_contract", gateway_owner_task_contract_mapping());
+  add_mapping_owned_mapping(map, "owner_executor_boundary_contract", owner_executor_boundary_contract_mapping());
   add_mapping_owned_mapping(map, "executor_queue_fairness", owner_queue_fairness_mapping());
   add_mapping_pair(map, "cross_owner", static_cast<long>(total_cross_owner_accesses.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "snapshot_required",
