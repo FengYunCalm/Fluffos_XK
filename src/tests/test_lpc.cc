@@ -3211,6 +3211,19 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(boundary_contract, "module_file"), "vm/internal/owner_executor.h");
     ASSERT_EQ(mapping_number(boundary_contract, "compilation_unit_extracted"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "depends_on_owner_cc_internal_state"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "dependency_manifest_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "runtime_dependency_contract_version"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "dependency_domains"),
+                 "scheduler_state,mailbox_state,task_dispatch,vm_context,metric_counters,future_completion");
+    ASSERT_EQ(mapping_number(boundary_contract, "scheduler_state_dependency"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "mailbox_state_dependency"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "task_dispatch_dependency"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "vm_context_dependency"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "metric_counter_dependency"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "future_completion_dependency"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_facade_required"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "compilation_unit_blocker"),
+                 "owner_cc_anonymous_runtime_state");
     ASSERT_EQ(mapping_number(boundary_contract, "claim_release_boundary_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "budget_boundary_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "thread_context_boundary_ready"), 1);

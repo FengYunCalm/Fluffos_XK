@@ -582,6 +582,18 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("vm/internal/owner_executor.h", boundary_contract["module_file"]);
     ASSERT_EQ(0, boundary_contract["compilation_unit_extracted"]);
     ASSERT_EQ(1, boundary_contract["depends_on_owner_cc_internal_state"]);
+    ASSERT_EQ(1, boundary_contract["dependency_manifest_ready"]);
+    ASSERT_EQ(1, boundary_contract["runtime_dependency_contract_version"]);
+    ASSERT_EQ("scheduler_state,mailbox_state,task_dispatch,vm_context,metric_counters,future_completion",
+              boundary_contract["dependency_domains"]);
+    ASSERT_EQ(1, boundary_contract["scheduler_state_dependency"]);
+    ASSERT_EQ(1, boundary_contract["mailbox_state_dependency"]);
+    ASSERT_EQ(1, boundary_contract["task_dispatch_dependency"]);
+    ASSERT_EQ(1, boundary_contract["vm_context_dependency"]);
+    ASSERT_EQ(1, boundary_contract["metric_counter_dependency"]);
+    ASSERT_EQ(1, boundary_contract["future_completion_dependency"]);
+    ASSERT_EQ(1, boundary_contract["owner_runtime_facade_required"]);
+    ASSERT_EQ("owner_cc_anonymous_runtime_state", boundary_contract["compilation_unit_blocker"]);
     ASSERT_EQ(1, boundary_contract["claim_release_boundary_ready"]);
     ASSERT_EQ(1, boundary_contract["budget_boundary_ready"]);
     ASSERT_EQ(1, boundary_contract["thread_context_boundary_ready"]);

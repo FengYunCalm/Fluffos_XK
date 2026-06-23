@@ -1318,7 +1318,7 @@ mapping_t *vm_context_contract_mapping() {
 }
 
 mapping_t *owner_executor_boundary_contract_mapping() {
-  auto *contract = allocate_mapping(24);
+  auto *contract = allocate_mapping(35);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "boundary_model", "owner_executor_boundary_v1");
   add_mapping_string(contract, "implementation_state", "header_module_active");
@@ -1328,6 +1328,18 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "module_file", "vm/internal/owner_executor.h");
   add_mapping_pair(contract, "compilation_unit_extracted", 0);
   add_mapping_pair(contract, "depends_on_owner_cc_internal_state", 1);
+  add_mapping_pair(contract, "dependency_manifest_ready", 1);
+  add_mapping_pair(contract, "runtime_dependency_contract_version", 1);
+  add_mapping_string(contract, "dependency_domains",
+                     "scheduler_state,mailbox_state,task_dispatch,vm_context,metric_counters,future_completion");
+  add_mapping_pair(contract, "scheduler_state_dependency", 1);
+  add_mapping_pair(contract, "mailbox_state_dependency", 1);
+  add_mapping_pair(contract, "task_dispatch_dependency", 1);
+  add_mapping_pair(contract, "vm_context_dependency", 1);
+  add_mapping_pair(contract, "metric_counter_dependency", 1);
+  add_mapping_pair(contract, "future_completion_dependency", 1);
+  add_mapping_pair(contract, "owner_runtime_facade_required", 1);
+  add_mapping_string(contract, "compilation_unit_blocker", "owner_cc_anonymous_runtime_state");
   add_mapping_pair(contract, "claim_release_boundary_ready", 1);
   add_mapping_pair(contract, "budget_boundary_ready", 1);
   add_mapping_pair(contract, "thread_context_boundary_ready", 1);
