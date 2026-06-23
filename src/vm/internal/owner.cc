@@ -250,10 +250,10 @@ constexpr std::array<GatewayCommandSideEffectReadinessGate, 5> kGatewayCommandSi
      "keep_snapshot_consume_before_executor_activation", "owner_command_snapshot",
      "main_thread_consume_before_executor_activation", "input_buffer_consume",
      "owner_private_command_text_snapshot_v1", 1, 1, 0, 1},
-    {"input_to_get_char_state", "interactive_input_callback_state",
-     "input_to_get_char_state_main_thread_bound", "isolate_input_callback_state_from_interactive_t",
-     "interactive_t", "owner_command_frame_input_callback_snapshot", "input_callback_state",
-     "redacted_input_to_get_char_state_v1", 1, 1, 1, 0},
+    {"input_to_get_char_state", "interactive_input_callback_state", "",
+     "keep_input_callback_state_in_owner_command_frame",
+     "owner_command_frame", "owner_command_frame_input_callback_executor", "input_callback_state",
+     "redacted_input_to_get_char_state_v1", 1, 1, 0, 1},
     {"process_input_add_action_parser", "interactive_command_parser_state",
      "add_action_parser_command_giver_main_thread_bound", "migrate_parser_state_to_owner_context",
      "interactive_t_and_command_giver", "owner_command_parser_context", "parser_command_giver_state",
@@ -1125,16 +1125,16 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_pair(map, "command_input_callback_snapshot_ready", 1);
   add_mapping_string(map, "command_input_callback_frame_model", "owner_command_frame_input_callback_detach_v1");
   add_mapping_pair(map, "command_input_callback_frame_detach_ready", 1);
-  add_mapping_pair(map, "command_input_callback_frame_executor_ready", 0);
+  add_mapping_pair(map, "command_input_callback_frame_executor_ready", 1);
   add_mapping_string(map, "command_input_callback_apply_frame_model", "owner_command_frame_input_callback_apply");
   add_mapping_string(map, "command_input_callback_apply_frame_task_type", "interactive_input_callback");
   add_mapping_pair(map, "command_input_callback_apply_frame_ready", 1);
-  add_mapping_pair(map, "command_input_callback_apply_frame_executor_ready", 0);
+  add_mapping_pair(map, "command_input_callback_apply_frame_executor_ready", 1);
   add_mapping_string(map, "command_input_callback_mode_delta_model",
                      "owner_command_frame_input_callback_mode_delta");
   add_mapping_pair(map, "command_input_callback_mode_delta_ready", 1);
-  add_mapping_pair(map, "command_input_callback_mode_delta_executor_ready", 0);
-  add_mapping_string(map, "command_input_callback_blocker", "input_to_get_char_state_main_thread_bound");
+  add_mapping_pair(map, "command_input_callback_mode_delta_executor_ready", 1);
+  add_mapping_string(map, "command_input_callback_blocker", "");
   add_mapping_string(map, "process_input_apply_frame_model", "owner_command_frame_process_input_apply");
   add_mapping_string(map, "process_input_apply_frame_task_type", "interactive_command_parser");
   add_mapping_pair(map, "process_input_apply_frame_ready", 1);

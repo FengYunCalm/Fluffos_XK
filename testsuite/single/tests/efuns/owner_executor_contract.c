@@ -289,19 +289,18 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("owner_command_frame_input_callback_detach_v1",
               contract["command_input_callback_frame_model"]);
     ASSERT_EQ(1, contract["command_input_callback_frame_detach_ready"]);
-    ASSERT_EQ(0, contract["command_input_callback_frame_executor_ready"]);
+    ASSERT_EQ(1, contract["command_input_callback_frame_executor_ready"]);
     ASSERT_EQ("owner_command_frame_input_callback_apply",
               contract["command_input_callback_apply_frame_model"]);
     ASSERT_EQ("interactive_input_callback",
               contract["command_input_callback_apply_frame_task_type"]);
     ASSERT_EQ(1, contract["command_input_callback_apply_frame_ready"]);
-    ASSERT_EQ(0, contract["command_input_callback_apply_frame_executor_ready"]);
+    ASSERT_EQ(1, contract["command_input_callback_apply_frame_executor_ready"]);
     ASSERT_EQ("owner_command_frame_input_callback_mode_delta",
               contract["command_input_callback_mode_delta_model"]);
     ASSERT_EQ(1, contract["command_input_callback_mode_delta_ready"]);
-    ASSERT_EQ(0, contract["command_input_callback_mode_delta_executor_ready"]);
-    ASSERT_EQ("input_to_get_char_state_main_thread_bound",
-              contract["command_input_callback_blocker"]);
+    ASSERT_EQ(1, contract["command_input_callback_mode_delta_executor_ready"]);
+    ASSERT_EQ("", contract["command_input_callback_blocker"]);
     ASSERT_EQ("owner_command_frame_process_input_apply",
               contract["process_input_apply_frame_model"]);
     ASSERT_EQ("interactive_command_parser",
@@ -392,8 +391,8 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("all_side_effect_gates_required_before_activation",
               contract["command_side_effect_readiness_gate_model"]);
     ASSERT_EQ(5, contract["command_side_effect_readiness_gate_count"]);
-    ASSERT_EQ(2, contract["command_side_effect_satisfied_gate_count"]);
-    ASSERT_EQ(3, contract["command_side_effect_blocked_gate_count"]);
+    ASSERT_EQ(3, contract["command_side_effect_satisfied_gate_count"]);
+    ASSERT_EQ(2, contract["command_side_effect_blocked_gate_count"]);
     ASSERT_EQ(5, contract["command_side_effect_snapshot_gate_count"]);
     ASSERT_EQ(5, contract["command_side_effect_snapshot_ready_count"]);
     ASSERT_EQ(1, contract["command_side_effect_observability_ready"]);
@@ -455,12 +454,11 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("input_buffer_consume", command_side_effect_gate_by_name["interactive_buffer_consume"]["side_effect_class"]);
     ASSERT_EQ("owner_private_command_text_snapshot_v1",
               command_side_effect_gate_by_name["interactive_buffer_consume"]["snapshot_policy"]);
-    ASSERT_EQ(0, command_side_effect_gate_by_name["input_to_get_char_state"]["satisfied"]);
-    ASSERT_EQ(1, command_side_effect_gate_by_name["input_to_get_char_state"]["blocks_activation"]);
-    ASSERT_EQ("input_to_get_char_state_main_thread_bound",
-              command_side_effect_gate_by_name["input_to_get_char_state"]["blocker"]);
-    ASSERT_EQ("interactive_t", command_side_effect_gate_by_name["input_to_get_char_state"]["state_owner"]);
-    ASSERT_EQ("owner_command_frame_input_callback_snapshot",
+    ASSERT_EQ(1, command_side_effect_gate_by_name["input_to_get_char_state"]["satisfied"]);
+    ASSERT_EQ(0, command_side_effect_gate_by_name["input_to_get_char_state"]["blocks_activation"]);
+    ASSERT_EQ("", command_side_effect_gate_by_name["input_to_get_char_state"]["blocker"]);
+    ASSERT_EQ("owner_command_frame", command_side_effect_gate_by_name["input_to_get_char_state"]["state_owner"]);
+    ASSERT_EQ("owner_command_frame_input_callback_executor",
               command_side_effect_gate_by_name["input_to_get_char_state"]["migration_boundary"]);
     ASSERT_EQ("input_callback_state", command_side_effect_gate_by_name["input_to_get_char_state"]["side_effect_class"]);
     ASSERT_EQ("redacted_input_to_get_char_state_v1",

@@ -3269,19 +3269,18 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gateway_contract, "command_input_callback_frame_model"),
                  "owner_command_frame_input_callback_detach_v1");
     ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_frame_detach_ready"), 1);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_frame_executor_ready"), 0);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_frame_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "command_input_callback_apply_frame_model"),
                  "owner_command_frame_input_callback_apply");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_input_callback_apply_frame_task_type"),
                  "interactive_input_callback");
     ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_apply_frame_ready"), 1);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_apply_frame_executor_ready"), 0);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_apply_frame_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "command_input_callback_mode_delta_model"),
                  "owner_command_frame_input_callback_mode_delta");
     ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_mode_delta_ready"), 1);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_mode_delta_executor_ready"), 0);
-    ASSERT_STREQ(mapping_string(gateway_contract, "command_input_callback_blocker"),
-                 "input_to_get_char_state_main_thread_bound");
+    ASSERT_EQ(mapping_number(gateway_contract, "command_input_callback_mode_delta_executor_ready"), 1);
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_input_callback_blocker"), "");
     ASSERT_STREQ(mapping_string(gateway_contract, "process_input_apply_frame_model"),
                  "owner_command_frame_process_input_apply");
     ASSERT_STREQ(mapping_string(gateway_contract, "process_input_apply_frame_task_type"),
@@ -3374,8 +3373,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gateway_contract, "command_side_effect_readiness_gate_model"),
                  "all_side_effect_gates_required_before_activation");
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_readiness_gate_count"), 5);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_satisfied_gate_count"), 2);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_blocked_gate_count"), 3);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_satisfied_gate_count"), 3);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_blocked_gate_count"), 2);
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_snapshot_gate_count"), 5);
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_snapshot_ready_count"), 5);
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_observability_ready"), 1);
@@ -3446,14 +3445,13 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "input_buffer_consume");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_buffer_consume"), "snapshot_policy"),
                  "owner_private_command_text_snapshot_v1");
-    ASSERT_EQ(mapping_number(command_side_effect_gate("input_to_get_char_state"), "satisfied"), 0);
-    ASSERT_EQ(mapping_number(command_side_effect_gate("input_to_get_char_state"), "blocks_activation"), 1);
-    ASSERT_STREQ(mapping_string(command_side_effect_gate("input_to_get_char_state"), "blocker"),
-                 "input_to_get_char_state_main_thread_bound");
+    ASSERT_EQ(mapping_number(command_side_effect_gate("input_to_get_char_state"), "satisfied"), 1);
+    ASSERT_EQ(mapping_number(command_side_effect_gate("input_to_get_char_state"), "blocks_activation"), 0);
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("input_to_get_char_state"), "blocker"), "");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("input_to_get_char_state"), "state_owner"),
-                 "interactive_t");
+                 "owner_command_frame");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("input_to_get_char_state"), "migration_boundary"),
-                 "owner_command_frame_input_callback_snapshot");
+                 "owner_command_frame_input_callback_executor");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("input_to_get_char_state"), "side_effect_class"),
                  "input_callback_state");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("input_to_get_char_state"), "snapshot_policy"),
@@ -7938,17 +7936,17 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_STREQ(mapping_string(payload, "input_callback_frame_model"),
                      "owner_command_frame_input_callback_detach_v1");
         ASSERT_EQ(mapping_number(payload, "input_callback_frame_detach_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "input_callback_frame_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "input_callback_frame_executor_ready"), 1);
         ASSERT_STREQ(mapping_string(payload, "input_callback_apply_frame_model"),
                      "owner_command_frame_input_callback_apply");
         ASSERT_STREQ(mapping_string(payload, "input_callback_apply_frame_task_type"),
                      "interactive_input_callback");
         ASSERT_EQ(mapping_number(payload, "input_callback_apply_frame_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "input_callback_apply_frame_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "input_callback_apply_frame_executor_ready"), 1);
         ASSERT_STREQ(mapping_string(payload, "input_callback_mode_delta_model"),
                      "owner_command_frame_input_callback_mode_delta");
         ASSERT_EQ(mapping_number(payload, "input_callback_mode_delta_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "input_callback_mode_delta_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "input_callback_mode_delta_executor_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_active"), 0);
         ASSERT_EQ(mapping_number(payload, "input_callback_single_char"), 0);
         ASSERT_EQ(mapping_number(payload, "input_callback_noescape"), 0);
@@ -8335,17 +8333,17 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveInputToState) {
         ASSERT_STREQ(mapping_string(payload, "input_callback_frame_model"),
                      "owner_command_frame_input_callback_detach_v1");
         ASSERT_EQ(mapping_number(payload, "input_callback_frame_detach_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "input_callback_frame_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "input_callback_frame_executor_ready"), 1);
         ASSERT_STREQ(mapping_string(payload, "input_callback_apply_frame_model"),
                      "owner_command_frame_input_callback_apply");
         ASSERT_STREQ(mapping_string(payload, "input_callback_apply_frame_task_type"),
                      "interactive_input_callback");
         ASSERT_EQ(mapping_number(payload, "input_callback_apply_frame_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "input_callback_apply_frame_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "input_callback_apply_frame_executor_ready"), 1);
         ASSERT_STREQ(mapping_string(payload, "input_callback_mode_delta_model"),
                      "owner_command_frame_input_callback_mode_delta");
         ASSERT_EQ(mapping_number(payload, "input_callback_mode_delta_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "input_callback_mode_delta_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "input_callback_mode_delta_executor_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_active"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_single_char"), 0);
         ASSERT_EQ(mapping_number(payload, "input_callback_noescape"), 1);
@@ -8507,17 +8505,17 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveGetCharState) {
         ASSERT_STREQ(mapping_string(payload, "input_callback_frame_model"),
                      "owner_command_frame_input_callback_detach_v1");
         ASSERT_EQ(mapping_number(payload, "input_callback_frame_detach_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "input_callback_frame_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "input_callback_frame_executor_ready"), 1);
         ASSERT_STREQ(mapping_string(payload, "input_callback_apply_frame_model"),
                      "owner_command_frame_input_callback_apply");
         ASSERT_STREQ(mapping_string(payload, "input_callback_apply_frame_task_type"),
                      "interactive_input_callback");
         ASSERT_EQ(mapping_number(payload, "input_callback_apply_frame_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "input_callback_apply_frame_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "input_callback_apply_frame_executor_ready"), 1);
         ASSERT_STREQ(mapping_string(payload, "input_callback_mode_delta_model"),
                      "owner_command_frame_input_callback_mode_delta");
         ASSERT_EQ(mapping_number(payload, "input_callback_mode_delta_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "input_callback_mode_delta_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "input_callback_mode_delta_executor_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_active"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_single_char"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_noescape"), 1);

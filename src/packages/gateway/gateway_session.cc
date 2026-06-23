@@ -90,15 +90,15 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_pair(payload.u.map, "input_callback_state_redacted", 1);
   add_mapping_string(payload.u.map, "input_callback_frame_model", "owner_command_frame_input_callback_detach_v1");
   add_mapping_pair(payload.u.map, "input_callback_frame_detach_ready", 1);
-  add_mapping_pair(payload.u.map, "input_callback_frame_executor_ready", 0);
+  add_mapping_pair(payload.u.map, "input_callback_frame_executor_ready", 1);
   add_mapping_string(payload.u.map, "input_callback_apply_frame_model", "owner_command_frame_input_callback_apply");
   add_mapping_string(payload.u.map, "input_callback_apply_frame_task_type", "interactive_input_callback");
   add_mapping_pair(payload.u.map, "input_callback_apply_frame_ready", 1);
-  add_mapping_pair(payload.u.map, "input_callback_apply_frame_executor_ready", 0);
+  add_mapping_pair(payload.u.map, "input_callback_apply_frame_executor_ready", 1);
   add_mapping_string(payload.u.map, "input_callback_mode_delta_model",
                      "owner_command_frame_input_callback_mode_delta");
   add_mapping_pair(payload.u.map, "input_callback_mode_delta_ready", 1);
-  add_mapping_pair(payload.u.map, "input_callback_mode_delta_executor_ready", 0);
+  add_mapping_pair(payload.u.map, "input_callback_mode_delta_executor_ready", 1);
   add_mapping_pair(payload.u.map, "input_callback_active", input_callback_active);
   add_mapping_pair(payload.u.map, "input_callback_single_char", user && (user->iflags & SINGLE_CHAR) ? 1 : 0);
   add_mapping_pair(payload.u.map, "input_callback_noescape", user && (user->iflags & NOESC) ? 1 : 0);
