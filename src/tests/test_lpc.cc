@@ -3204,10 +3204,13 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_NE(boundary_contract, nullptr);
     ASSERT_EQ(mapping_number(boundary_contract, "contract_version"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "boundary_model"), "owner_executor_boundary_v1");
-    ASSERT_STREQ(mapping_string(boundary_contract, "implementation_state"), "embedded_class_active");
+    ASSERT_STREQ(mapping_string(boundary_contract, "implementation_state"), "header_module_active");
     ASSERT_STREQ(mapping_string(boundary_contract, "class_name"), "OwnerExecutor");
     ASSERT_EQ(mapping_number(boundary_contract, "class_extracted"), 1);
-    ASSERT_EQ(mapping_number(boundary_contract, "module_extracted"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "module_extracted"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "module_file"), "vm/internal/owner_executor.h");
+    ASSERT_EQ(mapping_number(boundary_contract, "compilation_unit_extracted"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "depends_on_owner_cc_internal_state"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "claim_release_boundary_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "budget_boundary_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "thread_context_boundary_ready"), 1);
@@ -3224,7 +3227,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "explicit_open_same_owner_only");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_surface_expanded"), 0);
     ASSERT_STREQ(mapping_string(boundary_contract, "next_refactor_target"),
-                 "extract_owner_executor_module_without_expanding_lpc_surface");
+                 "extract_owner_executor_compilation_unit_without_expanding_lpc_surface");
 
     auto* gateway_contract = mapping_entry(status, "gateway_owner_task_contract");
     ASSERT_NE(gateway_contract, nullptr);

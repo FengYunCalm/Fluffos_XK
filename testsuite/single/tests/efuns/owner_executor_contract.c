@@ -575,10 +575,13 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT(mapp(boundary_contract));
     ASSERT_EQ(1, boundary_contract["contract_version"]);
     ASSERT_EQ("owner_executor_boundary_v1", boundary_contract["boundary_model"]);
-    ASSERT_EQ("embedded_class_active", boundary_contract["implementation_state"]);
+    ASSERT_EQ("header_module_active", boundary_contract["implementation_state"]);
     ASSERT_EQ("OwnerExecutor", boundary_contract["class_name"]);
     ASSERT_EQ(1, boundary_contract["class_extracted"]);
-    ASSERT_EQ(0, boundary_contract["module_extracted"]);
+    ASSERT_EQ(1, boundary_contract["module_extracted"]);
+    ASSERT_EQ("vm/internal/owner_executor.h", boundary_contract["module_file"]);
+    ASSERT_EQ(0, boundary_contract["compilation_unit_extracted"]);
+    ASSERT_EQ(1, boundary_contract["depends_on_owner_cc_internal_state"]);
     ASSERT_EQ(1, boundary_contract["claim_release_boundary_ready"]);
     ASSERT_EQ(1, boundary_contract["budget_boundary_ready"]);
     ASSERT_EQ(1, boundary_contract["thread_context_boundary_ready"]);
@@ -593,7 +596,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["ordinary_lpc_explicit_open_required"]);
     ASSERT_EQ("explicit_open_same_owner_only", boundary_contract["ordinary_lpc_policy"]);
     ASSERT_EQ(0, boundary_contract["lpc_surface_expanded"]);
-    ASSERT_EQ("extract_owner_executor_module_without_expanding_lpc_surface",
+    ASSERT_EQ("extract_owner_executor_compilation_unit_without_expanding_lpc_surface",
               boundary_contract["next_refactor_target"]);
     ASSERT(mapp(fairness));
     ASSERT_EQ("owner_executor_v1", status["executor_contract_version"]);
