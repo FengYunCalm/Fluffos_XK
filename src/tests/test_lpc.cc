@@ -3241,8 +3241,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "main_required_tasks_excluded"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "target_handle_messages_main_required"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "compute_result_executor_safe"), 1);
-    ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_rejected"), 1);
-    ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_executor_activation_ready"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_rejected"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_executor_activation_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "ordinary_lpc_default_closed"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "ordinary_lpc_explicit_open_required"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "ordinary_lpc_policy"),
@@ -3292,8 +3292,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(gateway_contract, "process_input_add_action_parser_frame_ready"), 1);
     ASSERT_EQ(mapping_number(gateway_contract, "process_input_add_action_parser_frame_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "process_input_add_action_parser_blocker"), "");
-    ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_blocker"),
-                 "interactive_command_side_effects_main_thread_bound");
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_blocker"), "");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_consume_model"),
                  "owner_owned_snapshot_main_thread_consume");
     ASSERT_EQ(mapping_number(gateway_contract, "command_consume_snapshot_ready"), 1);
@@ -3363,12 +3362,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "all_gates_required_before_owner_executor");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_gate"),
                  "gateway_command_executor_activation");
-    ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_blocker"),
-                 "interactive_command_side_effects_main_thread_bound");
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_blocker"), "");
+    ASSERT_GE(mapping_number(status, "thread_gateway_command_guarded"), 0);
     ASSERT_GE(mapping_number(status, "thread_gateway_command_rejected"), 0);
     ASSERT_EQ(mapping_number(gateway_contract, "command_executor_readiness_gate_count"), 7);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_executor_satisfied_gate_count"), 6);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_executor_blocked_gate_count"), 1);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_executor_satisfied_gate_count"), 7);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_executor_blocked_gate_count"), 0);
     ASSERT_STREQ(mapping_string(gateway_contract, "command_side_effect_readiness_gate_model"),
                  "all_side_effect_gates_required_before_activation");
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_readiness_gate_count"), 5);
@@ -3406,9 +3405,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(command_executor_gate("owner_executor_frame_restore"), "blocker"), "");
     ASSERT_EQ(mapping_number(command_executor_gate("ordinary_lpc_ready"), "satisfied"), 1);
     ASSERT_STREQ(mapping_string(command_executor_gate("ordinary_lpc_ready"), "blocker"), "");
-    ASSERT_EQ(mapping_number(command_executor_gate("gateway_command_executor_activation"), "satisfied"), 0);
-    ASSERT_STREQ(mapping_string(command_executor_gate("gateway_command_executor_activation"), "blocker"),
-                 "interactive_command_side_effects_main_thread_bound");
+    ASSERT_EQ(mapping_number(command_executor_gate("gateway_command_executor_activation"), "satisfied"), 1);
+    ASSERT_STREQ(mapping_string(command_executor_gate("gateway_command_executor_activation"), "blocker"), "");
     auto* command_side_effect_gates = mapping_array(gateway_contract, "command_side_effect_readiness_gates");
     ASSERT_NE(command_side_effect_gates, nullptr);
     ASSERT_EQ(command_side_effect_gates->size, 5);
@@ -3629,8 +3627,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                     1, 0);
     assert_dispatch("command_frame_restore", "owner_executor_command_frame_restore", "command_frame_restore",
                     "executor_safe", 1, 1, 0);
-    assert_dispatch("gateway_command", "gateway_command_executor_activation", "gateway_command", "rejected", 1, 0,
-                    1);
+    assert_dispatch("gateway_command", "gateway_command_executor_activation", "gateway_command", "executor_safe", 1, 1,
+                    0);
     assert_dispatch("compute_result", "compute_result", "compute_result", "executor_safe", 1, 1, 0);
     assert_dispatch("lpc", "lpc", "reject_lpc", "rejected", 1, 0, 1);
     assert_dispatch("owner_state", "owner_state", "guard_owner_state", "rejected", 1, 0, 1);
@@ -3657,17 +3655,16 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(command_frame_restore, "rejected"), 0);
 
     auto* gateway_command = mapping_entry(contract, "gateway_command_executor_activation");
-    ASSERT_STREQ(mapping_string(gateway_command, "executor_mode"), "rejected");
+    ASSERT_STREQ(mapping_string(gateway_command, "executor_mode"), "executor_safe");
     ASSERT_STREQ(mapping_string(gateway_command, "route"), "owner_executor");
-    ASSERT_EQ(mapping_number(gateway_command, "executor_safe"), 0);
+    ASSERT_EQ(mapping_number(gateway_command, "executor_safe"), 1);
     ASSERT_EQ(mapping_number(gateway_command, "main_required"), 0);
-    ASSERT_EQ(mapping_number(gateway_command, "rejected"), 1);
+    ASSERT_EQ(mapping_number(gateway_command, "rejected"), 0);
     ASSERT_EQ(mapping_number(gateway_command, "side_effect_snapshot_gate_count"), 5);
     ASSERT_EQ(mapping_number(gateway_command, "side_effect_snapshot_ready_count"), 5);
     ASSERT_EQ(mapping_number(gateway_command, "side_effect_observability_ready"), 1);
     ASSERT_EQ(mapping_number(gateway_command, "side_effect_activation_ready"), 1);
-    ASSERT_STREQ(mapping_string(gateway_command, "activation_blocker"),
-                 "interactive_command_side_effects_main_thread_bound");
+    ASSERT_STREQ(mapping_string(gateway_command, "activation_blocker"), "");
 
     auto* mailbox_message = mapping_entry(contract, "owner_message_mailbox");
     ASSERT_EQ(mapping_number(mailbox_message, "executor_safe"), 1);
@@ -4056,10 +4053,10 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
   auto* queued = vm_owner_mailbox_status(owner);
   ASSERT_EQ(mapping_number(queued, "owner_queue_depth"), 4);
   ASSERT_EQ(mapping_number(queued, "owner_executor_runnable_queue_depth"), 4);
-  ASSERT_EQ(mapping_number(queued, "owner_executor_safe_queue_depth"), 1);
+  ASSERT_EQ(mapping_number(queued, "owner_executor_safe_queue_depth"), 2);
   ASSERT_EQ(mapping_number(queued, "owner_main_required_queue_depth"), 0);
   ASSERT_GE(mapping_number(queued, "executor_runnable_queue_depth"), 4);
-  ASSERT_GE(mapping_number(queued, "executor_safe_queue_depth"), 1);
+  ASSERT_GE(mapping_number(queued, "executor_safe_queue_depth"), 2);
   free_mapping(queued);
   auto* queued_thread = vm_owner_thread_status();
   ASSERT_GE(mapping_number(queued_thread, "executor_runnable_queue_depth"), 4);
@@ -4085,10 +4082,10 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
   auto* running = vm_owner_thread_status();
   ASSERT_GE(mapping_number(running, "thread_lpc_rejected"), 1);
   ASSERT_GE(mapping_number(running, "thread_owner_state_guarded"), 1);
-  ASSERT_GE(mapping_number(running, "thread_gateway_command_rejected"), 1);
+  ASSERT_GE(mapping_number(running, "thread_gateway_command_guarded"), 1);
   ASSERT_GE(mapping_number(running, "thread_message_dispatched"), 1);
   ASSERT_EQ(mapping_number(running, "executor_runnable_task_dispatched"), before_runnable + 4);
-  ASSERT_EQ(mapping_number(running, "executor_safe_task_dispatched"), before_safe + 1);
+  ASSERT_EQ(mapping_number(running, "executor_safe_task_dispatched"), before_safe + 2);
   free_mapping(running);
 
   auto* trace = vm_owner_task_trace(16);
@@ -4097,7 +4094,7 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
   ASSERT_EQ(events->type, T_ARRAY);
   int lpc_rejected = 0;
   int state_guarded = 0;
-  int gateway_command_rejected = 0;
+  int gateway_command_guarded = 0;
   int message_dispatched = 0;
   for (int i = 0; i < events->u.arr->size; i++) {
     auto* event = events->u.arr->item[i].u.map;
@@ -4110,8 +4107,8 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
       state_guarded = 1;
     }
     if (mapping_number(event, "task_id") == static_cast<long>(gateway_command_task) &&
-        std::string(mapping_string(event, "state")) == "thread_gateway_command_rejected") {
-      gateway_command_rejected = 1;
+        std::string(mapping_string(event, "state")) == "thread_gateway_command_executor_guarded") {
+      gateway_command_guarded = 1;
     }
     if (mapping_number(event, "task_id") == static_cast<long>(message_task) &&
         std::string(mapping_string(event, "state")) == "thread_message_dispatched") {
@@ -4120,7 +4117,7 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
   }
   ASSERT_EQ(lpc_rejected, 1);
   ASSERT_EQ(state_guarded, 1);
-  ASSERT_EQ(gateway_command_rejected, 1);
+  ASSERT_EQ(gateway_command_guarded, 1);
   ASSERT_EQ(message_dispatched, 1);
   free_mapping(trace);
 
@@ -8033,8 +8030,7 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_EQ(mapping_number(payload, "telnet_ga_required"), 0);
         ASSERT_EQ(mapping_number(payload, "reschedule_cmd_in_buf"), 1);
         ASSERT_FALSE(mapping_has_string_key(payload, "prompt_text"));
-        ASSERT_STREQ(mapping_string(payload, "command_executor_blocker"),
-                     "interactive_command_side_effects_main_thread_bound");
+        ASSERT_STREQ(mapping_string(payload, "command_executor_blocker"), "");
         ASSERT_STREQ(mapping_string(payload, "command_consume_model"), "owner_owned_snapshot_main_thread_consume");
         ASSERT_EQ(mapping_number(payload, "command_consume_snapshot_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "command_consume_executor_ready"), 1);

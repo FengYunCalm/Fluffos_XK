@@ -312,8 +312,7 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ(1, contract["process_input_add_action_parser_frame_ready"]);
     ASSERT_EQ(1, contract["process_input_add_action_parser_frame_executor_ready"]);
     ASSERT_EQ("", contract["process_input_add_action_parser_blocker"]);
-    ASSERT_EQ("interactive_command_side_effects_main_thread_bound",
-              contract["command_executor_blocker"]);
+    ASSERT_EQ("", contract["command_executor_blocker"]);
     ASSERT_EQ("owner_owned_snapshot_main_thread_consume",
               contract["command_consume_model"]);
     ASSERT_EQ(1, contract["command_consume_snapshot_ready"]);
@@ -382,11 +381,10 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("all_gates_required_before_owner_executor",
               contract["command_executor_readiness_gate_model"]);
     ASSERT_EQ("gateway_command_executor_activation", contract["command_executor_next_gate"]);
-    ASSERT_EQ("interactive_command_side_effects_main_thread_bound",
-              contract["command_executor_next_blocker"]);
+    ASSERT_EQ("", contract["command_executor_next_blocker"]);
     ASSERT_EQ(7, contract["command_executor_readiness_gate_count"]);
-    ASSERT_EQ(6, contract["command_executor_satisfied_gate_count"]);
-    ASSERT_EQ(1, contract["command_executor_blocked_gate_count"]);
+    ASSERT_EQ(7, contract["command_executor_satisfied_gate_count"]);
+    ASSERT_EQ(0, contract["command_executor_blocked_gate_count"]);
     ASSERT_EQ("all_side_effect_gates_required_before_activation",
               contract["command_side_effect_readiness_gate_model"]);
     ASSERT_EQ(5, contract["command_side_effect_readiness_gate_count"]);
@@ -421,9 +419,8 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("", command_executor_gate_by_name["owner_executor_frame_restore"]["blocker"]);
     ASSERT_EQ(1, command_executor_gate_by_name["ordinary_lpc_ready"]["satisfied"]);
     ASSERT_EQ("", command_executor_gate_by_name["ordinary_lpc_ready"]["blocker"]);
-    ASSERT_EQ(0, command_executor_gate_by_name["gateway_command_executor_activation"]["satisfied"]);
-    ASSERT_EQ("interactive_command_side_effects_main_thread_bound",
-              command_executor_gate_by_name["gateway_command_executor_activation"]["blocker"]);
+    ASSERT_EQ(1, command_executor_gate_by_name["gateway_command_executor_activation"]["satisfied"]);
+    ASSERT_EQ("", command_executor_gate_by_name["gateway_command_executor_activation"]["blocker"]);
     ASSERT(arrayp(command_side_effect_gates));
     ASSERT_EQ(5, sizeof(command_side_effect_gates));
     for (i = 0; i < sizeof(command_side_effect_gates); i++) {
@@ -604,8 +601,8 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["main_required_tasks_excluded"]);
     ASSERT_EQ(1, boundary_contract["target_handle_messages_main_required"]);
     ASSERT_EQ(1, boundary_contract["compute_result_executor_safe"]);
-    ASSERT_EQ(1, boundary_contract["gateway_command_rejected"]);
-    ASSERT_EQ(0, boundary_contract["gateway_command_executor_activation_ready"]);
+    ASSERT_EQ(0, boundary_contract["gateway_command_rejected"]);
+    ASSERT_EQ(1, boundary_contract["gateway_command_executor_activation_ready"]);
     ASSERT_EQ(1, boundary_contract["ordinary_lpc_default_closed"]);
     ASSERT_EQ(1, boundary_contract["ordinary_lpc_explicit_open_required"]);
     ASSERT_EQ("explicit_open_same_owner_only", boundary_contract["ordinary_lpc_policy"]);
@@ -672,7 +669,7 @@ void assert_owner_executor_contract(mapping status) {
                           "executor_safe", 1, 1, 0);
     assert_dispatch_entry(dispatch_contract, "gateway_command",
                           "gateway_command_executor_activation", "gateway_command",
-                          "rejected", 1, 0, 1);
+                          "executor_safe", 1, 1, 0);
     assert_dispatch_entry(dispatch_contract, "compute_result", "compute_result",
                           "compute_result", "executor_safe", 1, 1, 0);
     assert_dispatch_entry(dispatch_contract, "lpc", "lpc", "reject_lpc",
@@ -687,6 +684,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT(intp(status["executor_safe_task_dispatched"]));
     ASSERT(intp(status["executor_command_consume_entry_executed"]));
     ASSERT(intp(status["executor_command_frame_restore_entry_executed"]));
+    ASSERT(intp(status["thread_gateway_command_guarded"]));
     ASSERT(intp(status["thread_gateway_command_rejected"]));
     ASSERT(intp(status["thread_ordinary_lpc_executed"]));
     ASSERT(intp(status["thread_ordinary_lpc_succeeded"]));
@@ -729,14 +727,13 @@ void assert_owner_executor_contract(mapping status) {
                           "owner_executor", 1, 0, 0);
     assert_contract_entry(contract, "owner_executor_command_frame_restore", "executor_safe",
                           "owner_executor", 1, 0, 0);
-    assert_contract_entry(contract, "gateway_command_executor_activation", "rejected",
-                          "owner_executor", 0, 0, 1);
+    assert_contract_entry(contract, "gateway_command_executor_activation", "executor_safe",
+                          "owner_executor", 1, 0, 0);
     ASSERT_EQ(5, contract["gateway_command_executor_activation"]["side_effect_snapshot_gate_count"]);
     ASSERT_EQ(5, contract["gateway_command_executor_activation"]["side_effect_snapshot_ready_count"]);
     ASSERT_EQ(1, contract["gateway_command_executor_activation"]["side_effect_observability_ready"]);
     ASSERT_EQ(1, contract["gateway_command_executor_activation"]["side_effect_activation_ready"]);
-    ASSERT_EQ("interactive_command_side_effects_main_thread_bound",
-              contract["gateway_command_executor_activation"]["activation_blocker"]);
+    ASSERT_EQ("", contract["gateway_command_executor_activation"]["activation_blocker"]);
     assert_contract_entry(contract, "owner_message_mailbox", "executor_safe",
                           "owner_executor", 1, 0, 0);
     assert_owner_message_route_contract(contract, "owner_message_mailbox", 1, 0);

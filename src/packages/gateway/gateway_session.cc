@@ -183,8 +183,7 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
                    user && user->telnet && (user->iflags & USING_TELNET) && !(user->iflags & SUPPRESS_GA) ? 1 : 0);
   add_mapping_pair(payload.u.map, "reschedule_cmd_in_buf", user && (user->iflags & CMD_IN_BUF) ? 1 : 0);
   add_mapping_string(payload.u.map, "command_executor_blocker",
-                     snapshot_ready ? "interactive_command_side_effects_main_thread_bound"
-                                    : "interactive_command_buffer_not_snapshotted");
+                     snapshot_ready ? "" : "interactive_command_buffer_not_snapshotted");
   add_mapping_string(payload.u.map, "command_consume_model", "owner_owned_snapshot_main_thread_consume");
   add_mapping_pair(payload.u.map, "command_consume_snapshot_ready", snapshot_ready ? 1 : 0);
   add_mapping_pair(payload.u.map, "command_consume_executor_ready", snapshot_ready ? 1 : 0);

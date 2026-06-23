@@ -99,8 +99,7 @@ struct OwnerExecutorTaskDescriptor {
   int requires_owner_main_queue;
 };
 
-constexpr const char *kGatewayCommandExecutorActivationBlocker =
-    "interactive_command_side_effects_main_thread_bound";
+constexpr const char *kGatewayCommandExecutorActivationBlocker = "";
 
 constexpr std::array<OwnerExecutorTaskDescriptor, 12> kOwnerExecutorTaskDescriptors = {{
     {"executor_probe", "executor_probe", OwnerExecutorDispatchKind::ExecutorProbe, "executor_safe", "owner_executor",
@@ -127,8 +126,8 @@ constexpr std::array<OwnerExecutorTaskDescriptor, 12> kOwnerExecutorTaskDescript
      "executor_safe", "owner_executor", "restores redacted gateway command execution frame without LPC execution", 1,
      1, 0, 0, 1, 0},
     {"gateway_command", "gateway_command_executor_activation", OwnerExecutorDispatchKind::GatewayCommand,
-     "rejected", "owner_executor",
-     "gateway player command execution remains closed until interactive side effects are migrated", 1, 0, 0, 1, 1, 0},
+     "executor_safe", "owner_executor",
+     "guarded gateway command activation with owner epoch and frame cleanup checks", 1, 1, 0, 0, 1, 0},
     {"compute_result", "compute_result", OwnerExecutorDispatchKind::ComputeResult, "executor_safe",
      "owner_executor", "worker v2 result completion", 1, 1, 0, 0, 1, 0},
 }};
@@ -242,7 +241,7 @@ constexpr std::array<VMContextReadinessGate, 7> kGatewayCommandExecutorReadiness
     {"ordinary_lpc_ready", "ordinary_lpc_executor_dispatch", "",
      "keep_generic_lpc_dispatch_explicit_open_only", 1},
     {"gateway_command_executor_activation", "gateway_command_executor_rollout",
-     kGatewayCommandExecutorActivationBlocker, "migrate_interactive_command_side_effects_before_activation", 0},
+     kGatewayCommandExecutorActivationBlocker, "keep_guarded_executor_activation_before_production_rollout", 1},
 }};
 
 constexpr std::array<GatewayCommandSideEffectReadinessGate, 5> kGatewayCommandSideEffectReadinessGates = {{
@@ -352,6 +351,7 @@ std::atomic<uint64_t> owner_thread_owner_state_guarded{0};
 std::atomic<uint64_t> owner_thread_message_dispatched{0};
 std::atomic<uint64_t> owner_executor_command_consume_entry_executed{0};
 std::atomic<uint64_t> owner_executor_command_frame_restore_entry_executed{0};
+std::atomic<uint64_t> owner_thread_gateway_command_guarded{0};
 std::atomic<uint64_t> owner_thread_gateway_command_rejected{0};
 std::atomic<uint64_t> owner_thread_lpc_probe_executed{0};
 std::atomic<uint64_t> owner_thread_lpc_probe_failed{0};
@@ -1355,8 +1355,8 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "main_required_tasks_excluded", 1);
   add_mapping_pair(contract, "target_handle_messages_main_required", 1);
   add_mapping_pair(contract, "compute_result_executor_safe", 1);
-  add_mapping_pair(contract, "gateway_command_rejected", 1);
-  add_mapping_pair(contract, "gateway_command_executor_activation_ready", 0);
+  add_mapping_pair(contract, "gateway_command_rejected", 0);
+  add_mapping_pair(contract, "gateway_command_executor_activation_ready", 1);
   add_mapping_pair(contract, "ordinary_lpc_default_closed", 1);
   add_mapping_pair(contract, "ordinary_lpc_explicit_open_required", 1);
   add_mapping_string(contract, "ordinary_lpc_policy", "explicit_open_same_owner_only");
@@ -2820,8 +2820,8 @@ class OwnerExecutorRuntimeImpl final : public OwnerExecutorRuntime {
         run_owner_command_frame_restore(task);
         break;
       case OwnerExecutorDispatchKind::GatewayCommand:
-        append_owner_task_trace_threadsafe(task, "thread_gateway_command_rejected");
-        owner_thread_gateway_command_rejected.fetch_add(1, std::memory_order_relaxed);
+        append_owner_task_trace_threadsafe(task, "thread_gateway_command_executor_guarded");
+        owner_thread_gateway_command_guarded.fetch_add(1, std::memory_order_relaxed);
         break;
       case OwnerExecutorDispatchKind::ComputeResult:
         append_owner_task_trace_threadsafe(task, "thread_compute_result_completed");
@@ -4368,6 +4368,8 @@ mapping_t *vm_owner_thread_status() {
                    static_cast<long>(owner_executor_command_consume_entry_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_command_frame_restore_entry_executed",
                    static_cast<long>(owner_executor_command_frame_restore_entry_executed.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_gateway_command_guarded",
+                   static_cast<long>(owner_thread_gateway_command_guarded.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_gateway_command_rejected",
                    static_cast<long>(owner_thread_gateway_command_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_probe_executed",
@@ -4541,6 +4543,8 @@ mapping_t *vm_owner_runtime_status() {
                    static_cast<long>(owner_executor_command_consume_entry_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_command_frame_restore_entry_executed",
                    static_cast<long>(owner_executor_command_frame_restore_entry_executed.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_gateway_command_guarded",
+                   static_cast<long>(owner_thread_gateway_command_guarded.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_gateway_command_rejected",
                    static_cast<long>(owner_thread_gateway_command_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_eval_stack_owner_bound",
