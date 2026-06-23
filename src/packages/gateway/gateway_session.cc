@@ -77,7 +77,7 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
 #endif
 
   payload.type = T_MAPPING;
-  payload.u.map = allocate_mapping(68);
+  payload.u.map = allocate_mapping(71);
   add_mapping_string(payload.u.map, "payload_model", "gateway_command_buffer_metadata_v1");
   add_mapping_string(payload.u.map, "payload_policy", "no_raw_command_text_in_trace");
   add_mapping_string(payload.u.map, "input_source", "interactive_text_buffer");
@@ -91,6 +91,10 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_string(payload.u.map, "input_callback_frame_model", "owner_command_frame_input_callback_detach_v1");
   add_mapping_pair(payload.u.map, "input_callback_frame_detach_ready", 1);
   add_mapping_pair(payload.u.map, "input_callback_frame_executor_ready", 0);
+  add_mapping_string(payload.u.map, "input_callback_mode_delta_model",
+                     "owner_command_frame_input_callback_mode_delta");
+  add_mapping_pair(payload.u.map, "input_callback_mode_delta_ready", 1);
+  add_mapping_pair(payload.u.map, "input_callback_mode_delta_executor_ready", 0);
   add_mapping_pair(payload.u.map, "input_callback_active", input_callback_active);
   add_mapping_pair(payload.u.map, "input_callback_single_char", user && (user->iflags & SINGLE_CHAR) ? 1 : 0);
   add_mapping_pair(payload.u.map, "input_callback_noescape", user && (user->iflags & NOESC) ? 1 : 0);

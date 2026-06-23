@@ -1668,13 +1668,43 @@ static int detach_user_input_callback_frame(interactive_t *i, sentence_t *sent,
   return 1;
 }
 
+struct UserInputCallbackModeDelta {
+  int noescape_cleared = 0;
+  int was_single = 0;
+  int was_noecho = 0;
+};
+
+static UserInputCallbackModeDelta detach_user_input_callback_mode_delta(interactive_t *i,
+                                                                        int noescape_cleared) {
+  UserInputCallbackModeDelta delta;
+  delta.noescape_cleared = noescape_cleared;
+  if (!i) {
+    return delta;
+  }
+
+  if (i->iflags & SINGLE_CHAR) {
+    i->iflags &= ~SINGLE_CHAR;
+    delta.was_single = 1;
+  }
+  if (i->iflags & NOECHO) {
+    i->iflags &= ~NOECHO;
+    delta.was_noecho = 1;
+  }
+
+  if (i->ob && !(i->ob->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(vm_owner_id(i->ob), "interactive_input_callback_mode",
+                               "input_to_get_char_mode_flags", vm_owner_epoch(i->ob),
+                               "frame_detached");
+  }
+  return delta;
+}
+
 static int call_function_interactive(interactive_t *i, char *str) {
   object_t *ob;
   sentence_t *sent;
-  int was_single = 0;
-  int was_noecho = 0;
   int ret = 0;
 
+  int noescape_cleared = (i->iflags & NOESC) ? 1 : 0;
   i->iflags &= ~NOESC;
   if (!(sent = i->input_to)) {
     return (0);
@@ -1685,17 +1715,7 @@ static int call_function_interactive(interactive_t *i, char *str) {
    * Special feature: input_to() has been called to setup a call to a
    * function.
    */
-  if (i->iflags & SINGLE_CHAR) {
-    /*
-     * clear single character mode
-     */
-    i->iflags &= ~SINGLE_CHAR;
-    was_single = 1;
-  }
-  if (i->iflags & NOECHO) {
-    was_noecho = 1;
-    i->iflags &= ~NOECHO;
-  }
+  auto mode_delta = detach_user_input_callback_mode_delta(i, noescape_cleared);
   if (ob->flags & O_DESTRUCTED) {
     /* Sorry, the object has selfdestructed ! */
     free_object(&sent->ob, "call_function_interactive");
@@ -1744,14 +1764,14 @@ static int call_function_interactive(interactive_t *i, char *str) {
 
   if (!(ob->flags & O_DESTRUCTED) && ob->interactive) {
     i = ob->interactive;
-    if (was_single && !(i->iflags & SINGLE_CHAR)) {
+    if (mode_delta.was_single && !(i->iflags & SINGLE_CHAR)) {
       i->text_start = i->text_end = 0;
       i->text[0] = '\0';
       i->iflags &= ~CMD_IN_BUF;
       enqueue_user_terminal_mode_delta(i, ob, UserTerminalModeDelta::LineMode,
                                        "get_char_linemode_restore");
     }
-    if (was_noecho && !(i->iflags & NOECHO)) {
+    if (mode_delta.was_noecho && !(i->iflags & NOECHO)) {
       enqueue_user_localecho_restore(i, ob);
     }
   }
