@@ -109,6 +109,10 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_pair(payload.u.map, "interactive_mode_flags_state_snapshot_ready", 1);
   add_mapping_pair(payload.u.map, "interactive_mode_flags_state_redacted", 1);
   add_mapping_pair(payload.u.map, "interactive_mode_noecho", user && (user->iflags & NOECHO) ? 1 : 0);
+  add_mapping_string(payload.u.map, "interactive_mode_localecho_restore_boundary",
+                     "main_reply_queue_after_command_consume");
+  add_mapping_pair(payload.u.map, "interactive_mode_localecho_restore_ready", 1);
+  add_mapping_pair(payload.u.map, "interactive_mode_localecho_restore_required", user && (user->iflags & NOECHO) ? 1 : 0);
   add_mapping_pair(payload.u.map, "interactive_mode_noescape", user && (user->iflags & NOESC) ? 1 : 0);
   add_mapping_pair(payload.u.map, "interactive_mode_single_char", user && (user->iflags & SINGLE_CHAR) ? 1 : 0);
   add_mapping_pair(payload.u.map, "interactive_mode_was_single_char", user && (user->iflags & WAS_SINGLE_CHAR) ? 1 : 0);

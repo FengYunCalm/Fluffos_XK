@@ -299,6 +299,12 @@ void assert_gateway_owner_task_contract(mapping contract) {
               contract["command_reply_queue_side_effects"]);
     ASSERT_EQ(1, contract["command_reply_queue_ready"]);
     ASSERT_EQ(1, contract["command_reply_queue_main_required"]);
+    ASSERT_EQ("owner_command_frame_mode_delta",
+              contract["command_mode_delta_model"]);
+    ASSERT_EQ("main_reply_queue_after_command_consume",
+              contract["command_mode_delta_localecho_restore_boundary"]);
+    ASSERT_EQ(1, contract["command_mode_delta_localecho_restore_ready"]);
+    ASSERT_EQ(0, contract["command_mode_delta_ready"]);
     ASSERT_EQ("no_raw_command_text_in_trace",
               contract["raw_input_trace_policy"]);
     ASSERT_EQ("gateway_command_execution_frame_v1",

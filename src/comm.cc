@@ -97,6 +97,33 @@ void maybe_schedule_user_command(interactive_t *user) {
   }
 }
 
+void run_user_localecho_restore(interactive_t *ip, object_t *reply_command_giver) {
+  if (!IP_VALID(ip, reply_command_giver)) {
+    return;
+  }
+
+  save_command_giver(reply_command_giver);
+  VMCurrentInteractiveScope interactive_scope(vm_context(), reply_command_giver);
+  set_localecho(ip, true);
+  restore_command_giver();
+}
+
+void enqueue_user_localecho_restore(interactive_t *ip, object_t *reply_command_giver) {
+  if (!IP_VALID(ip, reply_command_giver)) {
+    return;
+  }
+
+  auto task_id = vm_owner_enqueue_main_task(reply_command_giver, "command_reply", "localecho_restore",
+                                            [ip, reply_command_giver] {
+                                              run_user_localecho_restore(ip, reply_command_giver);
+                                            });
+  if (task_id == 0) {
+    run_user_localecho_restore(ip, reply_command_giver);
+    return;
+  }
+  vm_owner_drain_main_tasks(64);
+}
+
 void run_user_command_reply_side_effects(interactive_t *ip, object_t *reply_command_giver) {
   if (!IP_VALID(ip, reply_command_giver)) {
     return;
@@ -1171,8 +1198,8 @@ static char *get_user_command(interactive_t *ip) {
 
   if ((ip->iflags & NOECHO)) {
     /* must not enable echo before the user input is received */
-    set_localecho(command_giver->interactive, true);
     ip->iflags &= ~NOECHO;
+    enqueue_user_localecho_restore(ip, command_giver);
   }
 
   ip->last_time = get_current_time();
@@ -1231,8 +1258,8 @@ static int consume_user_command_snapshot(interactive_t *ip, const char *command_
 
   save_command_giver(ip->ob);
   if (ip->iflags & NOECHO) {
-    set_localecho(command_giver->interactive, true);
     ip->iflags &= ~NOECHO;
+    enqueue_user_localecho_restore(ip, command_giver);
   }
   ip->last_time = get_current_time();
   return 1;

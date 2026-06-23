@@ -1111,7 +1111,7 @@ array_t *gateway_owner_task_contract_entries_array() {
 }
 
 mapping_t *gateway_owner_task_contract_mapping() {
-  auto *map = allocate_mapping(64);
+  auto *map = allocate_mapping(68);
   add_mapping_pair(map, "contract_version", 1);
   add_mapping_string(map, "input_model", "owner_main_queue_bridge");
   add_mapping_string(map, "executor_migration_state", "main_required_before_owner_executor");
@@ -1133,6 +1133,11 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_string(map, "command_reply_queue_side_effects", "prompt_telnet_reschedule_io");
   add_mapping_pair(map, "command_reply_queue_ready", 1);
   add_mapping_pair(map, "command_reply_queue_main_required", 1);
+  add_mapping_string(map, "command_mode_delta_model", "owner_command_frame_mode_delta");
+  add_mapping_string(map, "command_mode_delta_localecho_restore_boundary",
+                     "main_reply_queue_after_command_consume");
+  add_mapping_pair(map, "command_mode_delta_localecho_restore_ready", 1);
+  add_mapping_pair(map, "command_mode_delta_ready", 0);
   add_mapping_string(map, "raw_input_trace_policy", "no_raw_command_text_in_trace");
   add_mapping_string(map, "command_execution_frame_model", "gateway_command_execution_frame_v1");
   add_mapping_string(map, "command_execution_frame_policy", "owner_scope_current_interactive_command_giver");

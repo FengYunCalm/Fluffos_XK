@@ -3185,6 +3185,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "prompt_telnet_reschedule_io");
     ASSERT_EQ(mapping_number(gateway_contract, "command_reply_queue_ready"), 1);
     ASSERT_EQ(mapping_number(gateway_contract, "command_reply_queue_main_required"), 1);
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_mode_delta_model"),
+                 "owner_command_frame_mode_delta");
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_mode_delta_localecho_restore_boundary"),
+                 "main_reply_queue_after_command_consume");
+    ASSERT_EQ(mapping_number(gateway_contract, "command_mode_delta_localecho_restore_ready"), 1);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_mode_delta_ready"), 0);
     ASSERT_STREQ(mapping_string(gateway_contract, "raw_input_trace_policy"),
                  "no_raw_command_text_in_trace");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_execution_frame_model"),
@@ -7744,6 +7750,10 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_EQ(mapping_number(payload, "interactive_mode_flags_state_snapshot_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_flags_state_redacted"), 1);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_noecho"), 0);
+        ASSERT_STREQ(mapping_string(payload, "interactive_mode_localecho_restore_boundary"),
+                     "main_reply_queue_after_command_consume");
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_ready"), 1);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_required"), 0);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_noescape"), 0);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_single_char"), 0);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_was_single_char"), 0);
@@ -7857,9 +7867,19 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveInputToState) {
   ASSERT_NE(events_value, nullptr);
   ASSERT_EQ(events_value ? events_value->type : T_INVALID, T_ARRAY);
   bool found_command_task = false;
+  bool found_localecho_restore_queued = false;
+  bool found_localecho_restore_dispatched = false;
   if (events_value && events_value->type == T_ARRAY) {
     for (int i = 0; i < events_value->u.arr->size; i++) {
       auto *event = events_value->u.arr->item[i].u.map;
+      if (std::string(mapping_string(event, "task_type")) == "command_reply" &&
+          std::string(mapping_string(event, "task_key")) == "localecho_restore" &&
+          std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
+          mapping_number(event, "owner_epoch") == static_cast<long>(owner_epoch)) {
+        auto state = std::string(mapping_string(event, "state"));
+        found_localecho_restore_queued = found_localecho_restore_queued || state == "main_queued";
+        found_localecho_restore_dispatched = found_localecho_restore_dispatched || state == "main_dispatched";
+      }
       if (std::string(mapping_string(event, "task_type")) == "gateway" &&
           std::string(mapping_string(event, "task_key")) == "process_user_command" &&
           std::string(mapping_string(event, "state")) == "main_queued" &&
@@ -7880,6 +7900,11 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveInputToState) {
         ASSERT_EQ(mapping_number(payload, "input_callback_single_char"), 0);
         ASSERT_EQ(mapping_number(payload, "input_callback_noescape"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_noecho"), 1);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_noecho"), 1);
+        ASSERT_STREQ(mapping_string(payload, "interactive_mode_localecho_restore_boundary"),
+                     "main_reply_queue_after_command_consume");
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_ready"), 1);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_required"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_carryover_count"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_function_redacted"), 1);
         ASSERT_EQ(mapping_number(payload, "input_callback_object_redacted"), 1);
@@ -7890,6 +7915,8 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveInputToState) {
     }
   }
   ASSERT_TRUE(found_command_task);
+  ASSERT_TRUE(found_localecho_restore_queued);
+  ASSERT_TRUE(found_localecho_restore_dispatched);
   free_mapping(trace);
 
   add_ref(ob, "TestGatewayCommandPayloadSnapshotsActiveInputToState");
