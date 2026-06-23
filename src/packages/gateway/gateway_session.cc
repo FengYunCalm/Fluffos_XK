@@ -88,6 +88,9 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_string(payload.u.map, "input_callback_state_policy", "redacted_input_to_get_char_state_v1");
   add_mapping_pair(payload.u.map, "input_callback_state_snapshot_ready", 1);
   add_mapping_pair(payload.u.map, "input_callback_state_redacted", 1);
+  add_mapping_string(payload.u.map, "input_callback_frame_model", "owner_command_frame_input_callback_detach_v1");
+  add_mapping_pair(payload.u.map, "input_callback_frame_detach_ready", 1);
+  add_mapping_pair(payload.u.map, "input_callback_frame_executor_ready", 0);
   add_mapping_pair(payload.u.map, "input_callback_active", input_callback_active);
   add_mapping_pair(payload.u.map, "input_callback_single_char", user && (user->iflags & SINGLE_CHAR) ? 1 : 0);
   add_mapping_pair(payload.u.map, "input_callback_noescape", user && (user->iflags & NOESC) ? 1 : 0);

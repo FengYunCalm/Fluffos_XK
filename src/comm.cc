@@ -1602,13 +1602,61 @@ void remove_interactive(object_t *ob, int dested) {
 } /* remove_interactive() */
 
 #if defined(F_INPUT_TO) || defined(F_GET_CHAR)
+struct UserInputCallbackFrame {
+  object_t *ob = nullptr;
+  funptr_t *funp = nullptr;
+  const char *function = nullptr;
+  svalue_t *args = nullptr;
+  int num_arg = 0;
+};
+
+static int detach_user_input_callback_frame(interactive_t *i, sentence_t *sent,
+                                            UserInputCallbackFrame *frame) {
+  if (!i || !sent || !frame) {
+    return 0;
+  }
+
+  frame->ob = sent->ob;
+  if (!(sent->flags & V_FUNCTION) && sent->function.s &&
+      sent->function.s[0] == APPLY___INIT_SPECIAL_CHAR) {
+    return 0;
+  }
+
+  STACK_INC;
+  if (sent->flags & V_FUNCTION) {
+    sp->type = T_FUNCTION;
+    sp->u.fp = frame->funp = sent->function.f;
+    frame->funp->hdr.ref++;
+  } else {
+    frame->function = sent->function.s;
+    sp->type = T_STRING;
+    sp->subtype = STRING_SHARED;
+    sp->u.string = frame->function;
+    ref_string(frame->function);
+  }
+
+  free_object(&sent->ob, "call_function_interactive");
+  free_sentence(sent);
+
+  frame->num_arg = i->num_carry;
+  if (frame->num_arg) {
+    frame->args = i->carryover;
+    i->num_carry = 0;
+    i->carryover = nullptr;
+  }
+  i->input_to = nullptr;
+
+  if (frame->ob && !(frame->ob->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(vm_owner_id(frame->ob), "interactive_input_callback",
+                               frame->function ? frame->function : "<function>", vm_owner_epoch(frame->ob),
+                               "frame_detached");
+  }
+  return 1;
+}
+
 static int call_function_interactive(interactive_t *i, char *str) {
   object_t *ob;
-  funptr_t *funp;
-  const char *function;
-  svalue_t *args;
   sentence_t *sent;
-  int num_arg;
   int was_single = 0;
   int was_noecho = 0;
   int ret = 0;
@@ -1647,46 +1695,10 @@ static int call_function_interactive(interactive_t *i, char *str) {
     i->input_to = nullptr;
     ret = 0;
   } else {
-    /*
-     * We must all references to input_to fields before the call to apply(),
-     * because someone might want to set up a new input_to().
-     */
-
-    /* we put the function on the stack in case of an error */
-    STACK_INC;
-    if (sent->flags & V_FUNCTION) {
-      function = nullptr;
-      sp->type = T_FUNCTION;
-      sp->u.fp = funp = sent->function.f;
-      funp->hdr.ref++;
-    } else {
-      function = sent->function.s;
-      if (function && function[0] == APPLY___INIT_SPECIAL_CHAR) {
-        return 0;
-      }
-      sp->type = T_STRING;
-      sp->subtype = STRING_SHARED;
-      sp->u.string = function;
-      ref_string(function);
+    UserInputCallbackFrame frame;
+    if (!detach_user_input_callback_frame(i, sent, &frame)) {
+      return 0;
     }
-
-    free_object(&sent->ob, "call_function_interactive");
-    free_sentence(sent);
-
-    /*
-     * If we have args, we have to copy them, so the svalues on the
-     * interactive struct can be FREEd
-     */
-    num_arg = i->num_carry;
-    if (num_arg) {
-      args = i->carryover;
-      i->num_carry = 0;
-      i->carryover = nullptr;
-    } else {
-      args = nullptr;
-    }
-
-    i->input_to = nullptr;
 
     copy_and_push_string(str);
     /*
@@ -1694,18 +1706,20 @@ static int call_function_interactive(interactive_t *i, char *str) {
      * were in when we got them.  They will be popped off by the called
      * function.
      */
-    if (args) {
-      transfer_push_some_svalues(args, num_arg);
-      FREE(args);
+    if (frame.args) {
+      transfer_push_some_svalues(frame.args, frame.num_arg);
+      FREE(frame.args);
     }
     /* current_object no longer set */
-    if (function) {
-      (void)owner_bound_safe_apply(function, ob, num_arg + 1, ORIGIN_INTERNAL, "interactive_input_to");
+    if (frame.function) {
+      (void)owner_bound_safe_apply(frame.function, ob, frame.num_arg + 1, ORIGIN_INTERNAL,
+                                   "interactive_input_to");
     } else {
-      VMOwnerScope owner_scope(vm_context(), vm_owner_id(funp->hdr.owner), vm_owner_epoch(funp->hdr.owner));
-      vm_owner_record_task_trace(vm_owner_id(funp->hdr.owner), "interactive_input_to", "<function>",
-                                 vm_owner_epoch(funp->hdr.owner), "dispatched");
-      safe_call_function_pointer(funp, num_arg + 1);
+      VMOwnerScope owner_scope(vm_context(), vm_owner_id(frame.funp->hdr.owner),
+                               vm_owner_epoch(frame.funp->hdr.owner));
+      vm_owner_record_task_trace(vm_owner_id(frame.funp->hdr.owner), "interactive_input_to", "<function>",
+                                 vm_owner_epoch(frame.funp->hdr.owner), "dispatched");
+      safe_call_function_pointer(frame.funp, frame.num_arg + 1);
     }
     // NOTE: we can't use "i" here anymore, it is possible that it
     // has been freed.
