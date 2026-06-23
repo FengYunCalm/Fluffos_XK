@@ -1111,7 +1111,7 @@ array_t *gateway_owner_task_contract_entries_array() {
 }
 
 mapping_t *gateway_owner_task_contract_mapping() {
-  auto *map = allocate_mapping(76);
+  auto *map = allocate_mapping(80);
   add_mapping_pair(map, "contract_version", 1);
   add_mapping_string(map, "input_model", "owner_main_queue_bridge");
   add_mapping_string(map, "executor_migration_state", "main_required_before_owner_executor");
@@ -1125,6 +1125,11 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_pair(map, "command_input_callback_frame_detach_ready", 1);
   add_mapping_pair(map, "command_input_callback_frame_executor_ready", 0);
   add_mapping_string(map, "command_input_callback_blocker", "input_to_get_char_state_main_thread_bound");
+  add_mapping_string(map, "process_input_add_action_parser_frame_model", "owner_command_parser_context_v1");
+  add_mapping_pair(map, "process_input_add_action_parser_frame_ready", 1);
+  add_mapping_pair(map, "process_input_add_action_parser_frame_executor_ready", 0);
+  add_mapping_string(map, "process_input_add_action_parser_blocker",
+                     "add_action_parser_command_giver_main_thread_bound");
   add_mapping_string(map, "command_executor_blocker", kGatewayCommandExecutorActivationBlocker);
   add_mapping_string(map, "command_consume_model", "owner_owned_snapshot_main_thread_consume");
   add_mapping_pair(map, "command_consume_snapshot_ready", 1);

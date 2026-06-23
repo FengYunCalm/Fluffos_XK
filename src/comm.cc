@@ -1317,11 +1317,25 @@ static int escape_command(interactive_t *ip, const char *user_command) {
   return 0;
 }
 
+static void parse_user_command_in_owner_frame(char *user_command, object_t *parser_command_giver) {
+  if (!parser_command_giver) {
+    safe_parse_command(user_command, parser_command_giver);
+    return;
+  }
+
+  VMOwnerScope owner_scope(vm_context(), vm_owner_id(parser_command_giver),
+                           vm_owner_epoch(parser_command_giver));
+  vm_owner_record_task_trace(vm_owner_id(parser_command_giver), "interactive_command_parser",
+                             "safe_parse_command", vm_owner_epoch(parser_command_giver),
+                             "frame_entered");
+  safe_parse_command(user_command, parser_command_giver);
+}
+
 static void process_input(interactive_t *ip, char *user_command) {
   svalue_t *ret;
 
   if (!(ip->iflags & HAS_PROCESS_INPUT)) {
-    safe_parse_command(user_command, command_giver);
+    parse_user_command_in_owner_frame(user_command, command_giver);
     return;
   }
 
@@ -1337,7 +1351,7 @@ static void process_input(interactive_t *ip, char *user_command) {
   }
   if (!ret) {
     ip->iflags &= ~HAS_PROCESS_INPUT;
-    safe_parse_command(user_command, command_giver);
+    parse_user_command_in_owner_frame(user_command, command_giver);
     return;
   }
 
@@ -1345,10 +1359,10 @@ static void process_input(interactive_t *ip, char *user_command) {
   if (ret->type == T_STRING) {
     auto *command = string_copy(ret->u.string, "current_command: " __CURRENT_FILE_LINE__);
     DEFER { FREE_MSTR(command); };
-    safe_parse_command(command, command_giver);
+    parse_user_command_in_owner_frame(command, command_giver);
   } else {
     if (ret->type != T_NUMBER || !ret->u.number) {
-      safe_parse_command(user_command, command_giver);
+      parse_user_command_in_owner_frame(user_command, command_giver);
     }
   }
 #endif
