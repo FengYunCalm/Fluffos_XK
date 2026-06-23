@@ -290,6 +290,15 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ(1, contract["command_consume_snapshot_ready"]);
     ASSERT_EQ(1, contract["command_consume_executor_ready"]);
     ASSERT_EQ("", contract["command_consume_blocker"]);
+    ASSERT_EQ("main_reply_queue_after_owner_command",
+              contract["command_reply_queue_model"]);
+    ASSERT_EQ("command_reply", contract["command_reply_queue_task_type"]);
+    ASSERT_EQ("prompt_telnet_reschedule_io",
+              contract["command_reply_queue_task_key"]);
+    ASSERT_EQ("prompt_telnet_reschedule_io",
+              contract["command_reply_queue_side_effects"]);
+    ASSERT_EQ(1, contract["command_reply_queue_ready"]);
+    ASSERT_EQ(1, contract["command_reply_queue_main_required"]);
     ASSERT_EQ("no_raw_command_text_in_trace",
               contract["raw_input_trace_policy"]);
     ASSERT_EQ("gateway_command_execution_frame_v1",
@@ -315,8 +324,8 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("all_side_effect_gates_required_before_activation",
               contract["command_side_effect_readiness_gate_model"]);
     ASSERT_EQ(5, contract["command_side_effect_readiness_gate_count"]);
-    ASSERT_EQ(1, contract["command_side_effect_satisfied_gate_count"]);
-    ASSERT_EQ(4, contract["command_side_effect_blocked_gate_count"]);
+    ASSERT_EQ(2, contract["command_side_effect_satisfied_gate_count"]);
+    ASSERT_EQ(3, contract["command_side_effect_blocked_gate_count"]);
     ASSERT_EQ(5, contract["command_side_effect_snapshot_gate_count"]);
     ASSERT_EQ(5, contract["command_side_effect_snapshot_ready_count"]);
     ASSERT_EQ(1, contract["command_side_effect_observability_ready"]);
@@ -400,11 +409,10 @@ void assert_gateway_owner_task_contract(mapping contract) {
               command_side_effect_gate_by_name["process_input_add_action_parser"]["side_effect_class"]);
     ASSERT_EQ("redacted_process_input_add_action_parser_state_v1",
               command_side_effect_gate_by_name["process_input_add_action_parser"]["snapshot_policy"]);
-    ASSERT_EQ(0, command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["satisfied"]);
-    ASSERT_EQ(1, command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["blocks_activation"]);
-    ASSERT_EQ("prompt_telnet_reschedule_main_thread_bound",
-              command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["blocker"]);
-    ASSERT_EQ("interactive_t_and_network_io",
+    ASSERT_EQ(1, command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["satisfied"]);
+    ASSERT_EQ(0, command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["blocks_activation"]);
+    ASSERT_EQ("", command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["blocker"]);
+    ASSERT_EQ("main_reply_queue_and_network_io",
               command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["state_owner"]);
     ASSERT_EQ("main_reply_queue_after_owner_command",
               command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["migration_boundary"]);

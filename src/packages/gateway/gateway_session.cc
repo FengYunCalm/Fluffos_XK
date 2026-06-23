@@ -118,6 +118,9 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
                      "redacted_prompt_telnet_reschedule_io_v1");
   add_mapping_pair(payload.u.map, "prompt_telnet_reschedule_state_snapshot_ready", 1);
   add_mapping_pair(payload.u.map, "prompt_telnet_reschedule_state_redacted", 1);
+  add_mapping_string(payload.u.map, "prompt_telnet_reschedule_boundary", "main_reply_queue_after_owner_command");
+  add_mapping_pair(payload.u.map, "prompt_telnet_reschedule_reply_queue_ready", 1);
+  add_mapping_pair(payload.u.map, "prompt_telnet_reschedule_blocks_activation", 0);
   add_mapping_pair(payload.u.map, "prompt_has_write_prompt", user && (user->iflags & HAS_WRITE_PROMPT) ? 1 : 0);
   add_mapping_pair(payload.u.map, "prompt_text_redacted", user && user->prompt ? 1 : 0);
   add_mapping_pair(payload.u.map, "prompt_write_prompt_apply_required",

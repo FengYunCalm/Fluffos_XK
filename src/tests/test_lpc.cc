@@ -3176,6 +3176,15 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(gateway_contract, "command_consume_snapshot_ready"), 1);
     ASSERT_EQ(mapping_number(gateway_contract, "command_consume_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "command_consume_blocker"), "");
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_reply_queue_model"),
+                 "main_reply_queue_after_owner_command");
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_reply_queue_task_type"), "command_reply");
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_reply_queue_task_key"),
+                 "prompt_telnet_reschedule_io");
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_reply_queue_side_effects"),
+                 "prompt_telnet_reschedule_io");
+    ASSERT_EQ(mapping_number(gateway_contract, "command_reply_queue_ready"), 1);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_reply_queue_main_required"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "raw_input_trace_policy"),
                  "no_raw_command_text_in_trace");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_execution_frame_model"),
@@ -3203,8 +3212,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gateway_contract, "command_side_effect_readiness_gate_model"),
                  "all_side_effect_gates_required_before_activation");
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_readiness_gate_count"), 5);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_satisfied_gate_count"), 1);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_blocked_gate_count"), 4);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_satisfied_gate_count"), 2);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_blocked_gate_count"), 3);
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_snapshot_gate_count"), 5);
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_snapshot_ready_count"), 5);
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_observability_ready"), 1);
@@ -3299,12 +3308,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "parser_command_giver_state");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("process_input_add_action_parser"), "snapshot_policy"),
                  "redacted_process_input_add_action_parser_state_v1");
-    ASSERT_EQ(mapping_number(command_side_effect_gate("prompt_telnet_reschedule_io"), "satisfied"), 0);
-    ASSERT_EQ(mapping_number(command_side_effect_gate("prompt_telnet_reschedule_io"), "blocks_activation"), 1);
-    ASSERT_STREQ(mapping_string(command_side_effect_gate("prompt_telnet_reschedule_io"), "blocker"),
-                 "prompt_telnet_reschedule_main_thread_bound");
+    ASSERT_EQ(mapping_number(command_side_effect_gate("prompt_telnet_reschedule_io"), "satisfied"), 1);
+    ASSERT_EQ(mapping_number(command_side_effect_gate("prompt_telnet_reschedule_io"), "blocks_activation"), 0);
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("prompt_telnet_reschedule_io"), "blocker"), "");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("prompt_telnet_reschedule_io"), "state_owner"),
-                 "interactive_t_and_network_io");
+                 "main_reply_queue_and_network_io");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("prompt_telnet_reschedule_io"), "migration_boundary"),
                  "main_reply_queue_after_owner_command");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("prompt_telnet_reschedule_io"), "side_effect_class"),
@@ -7657,9 +7665,19 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
   ASSERT_NE(events_value, nullptr);
   ASSERT_EQ(events_value ? events_value->type : T_INVALID, T_ARRAY);
   bool found_command_task = false;
+  bool found_reply_task_queued = false;
+  bool found_reply_task_dispatched = false;
   if (events_value && events_value->type == T_ARRAY) {
     for (int i = 0; i < events_value->u.arr->size; i++) {
       auto *event = events_value->u.arr->item[i].u.map;
+      if (std::string(mapping_string(event, "task_type")) == "command_reply" &&
+          std::string(mapping_string(event, "task_key")) == "prompt_telnet_reschedule_io" &&
+          std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
+          mapping_number(event, "owner_epoch") == static_cast<long>(owner_epoch)) {
+        auto state = std::string(mapping_string(event, "state"));
+        found_reply_task_queued = found_reply_task_queued || state == "main_queued";
+        found_reply_task_dispatched = found_reply_task_dispatched || state == "main_dispatched";
+      }
       if (std::string(mapping_string(event, "task_type")) == "gateway" &&
           std::string(mapping_string(event, "task_key")) == "process_user_command" &&
           std::string(mapping_string(event, "state")) == "main_queued" &&
@@ -7735,6 +7753,10 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
                      "redacted_prompt_telnet_reschedule_io_v1");
         ASSERT_EQ(mapping_number(payload, "prompt_telnet_reschedule_state_snapshot_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "prompt_telnet_reschedule_state_redacted"), 1);
+        ASSERT_STREQ(mapping_string(payload, "prompt_telnet_reschedule_boundary"),
+                     "main_reply_queue_after_owner_command");
+        ASSERT_EQ(mapping_number(payload, "prompt_telnet_reschedule_reply_queue_ready"), 1);
+        ASSERT_EQ(mapping_number(payload, "prompt_telnet_reschedule_blocks_activation"), 0);
         ASSERT_EQ(mapping_number(payload, "prompt_has_write_prompt"), 1);
         ASSERT_EQ(mapping_number(payload, "prompt_text_redacted"), 1);
         ASSERT_EQ(mapping_number(payload, "prompt_write_prompt_apply_required"), 1);
@@ -7762,6 +7784,8 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
     }
   }
   ASSERT_TRUE(found_command_task);
+  ASSERT_TRUE(found_reply_task_queued);
+  ASSERT_TRUE(found_reply_task_dispatched);
   free_mapping(trace);
 
   add_ref(ob, "TestGatewayCommandTaskCarriesOwnerHandlePayload");

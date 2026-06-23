@@ -97,6 +97,43 @@ void maybe_schedule_user_command(interactive_t *user) {
   }
 }
 
+void run_user_command_reply_side_effects(interactive_t *ip, object_t *reply_command_giver) {
+  if (!IP_VALID(ip, reply_command_giver)) {
+    return;
+  }
+
+  save_command_giver(reply_command_giver);
+  VMCurrentInteractiveScope interactive_scope(vm_context(), reply_command_giver);
+  if (IP_VALID(ip, command_giver)) {
+    if (ip->input_to == nullptr) {
+      print_prompt(ip);
+    }
+    if (IP_VALID(ip, command_giver) && ip->telnet && (ip->iflags & USING_TELNET) &&
+        !(ip->iflags & SUPPRESS_GA)) {
+      telnet_send_ga(ip->telnet);
+    }
+    if (IP_VALID(ip, command_giver)) {
+      maybe_schedule_user_command(ip);
+    }
+  }
+  restore_command_giver();
+}
+
+void enqueue_user_command_reply_side_effects(interactive_t *ip, object_t *reply_command_giver) {
+  if (!IP_VALID(ip, reply_command_giver)) {
+    return;
+  }
+
+  auto task_id = vm_owner_enqueue_main_task(
+      reply_command_giver, "command_reply", "prompt_telnet_reschedule_io",
+      [ip, reply_command_giver] { run_user_command_reply_side_effects(ip, reply_command_giver); });
+  if (task_id == 0) {
+    run_user_command_reply_side_effects(ip, reply_command_giver);
+    return;
+  }
+  vm_owner_drain_main_tasks(64);
+}
+
 void on_user_command(evutil_socket_t fd, short what, void *arg) {
   debug(event, "User has an full command ready: %d:%s%s%s%s \n", (int)fd,
         (what & EV_TIMEOUT) ? " timeout" : "", (what & EV_READ) ? " read" : "",
@@ -1335,17 +1372,11 @@ static int process_user_command_text(interactive_t *ip, char *user_command) {
 
 exit:
   /*
-   * Print a prompt if user is still here.
+   * Queue post-command prompt/telnet/reschedule side effects separately so owner
+   * command execution can move off-main before network-visible replies do.
    */
   if (IP_VALID(ip, command_giver)) {
-    if (ip->input_to == nullptr) {
-      print_prompt(ip);
-    }
-    if (ip->telnet && (ip->iflags & USING_TELNET) && !(ip->iflags & SUPPRESS_GA)) {
-      telnet_send_ga(ip->telnet);
-    }
-    // FIXME: this doesn't belong here, should be moved to event.cc
-    maybe_schedule_user_command(ip);
+    enqueue_user_command_reply_side_effects(ip, command_giver);
   }
 
   vm_context_set_current_interactive(vm_context(), nullptr);

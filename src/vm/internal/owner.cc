@@ -256,10 +256,10 @@ constexpr std::array<GatewayCommandSideEffectReadinessGate, 5> kGatewayCommandSi
      "add_action_parser_command_giver_main_thread_bound", "migrate_parser_state_to_owner_context",
      "interactive_t_and_command_giver", "owner_command_parser_context", "parser_command_giver_state",
      "redacted_process_input_add_action_parser_state_v1", 1, 1, 1, 0},
-    {"prompt_telnet_reschedule_io", "interactive_output_reschedule_state",
-     "prompt_telnet_reschedule_main_thread_bound", "move_prompt_and_reschedule_side_effects_to_main_reply_queue",
-     "interactive_t_and_network_io", "main_reply_queue_after_owner_command", "prompt_telnet_reschedule_io",
-     "redacted_prompt_telnet_reschedule_io_v1", 1, 1, 1, 0},
+    {"prompt_telnet_reschedule_io", "interactive_output_reschedule_state", "",
+     "keep_prompt_telnet_reschedule_in_main_reply_queue_after_owner_command",
+     "main_reply_queue_and_network_io", "main_reply_queue_after_owner_command", "prompt_telnet_reschedule_io",
+     "redacted_prompt_telnet_reschedule_io_v1", 1, 1, 0, 1},
     {"interactive_mode_flags", "interactive_flags_echo_mxp_ed_state",
      "interactive_mode_flags_main_thread_bound", "split_echo_mxp_ed_mode_mutations_from_owner_command_execution",
      "interactive_t", "owner_command_frame_mode_delta", "echo_mxp_ed_mode_flags",
@@ -1111,7 +1111,7 @@ array_t *gateway_owner_task_contract_entries_array() {
 }
 
 mapping_t *gateway_owner_task_contract_mapping() {
-  auto *map = allocate_mapping(56);
+  auto *map = allocate_mapping(64);
   add_mapping_pair(map, "contract_version", 1);
   add_mapping_string(map, "input_model", "owner_main_queue_bridge");
   add_mapping_string(map, "executor_migration_state", "main_required_before_owner_executor");
@@ -1127,6 +1127,12 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_pair(map, "command_consume_snapshot_ready", 1);
   add_mapping_pair(map, "command_consume_executor_ready", 1);
   add_mapping_string(map, "command_consume_blocker", "");
+  add_mapping_string(map, "command_reply_queue_model", "main_reply_queue_after_owner_command");
+  add_mapping_string(map, "command_reply_queue_task_type", "command_reply");
+  add_mapping_string(map, "command_reply_queue_task_key", "prompt_telnet_reschedule_io");
+  add_mapping_string(map, "command_reply_queue_side_effects", "prompt_telnet_reschedule_io");
+  add_mapping_pair(map, "command_reply_queue_ready", 1);
+  add_mapping_pair(map, "command_reply_queue_main_required", 1);
   add_mapping_string(map, "raw_input_trace_policy", "no_raw_command_text_in_trace");
   add_mapping_string(map, "command_execution_frame_model", "gateway_command_execution_frame_v1");
   add_mapping_string(map, "command_execution_frame_policy", "owner_scope_current_interactive_command_giver");
