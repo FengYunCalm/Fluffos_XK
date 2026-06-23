@@ -3173,7 +3173,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_NE(rejected_type_names.find("class"), rejected_type_names.end());
     auto* frozen_paths = mapping_array(frozen_payload_contract, "paths");
     ASSERT_NE(frozen_paths, nullptr);
-    ASSERT_EQ(frozen_paths->size, 4);
+    ASSERT_EQ(frozen_paths->size, 5);
     std::unordered_map<std::string, mapping_t*> frozen_paths_by_name;
     for (int i = 0; i < frozen_paths->size; i++) {
       ASSERT_EQ(frozen_paths->item[i].type, T_MAPPING);
@@ -3194,6 +3194,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(frozen_path("worker_snapshot"), "top_level_mapping_required"), 0);
     ASSERT_STREQ(mapping_string(frozen_path("worker_snapshot"), "result_policy"),
                  "owner_future_frozen_result_required");
+    ASSERT_EQ(mapping_number(frozen_path("domain_task"), "top_level_mapping_required"), 1);
+    ASSERT_STREQ(mapping_string(frozen_path("domain_task"), "input_policy"), "domain_task_payload");
+    ASSERT_STREQ(mapping_string(frozen_path("domain_task"), "result_policy"),
+                 "owner_future_frozen_result_required");
+    ASSERT_EQ(mapping_number(frozen_path("domain_task"), "frozen_result_required"), 1);
 
     auto* gateway_contract = mapping_entry(status, "gateway_owner_task_contract");
     ASSERT_NE(gateway_contract, nullptr);

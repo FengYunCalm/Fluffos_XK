@@ -195,7 +195,7 @@ void assert_frozen_payload_contract(mapping contract) {
     ASSERT(member_array("buffer", rejected_types) >= 0);
     ASSERT(member_array("class", rejected_types) >= 0);
     ASSERT(arrayp(paths));
-    ASSERT_EQ(4, sizeof(paths));
+    ASSERT_EQ(5, sizeof(paths));
     for (i = 0; i < sizeof(paths); i++) {
         mapping entry = paths[i];
 
@@ -216,6 +216,11 @@ void assert_frozen_payload_contract(mapping contract) {
     ASSERT_EQ(0, path_by_name["worker_snapshot"]["top_level_mapping_required"]);
     ASSERT_EQ("owner_future_frozen_result_required",
               path_by_name["worker_snapshot"]["result_policy"]);
+    ASSERT_EQ(1, path_by_name["domain_task"]["top_level_mapping_required"]);
+    ASSERT_EQ("domain_task_payload", path_by_name["domain_task"]["input_policy"]);
+    ASSERT_EQ("owner_future_frozen_result_required",
+              path_by_name["domain_task"]["result_policy"]);
+    ASSERT_EQ(1, path_by_name["domain_task"]["frozen_result_required"]);
 }
 
 void assert_gateway_contract_entry(mapping contract, string task_key,

@@ -331,7 +331,7 @@ payload 约束：
 - mapping key 必须为 string。
 - 递归深度超过 8 会拒绝。
 - object/function/buffer/class 等不允许作为 payload。
-- `frozen_payload_contract` 将 `owner_send`、`owner_call_async`、`owner_publish_snapshot` 和 `worker_snapshot` 的 input/result policy 暴露给 C++ 与 LPC 合同测试。
+- `frozen_payload_contract` 将 `owner_send`、`owner_call_async`、`owner_publish_snapshot`、`worker_snapshot` 和 `domain_task` 的 input/result policy 暴露给 C++ 与 LPC 合同测试；`domain_task` 目前是正式执行器前的协议边界，要求 top-level mapping 输入和 frozen owner future result。
 
 `owner_call_async()` 会使用 target `ObjectHandle`，future polling 会报告 target handle 是否仍 current。target handle stale 时 future 应失败。
 

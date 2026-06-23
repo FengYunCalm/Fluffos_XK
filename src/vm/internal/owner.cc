@@ -195,11 +195,12 @@ struct GatewayOwnerTaskContractEntry {
   int requires_frozen_payload;
 };
 
-constexpr std::array<FrozenPayloadContractEntry, 4> kFrozenPayloadContractEntries = {{
+constexpr std::array<FrozenPayloadContractEntry, 5> kFrozenPayloadContractEntries = {{
     {"owner_send", "owner_payload", "future_pending_no_result", 1, 1, 0},
     {"owner_call_async", "owner_payload", "frozen_result_required", 1, 1, 1},
     {"owner_publish_snapshot", "owner_payload", "snapshot_only", 1, 1, 0},
     {"worker_snapshot", "worker_value", "owner_future_frozen_result_required", 1, 0, 1},
+    {"domain_task", "domain_task_payload", "owner_future_frozen_result_required", 1, 1, 1},
 }};
 
 constexpr std::array<const char *, 5> kFrozenPayloadAllowedTypes = {{"number", "real", "string", "array", "mapping"}};
