@@ -344,7 +344,7 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("interactive_mode_flags",
               contract["interactive_mode_localecho_restore_task_type"]);
     ASSERT_EQ(1, contract["interactive_mode_localecho_restore_ready"]);
-    ASSERT_EQ(0, contract["interactive_mode_localecho_restore_executor_ready"]);
+    ASSERT_EQ(1, contract["interactive_mode_localecho_restore_executor_ready"]);
     ASSERT_EQ("command_mode_delta",
               contract["command_mode_delta_terminal_mode_task_type"]);
     ASSERT_EQ("get_char_linemode_restore,single_char_escape_linemode,single_char_escape_charmode_restore",
@@ -352,19 +352,19 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("main_mode_delta_queue_after_command_consume",
               contract["command_mode_delta_terminal_mode_boundary"]);
     ASSERT_EQ(1, contract["command_mode_delta_terminal_mode_ready"]);
-    ASSERT_EQ(0, contract["command_mode_delta_ready"]);
+    ASSERT_EQ(1, contract["command_mode_delta_ready"]);
     ASSERT_EQ("owner_command_frame_mxp_tag_filter",
               contract["interactive_mode_mxp_tag_filter_model"]);
     ASSERT_EQ("interactive_mode_flags",
               contract["interactive_mode_mxp_tag_filter_task_type"]);
     ASSERT_EQ(1, contract["interactive_mode_mxp_tag_filter_ready"]);
-    ASSERT_EQ(0, contract["interactive_mode_mxp_tag_filter_executor_ready"]);
+    ASSERT_EQ(1, contract["interactive_mode_mxp_tag_filter_executor_ready"]);
     ASSERT_EQ("owner_command_frame_ed_command",
               contract["interactive_mode_ed_command_model"]);
     ASSERT_EQ("interactive_mode_flags",
               contract["interactive_mode_ed_command_task_type"]);
     ASSERT_EQ(1, contract["interactive_mode_ed_command_ready"]);
-    ASSERT_EQ(0, contract["interactive_mode_ed_command_executor_ready"]);
+    ASSERT_EQ(1, contract["interactive_mode_ed_command_executor_ready"]);
     ASSERT_EQ("no_raw_command_text_in_trace",
               contract["raw_input_trace_policy"]);
     ASSERT_EQ("gateway_command_execution_frame_v1",
@@ -390,12 +390,12 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("all_side_effect_gates_required_before_activation",
               contract["command_side_effect_readiness_gate_model"]);
     ASSERT_EQ(5, contract["command_side_effect_readiness_gate_count"]);
-    ASSERT_EQ(4, contract["command_side_effect_satisfied_gate_count"]);
-    ASSERT_EQ(1, contract["command_side_effect_blocked_gate_count"]);
+    ASSERT_EQ(5, contract["command_side_effect_satisfied_gate_count"]);
+    ASSERT_EQ(0, contract["command_side_effect_blocked_gate_count"]);
     ASSERT_EQ(5, contract["command_side_effect_snapshot_gate_count"]);
     ASSERT_EQ(5, contract["command_side_effect_snapshot_ready_count"]);
     ASSERT_EQ(1, contract["command_side_effect_observability_ready"]);
-    ASSERT_EQ(0, contract["command_side_effect_activation_ready"]);
+    ASSERT_EQ(1, contract["command_side_effect_activation_ready"]);
     ASSERT(arrayp(command_executor_gates));
     ASSERT_EQ(7, sizeof(command_executor_gates));
     for (i = 0; i < sizeof(command_executor_gates); i++) {
@@ -484,12 +484,11 @@ void assert_gateway_owner_task_contract(mapping contract) {
               command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["side_effect_class"]);
     ASSERT_EQ("redacted_prompt_telnet_reschedule_io_v1",
               command_side_effect_gate_by_name["prompt_telnet_reschedule_io"]["snapshot_policy"]);
-    ASSERT_EQ(0, command_side_effect_gate_by_name["interactive_mode_flags"]["satisfied"]);
-    ASSERT_EQ(1, command_side_effect_gate_by_name["interactive_mode_flags"]["blocks_activation"]);
-    ASSERT_EQ("interactive_mode_flags_main_thread_bound",
-              command_side_effect_gate_by_name["interactive_mode_flags"]["blocker"]);
-    ASSERT_EQ("interactive_t", command_side_effect_gate_by_name["interactive_mode_flags"]["state_owner"]);
-    ASSERT_EQ("owner_command_frame_mode_delta",
+    ASSERT_EQ(1, command_side_effect_gate_by_name["interactive_mode_flags"]["satisfied"]);
+    ASSERT_EQ(0, command_side_effect_gate_by_name["interactive_mode_flags"]["blocks_activation"]);
+    ASSERT_EQ("", command_side_effect_gate_by_name["interactive_mode_flags"]["blocker"]);
+    ASSERT_EQ("owner_command_frame", command_side_effect_gate_by_name["interactive_mode_flags"]["state_owner"]);
+    ASSERT_EQ("owner_command_frame_mode_delta_executor",
               command_side_effect_gate_by_name["interactive_mode_flags"]["migration_boundary"]);
     ASSERT_EQ("echo_mxp_ed_mode_flags", command_side_effect_gate_by_name["interactive_mode_flags"]["side_effect_class"]);
     ASSERT_EQ("redacted_interactive_mode_flags_v1",
@@ -735,7 +734,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(5, contract["gateway_command_executor_activation"]["side_effect_snapshot_gate_count"]);
     ASSERT_EQ(5, contract["gateway_command_executor_activation"]["side_effect_snapshot_ready_count"]);
     ASSERT_EQ(1, contract["gateway_command_executor_activation"]["side_effect_observability_ready"]);
-    ASSERT_EQ(0, contract["gateway_command_executor_activation"]["side_effect_activation_ready"]);
+    ASSERT_EQ(1, contract["gateway_command_executor_activation"]["side_effect_activation_ready"]);
     ASSERT_EQ("interactive_command_side_effects_main_thread_bound",
               contract["gateway_command_executor_activation"]["activation_blocker"]);
     assert_contract_entry(contract, "owner_message_mailbox", "executor_safe",

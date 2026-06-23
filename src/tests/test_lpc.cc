@@ -3324,7 +3324,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gateway_contract, "interactive_mode_localecho_restore_task_type"),
                  "interactive_mode_flags");
     ASSERT_EQ(mapping_number(gateway_contract, "interactive_mode_localecho_restore_ready"), 1);
-    ASSERT_EQ(mapping_number(gateway_contract, "interactive_mode_localecho_restore_executor_ready"), 0);
+    ASSERT_EQ(mapping_number(gateway_contract, "interactive_mode_localecho_restore_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "command_mode_delta_terminal_mode_task_type"),
                  "command_mode_delta");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_mode_delta_terminal_mode_task_keys"),
@@ -3332,19 +3332,19 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gateway_contract, "command_mode_delta_terminal_mode_boundary"),
                  "main_mode_delta_queue_after_command_consume");
     ASSERT_EQ(mapping_number(gateway_contract, "command_mode_delta_terminal_mode_ready"), 1);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_mode_delta_ready"), 0);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_mode_delta_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "interactive_mode_mxp_tag_filter_model"),
                  "owner_command_frame_mxp_tag_filter");
     ASSERT_STREQ(mapping_string(gateway_contract, "interactive_mode_mxp_tag_filter_task_type"),
                  "interactive_mode_flags");
     ASSERT_EQ(mapping_number(gateway_contract, "interactive_mode_mxp_tag_filter_ready"), 1);
-    ASSERT_EQ(mapping_number(gateway_contract, "interactive_mode_mxp_tag_filter_executor_ready"), 0);
+    ASSERT_EQ(mapping_number(gateway_contract, "interactive_mode_mxp_tag_filter_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "interactive_mode_ed_command_model"),
                  "owner_command_frame_ed_command");
     ASSERT_STREQ(mapping_string(gateway_contract, "interactive_mode_ed_command_task_type"),
                  "interactive_mode_flags");
     ASSERT_EQ(mapping_number(gateway_contract, "interactive_mode_ed_command_ready"), 1);
-    ASSERT_EQ(mapping_number(gateway_contract, "interactive_mode_ed_command_executor_ready"), 0);
+    ASSERT_EQ(mapping_number(gateway_contract, "interactive_mode_ed_command_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "raw_input_trace_policy"),
                  "no_raw_command_text_in_trace");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_execution_frame_model"),
@@ -3372,12 +3372,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gateway_contract, "command_side_effect_readiness_gate_model"),
                  "all_side_effect_gates_required_before_activation");
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_readiness_gate_count"), 5);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_satisfied_gate_count"), 4);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_blocked_gate_count"), 1);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_satisfied_gate_count"), 5);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_blocked_gate_count"), 0);
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_snapshot_gate_count"), 5);
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_snapshot_ready_count"), 5);
     ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_observability_ready"), 1);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_activation_ready"), 0);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_side_effect_activation_ready"), 1);
     auto* command_executor_gates = mapping_array(gateway_contract, "command_executor_readiness_gates");
     ASSERT_NE(command_executor_gates, nullptr);
     ASSERT_EQ(command_executor_gates->size, 7);
@@ -3477,13 +3477,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "prompt_telnet_reschedule_io");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("prompt_telnet_reschedule_io"), "snapshot_policy"),
                  "redacted_prompt_telnet_reschedule_io_v1");
-    ASSERT_EQ(mapping_number(command_side_effect_gate("interactive_mode_flags"), "satisfied"), 0);
-    ASSERT_EQ(mapping_number(command_side_effect_gate("interactive_mode_flags"), "blocks_activation"), 1);
-    ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_mode_flags"), "blocker"),
-                 "interactive_mode_flags_main_thread_bound");
-    ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_mode_flags"), "state_owner"), "interactive_t");
+    ASSERT_EQ(mapping_number(command_side_effect_gate("interactive_mode_flags"), "satisfied"), 1);
+    ASSERT_EQ(mapping_number(command_side_effect_gate("interactive_mode_flags"), "blocks_activation"), 0);
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_mode_flags"), "blocker"), "");
+    ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_mode_flags"), "state_owner"), "owner_command_frame");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_mode_flags"), "migration_boundary"),
-                 "owner_command_frame_mode_delta");
+                 "owner_command_frame_mode_delta_executor");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_mode_flags"), "side_effect_class"),
                  "echo_mxp_ed_mode_flags");
     ASSERT_STREQ(mapping_string(command_side_effect_gate("interactive_mode_flags"), "snapshot_policy"),
@@ -3666,7 +3665,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(gateway_command, "side_effect_snapshot_gate_count"), 5);
     ASSERT_EQ(mapping_number(gateway_command, "side_effect_snapshot_ready_count"), 5);
     ASSERT_EQ(mapping_number(gateway_command, "side_effect_observability_ready"), 1);
-    ASSERT_EQ(mapping_number(gateway_command, "side_effect_activation_ready"), 0);
+    ASSERT_EQ(mapping_number(gateway_command, "side_effect_activation_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_command, "activation_blocker"),
                  "interactive_command_side_effects_main_thread_bound");
 
@@ -7986,7 +7985,7 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_STREQ(mapping_string(payload, "interactive_mode_localecho_restore_boundary"),
                      "main_reply_queue_after_command_consume");
         ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_executor_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_required"), 0);
         ASSERT_STREQ(mapping_string(payload, "interactive_mode_terminal_mode_delta_boundary"),
                      "main_mode_delta_queue_after_command_consume");
@@ -8002,14 +8001,14 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_STREQ(mapping_string(payload, "interactive_mode_mxp_tag_filter_task_type"),
                      "interactive_mode_flags");
         ASSERT_EQ(mapping_number(payload, "interactive_mode_mxp_tag_filter_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "interactive_mode_mxp_tag_filter_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_mxp_tag_filter_executor_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_mxp_tag_filter_required"), 0);
         ASSERT_STREQ(mapping_string(payload, "interactive_mode_ed_command_model"),
                      "owner_command_frame_ed_command");
         ASSERT_STREQ(mapping_string(payload, "interactive_mode_ed_command_task_type"),
                      "interactive_mode_flags");
         ASSERT_EQ(mapping_number(payload, "interactive_mode_ed_command_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "interactive_mode_ed_command_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_ed_command_executor_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_ed_command_required"), 0);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_ed_buffer_active"), 0);
         ASSERT_STREQ(mapping_string(payload, "prompt_telnet_reschedule_state_policy"),
@@ -8125,7 +8124,7 @@ TEST_F(DriverTest, TestGatewayCommandMxpTagFilterFrame) {
         ASSERT_STREQ(mapping_string(payload, "interactive_mode_mxp_tag_filter_model"),
                      "owner_command_frame_mxp_tag_filter");
         ASSERT_EQ(mapping_number(payload, "interactive_mode_mxp_tag_filter_required"), 1);
-        ASSERT_EQ(mapping_number(payload, "interactive_mode_mxp_tag_filter_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_mxp_tag_filter_executor_ready"), 1);
       }
     }
   }
@@ -8204,7 +8203,7 @@ TEST_F(DriverTest, TestGatewayCommandEdCommandFrame) {
         ASSERT_STREQ(mapping_string(payload, "interactive_mode_ed_command_model"),
                      "owner_command_frame_ed_command");
         ASSERT_EQ(mapping_number(payload, "interactive_mode_ed_command_required"), 1);
-        ASSERT_EQ(mapping_number(payload, "interactive_mode_ed_command_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_ed_command_executor_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_ed_buffer_active"), 1);
       }
     }
@@ -8353,7 +8352,7 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveInputToState) {
         ASSERT_STREQ(mapping_string(payload, "interactive_mode_localecho_restore_boundary"),
                      "main_reply_queue_after_command_consume");
         ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_executor_ready"), 0);
+        ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_executor_ready"), 1);
         ASSERT_EQ(mapping_number(payload, "interactive_mode_localecho_restore_required"), 1);
         ASSERT_STREQ(mapping_string(payload, "interactive_mode_terminal_mode_delta_boundary"),
                      "main_mode_delta_queue_after_command_consume");

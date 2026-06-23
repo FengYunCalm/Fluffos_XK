@@ -262,10 +262,10 @@ constexpr std::array<GatewayCommandSideEffectReadinessGate, 5> kGatewayCommandSi
      "keep_prompt_telnet_reschedule_in_main_reply_queue_after_owner_command",
      "main_reply_queue_and_network_io", "main_reply_queue_after_owner_command", "prompt_telnet_reschedule_io",
      "redacted_prompt_telnet_reschedule_io_v1", 1, 1, 0, 1},
-    {"interactive_mode_flags", "interactive_flags_echo_mxp_ed_state",
-     "interactive_mode_flags_main_thread_bound", "split_echo_mxp_ed_mode_mutations_from_owner_command_execution",
-     "interactive_t", "owner_command_frame_mode_delta", "echo_mxp_ed_mode_flags",
-     "redacted_interactive_mode_flags_v1", 1, 1, 1, 0},
+    {"interactive_mode_flags", "interactive_flags_echo_mxp_ed_state", "",
+     "keep_echo_mxp_ed_mode_mutations_in_owner_command_frame",
+     "owner_command_frame", "owner_command_frame_mode_delta_executor", "echo_mxp_ed_mode_flags",
+     "redacted_interactive_mode_flags_v1", 1, 1, 0, 1},
 }};
 
 constexpr std::array<VMContextReadinessGate, 13> kVMContextOrdinaryLpcReadinessGates = {{
@@ -1167,22 +1167,22 @@ mapping_t *gateway_owner_task_contract_mapping() {
                      "owner_command_frame_localecho_restore");
   add_mapping_string(map, "interactive_mode_localecho_restore_task_type", "interactive_mode_flags");
   add_mapping_pair(map, "interactive_mode_localecho_restore_ready", 1);
-  add_mapping_pair(map, "interactive_mode_localecho_restore_executor_ready", 0);
+  add_mapping_pair(map, "interactive_mode_localecho_restore_executor_ready", 1);
   add_mapping_string(map, "command_mode_delta_terminal_mode_task_type", "command_mode_delta");
   add_mapping_string(map, "command_mode_delta_terminal_mode_task_keys",
                      "get_char_linemode_restore,single_char_escape_linemode,single_char_escape_charmode_restore");
   add_mapping_string(map, "command_mode_delta_terminal_mode_boundary",
                      "main_mode_delta_queue_after_command_consume");
   add_mapping_pair(map, "command_mode_delta_terminal_mode_ready", 1);
-  add_mapping_pair(map, "command_mode_delta_ready", 0);
+  add_mapping_pair(map, "command_mode_delta_ready", 1);
   add_mapping_string(map, "interactive_mode_mxp_tag_filter_model", "owner_command_frame_mxp_tag_filter");
   add_mapping_string(map, "interactive_mode_mxp_tag_filter_task_type", "interactive_mode_flags");
   add_mapping_pair(map, "interactive_mode_mxp_tag_filter_ready", 1);
-  add_mapping_pair(map, "interactive_mode_mxp_tag_filter_executor_ready", 0);
+  add_mapping_pair(map, "interactive_mode_mxp_tag_filter_executor_ready", 1);
   add_mapping_string(map, "interactive_mode_ed_command_model", "owner_command_frame_ed_command");
   add_mapping_string(map, "interactive_mode_ed_command_task_type", "interactive_mode_flags");
   add_mapping_pair(map, "interactive_mode_ed_command_ready", 1);
-  add_mapping_pair(map, "interactive_mode_ed_command_executor_ready", 0);
+  add_mapping_pair(map, "interactive_mode_ed_command_executor_ready", 1);
   add_mapping_string(map, "raw_input_trace_policy", "no_raw_command_text_in_trace");
   add_mapping_string(map, "command_execution_frame_model", "gateway_command_execution_frame_v1");
   add_mapping_string(map, "command_execution_frame_policy", "owner_scope_current_interactive_command_giver");

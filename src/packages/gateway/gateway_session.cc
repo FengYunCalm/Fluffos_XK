@@ -135,7 +135,7 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_string(payload.u.map, "interactive_mode_localecho_restore_boundary",
                      "main_reply_queue_after_command_consume");
   add_mapping_pair(payload.u.map, "interactive_mode_localecho_restore_ready", 1);
-  add_mapping_pair(payload.u.map, "interactive_mode_localecho_restore_executor_ready", 0);
+  add_mapping_pair(payload.u.map, "interactive_mode_localecho_restore_executor_ready", 1);
   add_mapping_pair(payload.u.map, "interactive_mode_localecho_restore_required", user && (user->iflags & NOECHO) ? 1 : 0);
   add_mapping_string(payload.u.map, "interactive_mode_terminal_mode_delta_boundary",
                      "main_mode_delta_queue_after_command_consume");
@@ -151,13 +151,13 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_string(payload.u.map, "interactive_mode_mxp_tag_filter_model", "owner_command_frame_mxp_tag_filter");
   add_mapping_string(payload.u.map, "interactive_mode_mxp_tag_filter_task_type", "interactive_mode_flags");
   add_mapping_pair(payload.u.map, "interactive_mode_mxp_tag_filter_ready", 1);
-  add_mapping_pair(payload.u.map, "interactive_mode_mxp_tag_filter_executor_ready", 0);
+  add_mapping_pair(payload.u.map, "interactive_mode_mxp_tag_filter_executor_ready", 1);
   add_mapping_pair(payload.u.map, "interactive_mode_mxp_tag_filter_required",
                    user && (user->iflags & USING_MXP) ? 1 : 0);
   add_mapping_string(payload.u.map, "interactive_mode_ed_command_model", "owner_command_frame_ed_command");
   add_mapping_string(payload.u.map, "interactive_mode_ed_command_task_type", "interactive_mode_flags");
   add_mapping_pair(payload.u.map, "interactive_mode_ed_command_ready", 1);
-  add_mapping_pair(payload.u.map, "interactive_mode_ed_command_executor_ready", 0);
+  add_mapping_pair(payload.u.map, "interactive_mode_ed_command_executor_ready", 1);
   add_mapping_pair(payload.u.map, "interactive_mode_ed_command_required", user && user->ed_buffer ? 1 : 0);
   add_mapping_pair(payload.u.map, "interactive_mode_ed_buffer_active", user && user->ed_buffer ? 1 : 0);
   add_mapping_string(payload.u.map, "prompt_telnet_reschedule_state_policy",
