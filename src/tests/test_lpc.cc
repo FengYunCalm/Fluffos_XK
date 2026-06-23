@@ -710,6 +710,49 @@ TEST_F(DriverTest, TestSharedStdServicesUseDefaultOwnerInsidePlayerOwnerScope) {
   destruct_object(player);
 }
 
+TEST_F(DriverTest, TestStdHelperServicesUseDefaultOwnerInsidePlayerOwnerScope) {
+  const char* helper_paths[] = {"std/base64.c", "std/break_string.c", "std/element_of_weighted.c",
+                                "std/reduce.c", "std/highest.c",       "std/lowest.c",
+                                "std/number_string.c", "std/sum.c"};
+  for (auto* path : helper_paths) {
+    if (auto* existing = find_object(path)) {
+      destruct_object(existing);
+    }
+  }
+
+  current_object = master_ob;
+  auto* player = clone_object("single/owner_singleton", 0);
+  ASSERT_NE(player, nullptr);
+  vm_owner_set_id(player, "owner/test/std-helper/player");
+
+  VMOwnerScope scope(vm_context(), vm_owner_id(player), vm_owner_epoch(player));
+  current_object = player;
+
+  for (auto* path : helper_paths) {
+    auto* service = load_object_for_test(path);
+    ASSERT_NE(service, nullptr) << path;
+    ASSERT_STREQ(vm_owner_default_id(), vm_owner_id(service)) << path;
+    ASSERT_NE(vm_owner_id(service), vm_owner_id(player)) << path;
+
+    auto handle = vm_object_handle(service);
+    ASSERT_TRUE(handle.valid) << path;
+    ASSERT_FALSE(handle.object_path.empty()) << path;
+    ASSERT_EQ(vm_object_store_owner_resolve(vm_owner_default_id(), handle.object_id), service) << path;
+    ASSERT_EQ(vm_object_store_owner_resolve(vm_owner_id(player), handle.object_id), nullptr) << path;
+    ASSERT_EQ(vm_object_store_owner_path_resolve(vm_owner_default_id(), handle.object_path.c_str()), service)
+        << path;
+    ASSERT_EQ(vm_object_store_owner_path_resolve(vm_owner_id(player), handle.object_path.c_str()), nullptr)
+        << path;
+  }
+
+  for (auto* path : helper_paths) {
+    if (auto* service = find_object(path)) {
+      destruct_object(service);
+    }
+  }
+  destruct_object(player);
+}
+
 TEST_F(DriverTest, TestSimulEfunSingletonKeepsDefaultOwnerInsidePlayerOwnerScope) {
   current_object = master_ob;
   auto* player = clone_object("single/owner_singleton", 0);
