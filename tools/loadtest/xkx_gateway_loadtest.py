@@ -216,6 +216,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--duration", type=float, default=0.0)
     parser.add_argument("--ramp-up", type=float, default=0.0)
     parser.add_argument("--scenario", choices=sorted(SCENARIOS), default="smoke")
+    parser.add_argument("--mode", choices=("off", "audit", "enforced"), default="audit")
     parser.add_argument("--commands", default="", help="semicolon-separated command override")
     parser.add_argument("--account-prefix", default="loadtest")
     parser.add_argument("--password", default="test1234")
@@ -524,21 +525,53 @@ def summarize(
             errors.append({"account": result.account, "error": err})
     elapsed = max(0.001, ended - started)
     commands_sent = sum(result.commands_sent for result in results)
+    commands_ok = sum(item.commands_ok for item in results)
+    command_failures = sum(item.command_failures for item in results)
+    timeouts = sum(item.timeouts for item in results)
+    disconnected = sum(1 for item in results if item.disconnected)
+    logged_in = sum(1 for item in results if item.logged_in)
+    metrics_error = metrics_after.get("_metrics_error") or metrics_before.get("_metrics_error")
+    gateway_metrics_delta = {
+        "connections_rejected_total": metric_delta(
+            metrics_before, metrics_after, "xkx_gateway_connections_rejected_total"
+        ),
+        "messages_dropped_total": metric_delta(
+            metrics_before, metrics_after, "xkx_gateway_websocket_messages_dropped_total"
+        ),
+        "queue_full_total": metric_delta(
+            metrics_before, metrics_after, "xkx_gateway_websocket_queue_full_total"
+        ),
+        "write_errors_total": metric_delta(
+            metrics_before, metrics_after, "xkx_gateway_websocket_write_errors_total"
+        ),
+    }
+    metrics_available = (
+        bool(args.metrics_url)
+        and metrics_error is None
+        and all(value is not None for value in gateway_metrics_delta.values())
+    )
+    gateway_error_delta_zero = metrics_available and all(value == 0 for value in gateway_metrics_delta.values())
+    short_smoke = args.users == 1 and args.scenario == "smoke" and args.duration <= 0
     return {
+        "schema": "xkx_gateway_loadtest_report_v1",
+        "run_id": args.run_id,
+        "mode": args.mode,
         "host": args.host,
         "port": args.port,
         "path": args.path,
         "scenario": args.scenario,
+        "duration_seconds": elapsed,
+        "duration_requested_seconds": args.duration,
         "users_requested": args.users,
         "users_started": len(results),
         "connected": sum(1 for item in results if item.connected),
-        "logged_in": sum(1 for item in results if item.logged_in),
+        "logged_in": logged_in,
         "created_roles": sum(1 for item in results if item.created_role),
-        "disconnected": sum(1 for item in results if item.disconnected),
+        "disconnected": disconnected,
         "commands_sent": commands_sent,
-        "commands_ok": sum(item.commands_ok for item in results),
-        "command_failures": sum(item.command_failures for item in results),
-        "timeouts": sum(item.timeouts for item in results),
+        "commands_ok": commands_ok,
+        "command_failures": command_failures,
+        "timeouts": timeouts,
         "commands_per_second": commands_sent / elapsed,
         "latency_ms": {
             "count": len(latencies),
@@ -549,21 +582,20 @@ def summarize(
             "p99": percentile(latencies, 0.99),
             "max": max(latencies) if latencies else None,
         },
-        "gateway_metrics_delta": {
-            "connections_rejected_total": metric_delta(
-                metrics_before, metrics_after, "xkx_gateway_connections_rejected_total"
-            ),
-            "messages_dropped_total": metric_delta(
-                metrics_before, metrics_after, "xkx_gateway_websocket_messages_dropped_total"
-            ),
-            "queue_full_total": metric_delta(
-                metrics_before, metrics_after, "xkx_gateway_websocket_queue_full_total"
-            ),
-            "write_errors_total": metric_delta(
-                metrics_before, metrics_after, "xkx_gateway_websocket_write_errors_total"
-            ),
+        "gateway_metrics_delta": gateway_metrics_delta,
+        "production_gate_observations": {
+            "schema": "multicore_production_gate_evidence_v1",
+            "short_smoke_sufficient": False,
+            "short_smoke_run": short_smoke,
+            "all_users_logged_in": logged_in == args.users,
+            "command_failures_zero": command_failures == 0,
+            "timeouts_zero": timeouts == 0,
+            "disconnects_zero": disconnected == 0,
+            "gateway_error_delta_zero": gateway_error_delta_zero,
+            "metrics_available": metrics_available,
+            "production_matrix_complete": False,
         },
-        "metrics_error": metrics_after.get("_metrics_error") or metrics_before.get("_metrics_error"),
+        "metrics_error": metrics_error,
         "sample_errors": errors[: max(0, args.sample_errors)],
         "elapsed_seconds": elapsed,
     }

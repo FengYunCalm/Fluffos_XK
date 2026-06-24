@@ -19,6 +19,21 @@
 | `production_gate_blocker` | `real_mudlib_pressure_not_verified` | 仍缺长压和高并发证据 |
 | `production_gate_required_users` | `1,3,10,50,100` | 必须覆盖的并发用户档位 |
 | `production_gate_required_durations` | `smoke,30m,2h,overnight` | 必须覆盖的时长档位 |
+| `production_gate_required_modes` | `off,audit,enforced` | 必须覆盖的 driver 多核模式 |
+| `production_gate_required_scenarios` | `login,create,move,chat,inventory,shop,quest,combat,skills,mail,reconnect,gateway_callback,socket_callback,heartbeat,callout` | 必须覆盖的真实 mudlib 场景 |
+| `production_gate_evidence_schema` | `multicore_production_gate_evidence_v1` | 生产验收证据 schema |
+| `production_gate_short_smoke_sufficient` | `0` | 单用户短 smoke 永远不能单独置 ready |
+| `production_gate_minimum_ready_evidence` | `all_required_modes_users_durations_scenarios_with_zero_blockers` | 最小 ready 证据模型 |
+| `production_gate_unclassified_hotspots_required_zero` | `1` | 未分类 cross-owner hotspot 必须为 0 |
+| `production_gate_direct_cross_owner_writes_required_zero` | `1` | 直接 cross-owner 可变写必须为 0 |
+| `production_gate_context_leaks_required_zero` | `1` | VMContext/eval/context leak 必须为 0 |
+| `production_gate_future_backlog_required_zero` | `1` | future backlog 不允许持续增长 |
+| `production_gate_same_owner_claim_conflict_required_zero` | `1` | same-owner claim conflict 必须为 0 |
+| `production_gate_gateway_error_delta_required_zero` | `1` | gateway rejected/dropped/queue-full/write-error 增量必须为 0 |
+| `production_gate_socket_release_policy` | `main_required_until_owner_safe_handshake` | `socket_release` 保持 main-required，直到 release/acquire handshake 被证明 owner-safe |
+| `production_gate_socket_release_handshake_ready` | `0` | handshake 尚未完成，不得误判为 production complete |
+| `production_gate_report_schema` | `xkx_gateway_loadtest_report_v1` | loadtest JSON 报告 schema |
+| `production_gate_report_required_fields` | `schema,run_id,mode,users_requested,duration_seconds,scenario,commands_ok,timeouts,gateway_metrics_delta,production_gate_observations` | 每个归档 JSON 必须包含的字段 |
 
 这些字段只表达生产验收状态，不改变 gateway、heartbeat、callout 或 socket callback 的执行路径。
 
@@ -40,10 +55,12 @@
 仓库内自包含入口为 `tools/loadtest/xkx_gateway_loadtest.py`。最小 smoke 运行形式：
 
 ```bash
-python3 tools/loadtest/xkx_gateway_loadtest.py --host <gateway-host> --port <gateway-port> --path <ws-path> --users 1 --scenario smoke --fail-on-error
+python3 tools/loadtest/xkx_gateway_loadtest.py --host <gateway-host> --port <gateway-port> --path <ws-path> --mode audit --users 1 --scenario smoke --fail-on-error
 ```
 
-扩大压测时显式设置 `--users`、`--duration`、`--ramp-up`、`--scenario`、`--metrics-url` 和 `--report-json`。该脚本只使用 Python 标准库，WebSocket 握手、XK 协议包识别、文本帧收发、登录/建角、命令循环和 JSON 摘要都在脚本内完成。
+扩大压测时显式设置 `--mode`、`--users`、`--duration`、`--ramp-up`、`--scenario`、`--metrics-url` 和 `--report-json`。`--mode` 只记录本次报告对应的 driver 模式，不负责启动或切换 driver；调用方必须先用匹配的 `off`、`audit` 或 `enforced` 配置启动真实链路。
+
+该脚本输出的 JSON 顶层 schema 为 `xkx_gateway_loadtest_report_v1`，并包含 `production_gate_observations.schema=multicore_production_gate_evidence_v1`。没有 `--metrics-url` 或指标缺失时，`production_gate_observations.metrics_available` 与 `gateway_error_delta_zero` 都必须为 `false`，该 run 只能作为功能 smoke，不能作为 production gate 证据。报告中的 `production_gate_observations.production_matrix_complete` 在单次入口内固定为 `false`，最终只能由完整 production matrix 汇总器在所有模式、用户数、时长和场景都满足后置为 complete。
 
 当前入口已通过 1 用户 `smoke` 场景，覆盖登录/建角和 `look`、`i`、`skills`、`score`、`map` 命令闭环；该结果只证明入口可用和最小路径未立即回归，不替代 production matrix。
 
