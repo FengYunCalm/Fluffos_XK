@@ -445,14 +445,13 @@ payload 约束：
 
 ## 当前未完成的能力
 
-- gateway command 的真实 owner executor 执行路径；heartbeat、callout、async/db/file completion、DNS callback 和 socket read/write/close callback 真实入口已迁到 owner executor，但仍需真实 mudlib 长压验证吞吐。
-- array、mapping、object ref 的完整跨线程内存模型。
-- driver callback allowlist 到剩余 gateway command execute 入口实际迁移的生产路径。
-- input/gateway command 在 owner executor 中真正并行执行。
-- cross-owner `call_other` 的完整 message/future 替代链。
-- `owner_lpc_task_allowed()` 的正式注册、审计、domain 合同和验收。
-- 长时间、高并发、真实 mudlib 压测。
-- production rollout 策略和回滚指标。
+- 真实 mudlib cross-owner hotspot audit 尚未完成，`call_other`、`present`、move/destruct、parser、mutable payload、socket/gateway callback 仍需按频率和 owner 边界聚合。
+- 高频同步返回路径尚未逐项证明已经迁成 snapshot、owner message 或 owner future。
+- array、mapping、object ref 的完整跨线程内存模型仍不允许绕过 frozen payload/ObjectHandle 边界。
+- `owner_lpc_task_allowed()` 的正式注册、审计、domain 合同和验收仍未生产化。
+- gateway command、heartbeat、callout、async/db/file completion、DNS callback 和 socket read/write/close callback 已有 owner executor 入口，但真实 mudlib 长压吞吐仍未验收。
+- 长时间、高并发、真实 mudlib 压测仍未完成，`production_gate_ready` 必须保持 0。
+- production rollout 策略、回滚指标和发布阻断条件仍需以真实压测结果收口。
 
 ## 维护原则
 

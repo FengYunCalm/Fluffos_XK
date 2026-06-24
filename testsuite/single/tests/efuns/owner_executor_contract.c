@@ -392,6 +392,13 @@ void assert_gateway_owner_task_contract(mapping contract) {
               contract["command_executor_readiness_gate_model"]);
     ASSERT_EQ("mudlib_cross_owner_hotspots", contract["command_executor_next_gate"]);
     ASSERT_EQ("", contract["command_executor_next_blocker"]);
+    ASSERT_EQ(1, contract["mudlib_audit_required"]);
+    ASSERT_EQ(0, contract["mudlib_cross_owner_hotspots_ready"]);
+    ASSERT_EQ("real_mudlib_audit_not_complete", contract["mudlib_cross_owner_hotspots_blocker"]);
+    ASSERT_EQ(0, contract["production_gate_ready"]);
+    ASSERT_EQ("real_mudlib_pressure_not_verified", contract["production_gate_blocker"]);
+    ASSERT_EQ("1,3,10,50,100", contract["production_gate_required_users"]);
+    ASSERT_EQ("smoke,30m,2h,overnight", contract["production_gate_required_durations"]);
     ASSERT_EQ(7, contract["command_executor_readiness_gate_count"]);
     ASSERT_EQ(7, contract["command_executor_satisfied_gate_count"]);
     ASSERT_EQ(0, contract["command_executor_blocked_gate_count"]);
@@ -506,6 +513,13 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("mudlib_cross_owner_hotspots", contract["next_blocker"]);
     ASSERT_EQ("mudlib_audit/cross_owner_hotspots/production_gate",
               contract["next_blocker_chain"]);
+    ASSERT_EQ(1, contract["mudlib_audit_required"]);
+    ASSERT_EQ(0, contract["mudlib_cross_owner_hotspots_ready"]);
+    ASSERT_EQ("real_mudlib_audit_not_complete", contract["mudlib_cross_owner_hotspots_blocker"]);
+    ASSERT_EQ(0, contract["production_gate_ready"]);
+    ASSERT_EQ("real_mudlib_pressure_not_verified", contract["production_gate_blocker"]);
+    ASSERT_EQ("1,3,10,50,100", contract["production_gate_required_users"]);
+    ASSERT_EQ("smoke,30m,2h,overnight", contract["production_gate_required_durations"]);
     ASSERT(arrayp(tasks));
     ASSERT_EQ(4, sizeof(tasks));
     for (i = 0; i < sizeof(tasks); i++) {
@@ -677,6 +691,13 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("explicit_open_same_owner_only", boundary_contract["ordinary_lpc_policy"]);
     ASSERT_EQ(0, boundary_contract["lpc_surface_expanded"]);
     ASSERT_EQ("mudlib_cross_owner_hotspots", boundary_contract["next_refactor_target"]);
+    ASSERT_EQ(1, boundary_contract["mudlib_audit_required"]);
+    ASSERT_EQ(0, boundary_contract["mudlib_cross_owner_hotspots_ready"]);
+    ASSERT_EQ("real_mudlib_audit_not_complete", boundary_contract["mudlib_cross_owner_hotspots_blocker"]);
+    ASSERT_EQ(0, boundary_contract["production_gate_ready"]);
+    ASSERT_EQ("real_mudlib_pressure_not_verified", boundary_contract["production_gate_blocker"]);
+    ASSERT_EQ("1,3,10,50,100", boundary_contract["production_gate_required_users"]);
+    ASSERT_EQ("smoke,30m,2h,overnight", boundary_contract["production_gate_required_durations"]);
     ASSERT(mapp(fairness));
     ASSERT_EQ("owner_executor_v1", status["executor_contract_version"]);
     ASSERT_EQ("owner_executor", status["executor_model"]);

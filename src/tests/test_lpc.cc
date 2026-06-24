@@ -4346,6 +4346,16 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "explicit_open_same_owner_only");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_surface_expanded"), 0);
     ASSERT_STREQ(mapping_string(boundary_contract, "next_refactor_target"), "mudlib_cross_owner_hotspots");
+    ASSERT_EQ(mapping_number(boundary_contract, "mudlib_audit_required"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "mudlib_cross_owner_hotspots_ready"), 0);
+    ASSERT_STREQ(mapping_string(boundary_contract, "mudlib_cross_owner_hotspots_blocker"),
+                 "real_mudlib_audit_not_complete");
+    ASSERT_EQ(mapping_number(boundary_contract, "production_gate_ready"), 0);
+    ASSERT_STREQ(mapping_string(boundary_contract, "production_gate_blocker"),
+                 "real_mudlib_pressure_not_verified");
+    ASSERT_STREQ(mapping_string(boundary_contract, "production_gate_required_users"), "1,3,10,50,100");
+    ASSERT_STREQ(mapping_string(boundary_contract, "production_gate_required_durations"),
+                 "smoke,30m,2h,overnight");
 
     auto* gateway_contract = mapping_entry(status, "gateway_owner_task_contract");
     ASSERT_NE(gateway_contract, nullptr);
@@ -4467,6 +4477,16 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "all_gates_required_before_owner_executor");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_gate"), "mudlib_cross_owner_hotspots");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_blocker"), "");
+    ASSERT_EQ(mapping_number(gateway_contract, "mudlib_audit_required"), 1);
+    ASSERT_EQ(mapping_number(gateway_contract, "mudlib_cross_owner_hotspots_ready"), 0);
+    ASSERT_STREQ(mapping_string(gateway_contract, "mudlib_cross_owner_hotspots_blocker"),
+                 "real_mudlib_audit_not_complete");
+    ASSERT_EQ(mapping_number(gateway_contract, "production_gate_ready"), 0);
+    ASSERT_STREQ(mapping_string(gateway_contract, "production_gate_blocker"),
+                 "real_mudlib_pressure_not_verified");
+    ASSERT_STREQ(mapping_string(gateway_contract, "production_gate_required_users"), "1,3,10,50,100");
+    ASSERT_STREQ(mapping_string(gateway_contract, "production_gate_required_durations"),
+                 "smoke,30m,2h,overnight");
     ASSERT_GE(mapping_number(status, "thread_gateway_command_guarded"), 0);
     ASSERT_GE(mapping_number(status, "thread_gateway_command_rejected"), 0);
     ASSERT_EQ(mapping_number(gateway_contract, "command_executor_readiness_gate_count"), 7);
@@ -4595,6 +4615,16 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gateway_contract, "next_blocker"), "mudlib_cross_owner_hotspots");
     ASSERT_STREQ(mapping_string(gateway_contract, "next_blocker_chain"),
                  "mudlib_audit/cross_owner_hotspots/production_gate");
+    ASSERT_EQ(mapping_number(gateway_contract, "mudlib_audit_required"), 1);
+    ASSERT_EQ(mapping_number(gateway_contract, "mudlib_cross_owner_hotspots_ready"), 0);
+    ASSERT_STREQ(mapping_string(gateway_contract, "mudlib_cross_owner_hotspots_blocker"),
+                 "real_mudlib_audit_not_complete");
+    ASSERT_EQ(mapping_number(gateway_contract, "production_gate_ready"), 0);
+    ASSERT_STREQ(mapping_string(gateway_contract, "production_gate_blocker"),
+                 "real_mudlib_pressure_not_verified");
+    ASSERT_STREQ(mapping_string(gateway_contract, "production_gate_required_users"), "1,3,10,50,100");
+    ASSERT_STREQ(mapping_string(gateway_contract, "production_gate_required_durations"),
+                 "smoke,30m,2h,overnight");
     auto* gateway_tasks = mapping_array(gateway_contract, "tasks");
     ASSERT_NE(gateway_tasks, nullptr);
     ASSERT_EQ(gateway_tasks->size, 4);

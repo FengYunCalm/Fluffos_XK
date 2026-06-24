@@ -1177,7 +1177,7 @@ array_t *gateway_owner_task_contract_entries_array() {
 }
 
 mapping_t *gateway_owner_task_contract_mapping() {
-  auto *map = allocate_mapping(107);
+  auto *map = allocate_mapping(114);
   add_mapping_pair(map, "contract_version", 1);
   add_mapping_string(map, "input_model", "owner_executor_with_main_fallback");
   add_mapping_string(map, "executor_migration_state", "owner_executor_active");
@@ -1305,6 +1305,13 @@ mapping_t *gateway_owner_task_contract_mapping() {
   free_array(tasks);
   add_mapping_string(map, "next_blocker", "mudlib_cross_owner_hotspots");
   add_mapping_string(map, "next_blocker_chain", "mudlib_audit/cross_owner_hotspots/production_gate");
+  add_mapping_pair(map, "mudlib_audit_required", 1);
+  add_mapping_pair(map, "mudlib_cross_owner_hotspots_ready", 0);
+  add_mapping_string(map, "mudlib_cross_owner_hotspots_blocker", "real_mudlib_audit_not_complete");
+  add_mapping_pair(map, "production_gate_ready", 0);
+  add_mapping_string(map, "production_gate_blocker", "real_mudlib_pressure_not_verified");
+  add_mapping_string(map, "production_gate_required_users", "1,3,10,50,100");
+  add_mapping_string(map, "production_gate_required_durations", "smoke,30m,2h,overnight");
   return map;
 }
 
@@ -1392,7 +1399,7 @@ mapping_t *vm_context_contract_mapping() {
 }
 
 mapping_t *owner_executor_boundary_contract_mapping() {
-  auto *contract = allocate_mapping(48);
+  auto *contract = allocate_mapping(55);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "boundary_model", "owner_executor_boundary_v1");
   add_mapping_string(contract, "implementation_state", "compilation_unit_active");
@@ -1493,6 +1500,13 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "ordinary_lpc_policy", "explicit_open_same_owner_only");
   add_mapping_pair(contract, "lpc_surface_expanded", 0);
   add_mapping_string(contract, "next_refactor_target", "mudlib_cross_owner_hotspots");
+  add_mapping_pair(contract, "mudlib_audit_required", 1);
+  add_mapping_pair(contract, "mudlib_cross_owner_hotspots_ready", 0);
+  add_mapping_string(contract, "mudlib_cross_owner_hotspots_blocker", "real_mudlib_audit_not_complete");
+  add_mapping_pair(contract, "production_gate_ready", 0);
+  add_mapping_string(contract, "production_gate_blocker", "real_mudlib_pressure_not_verified");
+  add_mapping_string(contract, "production_gate_required_users", "1,3,10,50,100");
+  add_mapping_string(contract, "production_gate_required_durations", "smoke,30m,2h,overnight");
   return contract;
 }
 
