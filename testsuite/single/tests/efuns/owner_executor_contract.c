@@ -555,6 +555,8 @@ void assert_owner_executor_contract(mapping status) {
     mapping dispatch_contract = ([]);
     mapping readonly_contract;
     mixed *nested_lpc_contracts;
+    mixed *callback_task_contracts;
+    mixed *nested_callback_contracts;
     int i;
 
     ASSERT(mapp(contract));
@@ -601,13 +603,18 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["main_required_tasks_excluded"]);
     ASSERT_EQ(1, boundary_contract["target_handle_messages_main_required"]);
     ASSERT_EQ(1, boundary_contract["compute_result_executor_safe"]);
+    ASSERT_EQ(1, boundary_contract["executor_callback_task_boundary_ready"]);
+    ASSERT_EQ(1, boundary_contract["executor_callback_allowlist_ready"]);
+    ASSERT_EQ(1, boundary_contract["executor_callback_cleanup_main_required"]);
+    ASSERT_EQ("heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute",
+              boundary_contract["executor_callback_allowlist"]);
     ASSERT_EQ(0, boundary_contract["gateway_command_rejected"]);
     ASSERT_EQ(1, boundary_contract["gateway_command_executor_activation_ready"]);
     ASSERT_EQ(1, boundary_contract["ordinary_lpc_default_closed"]);
     ASSERT_EQ(1, boundary_contract["ordinary_lpc_explicit_open_required"]);
     ASSERT_EQ("explicit_open_same_owner_only", boundary_contract["ordinary_lpc_policy"]);
     ASSERT_EQ(0, boundary_contract["lpc_surface_expanded"]);
-    ASSERT_EQ("extract_owner_executor_compilation_unit_without_expanding_lpc_surface",
+    ASSERT_EQ("migrate_heartbeat_callout_async_callbacks_to_owner_executor",
               boundary_contract["next_refactor_target"]);
     ASSERT(mapp(fairness));
     ASSERT_EQ("owner_executor_v1", status["executor_contract_version"]);
@@ -621,6 +628,13 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["ordinary_lpc_explicit_open_required"]);
     ASSERT_EQ("default_closed_explicit_open", status["ordinary_lpc_activation_policy"]);
     ASSERT_EQ("", status["ordinary_lpc_next_blocker"]);
+    ASSERT_EQ(1, status["executor_callback_task_boundary_ready"]);
+    ASSERT_EQ(1, status["executor_callback_allowlist_ready"]);
+    ASSERT_EQ(6, status["executor_callback_allowlist_count"]);
+    ASSERT_EQ("frozen_payload_or_owner_handle_only", status["executor_callback_payload_policy"]);
+    callback_task_contracts = status["executor_callback_task_contracts"];
+    ASSERT(arrayp(callback_task_contracts));
+    ASSERT_EQ(6, sizeof(callback_task_contracts));
     ASSERT(arrayp(lpc_contracts));
     ASSERT_EQ(1, sizeof(lpc_contracts));
     readonly_contract = lpc_contracts[0];
@@ -639,7 +653,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(0, readonly_contract["direct_cross_owner_write"]);
     ASSERT(stringp(readonly_contract["reason"]));
     ASSERT(arrayp(dispatch_contracts));
-    ASSERT_EQ(12, sizeof(dispatch_contracts));
+    ASSERT_EQ(18, sizeof(dispatch_contracts));
     for (i = 0; i < sizeof(dispatch_contracts); i++) {
         mapping entry = dispatch_contracts[i];
 
@@ -670,6 +684,18 @@ void assert_owner_executor_contract(mapping status) {
     assert_dispatch_entry(dispatch_contract, "gateway_command",
                           "gateway_command_executor_activation", "gateway_command",
                           "executor_safe", 1, 1, 0);
+    assert_dispatch_entry(dispatch_contract, "heartbeat", "owner_executor_callback",
+                          "executor_callback", "executor_safe_callback", 1, 1, 0);
+    assert_dispatch_entry(dispatch_contract, "call_out", "owner_executor_callback",
+                          "executor_callback", "executor_safe_callback", 1, 1, 0);
+    assert_dispatch_entry(dispatch_contract, "async_callback", "owner_executor_callback",
+                          "executor_callback", "executor_safe_callback", 1, 1, 0);
+    assert_dispatch_entry(dispatch_contract, "dns_callback", "owner_executor_callback",
+                          "executor_callback", "executor_safe_callback", 1, 1, 0);
+    assert_dispatch_entry(dispatch_contract, "socket_callback", "owner_executor_callback",
+                          "executor_callback", "executor_safe_callback", 1, 1, 0);
+    assert_dispatch_entry(dispatch_contract, "gateway_command_execute", "owner_executor_callback",
+                          "executor_callback", "executor_safe_callback", 1, 1, 0);
     assert_dispatch_entry(dispatch_contract, "compute_result", "compute_result",
                           "compute_result", "executor_safe", 1, 1, 0);
     assert_dispatch_entry(dispatch_contract, "lpc", "lpc", "reject_lpc",
@@ -684,6 +710,12 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT(intp(status["executor_safe_task_dispatched"]));
     ASSERT(intp(status["executor_command_consume_entry_executed"]));
     ASSERT(intp(status["executor_command_frame_restore_entry_executed"]));
+    ASSERT(intp(status["executor_callback_queued"]));
+    ASSERT(intp(status["executor_callback_dispatched"]));
+    ASSERT(intp(status["executor_callback_dropped"]));
+    ASSERT(intp(status["executor_callback_main_cleanup_backlog"]));
+    ASSERT(intp(status["executor_callback_main_cleanup_queued"]));
+    ASSERT(intp(status["executor_callback_main_cleanup_dispatched"]));
     ASSERT(intp(status["thread_gateway_command_guarded"]));
     ASSERT(intp(status["thread_gateway_command_rejected"]));
     ASSERT(intp(status["thread_ordinary_lpc_executed"]));
@@ -734,6 +766,11 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, contract["gateway_command_executor_activation"]["side_effect_observability_ready"]);
     ASSERT_EQ(1, contract["gateway_command_executor_activation"]["side_effect_activation_ready"]);
     ASSERT_EQ("", contract["gateway_command_executor_activation"]["activation_blocker"]);
+    assert_contract_entry(contract, "owner_executor_callback_allowlist", "executor_safe_callback",
+                          "owner_executor", 1, 0, 0);
+    nested_callback_contracts = contract["owner_executor_callback_allowlist"]["contracts"];
+    ASSERT(arrayp(nested_callback_contracts));
+    ASSERT_EQ(6, sizeof(nested_callback_contracts));
     assert_contract_entry(contract, "owner_message_mailbox", "executor_safe",
                           "owner_executor", 1, 0, 0);
     assert_owner_message_route_contract(contract, "owner_message_mailbox", 1, 0);

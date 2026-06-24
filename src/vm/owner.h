@@ -48,6 +48,10 @@ uint64_t vm_owner_record_task_trace(const char *owner_id, const char *task_type,
 uint64_t vm_owner_enqueue_main_task(object_t *target, const char *task_type, const char *task_key,
                                     std::function<void()> callback,
                                     std::function<void()> drop_callback = nullptr);
+bool vm_owner_executor_available();
+uint64_t vm_owner_enqueue_executor_task(object_t *target, const char *task_type, const char *task_key,
+                                        std::function<void()> callback,
+                                        std::function<void()> drop_callback = nullptr);
 uint64_t vm_owner_enqueue_main_task_with_payload(object_t *target, const char *task_type,
                                                  const char *task_key, const char *payload_key,
                                                  svalue_t *payload, std::function<void()> callback,
