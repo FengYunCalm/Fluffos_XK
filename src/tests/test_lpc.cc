@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <vector>
 #include "base/package_api.h"
+#include "base/internal/strutils.h"
 
 #include "backend.h"
 #include "interactive.h"
@@ -21,6 +22,8 @@
 #include "packages/gateway/gateway.h"
 #include "vm/context.h"
 #include "vm/internal/base/array.h"
+#include "vm/internal/base/mapping.h"
+#include "vm/internal/base/object.h"
 #include "vm/internal/otable.h"
 #include "vm/internal/simulate.h"
 #include "vm/object_handle.h"
@@ -72,6 +75,70 @@ object_t* load_object_for_test(const char* path) {
   return object;
 }
 }  // namespace
+
+TEST_F(DriverTest, TestSaveSvalueDepthIsThreadLocal) {
+  save_svalue_depth = 41;
+  std::atomic<int> worker_depth{0};
+  std::thread worker([&] {
+    save_svalue_depth = 7;
+    worker_depth.store(save_svalue_depth, std::memory_order_relaxed);
+  });
+  worker.join();
+
+  ASSERT_EQ(worker_depth.load(std::memory_order_relaxed), 7);
+  ASSERT_EQ(save_svalue_depth, 41);
+  save_svalue_depth = 0;
+}
+
+TEST_F(DriverTest, TestStringIndexRejectsEmptySource) {
+  ASSERT_EQ(u8_egc_index_as_single_codepoint(nullptr, 0, 0), -2);
+  ASSERT_EQ(u8_egc_index_as_single_codepoint("", 0, 0), -2);
+}
+
+TEST_F(DriverTest, TestStringIndexHandlesConcurrentEgcIterators) {
+  const char* ascii = "abcdef";
+  const char* utf8 = "\xE4\xB8\xADx";
+  std::atomic<int> failures{0};
+  std::vector<std::thread> workers;
+
+  for (int t = 0; t < 8; t++) {
+    workers.emplace_back([&] {
+      for (int i = 0; i < 2000; i++) {
+        if (u8_egc_index_as_single_codepoint(ascii, 6, 2) != 'c') failures++;
+        if (u8_egc_index_as_single_codepoint(utf8, 4, 0) != 0x4E2D) failures++;
+        if (u8_egc_index_as_single_codepoint(utf8, 4, 9) != -2) failures++;
+      }
+    });
+  }
+
+  for (auto& worker : workers) worker.join();
+  ASSERT_EQ(failures.load(), 0);
+}
+
+TEST_F(DriverTest, TestMappingNodeFreelistIsOwnerThreadLocal) {
+  std::atomic<int> failures{0};
+  std::vector<std::thread> workers;
+
+  for (int t = 0; t < 8; t++) {
+    workers.emplace_back([&] {
+      mapping_t owner_local_map{};
+      owner_local_map.count = 0;
+      for (int i = 0; i < 4000; i++) {
+        auto* node = new_map_node();
+        if (node == nullptr) {
+          failures++;
+          continue;
+        }
+        node->values[0] = const0u;
+        node->values[1] = const0u;
+        free_node(&owner_local_map, node);
+      }
+    });
+  }
+
+  for (auto& worker : workers) worker.join();
+  ASSERT_EQ(failures.load(), 0);
+}
 
 TEST_F(DriverTest, TestCompileDumpProgWorks) {
   current_object = master_ob;

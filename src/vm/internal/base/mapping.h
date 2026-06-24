@@ -24,6 +24,7 @@ typedef struct mapping_node_s {
 
 typedef struct mapping_node_block_s {
   struct mapping_node_block_s *next;
+  struct mapping_node_block_s *global_next;
   mapping_node_t nodes[MNB_SIZE];
 } mapping_node_block_t;
 
@@ -73,7 +74,7 @@ typedef struct minfo_s {
 /*
  * mapping.c
  */
-extern mapping_node_t *locked_map_nodes;
+extern thread_local mapping_node_t *locked_map_nodes;
 
 int msameval(const svalue_t *, const svalue_t *);
 int mapping_save_size(mapping_t *);

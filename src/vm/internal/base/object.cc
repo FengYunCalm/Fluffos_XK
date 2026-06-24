@@ -61,8 +61,9 @@ int valid_hide(object_t *obj) {
 }
 #endif
 
-int save_svalue_depth = 0, max_depth;
-int *sizes = nullptr;
+thread_local int save_svalue_depth = 0;
+thread_local int max_depth = 0;
+thread_local int *sizes = nullptr;
 
 int svalue_save_size(svalue_t *v) {
   switch (v->type) {
@@ -1489,13 +1490,13 @@ static int save_object_recurse_str(program_t *prog, svalue_t **svp, int type, in
 }
 
 namespace {
-int sel = -1;
+const int SAVE_EXTENSION_LENGTH = strlen(SAVE_EXTENSION);
 const int SAVE_EXTENSION_GZ_LENGTH = strlen(SAVE_GZ_EXTENSION);
 }  // namespace
 
 int save_object(object_t *ob, const char *file, int save_zeros) {
   char *name, *p;
-  static char save_name[256], tmp_name[256];
+  char save_name[256], tmp_name[256];
   int len;
   FILE *f;
   int success;
@@ -1520,11 +1521,8 @@ int save_object(object_t *ob, const char *file, int save_zeros) {
     len -= 2;
   }
 
-  if (sel == -1) {
-    sel = strlen(SAVE_EXTENSION);
-  }
-  if (strcmp(file + len - sel, SAVE_EXTENSION) == 0) {
-    len -= sel;
+  if (len >= SAVE_EXTENSION_LENGTH && strcmp(file + len - SAVE_EXTENSION_LENGTH, SAVE_EXTENSION) == 0) {
+    len -= SAVE_EXTENSION_LENGTH;
   }
 
   if (save_compressed) {
@@ -1532,7 +1530,7 @@ int save_object(object_t *ob, const char *file, int save_zeros) {
     strcpy(name, file);
     strcpy(name + len, SAVE_GZ_EXTENSION);
   } else {
-    name = new_string(len + sel, "save_object");
+    name = new_string(len + SAVE_EXTENSION_LENGTH, "save_object");
     strcpy(name, file);
     strcpy(name + len, SAVE_EXTENSION);
   }

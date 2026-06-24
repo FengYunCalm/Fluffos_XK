@@ -2,13 +2,15 @@
 
 #include "base/std.h"
 
+#include <functional>
+#include <atomic>
 #include <deque>
 #include <map>
-#include <functional>
+#include <mutex>
 
 #include "vm/internal/base/machine.h"
 
-mapping_node_t *locked_map_nodes = nullptr;
+thread_local mapping_node_t *locked_map_nodes = nullptr;
 
 /*
  * LPC mapping (associative arrays) module.  Contains routines for
@@ -163,16 +165,20 @@ void free_mapping(mapping_t *m) {
   dealloc_mapping(m);
 }
 
-static mapping_node_t *free_nodes = nullptr;
+static thread_local mapping_node_t *free_nodes = nullptr;
+static thread_local mapping_node_block_t *thread_mapping_node_blocks = nullptr;
+static std::atomic<uint64_t> total_free_nodes{0};
 mapping_node_block_t *mapping_node_blocks = nullptr;
+std::mutex mapping_node_blocks_mutex;
 
 #ifdef DEBUGMALLOC_EXTENSIONS
 void mark_mapping_node_blocks() {
+  std::lock_guard<std::mutex> guard(mapping_node_blocks_mutex);
   mapping_node_block_t *mnb = mapping_node_blocks;
 
   while (mnb) {
     DO_MARK(mnb, TAG_MAP_NODE_BLOCK);
-    mnb = mnb->next;
+    mnb = mnb->global_next;
   }
 }
 #endif
@@ -184,11 +190,18 @@ mapping_node_t *new_map_node() {
 
   if ((ret = free_nodes)) {
     free_nodes = ret->next;
+    total_free_nodes.fetch_sub(1, std::memory_order_relaxed);
   } else {
     mnb = reinterpret_cast<mapping_node_block_t *>(
         DMALLOC(sizeof(mapping_node_block_t), TAG_MAP_NODE_BLOCK, "new_map_node"));
-    mnb->next = mapping_node_blocks;
-    mapping_node_blocks = mnb;
+    mnb->next = thread_mapping_node_blocks;
+    thread_mapping_node_blocks = mnb;
+    {
+      std::lock_guard<std::mutex> guard(mapping_node_blocks_mutex);
+      mnb->global_next = mapping_node_blocks;
+      mapping_node_blocks = mnb;
+    }
+    total_free_nodes.fetch_add(MNB_SIZE - 1, std::memory_order_relaxed);
     mnb->nodes[MNB_SIZE - 1].next = nullptr;
     mnb->nodes[MNB_SIZE - 1].values[0] = const0u;
     mnb->nodes[MNB_SIZE - 1].values[1] = const0u;
@@ -217,6 +230,7 @@ void unlock_mapping(mapping_t *m) {
       /* and add it to the free list */
       tmp->next = free_nodes;
       free_nodes = tmp;
+      total_free_nodes.fetch_add(1, std::memory_order_relaxed);
     } else {
       mn = &((*mn)->next);
     }
@@ -234,18 +248,12 @@ void free_node(mapping_t *m, mapping_node_t *mn) {
     *(mn->values + 1) = const0u;
     mn->next = free_nodes;
     free_nodes = mn;
+    total_free_nodes.fetch_add(1, std::memory_order_relaxed);
   }
 }
 
 uint64_t free_node_count() {
-  if (!free_nodes) return 0;
-
-  uint64_t count = 1;
-  auto p = free_nodes;
-  while ((p = p->next)) {
-    count++;
-  }
-  return count;
+  return total_free_nodes.load(std::memory_order_relaxed);
 }
 
 /* allocate_mapping(int n)
