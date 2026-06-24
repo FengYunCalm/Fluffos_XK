@@ -1,5 +1,7 @@
 int called = 0;
 int heartbeat_called = 0;
+int callout_called = 0;
+int callout_off_main = 0;
 
 void virtual_start() {
   called = 1;
@@ -28,6 +30,28 @@ void start_heartbeat() {
 
 void stop_heartbeat() {
   set_heart_beat(0);
+}
+
+int start_callout_probe() {
+  return call_out("callout_probe", 0);
+}
+
+void callout_probe() {
+  callout_called++;
+  callout_off_main = !vm_context_is_main_thread();
+}
+
+int get_callout_called() {
+  return callout_called;
+}
+
+int get_callout_off_main() {
+  return callout_off_main;
+}
+
+void reset_callout_probe() {
+  callout_called = 0;
+  callout_off_main = 0;
 }
 
 void dummy()

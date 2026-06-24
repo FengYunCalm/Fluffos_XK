@@ -16,6 +16,7 @@
 #include "user.h"
 
 #include "compiler/internal/compiler.h"
+#include "packages/core/call_out.h"
 #include "packages/core/heartbeat.h"
 #include "packages/gateway/gateway.h"
 #include "vm/context.h"
@@ -30,6 +31,7 @@ extern uint64_t vm_owner_enqueue_test_main_required_message(const char* owner_id
 extern uint64_t vm_owner_enqueue_command_frame_restore(object_t* target);
 extern bool vm_object_store_test_support_remove_live_object_ref_for_bridge_readiness(const char* owner_id,
                                                                                     uint64_t object_id);
+extern bool vm_call_out_test_support_run_handle(LPC_INT handle);
 extern int replace_interactive(object_t *ob, object_t *obfrom);
 extern bool gateway_dispatch_message_for_test(int fd, const char *payload);
 
@@ -1694,6 +1696,211 @@ TEST_F(DriverTest, TestVmOwnerHeartbeatExecutorDropsStaleOwnerEpoch) {
   ASSERT_TRUE(trace_has_heartbeat_stale());
   vm_owner_drain_main_tasks(8);
   ASSERT_EQ(call_number("get_heartbeat_called", obj), 0);
+}
+
+TEST_F(DriverTest, TestVmOwnerCalloutDispatchesThroughOwnerExecutor) {
+  const char* owner = "owner/test/callout-executor";
+  struct RuntimeGuard {
+    int saved_mode;
+    object_t* obj{nullptr};
+
+    ~RuntimeGuard() {
+      vm_owner_thread_stop();
+      vm_owner_drain_main_tasks(64);
+      clear_call_outs();
+      clear_tick_events();
+      if (obj) {
+        vm_owner_clear_id(obj);
+        destruct_object(obj);
+      }
+      CONFIG_INT(__RC_MULTICORE_MODE__) = saved_mode;
+    }
+  } runtime_guard{CONFIG_INT(__RC_MULTICORE_MODE__)};
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_AUDIT;
+  vm_owner_thread_stop();
+
+  object_t* obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+  runtime_guard.obj = obj;
+  vm_owner_set_id(obj, owner);
+
+  auto call_number = [](const char* method, object_t* target) -> long {
+    auto* ret = safe_apply(method, target, 0, ORIGIN_DRIVER);
+    EXPECT_NE(ret, nullptr);
+    EXPECT_EQ(ret ? ret->type : T_INVALID, T_NUMBER);
+    return ret && ret->type == T_NUMBER ? ret->u.number : -1;
+  };
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+  auto trace_has_callout_state = [&](const char* state) {
+    auto* trace = vm_owner_task_trace(96);
+    auto* events = find_string_in_mapping(trace, "events");
+    bool found = false;
+    EXPECT_NE(events, nullptr);
+    EXPECT_EQ(events ? events->type : T_INVALID, T_ARRAY);
+    if (events && events->type == T_ARRAY) {
+      for (int i = 0; i < events->u.arr->size; i++) {
+        auto* event = events->u.arr->item[i].u.map;
+        if (std::string(mapping_string(event, "task_type")) == "call_out" &&
+            std::string(mapping_string(event, "owner_id")) == owner &&
+            std::string(mapping_string(event, "state")) == state) {
+          found = true;
+          break;
+        }
+      }
+    }
+    free_mapping(trace);
+    return found;
+  };
+
+  ASSERT_EQ(call_number("get_callout_called", obj), 0);
+  ASSERT_EQ(call_number("get_callout_off_main", obj), 0);
+  auto* before = vm_owner_thread_status();
+  auto before_callback_queued = mapping_number(before, "executor_callback_queued");
+  auto before_callback_dispatched = mapping_number(before, "executor_callback_dispatched");
+  auto before_cleanup_queued = mapping_number(before, "executor_callback_main_cleanup_queued");
+  auto before_cleanup_dispatched = mapping_number(before, "executor_callback_main_cleanup_dispatched");
+  auto before_main_queued = mapping_number(before, "main_queued");
+  free_mapping(before);
+
+  vm_owner_thread_start(1);
+  ASSERT_TRUE(vm_owner_executor_available());
+  auto handle = call_number("start_callout_probe", obj);
+  ASSERT_GT(handle, 0);
+  ASSERT_TRUE(vm_call_out_test_support_run_handle(static_cast<LPC_INT>(handle)));
+
+  for (int i = 0; i < 100 && !trace_has_callout_state("thread_executor_callback_completed"); i++) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_TRUE(trace_has_callout_state("thread_executor_callback_dispatched"));
+  ASSERT_TRUE(trace_has_callout_state("thread_executor_callback_completed"));
+  ASSERT_EQ(call_number("get_callout_called", obj), 1);
+  ASSERT_EQ(call_number("get_callout_off_main", obj), 1);
+
+  for (int i = 0; i < 100 && !trace_has_callout_state("executor_callback_main_cleanup_queued"); i++) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_TRUE(trace_has_callout_state("executor_callback_main_cleanup_queued"));
+  ASSERT_GE(vm_owner_drain_main_tasks(64), 1);
+  ASSERT_TRUE(trace_has_callout_state("executor_callback_main_cleanup_dispatched"));
+
+  auto* after = vm_owner_thread_status();
+  ASSERT_GE(mapping_number(after, "executor_callback_queued"), before_callback_queued + 1);
+  ASSERT_GE(mapping_number(after, "executor_callback_dispatched"), before_callback_dispatched + 1);
+  ASSERT_GE(mapping_number(after, "executor_callback_main_cleanup_queued"), before_cleanup_queued + 1);
+  ASSERT_GE(mapping_number(after, "executor_callback_main_cleanup_dispatched"), before_cleanup_dispatched + 1);
+  ASSERT_EQ(mapping_number(after, "main_queued"), before_main_queued);
+  ASSERT_EQ(mapping_number(after, "callout_owner_executor_ready"), 1);
+  ASSERT_STREQ(mapping_string(after, "callout_owner_executor_task_type"), "call_out");
+  ASSERT_STREQ(mapping_string(after, "callout_owner_executor_route"), "owner_executor");
+  ASSERT_STREQ(mapping_string(after, "callout_owner_executor_fallback_route"), "owner_main_queue");
+  ASSERT_STREQ(mapping_string(after, "callout_owner_executor_policy"), "audit_enforced_owner_thread_else_main");
+  ASSERT_EQ(mapping_number(after, "callout_owner_executor_expired_handle_detach_ready"), 1);
+  ASSERT_EQ(mapping_number(after, "callout_owner_executor_cleanup_main_ready"), 1);
+  ASSERT_EQ(mapping_number(after, "callout_owner_executor_drop_cleanup_ready"), 1);
+  ASSERT_EQ(mapping_number(after, "callout_owner_executor_fallback_main_ready"), 1);
+  free_mapping(after);
+}
+
+TEST_F(DriverTest, TestVmOwnerCalloutExecutorDropsStaleOwnerEpoch) {
+  const char* owner = "owner/test/callout-executor-stale";
+  const char* moved_owner = "owner/test/callout-executor-stale/moved";
+  struct RuntimeGuard {
+    int saved_mode;
+    object_t* obj{nullptr};
+
+    ~RuntimeGuard() {
+      vm_owner_thread_stop();
+      vm_owner_drain_main_tasks(64);
+      clear_call_outs();
+      clear_tick_events();
+      if (obj) {
+        vm_owner_clear_id(obj);
+        destruct_object(obj);
+      }
+      CONFIG_INT(__RC_MULTICORE_MODE__) = saved_mode;
+    }
+  } runtime_guard{CONFIG_INT(__RC_MULTICORE_MODE__)};
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_AUDIT;
+  vm_owner_thread_stop();
+
+  object_t* obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+  runtime_guard.obj = obj;
+  vm_owner_set_id(obj, owner);
+
+  auto call_number = [](const char* method, object_t* target) -> long {
+    auto* ret = safe_apply(method, target, 0, ORIGIN_DRIVER);
+    EXPECT_NE(ret, nullptr);
+    EXPECT_EQ(ret ? ret->type : T_INVALID, T_NUMBER);
+    return ret && ret->type == T_NUMBER ? ret->u.number : -1;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+  auto trace_has_callout_stale = [&] {
+    auto* trace = vm_owner_task_trace(128);
+    auto* events = find_string_in_mapping(trace, "events");
+    bool found = false;
+    EXPECT_NE(events, nullptr);
+    EXPECT_EQ(events ? events->type : T_INVALID, T_ARRAY);
+    if (events && events->type == T_ARRAY) {
+      for (int i = 0; i < events->u.arr->size; i++) {
+        auto* event = events->u.arr->item[i].u.map;
+        if (std::string(mapping_string(event, "task_type")) == "call_out" &&
+            std::string(mapping_string(event, "owner_id")) == owner &&
+            std::string(mapping_string(event, "state")) == "thread_executor_callback_stale") {
+          found = true;
+          break;
+        }
+      }
+    }
+    free_mapping(trace);
+    return found;
+  };
+
+  std::atomic<int> blocker_started{0};
+  std::atomic<int> release_blocker{0};
+  vm_owner_thread_start(1);
+  ASSERT_TRUE(vm_owner_executor_available());
+  auto blocker = vm_owner_enqueue_executor_task(obj, "call_out", "callout-stale-blocker", [&] {
+    blocker_started.store(1, std::memory_order_release);
+    for (int i = 0; i < 200 && release_blocker.load(std::memory_order_acquire) == 0; i++) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  });
+  ASSERT_GT(blocker, 0u);
+  for (int i = 0; i < 100 && blocker_started.load(std::memory_order_acquire) == 0; i++) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  ASSERT_EQ(call_number("get_callout_called", obj), 0);
+  auto handle = call_number("start_callout_probe", obj);
+  ASSERT_GT(handle, 0);
+  ASSERT_TRUE(vm_call_out_test_support_run_handle(static_cast<LPC_INT>(handle)));
+  vm_owner_set_id(obj, moved_owner);
+  release_blocker.store(1, std::memory_order_release);
+
+  for (int i = 0; i < 100 && !trace_has_callout_stale(); i++) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_TRUE(trace_has_callout_stale());
+  vm_owner_drain_main_tasks(64);
+  ASSERT_EQ(call_number("get_callout_called", obj), 0);
 }
 
 TEST_F(DriverTest, TestVmOwnerAccessTraceRecordsCrossOwnerAccess) {
@@ -3368,6 +3575,15 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(status, "heartbeat_owner_executor_policy"), "audit_enforced_owner_thread_else_main");
     ASSERT_EQ(mapping_number(status, "heartbeat_owner_executor_fallback_main_ready"), 1);
     ASSERT_EQ(mapping_number(status, "heartbeat_current_object_thread_local"), 1);
+    ASSERT_EQ(mapping_number(status, "callout_owner_executor_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "callout_owner_executor_task_type"), "call_out");
+    ASSERT_STREQ(mapping_string(status, "callout_owner_executor_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(status, "callout_owner_executor_fallback_route"), "owner_main_queue");
+    ASSERT_STREQ(mapping_string(status, "callout_owner_executor_policy"), "audit_enforced_owner_thread_else_main");
+    ASSERT_EQ(mapping_number(status, "callout_owner_executor_expired_handle_detach_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "callout_owner_executor_cleanup_main_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "callout_owner_executor_drop_cleanup_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "callout_owner_executor_fallback_main_ready"), 1);
     ASSERT_GE(mapping_number(status, "executor_callback_main_cleanup_queued"), 0);
     auto* callback_task_contracts = mapping_array(status, "executor_callback_task_contracts");
     ASSERT_NE(callback_task_contracts, nullptr);
@@ -3608,6 +3824,16 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "audit_enforced_owner_thread_else_main");
     ASSERT_EQ(mapping_number(boundary_contract, "heartbeat_owner_executor_fallback_main_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "heartbeat_current_object_thread_local"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "callout_owner_executor_task_type"), "call_out");
+    ASSERT_STREQ(mapping_string(boundary_contract, "callout_owner_executor_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(boundary_contract, "callout_owner_executor_fallback_route"), "owner_main_queue");
+    ASSERT_STREQ(mapping_string(boundary_contract, "callout_owner_executor_policy"),
+                 "audit_enforced_owner_thread_else_main");
+    ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_expired_handle_detach_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_cleanup_main_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_drop_cleanup_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_fallback_main_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_rejected"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_executor_activation_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "ordinary_lpc_default_closed"), 1);
@@ -3616,7 +3842,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "explicit_open_same_owner_only");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_surface_expanded"), 0);
     ASSERT_STREQ(mapping_string(boundary_contract, "next_refactor_target"),
-                 "migrate_callout_async_callbacks_to_owner_executor");
+                 "migrate_async_dns_socket_callbacks_to_owner_executor");
 
     auto* gateway_contract = mapping_entry(status, "gateway_owner_task_contract");
     ASSERT_NE(gateway_contract, nullptr);

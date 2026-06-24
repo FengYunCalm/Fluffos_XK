@@ -1431,13 +1431,22 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "heartbeat_owner_executor_policy", "audit_enforced_owner_thread_else_main");
   add_mapping_pair(contract, "heartbeat_owner_executor_fallback_main_ready", 1);
   add_mapping_pair(contract, "heartbeat_current_object_thread_local", 1);
+  add_mapping_pair(contract, "callout_owner_executor_ready", 1);
+  add_mapping_string(contract, "callout_owner_executor_task_type", "call_out");
+  add_mapping_string(contract, "callout_owner_executor_route", "owner_executor");
+  add_mapping_string(contract, "callout_owner_executor_fallback_route", "owner_main_queue");
+  add_mapping_string(contract, "callout_owner_executor_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_pair(contract, "callout_owner_executor_expired_handle_detach_ready", 1);
+  add_mapping_pair(contract, "callout_owner_executor_cleanup_main_ready", 1);
+  add_mapping_pair(contract, "callout_owner_executor_drop_cleanup_ready", 1);
+  add_mapping_pair(contract, "callout_owner_executor_fallback_main_ready", 1);
   add_mapping_pair(contract, "gateway_command_rejected", 0);
   add_mapping_pair(contract, "gateway_command_executor_activation_ready", 1);
   add_mapping_pair(contract, "ordinary_lpc_default_closed", 1);
   add_mapping_pair(contract, "ordinary_lpc_explicit_open_required", 1);
   add_mapping_string(contract, "ordinary_lpc_policy", "explicit_open_same_owner_only");
   add_mapping_pair(contract, "lpc_surface_expanded", 0);
-  add_mapping_string(contract, "next_refactor_target", "migrate_callout_async_callbacks_to_owner_executor");
+  add_mapping_string(contract, "next_refactor_target", "migrate_async_dns_socket_callbacks_to_owner_executor");
   return contract;
 }
 
@@ -3353,6 +3362,34 @@ uint64_t vm_owner_enqueue_executor_task(object_t *target, const char *task_type,
   return task_id;
 }
 
+uint64_t vm_owner_enqueue_executor_callback_cleanup(const char *owner_id, uint64_t owner_epoch,
+                                                    const char *task_type, const char *task_key,
+                                                    std::function<void()> callback) {
+  if (!callback) {
+    return 0;
+  }
+
+  OwnerExecutorCallbackCleanup cleanup;
+  cleanup.task_id = next_mailbox_task_id.fetch_add(1, std::memory_order_relaxed);
+  cleanup.sequence = total_enqueued.fetch_add(1, std::memory_order_relaxed) + 1;
+  cleanup.owner_epoch = owner_epoch;
+  cleanup.owner_id = normalize_owner_id(owner_id);
+  cleanup.task_type = normalize_task_text(task_type, "executor_callback_cleanup");
+  cleanup.task_key = normalize_task_text(task_key, "");
+  cleanup.callback = std::move(callback);
+  auto task_id = cleanup.task_id;
+
+  {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    append_owner_task_trace(cleanup.task_id, cleanup.sequence, cleanup.owner_id, cleanup.owner_epoch,
+                            cleanup.task_type, cleanup.task_key,
+                            "executor_callback_main_cleanup_queued");
+    owner_executor_callback_main_cleanups.push_back(std::move(cleanup));
+    owner_executor_callback_main_cleanup_queued.fetch_add(1, std::memory_order_relaxed);
+  }
+  return task_id;
+}
+
 uint64_t vm_owner_enqueue_test_main_required_message(const char *owner_id, const char *task_key) {
   OwnerMailboxTask task;
   uint64_t task_id;
@@ -4696,6 +4733,15 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_string(map, "heartbeat_owner_executor_policy", "audit_enforced_owner_thread_else_main");
   add_mapping_pair(map, "heartbeat_owner_executor_fallback_main_ready", 1);
   add_mapping_pair(map, "heartbeat_current_object_thread_local", 1);
+  add_mapping_pair(map, "callout_owner_executor_ready", 1);
+  add_mapping_string(map, "callout_owner_executor_task_type", "call_out");
+  add_mapping_string(map, "callout_owner_executor_route", "owner_executor");
+  add_mapping_string(map, "callout_owner_executor_fallback_route", "owner_main_queue");
+  add_mapping_string(map, "callout_owner_executor_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_pair(map, "callout_owner_executor_expired_handle_detach_ready", 1);
+  add_mapping_pair(map, "callout_owner_executor_cleanup_main_ready", 1);
+  add_mapping_pair(map, "callout_owner_executor_drop_cleanup_ready", 1);
+  add_mapping_pair(map, "callout_owner_executor_fallback_main_ready", 1);
   add_mapping_pair(map, "executor_callback_queued",
                    static_cast<long>(owner_executor_callback_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_dispatched",
@@ -4849,6 +4895,15 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_string(map, "heartbeat_owner_executor_policy", "audit_enforced_owner_thread_else_main");
   add_mapping_pair(map, "heartbeat_owner_executor_fallback_main_ready", 1);
   add_mapping_pair(map, "heartbeat_current_object_thread_local", 1);
+  add_mapping_pair(map, "callout_owner_executor_ready", 1);
+  add_mapping_string(map, "callout_owner_executor_task_type", "call_out");
+  add_mapping_string(map, "callout_owner_executor_route", "owner_executor");
+  add_mapping_string(map, "callout_owner_executor_fallback_route", "owner_main_queue");
+  add_mapping_string(map, "callout_owner_executor_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_pair(map, "callout_owner_executor_expired_handle_detach_ready", 1);
+  add_mapping_pair(map, "callout_owner_executor_cleanup_main_ready", 1);
+  add_mapping_pair(map, "callout_owner_executor_drop_cleanup_ready", 1);
+  add_mapping_pair(map, "callout_owner_executor_fallback_main_ready", 1);
   add_mapping_pair(map, "executor_callback_queued",
                    static_cast<long>(owner_executor_callback_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_dispatched",
