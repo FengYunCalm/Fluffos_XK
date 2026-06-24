@@ -1424,14 +1424,20 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "executor_callback_cleanup_main_required", 1);
   add_mapping_string(contract, "executor_callback_allowlist",
                      "heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute");
+  add_mapping_pair(contract, "heartbeat_owner_executor_ready", 1);
+  add_mapping_string(contract, "heartbeat_owner_executor_task_type", "heartbeat");
+  add_mapping_string(contract, "heartbeat_owner_executor_route", "owner_executor");
+  add_mapping_string(contract, "heartbeat_owner_executor_fallback_route", "owner_main_queue");
+  add_mapping_string(contract, "heartbeat_owner_executor_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_pair(contract, "heartbeat_owner_executor_fallback_main_ready", 1);
+  add_mapping_pair(contract, "heartbeat_current_object_thread_local", 1);
   add_mapping_pair(contract, "gateway_command_rejected", 0);
   add_mapping_pair(contract, "gateway_command_executor_activation_ready", 1);
   add_mapping_pair(contract, "ordinary_lpc_default_closed", 1);
   add_mapping_pair(contract, "ordinary_lpc_explicit_open_required", 1);
   add_mapping_string(contract, "ordinary_lpc_policy", "explicit_open_same_owner_only");
   add_mapping_pair(contract, "lpc_surface_expanded", 0);
-  add_mapping_string(contract, "next_refactor_target",
-                     "migrate_heartbeat_callout_async_callbacks_to_owner_executor");
+  add_mapping_string(contract, "next_refactor_target", "migrate_callout_async_callbacks_to_owner_executor");
   return contract;
 }
 
@@ -4683,6 +4689,13 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_pair(map, "executor_callback_allowlist_ready", 1);
   add_mapping_pair(map, "executor_callback_allowlist_count", 6);
   add_mapping_string(map, "executor_callback_payload_policy", "frozen_payload_or_owner_handle_only");
+  add_mapping_pair(map, "heartbeat_owner_executor_ready", 1);
+  add_mapping_string(map, "heartbeat_owner_executor_task_type", "heartbeat");
+  add_mapping_string(map, "heartbeat_owner_executor_route", "owner_executor");
+  add_mapping_string(map, "heartbeat_owner_executor_fallback_route", "owner_main_queue");
+  add_mapping_string(map, "heartbeat_owner_executor_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_pair(map, "heartbeat_owner_executor_fallback_main_ready", 1);
+  add_mapping_pair(map, "heartbeat_current_object_thread_local", 1);
   add_mapping_pair(map, "executor_callback_queued",
                    static_cast<long>(owner_executor_callback_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_dispatched",
@@ -4829,6 +4842,13 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_pair(map, "executor_callback_allowlist_ready", 1);
   add_mapping_pair(map, "executor_callback_allowlist_count", 6);
   add_mapping_string(map, "executor_callback_payload_policy", "frozen_payload_or_owner_handle_only");
+  add_mapping_pair(map, "heartbeat_owner_executor_ready", 1);
+  add_mapping_string(map, "heartbeat_owner_executor_task_type", "heartbeat");
+  add_mapping_string(map, "heartbeat_owner_executor_route", "owner_executor");
+  add_mapping_string(map, "heartbeat_owner_executor_fallback_route", "owner_main_queue");
+  add_mapping_string(map, "heartbeat_owner_executor_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_pair(map, "heartbeat_owner_executor_fallback_main_ready", 1);
+  add_mapping_pair(map, "heartbeat_current_object_thread_local", 1);
   add_mapping_pair(map, "executor_callback_queued",
                    static_cast<long>(owner_executor_callback_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_dispatched",

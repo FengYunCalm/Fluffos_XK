@@ -608,13 +608,20 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["executor_callback_cleanup_main_required"]);
     ASSERT_EQ("heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute",
               boundary_contract["executor_callback_allowlist"]);
+    ASSERT_EQ(1, boundary_contract["heartbeat_owner_executor_ready"]);
+    ASSERT_EQ("heartbeat", boundary_contract["heartbeat_owner_executor_task_type"]);
+    ASSERT_EQ("owner_executor", boundary_contract["heartbeat_owner_executor_route"]);
+    ASSERT_EQ("owner_main_queue", boundary_contract["heartbeat_owner_executor_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_else_main", boundary_contract["heartbeat_owner_executor_policy"]);
+    ASSERT_EQ(1, boundary_contract["heartbeat_owner_executor_fallback_main_ready"]);
+    ASSERT_EQ(1, boundary_contract["heartbeat_current_object_thread_local"]);
     ASSERT_EQ(0, boundary_contract["gateway_command_rejected"]);
     ASSERT_EQ(1, boundary_contract["gateway_command_executor_activation_ready"]);
     ASSERT_EQ(1, boundary_contract["ordinary_lpc_default_closed"]);
     ASSERT_EQ(1, boundary_contract["ordinary_lpc_explicit_open_required"]);
     ASSERT_EQ("explicit_open_same_owner_only", boundary_contract["ordinary_lpc_policy"]);
     ASSERT_EQ(0, boundary_contract["lpc_surface_expanded"]);
-    ASSERT_EQ("migrate_heartbeat_callout_async_callbacks_to_owner_executor",
+    ASSERT_EQ("migrate_callout_async_callbacks_to_owner_executor",
               boundary_contract["next_refactor_target"]);
     ASSERT(mapp(fairness));
     ASSERT_EQ("owner_executor_v1", status["executor_contract_version"]);
@@ -632,6 +639,13 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["executor_callback_allowlist_ready"]);
     ASSERT_EQ(6, status["executor_callback_allowlist_count"]);
     ASSERT_EQ("frozen_payload_or_owner_handle_only", status["executor_callback_payload_policy"]);
+    ASSERT_EQ(1, status["heartbeat_owner_executor_ready"]);
+    ASSERT_EQ("heartbeat", status["heartbeat_owner_executor_task_type"]);
+    ASSERT_EQ("owner_executor", status["heartbeat_owner_executor_route"]);
+    ASSERT_EQ("owner_main_queue", status["heartbeat_owner_executor_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_else_main", status["heartbeat_owner_executor_policy"]);
+    ASSERT_EQ(1, status["heartbeat_owner_executor_fallback_main_ready"]);
+    ASSERT_EQ(1, status["heartbeat_current_object_thread_local"]);
     callback_task_contracts = status["executor_callback_task_contracts"];
     ASSERT(arrayp(callback_task_contracts));
     ASSERT_EQ(6, sizeof(callback_task_contracts));

@@ -24,10 +24,30 @@ struct heart_beat_t {
   std::string owner_id;
 };
 
-// Global pointer to current object executing heartbeat.
-object_t *g_current_heartbeat_obj;
+// Thread-local pointer to current object executing heartbeat.
+thread_local object_t *g_current_heartbeat_obj;
 
 namespace {
+class CurrentHeartbeatScope {
+ public:
+  explicit CurrentHeartbeatScope(object_t *ob) : previous_(g_current_heartbeat_obj) { g_current_heartbeat_obj = ob; }
+  ~CurrentHeartbeatScope() { g_current_heartbeat_obj = previous_; }
+
+ private:
+  object_t *previous_;
+};
+
+class ControlledLpcScope {
+ public:
+  ControlledLpcScope() : previous_(vm_context().owner.controlled_lpc_active) {
+    vm_context().owner.controlled_lpc_active = true;
+  }
+  ~ControlledLpcScope() { vm_context().owner.controlled_lpc_active = previous_; }
+
+ private:
+  bool previous_;
+};
+
 void execute_heart_beat(object_t *ob) {
   if (!ob || (ob->flags & O_DESTRUCTED) || ob->prog->heart_beat == 0) {
     return;
@@ -56,7 +76,8 @@ void execute_heart_beat(object_t *ob) {
 
   save_command_giver(new_command_giver);
 
-  g_current_heartbeat_obj = ob;
+  CurrentHeartbeatScope current_heartbeat(ob);
+  ControlledLpcScope controlled_lpc;
 
   error_context_t econ;
 
@@ -72,7 +93,6 @@ void execute_heart_beat(object_t *ob) {
   pop_context(&econ);
 
   restore_command_giver();
-  g_current_heartbeat_obj = nullptr;
 }
 }  // namespace
 
@@ -129,6 +149,13 @@ void call_heart_beat() {
     if (curr_hb->owner_id != vm_owner_id(ob) || curr_hb->owner_epoch != vm_owner_epoch(ob)) {
       vm_owner_record_task_trace(curr_hb->owner_id.c_str(), "heartbeat", "heart_beat", curr_hb->owner_epoch, "stale");
       continue;
+    }
+    if (vm_owner_executor_available()) {
+      auto task_id = vm_owner_enqueue_executor_task(ob, "heartbeat", "heart_beat", [ob] { execute_heart_beat(ob); });
+      if (task_id != 0) {
+        curr_hb = nullptr;
+        continue;
+      }
     }
     vm_owner_enqueue_main_task(ob, "heartbeat", "heart_beat", [ob] { execute_heart_beat(ob); });
     curr_hb = nullptr;
