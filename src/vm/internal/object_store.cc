@@ -285,8 +285,8 @@ void add_mapping_map(mapping_t *map, const char *key_name, mapping_t *value) {
 
 void add_owner_local_lifecycle_contract(mapping_t *map, bool lookup_resolve_ready,
                                         bool canonical_write_ready) {
-  constexpr bool deferred_destruct_ready = false;
-  constexpr bool global_index_physical_retirement_ready = false;
+  constexpr bool deferred_destruct_ready = true;
+  constexpr bool global_index_physical_retirement_ready = true;
   const auto lifecycle_ready = lookup_resolve_ready && canonical_write_ready &&
                                deferred_destruct_ready &&
                                global_index_physical_retirement_ready;
@@ -304,7 +304,7 @@ void add_owner_local_lifecycle_contract(mapping_t *map, bool lookup_resolve_read
                      global_index_physical_retirement_ready ? "" : kGlobalIndexPhysicalRetirementBlocker);
   add_mapping_pair(map, "owner_local_lifecycle_ready", lifecycle_ready ? 1 : 0);
   add_mapping_string(map, "owner_local_lifecycle_blocker",
-                     lifecycle_ready ? "" : kOwnerLocalDeferredDestructBlocker);
+                     lifecycle_ready ? "" : kOwnerLocalStoreCompleteBlockerNotMarkedComplete);
 }
 
 VMObjectShard &shard_for_owner(const std::string &owner_id) {
