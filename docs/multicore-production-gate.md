@@ -35,9 +35,21 @@
 
 该 smoke 只能证明最小路径没有立即回归，不能替代 3/10/50/100 用户并发，也不能替代 30 分钟、2 小时和隔夜压测。
 
+## Loadtest 入口
+
+仓库内自包含入口为 `tools/loadtest/xkx_gateway_loadtest.py`。最小 smoke 运行形式：
+
+```bash
+python3 tools/loadtest/xkx_gateway_loadtest.py --host <gateway-host> --port <gateway-port> --path <ws-path> --users 1 --scenario smoke --fail-on-error
+```
+
+扩大压测时显式设置 `--users`、`--duration`、`--ramp-up`、`--scenario`、`--metrics-url` 和 `--report-json`。该脚本只使用 Python 标准库，WebSocket 握手、XK 协议包识别、文本帧收发、登录/建角、命令循环和 JSON 摘要都在脚本内完成。
+
+当前入口已通过 1 用户 `smoke` 场景，覆盖登录/建角和 `look`、`i`、`skills`、`score`、`map` 命令闭环；该结果只证明入口可用和最小路径未立即回归，不替代 production matrix。
+
 ## 当前阻塞项
 
-1. loadtest 入口尚未形成仓库内可重复生产验收命令；现有本地压测素材依赖未随仓库提交的客户端模块，不能作为正式 CI 或交接入口。
+1. 仓库内已新增 `tools/loadtest/xkx_gateway_loadtest.py` 作为自包含 gateway WebSocket smoke/loadtest 入口；该入口已解除对本地未提交客户端模块的隐式依赖，并已通过 1 用户 smoke，但尚未跑完 production matrix。
 2. smoke 中出现客户端侧大 payload JSON 解析 warning，涉及批量/系统/地图/动作类消息；虽然本次命令响应可用、driver 日志未新增错误，但这仍是 gateway production gate blocker。
 3. 真实 mudlib cross-owner hotspot audit 尚未输出完整清单：`call_other`、`present`、move/destruct、parser、mutable payload、socket/gateway callback 都需要按热点归类。
 4. 高频同步返回路径尚未逐项证明已经迁成 snapshot、owner message 或 owner future。
@@ -71,7 +83,7 @@
 
 ## 下一步
 
-1. 提供仓库内可重复的 gateway loadtest 入口，去掉对本地未提交客户端模块的隐式依赖。
+1. 使用 `tools/loadtest/xkx_gateway_loadtest.py` 先复跑 1 用户 smoke，再扩展到 3/10/50/100 用户矩阵。
 2. 修复或隔离大 payload JSON 解析 warning，并把 BACH/SYST/MAPS/ACT 类消息纳入 smoke 断言。
 3. 在 `audit` 下收集真实 cross-owner hotspot 报告，输出按调用类型、owner、对象路径和频率聚合的清单。
 4. 将高频同步返回路径迁移为 snapshot、owner message 或 owner future。
