@@ -1440,13 +1440,30 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "callout_owner_executor_cleanup_main_ready", 1);
   add_mapping_pair(contract, "callout_owner_executor_drop_cleanup_ready", 1);
   add_mapping_pair(contract, "callout_owner_executor_fallback_main_ready", 1);
+  add_mapping_pair(contract, "async_owner_executor_ready", 1);
+  add_mapping_string(contract, "async_owner_executor_task_type", "async_callback");
+  add_mapping_string(contract, "async_owner_executor_route", "owner_executor");
+  add_mapping_string(contract, "async_owner_executor_fallback_route", "owner_main_queue");
+  add_mapping_string(contract, "async_owner_executor_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_string(contract, "async_owner_executor_result_policy", "frozen_deep_copy_result");
+  add_mapping_pair(contract, "async_owner_executor_cleanup_main_ready", 1);
+  add_mapping_pair(contract, "async_owner_executor_drop_cleanup_ready", 1);
+  add_mapping_pair(contract, "dns_owner_executor_ready", 1);
+  add_mapping_string(contract, "dns_owner_executor_task_type", "dns_callback");
+  add_mapping_string(contract, "dns_owner_executor_route", "owner_executor");
+  add_mapping_string(contract, "dns_owner_executor_fallback_route", "owner_main_queue");
+  add_mapping_string(contract, "dns_owner_executor_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_string(contract, "dns_owner_executor_result_policy", "frozen_deep_copy_result");
+  add_mapping_pair(contract, "dns_owner_executor_owner_epoch_capture_ready", 1);
+  add_mapping_pair(contract, "dns_owner_executor_cleanup_main_ready", 1);
+  add_mapping_pair(contract, "dns_owner_executor_drop_cleanup_ready", 1);
   add_mapping_pair(contract, "gateway_command_rejected", 0);
   add_mapping_pair(contract, "gateway_command_executor_activation_ready", 1);
   add_mapping_pair(contract, "ordinary_lpc_default_closed", 1);
   add_mapping_pair(contract, "ordinary_lpc_explicit_open_required", 1);
   add_mapping_string(contract, "ordinary_lpc_policy", "explicit_open_same_owner_only");
   add_mapping_pair(contract, "lpc_surface_expanded", 0);
-  add_mapping_string(contract, "next_refactor_target", "migrate_async_dns_socket_callbacks_to_owner_executor");
+  add_mapping_string(contract, "next_refactor_target", "migrate_socket_callbacks_to_owner_executor");
   return contract;
 }
 
@@ -4742,6 +4759,23 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_pair(map, "callout_owner_executor_cleanup_main_ready", 1);
   add_mapping_pair(map, "callout_owner_executor_drop_cleanup_ready", 1);
   add_mapping_pair(map, "callout_owner_executor_fallback_main_ready", 1);
+  add_mapping_pair(map, "async_owner_executor_ready", 1);
+  add_mapping_string(map, "async_owner_executor_task_type", "async_callback");
+  add_mapping_string(map, "async_owner_executor_route", "owner_executor");
+  add_mapping_string(map, "async_owner_executor_fallback_route", "owner_main_queue");
+  add_mapping_string(map, "async_owner_executor_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_string(map, "async_owner_executor_result_policy", "frozen_deep_copy_result");
+  add_mapping_pair(map, "async_owner_executor_cleanup_main_ready", 1);
+  add_mapping_pair(map, "async_owner_executor_drop_cleanup_ready", 1);
+  add_mapping_pair(map, "dns_owner_executor_ready", 1);
+  add_mapping_string(map, "dns_owner_executor_task_type", "dns_callback");
+  add_mapping_string(map, "dns_owner_executor_route", "owner_executor");
+  add_mapping_string(map, "dns_owner_executor_fallback_route", "owner_main_queue");
+  add_mapping_string(map, "dns_owner_executor_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_string(map, "dns_owner_executor_result_policy", "frozen_deep_copy_result");
+  add_mapping_pair(map, "dns_owner_executor_owner_epoch_capture_ready", 1);
+  add_mapping_pair(map, "dns_owner_executor_cleanup_main_ready", 1);
+  add_mapping_pair(map, "dns_owner_executor_drop_cleanup_ready", 1);
   add_mapping_pair(map, "executor_callback_queued",
                    static_cast<long>(owner_executor_callback_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_dispatched",
@@ -4904,6 +4938,23 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_pair(map, "callout_owner_executor_cleanup_main_ready", 1);
   add_mapping_pair(map, "callout_owner_executor_drop_cleanup_ready", 1);
   add_mapping_pair(map, "callout_owner_executor_fallback_main_ready", 1);
+  add_mapping_pair(map, "async_owner_executor_ready", 1);
+  add_mapping_string(map, "async_owner_executor_task_type", "async_callback");
+  add_mapping_string(map, "async_owner_executor_route", "owner_executor");
+  add_mapping_string(map, "async_owner_executor_fallback_route", "owner_main_queue");
+  add_mapping_string(map, "async_owner_executor_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_string(map, "async_owner_executor_result_policy", "frozen_deep_copy_result");
+  add_mapping_pair(map, "async_owner_executor_cleanup_main_ready", 1);
+  add_mapping_pair(map, "async_owner_executor_drop_cleanup_ready", 1);
+  add_mapping_pair(map, "dns_owner_executor_ready", 1);
+  add_mapping_string(map, "dns_owner_executor_task_type", "dns_callback");
+  add_mapping_string(map, "dns_owner_executor_route", "owner_executor");
+  add_mapping_string(map, "dns_owner_executor_fallback_route", "owner_main_queue");
+  add_mapping_string(map, "dns_owner_executor_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_string(map, "dns_owner_executor_result_policy", "frozen_deep_copy_result");
+  add_mapping_pair(map, "dns_owner_executor_owner_epoch_capture_ready", 1);
+  add_mapping_pair(map, "dns_owner_executor_cleanup_main_ready", 1);
+  add_mapping_pair(map, "dns_owner_executor_drop_cleanup_ready", 1);
   add_mapping_pair(map, "executor_callback_queued",
                    static_cast<long>(owner_executor_callback_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_dispatched",

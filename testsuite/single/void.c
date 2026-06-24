@@ -2,6 +2,12 @@ int called = 0;
 int heartbeat_called = 0;
 int callout_called = 0;
 int callout_off_main = 0;
+int async_callback_called = 0;
+int async_callback_off_main = 0;
+string async_callback_value = 0;
+int dns_callback_called = 0;
+int dns_callback_off_main = 0;
+int dns_callback_key = 0;
 
 void virtual_start() {
   called = 1;
@@ -52,6 +58,38 @@ int get_callout_off_main() {
 void reset_callout_probe() {
   callout_called = 0;
   callout_off_main = 0;
+}
+
+void async_callback_probe(string value) {
+  async_callback_called++;
+  async_callback_off_main = !vm_context_is_main_thread();
+  async_callback_value = value;
+}
+
+int get_async_callback_called() { return async_callback_called; }
+int get_async_callback_off_main() { return async_callback_off_main; }
+string get_async_callback_value() { return async_callback_value; }
+
+void reset_async_callback_probe() {
+  async_callback_called = 0;
+  async_callback_off_main = 0;
+  async_callback_value = 0;
+}
+
+void dns_callback_probe(mixed name, mixed address, int key) {
+  dns_callback_called++;
+  dns_callback_off_main = !vm_context_is_main_thread();
+  dns_callback_key = key;
+}
+
+int get_dns_callback_called() { return dns_callback_called; }
+int get_dns_callback_off_main() { return dns_callback_off_main; }
+int get_dns_callback_key() { return dns_callback_key; }
+
+void reset_dns_callback_probe() {
+  dns_callback_called = 0;
+  dns_callback_off_main = 0;
+  dns_callback_key = 0;
 }
 
 void dummy()
