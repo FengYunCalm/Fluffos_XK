@@ -25,6 +25,17 @@ namespace {
 std::unordered_map<std::string, std::unique_ptr<GatewaySession>> g_gateway_sessions;
 std::unordered_map<object_t *, GatewaySession *> g_gateway_obj_to_session;
 
+class GatewayControlledLpcScope {
+ public:
+  GatewayControlledLpcScope() : previous_(vm_context().owner.controlled_lpc_active) {
+    vm_context().owner.controlled_lpc_active = true;
+  }
+  ~GatewayControlledLpcScope() { vm_context().owner.controlled_lpc_active = previous_; }
+
+ private:
+  bool previous_;
+};
+
 bool gateway_object_valid(object_t *ob) {
   return ob && !(ob->flags & O_DESTRUCTED) && ob->obname && ob->obname[0] != '\0';
 }
@@ -63,6 +74,11 @@ std::string gateway_pending_command_snapshot(interactive_t *user) {
     end++;
   }
   return std::string(user->text + user->text_start, user->text + end);
+}
+
+bool gateway_executor_session_current(object_t *user, interactive_t *ip) {
+  return ip && ::gateway_is_session(user) && user->interactive == ip && ip->ob == user &&
+         !(user->flags & O_DESTRUCTED);
 }
 
 svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, size_t snapshot_bytes) {
@@ -356,6 +372,31 @@ uint64_t gateway_enqueue_pending_command_internal(object_t *user) {
   auto command_snapshot = gateway_pending_command_snapshot(ip);
   auto snapshot_ready = (ip->iflags & CMD_IN_BUF) != 0;
   auto payload = gateway_command_task_payload(ip, snapshot_ready, command_snapshot.size());
+  if (snapshot_ready && vm_owner_executor_available()) {
+    auto task_id = vm_owner_enqueue_executor_task(
+        user, "gateway_command_execute", "process_user_command", [user, ip, command_snapshot] {
+          if (!gateway_executor_session_current(user, ip)) {
+            vm_owner_record_task_trace(user ? vm_owner_id(user) : vm_owner_default_id(), "gateway_command_execute",
+                                       "process_user_command", user ? vm_owner_epoch(user) : 0, "session_stale");
+            vm_context_set_current_interactive(vm_context(), nullptr);
+            return;
+          }
+
+          GatewayControlledLpcScope controlled_lpc;
+          set_eval(max_eval_cost);
+          vm_owner_record_task_trace(vm_owner_id(user), "gateway_command_execute", "process_user_command",
+                                     vm_owner_epoch(user), "snapshot_dispatched");
+          if (!process_user_command_snapshot(ip, command_snapshot.c_str(), command_snapshot.size())) {
+            vm_owner_record_task_trace(vm_owner_id(user), "gateway_command_execute", "process_user_command",
+                                       vm_owner_epoch(user), "snapshot_dropped");
+          }
+          vm_context_set_current_interactive(vm_context(), nullptr);
+        });
+    if (task_id != 0) {
+      free_svalue(&payload, "gateway_command_task_payload");
+      return task_id;
+    }
+  }
   auto task_id = vm_owner_enqueue_main_task_with_payload(
       user, "gateway", "process_user_command", "gateway_command_input", &payload, [ip, command_snapshot] {
         set_eval(max_eval_cost);

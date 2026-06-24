@@ -224,17 +224,19 @@ void assert_frozen_payload_contract(mapping contract) {
 }
 
 void assert_gateway_contract_entry(mapping contract, string task_key,
-                                   string route, int requires_main_queue,
+                                   string executor_mode, string route,
+                                   int main_required, int executor_safe,
+                                   int requires_main_queue,
                                    string owner_scope_model,
                                    string stale_policy) {
     mapping entry = contract[task_key];
 
     ASSERT(mapp(entry));
     ASSERT_EQ("gateway", entry["task_type"]);
-    ASSERT_EQ("main_required", entry["executor_mode"]);
+    ASSERT_EQ(executor_mode, entry["executor_mode"]);
     ASSERT_EQ(route, entry["route"]);
-    ASSERT_EQ(1, entry["main_required"]);
-    ASSERT_EQ(0, entry["executor_safe"]);
+    ASSERT_EQ(main_required, entry["main_required"]);
+    ASSERT_EQ(executor_safe, entry["executor_safe"]);
     ASSERT_EQ(requires_main_queue, entry["requires_owner_main_queue"]);
     ASSERT_EQ(1, entry["requires_owner_scope"]);
     ASSERT_EQ(1, entry["requires_current_interactive"]);
@@ -274,9 +276,8 @@ void assert_gateway_owner_task_contract(mapping contract) {
 
     ASSERT(mapp(contract));
     ASSERT_EQ(1, contract["contract_version"]);
-    ASSERT_EQ("owner_main_queue_bridge", contract["input_model"]);
-    ASSERT_EQ("main_required_before_owner_executor",
-              contract["executor_migration_state"]);
+    ASSERT_EQ("owner_executor_with_main_fallback", contract["input_model"]);
+    ASSERT_EQ("owner_executor_active", contract["executor_migration_state"]);
     ASSERT_EQ("gateway_command_buffer_metadata_v1",
               contract["command_payload_model"]);
     ASSERT_EQ("interactive_text_buffer", contract["command_input_source"]);
@@ -313,7 +314,12 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ(1, contract["process_input_add_action_parser_frame_executor_ready"]);
     ASSERT_EQ("", contract["process_input_add_action_parser_blocker"]);
     ASSERT_EQ("", contract["command_executor_blocker"]);
-    ASSERT_EQ("owner_owned_snapshot_main_thread_consume",
+    ASSERT_EQ(1, contract["gateway_command_execute_ready"]);
+    ASSERT_EQ("gateway_command_execute", contract["gateway_command_execute_task_type"]);
+    ASSERT_EQ("owner_executor", contract["gateway_command_execute_route"]);
+    ASSERT_EQ("owner_main_queue", contract["gateway_command_execute_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_else_main", contract["gateway_command_execute_policy"]);
+    ASSERT_EQ("owner_owned_snapshot_owner_executor_consume",
               contract["command_consume_model"]);
     ASSERT_EQ(1, contract["command_consume_snapshot_ready"]);
     ASSERT_EQ(1, contract["command_consume_executor_ready"]);
@@ -376,11 +382,15 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("", contract["command_execution_frame_restore_blocker"]);
     ASSERT_EQ(1, contract["command_execution_frame_executor_ready"]);
     ASSERT_EQ("owner_epoch_target_handle_guard", contract["command_stale_guard"]);
-    ASSERT_EQ("main_stale", contract["command_stale_trace_state"]);
+    ASSERT_EQ("thread_executor_callback_stale", contract["command_stale_trace_state"]);
     ASSERT_EQ("owner_epoch_mismatch", contract["command_stale_target_status"]);
+    ASSERT_EQ(1, contract["gateway_command_execute_stale_drop_ready"]);
+    ASSERT_EQ(1, contract["gateway_command_execute_context_cleanup_ready"]);
+    ASSERT_EQ(1, contract["gateway_command_execute_session_revalidate_ready"]);
+    ASSERT_EQ(1, contract["gateway_command_execute_reply_queue_main_ready"]);
     ASSERT_EQ("all_gates_required_before_owner_executor",
               contract["command_executor_readiness_gate_model"]);
-    ASSERT_EQ("gateway_command_executor_activation", contract["command_executor_next_gate"]);
+    ASSERT_EQ("mudlib_cross_owner_hotspots", contract["command_executor_next_gate"]);
     ASSERT_EQ("", contract["command_executor_next_blocker"]);
     ASSERT_EQ(7, contract["command_executor_readiness_gate_count"]);
     ASSERT_EQ(7, contract["command_executor_satisfied_gate_count"]);
@@ -491,10 +501,10 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ("redacted_interactive_mode_flags_v1",
               command_side_effect_gate_by_name["interactive_mode_flags"]["snapshot_policy"]);
     ASSERT_EQ(0, contract["ordinary_lpc_ready_required"]);
-    ASSERT_EQ(1, contract["main_required"]);
-    ASSERT_EQ("gateway_command_executor_activation",
-              contract["next_blocker"]);
-    ASSERT_EQ("gateway_command_executor/gateway_command_executor_activation",
+    ASSERT_EQ(0, contract["main_required"]);
+    ASSERT_EQ(1, contract["fallback_main_required"]);
+    ASSERT_EQ("mudlib_cross_owner_hotspots", contract["next_blocker"]);
+    ASSERT_EQ("mudlib_audit/cross_owner_hotspots/production_gate",
               contract["next_blocker_chain"]);
     ASSERT(arrayp(tasks));
     ASSERT_EQ(4, sizeof(tasks));
@@ -506,18 +516,18 @@ void assert_gateway_owner_task_contract(mapping contract) {
         task_by_key[task["task_key"]] = task;
     }
     assert_gateway_contract_entry(task_by_key, "gateway_receive",
-                                  "owner_main_queue", 1,
+                                  "main_required", "owner_main_queue", 1, 0, 1,
                                   "owner_scope_and_current_interactive",
                                   "owner_epoch_target_guard");
     assert_gateway_contract_entry(task_by_key, "process_user_command",
-                                  "owner_main_queue", 1,
-                                  "interactive_owner_scope_frame",
+                                  "executor_safe_callback", "owner_executor", 0, 1, 0,
+                                  "owner_executor_command_frame",
                                   "owner_epoch_target_guard");
     ASSERT_EQ("gateway_command_input",
               task_by_key["process_user_command"]["payload_key"]);
     ASSERT_EQ("buffer_metadata_no_raw_command_text",
               task_by_key["process_user_command"]["input_payload_policy"]);
-    ASSERT_EQ("owner_owned_snapshot_main_thread_consume",
+    ASSERT_EQ("owner_owned_snapshot_owner_executor_consume",
               task_by_key["process_user_command"]["command_consume_model"]);
     ASSERT_EQ(1, task_by_key["process_user_command"]["command_consume_snapshot_ready"]);
     ASSERT_EQ(1, task_by_key["process_user_command"]["command_consume_executor_ready"]);
@@ -534,11 +544,11 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ(1, task_by_key["process_user_command"]["requires_target_handle"]);
     ASSERT_EQ(1, task_by_key["process_user_command"]["requires_frozen_payload"]);
     assert_gateway_contract_entry(task_by_key, "gateway_logon",
-                                  "direct_main_owner_scope", 0,
+                                  "main_required", "direct_main_owner_scope", 1, 0, 0,
                                   "owner_scope_and_current_interactive",
                                   "session_owner_resolve_after_exec");
     assert_gateway_contract_entry(task_by_key, "gateway_disconnected",
-                                  "direct_main_owner_scope", 0,
+                                  "main_required", "direct_main_owner_scope", 1, 0, 0,
                                   "owner_scope_and_current_interactive",
                                   "session_owner_resolve_after_exec");
 }
@@ -652,12 +662,21 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["socket_release_main_required"]);
     ASSERT_EQ(0, boundary_contract["gateway_command_rejected"]);
     ASSERT_EQ(1, boundary_contract["gateway_command_executor_activation_ready"]);
+    ASSERT_EQ(1, boundary_contract["gateway_command_execute_ready"]);
+    ASSERT_EQ("gateway_command_execute", boundary_contract["gateway_command_execute_task_type"]);
+    ASSERT_EQ("owner_executor", boundary_contract["gateway_command_execute_route"]);
+    ASSERT_EQ("owner_main_queue", boundary_contract["gateway_command_execute_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_else_main", boundary_contract["gateway_command_execute_policy"]);
+    ASSERT_EQ("owner_private_command_snapshot", boundary_contract["gateway_command_execute_payload_policy"]);
+    ASSERT_EQ(1, boundary_contract["gateway_command_execute_reply_queue_main_ready"]);
+    ASSERT_EQ(1, boundary_contract["gateway_command_execute_stale_drop_ready"]);
+    ASSERT_EQ(1, boundary_contract["gateway_command_execute_context_cleanup_ready"]);
+    ASSERT_EQ(1, boundary_contract["gateway_command_execute_session_revalidate_ready"]);
     ASSERT_EQ(1, boundary_contract["ordinary_lpc_default_closed"]);
     ASSERT_EQ(1, boundary_contract["ordinary_lpc_explicit_open_required"]);
     ASSERT_EQ("explicit_open_same_owner_only", boundary_contract["ordinary_lpc_policy"]);
     ASSERT_EQ(0, boundary_contract["lpc_surface_expanded"]);
-    ASSERT_EQ("execute_gateway_commands_on_owner_executor",
-              boundary_contract["next_refactor_target"]);
+    ASSERT_EQ("mudlib_cross_owner_hotspots", boundary_contract["next_refactor_target"]);
     ASSERT(mapp(fairness));
     ASSERT_EQ("owner_executor_v1", status["executor_contract_version"]);
     ASSERT_EQ("owner_executor", status["executor_model"]);
@@ -716,6 +735,16 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["socket_owner_executor_cleanup_main_ready"]);
     ASSERT_EQ(1, status["socket_owner_executor_drop_cleanup_ready"]);
     ASSERT_EQ(1, status["socket_release_main_required"]);
+    ASSERT_EQ(1, status["gateway_command_execute_ready"]);
+    ASSERT_EQ("gateway_command_execute", status["gateway_command_execute_task_type"]);
+    ASSERT_EQ("owner_executor", status["gateway_command_execute_route"]);
+    ASSERT_EQ("owner_main_queue", status["gateway_command_execute_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_else_main", status["gateway_command_execute_policy"]);
+    ASSERT_EQ("owner_private_command_snapshot", status["gateway_command_execute_payload_policy"]);
+    ASSERT_EQ(1, status["gateway_command_execute_reply_queue_main_ready"]);
+    ASSERT_EQ(1, status["gateway_command_execute_stale_drop_ready"]);
+    ASSERT_EQ(1, status["gateway_command_execute_context_cleanup_ready"]);
+    ASSERT_EQ(1, status["gateway_command_execute_session_revalidate_ready"]);
     callback_task_contracts = status["executor_callback_task_contracts"];
     ASSERT(arrayp(callback_task_contracts));
     ASSERT_EQ(6, sizeof(callback_task_contracts));

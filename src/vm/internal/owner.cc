@@ -228,11 +228,11 @@ constexpr std::array<GatewayOwnerTaskContractEntry, 4> kGatewayOwnerTaskContract
      "owner_epoch_target_guard", "gateway_receive_data", "direct_lpc_payload", "", 0, 0, "",
      "gateway_receive_execution_frame_v1", "owner_scope_current_interactive_command_giver", "", "", 0, 0, 1, 0, 1,
      1, 1, 1, 0, 1, 0, 0},
-    {"gateway", "process_user_command", "main_required", "owner_main_queue", "interactive_owner_scope_frame",
-     "owner_epoch_target_guard", "gateway_command_input", "buffer_metadata_no_raw_command_text",
-     "owner_owned_snapshot_main_thread_consume", 1, 1, "",
+    {"gateway", "process_user_command", "executor_safe_callback", "owner_executor",
+     "owner_executor_command_frame", "owner_epoch_target_guard", "gateway_command_input",
+     "buffer_metadata_no_raw_command_text", "owner_owned_snapshot_owner_executor_consume", 1, 1, "",
      "gateway_command_execution_frame_v1", "owner_scope_current_interactive_command_giver",
-     "owner_executor_vmcontext_restore", "", 1, 1, 1, 0, 1, 1, 1, 1,
+     "owner_executor_vmcontext_restore", "", 1, 1, 0, 1, 0, 1, 1, 1,
      0, 1, 1, 1},
     {"gateway", "gateway_logon", "main_required", "direct_main_owner_scope", "owner_scope_and_current_interactive",
      "session_owner_resolve_after_exec", "gateway_logon_data", "direct_lpc_payload", "", 0, 0, "",
@@ -1179,8 +1179,8 @@ array_t *gateway_owner_task_contract_entries_array() {
 mapping_t *gateway_owner_task_contract_mapping() {
   auto *map = allocate_mapping(107);
   add_mapping_pair(map, "contract_version", 1);
-  add_mapping_string(map, "input_model", "owner_main_queue_bridge");
-  add_mapping_string(map, "executor_migration_state", "main_required_before_owner_executor");
+  add_mapping_string(map, "input_model", "owner_executor_with_main_fallback");
+  add_mapping_string(map, "executor_migration_state", "owner_executor_active");
   add_mapping_string(map, "command_payload_model", "gateway_command_buffer_metadata_v1");
   add_mapping_string(map, "command_input_source", "interactive_text_buffer");
   add_mapping_string(map, "command_text_snapshot_policy", "owner_private_redacted_from_trace");
@@ -1208,7 +1208,12 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_pair(map, "process_input_add_action_parser_frame_executor_ready", 1);
   add_mapping_string(map, "process_input_add_action_parser_blocker", "");
   add_mapping_string(map, "command_executor_blocker", kGatewayCommandExecutorActivationBlocker);
-  add_mapping_string(map, "command_consume_model", "owner_owned_snapshot_main_thread_consume");
+  add_mapping_pair(map, "gateway_command_execute_ready", 1);
+  add_mapping_string(map, "gateway_command_execute_task_type", "gateway_command_execute");
+  add_mapping_string(map, "gateway_command_execute_route", "owner_executor");
+  add_mapping_string(map, "gateway_command_execute_fallback_route", "owner_main_queue");
+  add_mapping_string(map, "gateway_command_execute_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_string(map, "command_consume_model", "owner_owned_snapshot_owner_executor_consume");
   add_mapping_pair(map, "command_consume_snapshot_ready", 1);
   add_mapping_pair(map, "command_consume_executor_ready", 1);
   add_mapping_string(map, "command_consume_blocker", "");
@@ -1255,11 +1260,15 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_string(map, "command_execution_frame_restore_blocker", "");
   add_mapping_pair(map, "command_execution_frame_executor_ready", 1);
   add_mapping_string(map, "command_stale_guard", "owner_epoch_target_handle_guard");
-  add_mapping_string(map, "command_stale_trace_state", "main_stale");
+  add_mapping_string(map, "command_stale_trace_state", "thread_executor_callback_stale");
   add_mapping_string(map, "command_stale_target_status", "owner_epoch_mismatch");
+  add_mapping_pair(map, "gateway_command_execute_stale_drop_ready", 1);
+  add_mapping_pair(map, "gateway_command_execute_context_cleanup_ready", 1);
+  add_mapping_pair(map, "gateway_command_execute_session_revalidate_ready", 1);
+  add_mapping_pair(map, "gateway_command_execute_reply_queue_main_ready", 1);
   add_mapping_string(map, "command_executor_readiness_gate_model", "all_gates_required_before_owner_executor");
-  add_mapping_string(map, "command_executor_next_gate", "gateway_command_executor_activation");
-  add_mapping_string(map, "command_executor_next_blocker", kGatewayCommandExecutorActivationBlocker);
+  add_mapping_string(map, "command_executor_next_gate", "mudlib_cross_owner_hotspots");
+  add_mapping_string(map, "command_executor_next_blocker", "");
   add_mapping_pair(map, "command_executor_readiness_gate_count",
                    static_cast<long>(kGatewayCommandExecutorReadinessGates.size()));
   const auto command_executor_satisfied_gates = gateway_command_executor_satisfied_readiness_gate_count();
@@ -1288,13 +1297,14 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_array(map, "command_side_effect_readiness_gates", command_side_effect_gates);
   free_array(command_side_effect_gates);
   add_mapping_pair(map, "ordinary_lpc_ready_required", 0);
-  add_mapping_pair(map, "main_required", 1);
+  add_mapping_pair(map, "main_required", 0);
+  add_mapping_pair(map, "fallback_main_required", 1);
   add_mapping_pair(map, "task_count", static_cast<long>(kGatewayOwnerTaskContracts.size()));
   auto *tasks = gateway_owner_task_contract_entries_array();
   add_mapping_array(map, "tasks", tasks);
   free_array(tasks);
-  add_mapping_string(map, "next_blocker", "gateway_command_executor_activation");
-  add_mapping_string(map, "next_blocker_chain", "gateway_command_executor/gateway_command_executor_activation");
+  add_mapping_string(map, "next_blocker", "mudlib_cross_owner_hotspots");
+  add_mapping_string(map, "next_blocker_chain", "mudlib_audit/cross_owner_hotspots/production_gate");
   return map;
 }
 
@@ -1468,11 +1478,21 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "socket_release_main_required", 1);
   add_mapping_pair(contract, "gateway_command_rejected", 0);
   add_mapping_pair(contract, "gateway_command_executor_activation_ready", 1);
+  add_mapping_pair(contract, "gateway_command_execute_ready", 1);
+  add_mapping_string(contract, "gateway_command_execute_task_type", "gateway_command_execute");
+  add_mapping_string(contract, "gateway_command_execute_route", "owner_executor");
+  add_mapping_string(contract, "gateway_command_execute_fallback_route", "owner_main_queue");
+  add_mapping_string(contract, "gateway_command_execute_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_string(contract, "gateway_command_execute_payload_policy", "owner_private_command_snapshot");
+  add_mapping_pair(contract, "gateway_command_execute_reply_queue_main_ready", 1);
+  add_mapping_pair(contract, "gateway_command_execute_stale_drop_ready", 1);
+  add_mapping_pair(contract, "gateway_command_execute_context_cleanup_ready", 1);
+  add_mapping_pair(contract, "gateway_command_execute_session_revalidate_ready", 1);
   add_mapping_pair(contract, "ordinary_lpc_default_closed", 1);
   add_mapping_pair(contract, "ordinary_lpc_explicit_open_required", 1);
   add_mapping_string(contract, "ordinary_lpc_policy", "explicit_open_same_owner_only");
   add_mapping_pair(contract, "lpc_surface_expanded", 0);
-  add_mapping_string(contract, "next_refactor_target", "execute_gateway_commands_on_owner_executor");
+  add_mapping_string(contract, "next_refactor_target", "mudlib_cross_owner_hotspots");
   return contract;
 }
 
@@ -4794,6 +4814,16 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_pair(map, "socket_owner_executor_cleanup_main_ready", 1);
   add_mapping_pair(map, "socket_owner_executor_drop_cleanup_ready", 1);
   add_mapping_pair(map, "socket_release_main_required", 1);
+  add_mapping_pair(map, "gateway_command_execute_ready", 1);
+  add_mapping_string(map, "gateway_command_execute_task_type", "gateway_command_execute");
+  add_mapping_string(map, "gateway_command_execute_route", "owner_executor");
+  add_mapping_string(map, "gateway_command_execute_fallback_route", "owner_main_queue");
+  add_mapping_string(map, "gateway_command_execute_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_string(map, "gateway_command_execute_payload_policy", "owner_private_command_snapshot");
+  add_mapping_pair(map, "gateway_command_execute_reply_queue_main_ready", 1);
+  add_mapping_pair(map, "gateway_command_execute_stale_drop_ready", 1);
+  add_mapping_pair(map, "gateway_command_execute_context_cleanup_ready", 1);
+  add_mapping_pair(map, "gateway_command_execute_session_revalidate_ready", 1);
   add_mapping_pair(map, "executor_callback_queued",
                    static_cast<long>(owner_executor_callback_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_dispatched",
@@ -4982,6 +5012,16 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_pair(map, "socket_owner_executor_cleanup_main_ready", 1);
   add_mapping_pair(map, "socket_owner_executor_drop_cleanup_ready", 1);
   add_mapping_pair(map, "socket_release_main_required", 1);
+  add_mapping_pair(map, "gateway_command_execute_ready", 1);
+  add_mapping_string(map, "gateway_command_execute_task_type", "gateway_command_execute");
+  add_mapping_string(map, "gateway_command_execute_route", "owner_executor");
+  add_mapping_string(map, "gateway_command_execute_fallback_route", "owner_main_queue");
+  add_mapping_string(map, "gateway_command_execute_policy", "audit_enforced_owner_thread_else_main");
+  add_mapping_string(map, "gateway_command_execute_payload_policy", "owner_private_command_snapshot");
+  add_mapping_pair(map, "gateway_command_execute_reply_queue_main_ready", 1);
+  add_mapping_pair(map, "gateway_command_execute_stale_drop_ready", 1);
+  add_mapping_pair(map, "gateway_command_execute_context_cleanup_ready", 1);
+  add_mapping_pair(map, "gateway_command_execute_session_revalidate_ready", 1);
   add_mapping_pair(map, "executor_callback_queued",
                    static_cast<long>(owner_executor_callback_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_dispatched",

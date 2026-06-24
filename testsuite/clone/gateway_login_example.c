@@ -9,6 +9,8 @@ private string last_input_to_line = 0;
 private string last_input_to_token = 0;
 private string last_get_char_value = 0;
 private string last_get_char_token = 0;
+private string last_process_input_command = 0;
+private int last_process_input_off_main = 0;
 
 void logon() {
   write("Normal login path reached.\n");
@@ -58,6 +60,21 @@ int enable_gateway_ed() {
   return 0;
 #endif
 }
+
+mixed process_input(string command) {
+  last_process_input_command = command;
+  last_process_input_off_main = !vm_context_is_main_thread();
+  return 0;
+}
+
+void reset_gateway_command_probe() {
+  last_process_input_command = 0;
+  last_process_input_off_main = 0;
+}
+
+string query_last_process_input_command() { return last_process_input_command; }
+
+int query_last_process_input_off_main() { return last_process_input_off_main; }
 
 string query_last_get_char_value() { return last_get_char_value; }
 
