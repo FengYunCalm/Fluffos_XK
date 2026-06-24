@@ -8,6 +8,9 @@ string async_callback_value = 0;
 int dns_callback_called = 0;
 int dns_callback_off_main = 0;
 int dns_callback_key = 0;
+int socket_callback_called = 0;
+int socket_callback_off_main = 0;
+int socket_callback_fd = 0;
 
 void virtual_start() {
   called = 1;
@@ -90,6 +93,22 @@ void reset_dns_callback_probe() {
   dns_callback_called = 0;
   dns_callback_off_main = 0;
   dns_callback_key = 0;
+}
+
+void socket_callback_probe(int fd) {
+  socket_callback_called++;
+  socket_callback_off_main = !vm_context_is_main_thread();
+  socket_callback_fd = fd;
+}
+
+int get_socket_callback_called() { return socket_callback_called; }
+int get_socket_callback_off_main() { return socket_callback_off_main; }
+int get_socket_callback_fd() { return socket_callback_fd; }
+
+void reset_socket_callback_probe() {
+  socket_callback_called = 0;
+  socket_callback_off_main = 0;
+  socket_callback_fd = 0;
 }
 
 void dummy()

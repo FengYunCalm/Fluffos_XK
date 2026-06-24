@@ -641,13 +641,22 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["dns_owner_executor_owner_epoch_capture_ready"]);
     ASSERT_EQ(1, boundary_contract["dns_owner_executor_cleanup_main_ready"]);
     ASSERT_EQ(1, boundary_contract["dns_owner_executor_drop_cleanup_ready"]);
+    ASSERT_EQ(1, boundary_contract["socket_owner_executor_ready"]);
+    ASSERT_EQ("socket_callback", boundary_contract["socket_owner_executor_task_type"]);
+    ASSERT_EQ("owner_executor", boundary_contract["socket_owner_executor_route"]);
+    ASSERT_EQ("owner_main_queue", boundary_contract["socket_owner_executor_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_else_main", boundary_contract["socket_owner_executor_policy"]);
+    ASSERT_EQ("frozen_deep_copy_args", boundary_contract["socket_owner_executor_result_policy"]);
+    ASSERT_EQ(1, boundary_contract["socket_owner_executor_cleanup_main_ready"]);
+    ASSERT_EQ(1, boundary_contract["socket_owner_executor_drop_cleanup_ready"]);
+    ASSERT_EQ(1, boundary_contract["socket_release_main_required"]);
     ASSERT_EQ(0, boundary_contract["gateway_command_rejected"]);
     ASSERT_EQ(1, boundary_contract["gateway_command_executor_activation_ready"]);
     ASSERT_EQ(1, boundary_contract["ordinary_lpc_default_closed"]);
     ASSERT_EQ(1, boundary_contract["ordinary_lpc_explicit_open_required"]);
     ASSERT_EQ("explicit_open_same_owner_only", boundary_contract["ordinary_lpc_policy"]);
     ASSERT_EQ(0, boundary_contract["lpc_surface_expanded"]);
-    ASSERT_EQ("migrate_socket_callbacks_to_owner_executor",
+    ASSERT_EQ("execute_gateway_commands_on_owner_executor",
               boundary_contract["next_refactor_target"]);
     ASSERT(mapp(fairness));
     ASSERT_EQ("owner_executor_v1", status["executor_contract_version"]);
@@ -698,6 +707,15 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["dns_owner_executor_owner_epoch_capture_ready"]);
     ASSERT_EQ(1, status["dns_owner_executor_cleanup_main_ready"]);
     ASSERT_EQ(1, status["dns_owner_executor_drop_cleanup_ready"]);
+    ASSERT_EQ(1, status["socket_owner_executor_ready"]);
+    ASSERT_EQ("socket_callback", status["socket_owner_executor_task_type"]);
+    ASSERT_EQ("owner_executor", status["socket_owner_executor_route"]);
+    ASSERT_EQ("owner_main_queue", status["socket_owner_executor_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_else_main", status["socket_owner_executor_policy"]);
+    ASSERT_EQ("frozen_deep_copy_args", status["socket_owner_executor_result_policy"]);
+    ASSERT_EQ(1, status["socket_owner_executor_cleanup_main_ready"]);
+    ASSERT_EQ(1, status["socket_owner_executor_drop_cleanup_ready"]);
+    ASSERT_EQ(1, status["socket_release_main_required"]);
     callback_task_contracts = status["executor_callback_task_contracts"];
     ASSERT(arrayp(callback_task_contracts));
     ASSERT_EQ(6, sizeof(callback_task_contracts));

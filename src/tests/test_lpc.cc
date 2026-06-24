@@ -34,6 +34,7 @@ extern bool vm_object_store_test_support_remove_live_object_ref_for_bridge_readi
 extern bool vm_call_out_test_support_run_handle(LPC_INT handle);
 extern bool vm_async_test_support_dispatch_read_callback(object_t* owner, const char* method, const char* payload);
 extern bool vm_dns_test_support_dispatch_callback(object_t* owner, const char* method, LPC_INT key);
+extern bool vm_socket_test_support_dispatch_callback(object_t* owner, const char* method, LPC_INT fd);
 extern int replace_interactive(object_t *ob, object_t *obfrom);
 extern bool gateway_dispatch_message_for_test(int fd, const char *payload);
 
@@ -2130,6 +2131,204 @@ TEST_F(DriverTest, TestVmOwnerAsyncCallbackExecutorDropsStaleOwnerEpoch) {
   ASSERT_EQ(call_number("get_async_callback_called", obj), 0);
 }
 
+TEST_F(DriverTest, TestVmOwnerSocketCallbacksDispatchThroughOwnerExecutor) {
+  const char* owner = "owner/test/socket-executor";
+  struct RuntimeGuard {
+    int saved_mode;
+    object_t* obj{nullptr};
+
+    ~RuntimeGuard() {
+      vm_owner_thread_stop();
+      vm_owner_drain_main_tasks(64);
+      if (obj) {
+        vm_owner_clear_id(obj);
+        destruct_object(obj);
+      }
+      CONFIG_INT(__RC_MULTICORE_MODE__) = saved_mode;
+    }
+  } runtime_guard{CONFIG_INT(__RC_MULTICORE_MODE__)};
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_AUDIT;
+  vm_owner_thread_stop();
+
+  object_t* obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+  runtime_guard.obj = obj;
+  vm_owner_set_id(obj, owner);
+
+  auto call_number = [](const char* method, object_t* target) -> long {
+    auto* ret = safe_apply(method, target, 0, ORIGIN_DRIVER);
+    EXPECT_NE(ret, nullptr);
+    EXPECT_EQ(ret ? ret->type : T_INVALID, T_NUMBER);
+    return ret && ret->type == T_NUMBER ? ret->u.number : -1;
+  };
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+  auto trace_has_state = [&](const char* state) {
+    auto* trace = vm_owner_task_trace(160);
+    auto* events = find_string_in_mapping(trace, "events");
+    bool found = false;
+    EXPECT_NE(events, nullptr);
+    EXPECT_EQ(events ? events->type : T_INVALID, T_ARRAY);
+    if (events && events->type == T_ARRAY) {
+      for (int i = 0; i < events->u.arr->size; i++) {
+        auto* event = events->u.arr->item[i].u.map;
+        if (std::string(mapping_string(event, "task_type")) == "socket_callback" &&
+            std::string(mapping_string(event, "owner_id")) == owner &&
+            std::string(mapping_string(event, "state")) == state) {
+          found = true;
+          break;
+        }
+      }
+    }
+    free_mapping(trace);
+    return found;
+  };
+
+  safe_apply("reset_socket_callback_probe", obj, 0, ORIGIN_DRIVER);
+  ASSERT_EQ(call_number("get_socket_callback_called", obj), 0);
+  auto* before = vm_owner_thread_status();
+  auto before_callback_queued = mapping_number(before, "executor_callback_queued");
+  auto before_callback_dispatched = mapping_number(before, "executor_callback_dispatched");
+  auto before_cleanup_queued = mapping_number(before, "executor_callback_main_cleanup_queued");
+  auto before_cleanup_dispatched = mapping_number(before, "executor_callback_main_cleanup_dispatched");
+  auto before_main_queued = mapping_number(before, "main_queued");
+  free_mapping(before);
+
+  vm_owner_thread_start(1);
+  ASSERT_TRUE(vm_owner_executor_available());
+  ASSERT_TRUE(vm_socket_test_support_dispatch_callback(obj, "socket_callback_probe", 9876));
+
+  for (int i = 0; i < 100 && !trace_has_state("thread_executor_callback_completed"); i++) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_TRUE(trace_has_state("thread_executor_callback_dispatched"));
+  ASSERT_TRUE(trace_has_state("thread_executor_callback_completed"));
+  ASSERT_EQ(call_number("get_socket_callback_called", obj), 1);
+  ASSERT_EQ(call_number("get_socket_callback_off_main", obj), 1);
+  ASSERT_EQ(call_number("get_socket_callback_fd", obj), 9876);
+
+  for (int i = 0; i < 100 && !trace_has_state("executor_callback_main_cleanup_queued"); i++) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_TRUE(trace_has_state("executor_callback_main_cleanup_queued"));
+  ASSERT_GE(vm_owner_drain_main_tasks(64), 1);
+  ASSERT_TRUE(trace_has_state("executor_callback_main_cleanup_dispatched"));
+
+  auto* after = vm_owner_thread_status();
+  ASSERT_GE(mapping_number(after, "executor_callback_queued"), before_callback_queued + 1);
+  ASSERT_GE(mapping_number(after, "executor_callback_dispatched"), before_callback_dispatched + 1);
+  ASSERT_GE(mapping_number(after, "executor_callback_main_cleanup_queued"), before_cleanup_queued + 1);
+  ASSERT_GE(mapping_number(after, "executor_callback_main_cleanup_dispatched"), before_cleanup_dispatched + 1);
+  ASSERT_EQ(mapping_number(after, "main_queued"), before_main_queued);
+  ASSERT_EQ(mapping_number(after, "socket_owner_executor_ready"), 1);
+  ASSERT_STREQ(mapping_string(after, "socket_owner_executor_task_type"), "socket_callback");
+  ASSERT_STREQ(mapping_string(after, "socket_owner_executor_route"), "owner_executor");
+  ASSERT_STREQ(mapping_string(after, "socket_owner_executor_fallback_route"), "owner_main_queue");
+  ASSERT_STREQ(mapping_string(after, "socket_owner_executor_policy"), "audit_enforced_owner_thread_else_main");
+  ASSERT_STREQ(mapping_string(after, "socket_owner_executor_result_policy"), "frozen_deep_copy_args");
+  ASSERT_EQ(mapping_number(after, "socket_owner_executor_cleanup_main_ready"), 1);
+  ASSERT_EQ(mapping_number(after, "socket_owner_executor_drop_cleanup_ready"), 1);
+  ASSERT_EQ(mapping_number(after, "socket_release_main_required"), 1);
+  free_mapping(after);
+}
+
+TEST_F(DriverTest, TestVmOwnerSocketCallbackExecutorDropsStaleOwnerEpoch) {
+  const char* owner = "owner/test/socket-executor-stale";
+  const char* moved_owner = "owner/test/socket-executor-stale/moved";
+  struct RuntimeGuard {
+    int saved_mode;
+    object_t* obj{nullptr};
+
+    ~RuntimeGuard() {
+      vm_owner_thread_stop();
+      vm_owner_drain_main_tasks(64);
+      if (obj) {
+        vm_owner_clear_id(obj);
+        destruct_object(obj);
+      }
+      CONFIG_INT(__RC_MULTICORE_MODE__) = saved_mode;
+    }
+  } runtime_guard{CONFIG_INT(__RC_MULTICORE_MODE__)};
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_AUDIT;
+  vm_owner_thread_stop();
+
+  object_t* obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+  runtime_guard.obj = obj;
+  vm_owner_set_id(obj, owner);
+
+  auto call_number = [](const char* method, object_t* target) -> long {
+    auto* ret = safe_apply(method, target, 0, ORIGIN_DRIVER);
+    EXPECT_NE(ret, nullptr);
+    EXPECT_EQ(ret ? ret->type : T_INVALID, T_NUMBER);
+    return ret && ret->type == T_NUMBER ? ret->u.number : -1;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+  auto trace_has_socket_stale = [&] {
+    auto* trace = vm_owner_task_trace(160);
+    auto* events = find_string_in_mapping(trace, "events");
+    bool found = false;
+    EXPECT_NE(events, nullptr);
+    EXPECT_EQ(events ? events->type : T_INVALID, T_ARRAY);
+    if (events && events->type == T_ARRAY) {
+      for (int i = 0; i < events->u.arr->size; i++) {
+        auto* event = events->u.arr->item[i].u.map;
+        if (std::string(mapping_string(event, "task_type")) == "socket_callback" &&
+            std::string(mapping_string(event, "owner_id")) == owner &&
+            std::string(mapping_string(event, "state")) == "thread_executor_callback_stale") {
+          found = true;
+          break;
+        }
+      }
+    }
+    free_mapping(trace);
+    return found;
+  };
+
+  std::atomic<int> blocker_started{0};
+  std::atomic<int> release_blocker{0};
+  vm_owner_thread_start(1);
+  ASSERT_TRUE(vm_owner_executor_available());
+  auto blocker = vm_owner_enqueue_executor_task(obj, "socket_callback", "socket-stale-blocker", [&] {
+    blocker_started.store(1, std::memory_order_release);
+    for (int i = 0; i < 200 && release_blocker.load(std::memory_order_acquire) == 0; i++) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  });
+  ASSERT_GT(blocker, 0u);
+  for (int i = 0; i < 100 && blocker_started.load(std::memory_order_acquire) == 0; i++) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  safe_apply("reset_socket_callback_probe", obj, 0, ORIGIN_DRIVER);
+  ASSERT_TRUE(vm_socket_test_support_dispatch_callback(obj, "socket_callback_probe", 1234));
+  vm_owner_set_id(obj, moved_owner);
+  release_blocker.store(1, std::memory_order_release);
+
+  for (int i = 0; i < 100 && !trace_has_socket_stale(); i++) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_TRUE(trace_has_socket_stale());
+  vm_owner_drain_main_tasks(64);
+  ASSERT_EQ(call_number("get_socket_callback_called", obj), 0);
+}
+
 TEST_F(DriverTest, TestVmOwnerAccessTraceRecordsCrossOwnerAccess) {
   current_object = master_ob;
   object_t* source = find_object("single/master.c");
@@ -3828,6 +4027,15 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "dns_owner_executor_owner_epoch_capture_ready"), 1);
     ASSERT_EQ(mapping_number(status, "dns_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(status, "dns_owner_executor_drop_cleanup_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "socket_owner_executor_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "socket_owner_executor_task_type"), "socket_callback");
+    ASSERT_STREQ(mapping_string(status, "socket_owner_executor_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(status, "socket_owner_executor_fallback_route"), "owner_main_queue");
+    ASSERT_STREQ(mapping_string(status, "socket_owner_executor_policy"), "audit_enforced_owner_thread_else_main");
+    ASSERT_STREQ(mapping_string(status, "socket_owner_executor_result_policy"), "frozen_deep_copy_args");
+    ASSERT_EQ(mapping_number(status, "socket_owner_executor_cleanup_main_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "socket_owner_executor_drop_cleanup_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "socket_release_main_required"), 1);
     ASSERT_GE(mapping_number(status, "executor_callback_main_cleanup_queued"), 0);
     auto* callback_task_contracts = mapping_array(status, "executor_callback_task_contracts");
     ASSERT_NE(callback_task_contracts, nullptr);
@@ -4098,6 +4306,16 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "dns_owner_executor_owner_epoch_capture_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "dns_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "dns_owner_executor_drop_cleanup_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "socket_owner_executor_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_task_type"), "socket_callback");
+    ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_fallback_route"), "owner_main_queue");
+    ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_policy"),
+                 "audit_enforced_owner_thread_else_main");
+    ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_result_policy"), "frozen_deep_copy_args");
+    ASSERT_EQ(mapping_number(boundary_contract, "socket_owner_executor_cleanup_main_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "socket_owner_executor_drop_cleanup_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "socket_release_main_required"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_rejected"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_executor_activation_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "ordinary_lpc_default_closed"), 1);
@@ -4106,7 +4324,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "explicit_open_same_owner_only");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_surface_expanded"), 0);
     ASSERT_STREQ(mapping_string(boundary_contract, "next_refactor_target"),
-                 "migrate_socket_callbacks_to_owner_executor");
+                 "execute_gateway_commands_on_owner_executor");
 
     auto* gateway_contract = mapping_entry(status, "gateway_owner_task_contract");
     ASSERT_NE(gateway_contract, nullptr);
