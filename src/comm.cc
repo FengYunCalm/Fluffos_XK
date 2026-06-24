@@ -708,7 +708,15 @@ void add_message(object_t *who, const char *data, int len) {
 #ifdef PACKAGE_GATEWAY
   if ((ip->iflags & GATEWAY_SESSION) && ip->gateway_session_id) {
     extern int gateway_send_to_session(const char *session_id, const char *data, size_t len);
-    gateway_send_to_session(ip->gateway_session_id, data, len);
+    if (vm_context_is_main_thread()) {
+      gateway_send_to_session(ip->gateway_session_id, data, len);
+    } else {
+      auto session_id = std::string(ip->gateway_session_id);
+      auto payload = std::string(data, len);
+      vm_owner_enqueue_main_task(who, "gateway", "gateway_output", [session_id, payload] {
+        gateway_send_to_session(session_id.c_str(), payload.data(), payload.size());
+      });
+    }
 #ifdef SHADOW_CATCH_MESSAGE
     if (shadow_catch_message(who, data)) {
       if (CONFIG_INT(__RC_SNOOP_SHADOWED__)) {
