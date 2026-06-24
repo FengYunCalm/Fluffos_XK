@@ -538,6 +538,15 @@ def summarize(
         "messages_dropped_total": metric_delta(
             metrics_before, metrics_after, "xkx_gateway_websocket_messages_dropped_total"
         ),
+        "messages_collapsed_total": metric_delta(
+            metrics_before, metrics_after, "xkx_gateway_websocket_messages_collapsed_total"
+        ),
+        "late_frames_total": metric_delta(
+            metrics_before, metrics_after, "xkx_gateway_websocket_late_frames_total"
+        ),
+        "closed_session_writes_total": metric_delta(
+            metrics_before, metrics_after, "xkx_gateway_websocket_closed_session_writes_total"
+        ),
         "queue_full_total": metric_delta(
             metrics_before, metrics_after, "xkx_gateway_websocket_queue_full_total"
         ),
@@ -550,7 +559,15 @@ def summarize(
         and metrics_error is None
         and all(value is not None for value in gateway_metrics_delta.values())
     )
-    gateway_error_delta_zero = metrics_available and all(value == 0 for value in gateway_metrics_delta.values())
+    production_error_metric_keys = (
+        "connections_rejected_total",
+        "messages_dropped_total",
+        "queue_full_total",
+        "write_errors_total",
+    )
+    gateway_error_delta_zero = metrics_available and all(
+        gateway_metrics_delta.get(name) == 0 for name in production_error_metric_keys
+    )
     short_smoke = args.users == 1 and args.scenario == "smoke" and args.duration <= 0
     return {
         "schema": "xkx_gateway_loadtest_report_v1",
