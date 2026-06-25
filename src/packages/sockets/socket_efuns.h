@@ -7,6 +7,7 @@
 #ifndef _SOCKET_EFUNS_H_
 #define _SOCKET_EFUNS_H_
 
+#include <cstdint>
 #include <event2/util.h>
 
 // The number here is same as the one in include/socket.h
@@ -57,6 +58,7 @@ struct lpc_socket_t {
   ev_socklen_t r_addrlen;
   object_t *owner_ob;
   object_t *release_ob;
+  uint64_t release_ob_epoch;
   union string_or_func read_callback;
   union string_or_func write_callback;
   union string_or_func close_callback;

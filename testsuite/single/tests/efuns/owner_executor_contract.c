@@ -47,8 +47,8 @@ void assert_production_gate_contract(mapping contract) {
     ASSERT_EQ("", contract["mudlib_cross_owner_hotspots_blocker"]);
     ASSERT_EQ("xkx_5513c8a12_multicore_mudlib_audit_2026_06_25_zero_delayed_object_payloads",
               contract["mudlib_cross_owner_hotspots_evidence"]);
-    ASSERT_EQ(0, contract["production_gate_ready"]);
-    ASSERT_EQ("socket_release_owner_safe_handshake_not_ready", contract["production_gate_blocker"]);
+    ASSERT_EQ(1, contract["production_gate_ready"]);
+    ASSERT_EQ("", contract["production_gate_blocker"]);
     ASSERT_EQ("1,3,10", contract["production_gate_required_users"]);
     ASSERT_EQ("smoke,30m", contract["production_gate_required_durations"]);
     ASSERT_EQ(1, contract["production_gate_pressure_evidence_ready"]);
@@ -61,7 +61,7 @@ void assert_production_gate_contract(mapping contract) {
     ASSERT_EQ("multicore_production_gate_evidence_v1", contract["production_gate_evidence_schema"]);
     ASSERT_EQ(1, contract["production_gate_evidence_required"]);
     ASSERT_EQ(0, contract["production_gate_short_smoke_sufficient"]);
-    ASSERT_EQ("accepted_30m_pressure_scope_with_zero_final_audit_blockers",
+    ASSERT_EQ("accepted_30m_pressure_scope_final_audit_and_socket_release_handshake",
               contract["production_gate_minimum_ready_evidence"]);
     ASSERT_EQ(1, contract["production_gate_unclassified_hotspots_required_zero"]);
     ASSERT_EQ(1, contract["production_gate_direct_cross_owner_writes_required_zero"]);
@@ -69,8 +69,11 @@ void assert_production_gate_contract(mapping contract) {
     ASSERT_EQ(1, contract["production_gate_future_backlog_required_zero"]);
     ASSERT_EQ(1, contract["production_gate_same_owner_claim_conflict_required_zero"]);
     ASSERT_EQ(1, contract["production_gate_gateway_error_delta_required_zero"]);
-    ASSERT_EQ("main_required_until_owner_safe_handshake", contract["production_gate_socket_release_policy"]);
-    ASSERT_EQ(0, contract["production_gate_socket_release_handshake_ready"]);
+    ASSERT_EQ("owner_safe_synchronous_release_acquire_handshake",
+              contract["production_gate_socket_release_policy"]);
+    ASSERT_EQ(1, contract["production_gate_socket_release_handshake_ready"]);
+    ASSERT_EQ("socket_release_owner_epoch_handshake_contract_v1",
+              contract["production_gate_socket_release_handshake_evidence"]);
     ASSERT_EQ("xkx_gateway_loadtest_report_v1", contract["production_gate_report_schema"]);
     ASSERT_EQ("schema,run_id,mode,users_requested,duration_seconds,scenario,commands_ok,timeouts,"
               "gateway_metrics_delta,production_gate_observations",
@@ -697,7 +700,11 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("frozen_deep_copy_args", boundary_contract["socket_owner_executor_result_policy"]);
     ASSERT_EQ(1, boundary_contract["socket_owner_executor_cleanup_main_ready"]);
     ASSERT_EQ(1, boundary_contract["socket_owner_executor_drop_cleanup_ready"]);
-    ASSERT_EQ(1, boundary_contract["socket_release_main_required"]);
+    ASSERT_EQ(0, boundary_contract["socket_release_main_required"]);
+    ASSERT_EQ(1, boundary_contract["socket_release_owner_safe_handshake_ready"]);
+    ASSERT_EQ("synchronous_release_acquire_owner_epoch_guard",
+              boundary_contract["socket_release_owner_safe_handshake_policy"]);
+    ASSERT_EQ(1, boundary_contract["socket_release_owner_epoch_guard_ready"]);
     ASSERT_EQ(0, boundary_contract["gateway_command_rejected"]);
     ASSERT_EQ(1, boundary_contract["gateway_command_executor_activation_ready"]);
     ASSERT_EQ(1, boundary_contract["gateway_command_execute_ready"]);
@@ -773,7 +780,11 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("frozen_deep_copy_args", status["socket_owner_executor_result_policy"]);
     ASSERT_EQ(1, status["socket_owner_executor_cleanup_main_ready"]);
     ASSERT_EQ(1, status["socket_owner_executor_drop_cleanup_ready"]);
-    ASSERT_EQ(1, status["socket_release_main_required"]);
+    ASSERT_EQ(0, status["socket_release_main_required"]);
+    ASSERT_EQ(1, status["socket_release_owner_safe_handshake_ready"]);
+    ASSERT_EQ("synchronous_release_acquire_owner_epoch_guard",
+              status["socket_release_owner_safe_handshake_policy"]);
+    ASSERT_EQ(1, status["socket_release_owner_epoch_guard_ready"]);
     ASSERT_EQ(1, status["gateway_command_execute_ready"]);
     ASSERT_EQ("gateway_command_execute", status["gateway_command_execute_task_type"]);
     ASSERT_EQ("owner_executor", status["gateway_command_execute_route"]);

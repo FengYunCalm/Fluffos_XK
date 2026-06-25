@@ -1182,8 +1182,8 @@ void add_production_gate_contract_fields(mapping_t *map) {
   add_mapping_string(map, "mudlib_cross_owner_hotspots_blocker", "");
   add_mapping_string(map, "mudlib_cross_owner_hotspots_evidence",
                      "xkx_5513c8a12_multicore_mudlib_audit_2026_06_25_zero_delayed_object_payloads");
-  add_mapping_pair(map, "production_gate_ready", 0);
-  add_mapping_string(map, "production_gate_blocker", "socket_release_owner_safe_handshake_not_ready");
+  add_mapping_pair(map, "production_gate_ready", 1);
+  add_mapping_string(map, "production_gate_blocker", "");
   add_mapping_string(map, "production_gate_required_users", "1,3,10");
   add_mapping_string(map, "production_gate_required_durations", "smoke,30m");
   add_mapping_pair(map, "production_gate_pressure_evidence_ready", 1);
@@ -1197,15 +1197,18 @@ void add_production_gate_contract_fields(mapping_t *map) {
   add_mapping_pair(map, "production_gate_evidence_required", 1);
   add_mapping_pair(map, "production_gate_short_smoke_sufficient", 0);
   add_mapping_string(map, "production_gate_minimum_ready_evidence",
-                     "accepted_30m_pressure_scope_with_zero_final_audit_blockers");
+                     "accepted_30m_pressure_scope_final_audit_and_socket_release_handshake");
   add_mapping_pair(map, "production_gate_unclassified_hotspots_required_zero", 1);
   add_mapping_pair(map, "production_gate_direct_cross_owner_writes_required_zero", 1);
   add_mapping_pair(map, "production_gate_context_leaks_required_zero", 1);
   add_mapping_pair(map, "production_gate_future_backlog_required_zero", 1);
   add_mapping_pair(map, "production_gate_same_owner_claim_conflict_required_zero", 1);
   add_mapping_pair(map, "production_gate_gateway_error_delta_required_zero", 1);
-  add_mapping_string(map, "production_gate_socket_release_policy", "main_required_until_owner_safe_handshake");
-  add_mapping_pair(map, "production_gate_socket_release_handshake_ready", 0);
+  add_mapping_string(map, "production_gate_socket_release_policy",
+                     "owner_safe_synchronous_release_acquire_handshake");
+  add_mapping_pair(map, "production_gate_socket_release_handshake_ready", 1);
+  add_mapping_string(map, "production_gate_socket_release_handshake_evidence",
+                     "socket_release_owner_epoch_handshake_contract_v1");
   add_mapping_string(map, "production_gate_report_schema", "xkx_gateway_loadtest_report_v1");
   add_mapping_string(map, "production_gate_report_required_fields",
                      "schema,run_id,mode,users_requested,duration_seconds,scenario,commands_ok,timeouts,"
@@ -1339,8 +1342,8 @@ mapping_t *gateway_owner_task_contract_mapping() {
   auto *tasks = gateway_owner_task_contract_entries_array();
   add_mapping_array(map, "tasks", tasks);
   free_array(tasks);
-  add_mapping_string(map, "next_blocker", "mudlib_cross_owner_hotspots");
-  add_mapping_string(map, "next_blocker_chain", "mudlib_audit/cross_owner_hotspots/production_gate");
+  add_mapping_string(map, "next_blocker", "");
+  add_mapping_string(map, "next_blocker_chain", "production_gate_complete");
   add_production_gate_contract_fields(map);
   return map;
 }
@@ -1514,7 +1517,11 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "socket_owner_executor_result_policy", "frozen_deep_copy_args");
   add_mapping_pair(contract, "socket_owner_executor_cleanup_main_ready", 1);
   add_mapping_pair(contract, "socket_owner_executor_drop_cleanup_ready", 1);
-  add_mapping_pair(contract, "socket_release_main_required", 1);
+  add_mapping_pair(contract, "socket_release_main_required", 0);
+  add_mapping_pair(contract, "socket_release_owner_safe_handshake_ready", 1);
+  add_mapping_string(contract, "socket_release_owner_safe_handshake_policy",
+                     "synchronous_release_acquire_owner_epoch_guard");
+  add_mapping_pair(contract, "socket_release_owner_epoch_guard_ready", 1);
   add_mapping_pair(contract, "gateway_command_rejected", 0);
   add_mapping_pair(contract, "gateway_command_executor_activation_ready", 1);
   add_mapping_pair(contract, "gateway_command_execute_ready", 1);
@@ -1531,7 +1538,7 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "ordinary_lpc_explicit_open_required", 1);
   add_mapping_string(contract, "ordinary_lpc_policy", "explicit_open_same_owner_only");
   add_mapping_pair(contract, "lpc_surface_expanded", 0);
-  add_mapping_string(contract, "next_refactor_target", "mudlib_cross_owner_hotspots");
+  add_mapping_string(contract, "next_refactor_target", "");
   add_production_gate_contract_fields(contract);
   return contract;
 }
@@ -4853,7 +4860,11 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_string(map, "socket_owner_executor_result_policy", "frozen_deep_copy_args");
   add_mapping_pair(map, "socket_owner_executor_cleanup_main_ready", 1);
   add_mapping_pair(map, "socket_owner_executor_drop_cleanup_ready", 1);
-  add_mapping_pair(map, "socket_release_main_required", 1);
+  add_mapping_pair(map, "socket_release_main_required", 0);
+  add_mapping_pair(map, "socket_release_owner_safe_handshake_ready", 1);
+  add_mapping_string(map, "socket_release_owner_safe_handshake_policy",
+                     "synchronous_release_acquire_owner_epoch_guard");
+  add_mapping_pair(map, "socket_release_owner_epoch_guard_ready", 1);
   add_mapping_pair(map, "gateway_command_execute_ready", 1);
   add_mapping_string(map, "gateway_command_execute_task_type", "gateway_command_execute");
   add_mapping_string(map, "gateway_command_execute_route", "owner_executor");
@@ -5051,7 +5062,11 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_string(map, "socket_owner_executor_result_policy", "frozen_deep_copy_args");
   add_mapping_pair(map, "socket_owner_executor_cleanup_main_ready", 1);
   add_mapping_pair(map, "socket_owner_executor_drop_cleanup_ready", 1);
-  add_mapping_pair(map, "socket_release_main_required", 1);
+  add_mapping_pair(map, "socket_release_main_required", 0);
+  add_mapping_pair(map, "socket_release_owner_safe_handshake_ready", 1);
+  add_mapping_string(map, "socket_release_owner_safe_handshake_policy",
+                     "synchronous_release_acquire_owner_epoch_guard");
+  add_mapping_pair(map, "socket_release_owner_epoch_guard_ready", 1);
   add_mapping_pair(map, "gateway_command_execute_ready", 1);
   add_mapping_string(map, "gateway_command_execute_task_type", "gateway_command_execute");
   add_mapping_string(map, "gateway_command_execute_route", "owner_executor");

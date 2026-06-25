@@ -2305,7 +2305,11 @@ TEST_F(DriverTest, TestVmOwnerSocketCallbacksDispatchThroughOwnerExecutor) {
   ASSERT_STREQ(mapping_string(after, "socket_owner_executor_result_policy"), "frozen_deep_copy_args");
   ASSERT_EQ(mapping_number(after, "socket_owner_executor_cleanup_main_ready"), 1);
   ASSERT_EQ(mapping_number(after, "socket_owner_executor_drop_cleanup_ready"), 1);
-  ASSERT_EQ(mapping_number(after, "socket_release_main_required"), 1);
+  ASSERT_EQ(mapping_number(after, "socket_release_main_required"), 0);
+  ASSERT_EQ(mapping_number(after, "socket_release_owner_safe_handshake_ready"), 1);
+  ASSERT_STREQ(mapping_string(after, "socket_release_owner_safe_handshake_policy"),
+               "synchronous_release_acquire_owner_epoch_guard");
+  ASSERT_EQ(mapping_number(after, "socket_release_owner_epoch_guard_ready"), 1);
   free_mapping(after);
 }
 
@@ -4051,9 +4055,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "");
     ASSERT_STREQ(mapping_string(contract, "mudlib_cross_owner_hotspots_evidence"),
                  "xkx_5513c8a12_multicore_mudlib_audit_2026_06_25_zero_delayed_object_payloads");
-    ASSERT_EQ(mapping_number(contract, "production_gate_ready"), 0);
-    ASSERT_STREQ(mapping_string(contract, "production_gate_blocker"),
-                 "socket_release_owner_safe_handshake_not_ready");
+    ASSERT_EQ(mapping_number(contract, "production_gate_ready"), 1);
+    ASSERT_STREQ(mapping_string(contract, "production_gate_blocker"), "");
     ASSERT_STREQ(mapping_string(contract, "production_gate_required_users"), "1,3,10");
     ASSERT_STREQ(mapping_string(contract, "production_gate_required_durations"), "smoke,30m");
     ASSERT_EQ(mapping_number(contract, "production_gate_pressure_evidence_ready"), 1);
@@ -4068,7 +4071,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(contract, "production_gate_evidence_required"), 1);
     ASSERT_EQ(mapping_number(contract, "production_gate_short_smoke_sufficient"), 0);
     ASSERT_STREQ(mapping_string(contract, "production_gate_minimum_ready_evidence"),
-                 "accepted_30m_pressure_scope_with_zero_final_audit_blockers");
+                 "accepted_30m_pressure_scope_final_audit_and_socket_release_handshake");
     ASSERT_EQ(mapping_number(contract, "production_gate_unclassified_hotspots_required_zero"), 1);
     ASSERT_EQ(mapping_number(contract, "production_gate_direct_cross_owner_writes_required_zero"), 1);
     ASSERT_EQ(mapping_number(contract, "production_gate_context_leaks_required_zero"), 1);
@@ -4076,8 +4079,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(contract, "production_gate_same_owner_claim_conflict_required_zero"), 1);
     ASSERT_EQ(mapping_number(contract, "production_gate_gateway_error_delta_required_zero"), 1);
     ASSERT_STREQ(mapping_string(contract, "production_gate_socket_release_policy"),
-                 "main_required_until_owner_safe_handshake");
-    ASSERT_EQ(mapping_number(contract, "production_gate_socket_release_handshake_ready"), 0);
+                 "owner_safe_synchronous_release_acquire_handshake");
+    ASSERT_EQ(mapping_number(contract, "production_gate_socket_release_handshake_ready"), 1);
+    ASSERT_STREQ(mapping_string(contract, "production_gate_socket_release_handshake_evidence"),
+                 "socket_release_owner_epoch_handshake_contract_v1");
     ASSERT_STREQ(mapping_string(contract, "production_gate_report_schema"),
                  "xkx_gateway_loadtest_report_v1");
     ASSERT_STREQ(mapping_string(contract, "production_gate_report_required_fields"),
@@ -4142,7 +4147,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(status, "socket_owner_executor_result_policy"), "frozen_deep_copy_args");
     ASSERT_EQ(mapping_number(status, "socket_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(status, "socket_owner_executor_drop_cleanup_ready"), 1);
-    ASSERT_EQ(mapping_number(status, "socket_release_main_required"), 1);
+    ASSERT_EQ(mapping_number(status, "socket_release_main_required"), 0);
+    ASSERT_EQ(mapping_number(status, "socket_release_owner_safe_handshake_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "socket_release_owner_safe_handshake_policy"),
+                 "synchronous_release_acquire_owner_epoch_guard");
+    ASSERT_EQ(mapping_number(status, "socket_release_owner_epoch_guard_ready"), 1);
     ASSERT_EQ(mapping_number(status, "gateway_command_execute_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "gateway_command_execute_task_type"), "gateway_command_execute");
     ASSERT_STREQ(mapping_string(status, "gateway_command_execute_route"), "owner_executor");
@@ -4434,7 +4443,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_result_policy"), "frozen_deep_copy_args");
     ASSERT_EQ(mapping_number(boundary_contract, "socket_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "socket_owner_executor_drop_cleanup_ready"), 1);
-    ASSERT_EQ(mapping_number(boundary_contract, "socket_release_main_required"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "socket_release_main_required"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "socket_release_owner_safe_handshake_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "socket_release_owner_safe_handshake_policy"),
+                 "synchronous_release_acquire_owner_epoch_guard");
+    ASSERT_EQ(mapping_number(boundary_contract, "socket_release_owner_epoch_guard_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_rejected"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_executor_activation_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_execute_ready"), 1);

@@ -264,6 +264,7 @@ static void clear_socket(int which, int dofree) {
   lpc_socks[which].r_addrlen = 0;
   lpc_socks[which].owner_ob = nullptr;
   lpc_socks[which].release_ob = nullptr;
+  lpc_socks[which].release_ob_epoch = 0;
   lpc_socks[which].read_callback.s = nullptr;
   lpc_socks[which].write_callback.s = nullptr;
   lpc_socks[which].close_callback.s = nullptr;
@@ -1369,6 +1370,23 @@ static void dispatch_socket_queued_callback(object_t *owner, SocketQueuedCallbac
   vm_owner_drain_main_tasks(64);
 }
 
+static const char *socket_release_callback_key(svalue_t *callback) {
+  if (!callback) {
+    return "";
+  }
+  if (callback->type == T_FUNCTION) {
+    return "<function>";
+  }
+  return callback->u.string ? callback->u.string : "";
+}
+
+static object_t *socket_release_callback_owner(object_t *release_ob, svalue_t *callback) {
+  if (callback && callback->type == T_FUNCTION && callback->u.fp && callback->u.fp->hdr.owner) {
+    return callback->u.fp->hdr.owner;
+  }
+  return release_ob;
+}
+
 bool vm_socket_test_support_dispatch_callback(object_t *owner, const char *method, LPC_INT fd) {
   if (!owner || !method || method[0] == '\0' || (owner->flags & O_DESTRUCTED)) {
     return false;
@@ -1984,39 +2002,77 @@ int socket_release(int fd, object_t *ob, svalue_t *callback) {
   if (lpc_socks[fd].state == STATE_CLOSED || lpc_socks[fd].state == STATE_FLUSHING) {
     return EEBADF;
   }
+  if (!current_object || (current_object->flags & O_DESTRUCTED)) {
+    return EESECURITY;
+  }
   if (lpc_socks[fd].owner_ob != current_object) {
     return EESECURITY;
   }
   if (lpc_socks[fd].flags & S_RELEASE) {
     return EESOCKRLSD;
   }
+  if (!callback || (callback->type == T_FUNCTION && !callback->u.fp) ||
+      (callback->type != T_FUNCTION && !callback->u.string)) {
+    return EESECURITY;
+  }
+  if (!ob || (ob->flags & O_DESTRUCTED)) {
+    return EESECURITY;
+  }
+
+  auto *callback_owner = socket_release_callback_owner(ob, callback);
+  auto *callback_key = socket_release_callback_key(callback);
+  if (!callback_owner || (callback_owner->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(vm_owner_id(ob), "socket_release", callback_key, vm_owner_epoch(ob), "destructed");
+    return EESECURITY;
+  }
+
+  auto release_owner_id = std::string(vm_owner_id(current_object));
+  auto release_owner_epoch = vm_owner_epoch(current_object);
+  auto target_owner_id = std::string(vm_owner_id(ob));
+  auto target_owner_epoch = vm_owner_epoch(ob);
+  auto callback_owner_id = std::string(vm_owner_id(callback_owner));
+  auto callback_owner_epoch = vm_owner_epoch(callback_owner);
+  if (callback_owner_id != target_owner_id) {
+    vm_owner_record_task_trace(target_owner_id.c_str(), "socket_release", callback_key, target_owner_epoch,
+                               "owner_mismatch");
+    return EESECURITY;
+  }
 
   lpc_socks[fd].flags |= S_RELEASE;
   lpc_socks[fd].release_ob = ob;
+  lpc_socks[fd].release_ob_epoch = target_owner_epoch;
+  vm_owner_record_task_trace(target_owner_id.c_str(), "socket_release", callback_key, target_owner_epoch,
+                             "handshake_prepared");
 
   push_number(fd);
   push_object(ob);
   set_eval(max_eval_cost);
 
   if (callback->type == T_FUNCTION) {
-    auto *owner = callback->u.fp ? callback->u.fp->hdr.owner : ob;
-    VMOwnerScope owner_scope(vm_context(), vm_owner_id(owner), vm_owner_epoch(owner));
-    vm_owner_record_task_trace(vm_owner_id(owner), "socket_release", "<function>", vm_owner_epoch(owner),
+    VMOwnerScope owner_scope(vm_context(), callback_owner_id.c_str(), callback_owner_epoch);
+    ControlledLpcScope controlled_lpc;
+    vm_owner_record_task_trace(callback_owner_id.c_str(), "socket_release", callback_key, callback_owner_epoch,
                                "dispatched");
     safe_call_function_pointer(callback->u.fp, 2);
   } else {
-    VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob), vm_owner_epoch(ob));
-    vm_owner_record_task_trace(vm_owner_id(ob), "socket_release", callback->u.string, vm_owner_epoch(ob),
+    VMOwnerScope owner_scope(vm_context(), target_owner_id.c_str(), target_owner_epoch);
+    ControlledLpcScope controlled_lpc;
+    vm_owner_record_task_trace(target_owner_id.c_str(), "socket_release", callback_key, target_owner_epoch,
                                "dispatched");
     safe_apply(callback->u.string, ob, 2, ORIGIN_INTERNAL);
   }
 
   if ((lpc_socks[fd].flags & S_RELEASE) == 0) {
+    vm_owner_record_task_trace(target_owner_id.c_str(), "socket_release", callback_key, target_owner_epoch,
+                               "handshake_completed");
     return EESUCCESS;
   }
 
   lpc_socks[fd].flags &= ~S_RELEASE;
   lpc_socks[fd].release_ob = nullptr;
+  lpc_socks[fd].release_ob_epoch = 0;
+  vm_owner_record_task_trace(release_owner_id.c_str(), "socket_release", callback_key, release_owner_epoch,
+                             "handshake_not_acquired");
 
   return EESOCKNOTRLSD;
 }
@@ -2035,17 +2091,29 @@ int socket_acquire(int fd, svalue_t *read_callback, svalue_t *write_callback,
   if ((lpc_socks[fd].flags & S_RELEASE) == 0) {
     return EESOCKNOTRLSD;
   }
+  if (!current_object || (current_object->flags & O_DESTRUCTED)) {
+    return EESECURITY;
+  }
   if (lpc_socks[fd].release_ob != current_object) {
+    return EESECURITY;
+  }
+  if (lpc_socks[fd].release_ob_epoch != 0 &&
+      lpc_socks[fd].release_ob_epoch != vm_owner_epoch(current_object)) {
+    vm_owner_record_task_trace(vm_owner_id(current_object), "socket_release", "socket_acquire",
+                               vm_owner_epoch(current_object), "stale");
     return EESECURITY;
   }
 
   lpc_socks[fd].flags &= ~S_RELEASE;
   lpc_socks[fd].owner_ob = current_object;
   lpc_socks[fd].release_ob = nullptr;
+  lpc_socks[fd].release_ob_epoch = 0;
 
   set_read_callback(fd, read_callback);
   set_write_callback(fd, write_callback);
   set_close_callback(fd, close_callback);
+  vm_owner_record_task_trace(vm_owner_id(current_object), "socket_release", "socket_acquire",
+                             vm_owner_epoch(current_object), "acquired");
 
   return EESUCCESS;
 }
