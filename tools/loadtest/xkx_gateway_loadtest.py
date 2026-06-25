@@ -70,6 +70,15 @@ class PlayerResult:
     latencies_ms: List[float] = field(default_factory=list)
     command_latencies_ms: Dict[str, List[float]] = field(default_factory=dict)
     command_timeouts: Dict[str, int] = field(default_factory=dict)
+    command_failure_reasons: Dict[str, int] = field(default_factory=dict)
+    first_command_at: Optional[float] = None
+    last_command_at: Optional[float] = None
+    last_success_at: Optional[float] = None
+    first_timeout_at: Optional[float] = None
+    last_timeout_at: Optional[float] = None
+    consecutive_timeouts: int = 0
+    max_consecutive_timeouts: int = 0
+    recent_events: List[Dict[str, Any]] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
 
 
@@ -227,7 +236,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", type=int, default=int(time.time()) % 1000)
     parser.add_argument("--connect-timeout", type=float, default=8.0)
     parser.add_argument("--login-timeout", type=float, default=5.0)
-    parser.add_argument("--command-timeout", type=float, default=2.0)
+    parser.add_argument("--command-timeout", type=float, default=5.0)
     parser.add_argument("--idle-gap", type=float, default=0.15)
     parser.add_argument("--think-min", type=float, default=0.1)
     parser.add_argument("--think-max", type=float, default=0.5)
@@ -426,12 +435,35 @@ def login_player(client: WebSocketClient, args: argparse.Namespace, result: Play
     return False
 
 
+def record_command_event(
+    result: PlayerResult,
+    command: str,
+    status: str,
+    elapsed_ms: float,
+    message_count: int,
+) -> None:
+    result.recent_events.append(
+        {
+            "command": command,
+            "status": status,
+            "elapsed_ms": elapsed_ms,
+            "message_count": message_count,
+            "at": time.perf_counter(),
+        }
+    )
+    if len(result.recent_events) > 20:
+        del result.recent_events[: len(result.recent_events) - 20]
+
+
 def run_command(client: WebSocketClient, command: str, args: argparse.Namespace, result: PlayerResult) -> None:
     command_key = command
     expects_token = "{token}" in command
     token = f"LT-{result.index:04d}-{result.commands_sent + 1:04d}"
     command = command.replace("{token}", token)
     started = time.perf_counter()
+    if result.first_command_at is None:
+        result.first_command_at = started
+    result.last_command_at = started
     result.commands_sent += 1
     client.send_text(command + "\n")
     messages = collect_messages(client, args.command_timeout, args.idle_gap)
@@ -441,11 +473,28 @@ def run_command(client: WebSocketClient, command: str, args: argparse.Namespace,
         result.commands_ok += 1
         result.latencies_ms.append(elapsed)
         result.command_latencies_ms.setdefault(command_key, []).append(elapsed)
+        result.last_success_at = time.perf_counter()
+        result.consecutive_timeouts = 0
+        record_command_event(result, command_key, "ok", elapsed, len(messages))
         return
+    if not messages:
+        reason = "timeout_no_messages"
+    elif expects_token and token not in blob:
+        reason = "token_missing"
+    else:
+        reason = "unexpected_response"
     result.timeouts += 1
     result.command_failures += 1
     result.command_timeouts[command_key] = result.command_timeouts.get(command_key, 0) + 1
-    result.errors.append("timeout:" + command)
+    result.command_failure_reasons[reason] = result.command_failure_reasons.get(reason, 0) + 1
+    now = time.perf_counter()
+    if result.first_timeout_at is None:
+        result.first_timeout_at = now
+    result.last_timeout_at = now
+    result.consecutive_timeouts += 1
+    result.max_consecutive_timeouts = max(result.max_consecutive_timeouts, result.consecutive_timeouts)
+    record_command_event(result, command_key, reason, elapsed, len(messages))
+    result.errors.append(f"{reason}:{command}")
 
 
 def run_player(index: int, args: argparse.Namespace, commands: List[str]) -> PlayerResult:
@@ -528,6 +577,48 @@ def latency_summary(values: List[float]) -> Dict[str, Optional[float]]:
     }
 
 
+def relative_seconds(value: Optional[float], started: float) -> Optional[float]:
+    if value is None:
+        return None
+    return max(0.0, value - started)
+
+
+def player_timeline(result: PlayerResult, started: float) -> List[Dict[str, Any]]:
+    timeline: List[Dict[str, Any]] = []
+    for event in result.recent_events:
+        rendered = dict(event)
+        rendered["at"] = relative_seconds(event.get("at"), started)
+        timeline.append(rendered)
+    return timeline
+
+
+def per_player_summary(result: PlayerResult, started: float) -> Dict[str, Any]:
+    return {
+        "index": result.index,
+        "account": result.account,
+        "connected": result.connected,
+        "logged_in": result.logged_in,
+        "created_role": result.created_role,
+        "disconnected": result.disconnected,
+        "commands_sent": result.commands_sent,
+        "commands_ok": result.commands_ok,
+        "command_failures": result.command_failures,
+        "timeouts": result.timeouts,
+        "command_timeouts": dict(sorted(result.command_timeouts.items())),
+        "command_failure_reasons": dict(sorted(result.command_failure_reasons.items())),
+        "latency_ms": latency_summary(result.latencies_ms),
+        "first_command_at": relative_seconds(result.first_command_at, started),
+        "last_command_at": relative_seconds(result.last_command_at, started),
+        "last_success_at": relative_seconds(result.last_success_at, started),
+        "first_timeout_at": relative_seconds(result.first_timeout_at, started),
+        "last_timeout_at": relative_seconds(result.last_timeout_at, started),
+        "consecutive_timeouts": result.consecutive_timeouts,
+        "max_consecutive_timeouts": result.max_consecutive_timeouts,
+        "recent_events": player_timeline(result, started),
+        "sample_errors": result.errors[:5],
+    }
+
+
 def summarize(
     args: argparse.Namespace,
     results: List[PlayerResult],
@@ -539,12 +630,15 @@ def summarize(
     latencies = [value for result in results for value in result.latencies_ms]
     command_latencies: Dict[str, List[float]] = defaultdict(list)
     command_timeouts: Dict[str, int] = defaultdict(int)
+    command_failure_reasons: Dict[str, int] = defaultdict(int)
     errors = []
     for result in results:
         for command, values in result.command_latencies_ms.items():
             command_latencies[command].extend(values)
         for command, count in result.command_timeouts.items():
             command_timeouts[command] += count
+        for reason, count in result.command_failure_reasons.items():
+            command_failure_reasons[reason] += count
         for err in result.errors:
             errors.append({"account": result.account, "error": err})
     elapsed = max(0.001, ended - started)
@@ -603,6 +697,10 @@ def summarize(
         "scenario": args.scenario,
         "duration_seconds": elapsed,
         "duration_requested_seconds": args.duration,
+        "command_timeout_seconds": args.command_timeout,
+        "idle_gap_seconds": args.idle_gap,
+        "think_min_seconds": args.think_min,
+        "think_max_seconds": args.think_max,
         "users_requested": args.users,
         "users_started": len(results),
         "connected": sum(1 for item in results if item.connected),
@@ -622,6 +720,10 @@ def summarize(
         "command_timeouts_by_command": {
             command: count for command, count in sorted(command_timeouts.items())
         },
+        "command_failure_reasons": {
+            reason: count for reason, count in sorted(command_failure_reasons.items())
+        },
+        "per_player": [per_player_summary(result, started) for result in results],
         "gateway_metrics_delta": gateway_metrics_delta,
         "production_gate_observations": {
             "schema": "multicore_production_gate_evidence_v1",
