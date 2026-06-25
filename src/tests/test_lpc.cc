@@ -4191,6 +4191,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(vm_context_contract, "apply_return_owner_bound_on_executor"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "apply_return_cleared_after_task"), 1);
     ASSERT_EQ(mapping_number(vm_context_contract, "apply_return_owner_local"), 1);
+    ASSERT_EQ(mapping_number(vm_context_contract, "sprintf_state_thread_local"), 1);
+    ASSERT_EQ(mapping_number(vm_context_contract, "sprintf_format_buffers_static_free"), 1);
     ASSERT_STREQ(mapping_string(vm_context_contract, "object_refs_model"), "object_handle_boundary");
     ASSERT_EQ(mapping_number(vm_context_contract, "object_refs_owner_local"), 1);
     ASSERT_STREQ(mapping_string(vm_context_contract, "cross_owner_object_refs_policy"),

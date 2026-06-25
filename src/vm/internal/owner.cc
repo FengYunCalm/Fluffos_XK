@@ -1351,7 +1351,7 @@ long vm_context_satisfied_readiness_gate_count() {
 }
 
 mapping_t *vm_context_contract_mapping() {
-  auto *contract = allocate_mapping(69);
+  auto *contract = allocate_mapping(71);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "context_model", "thread_local_vm_context");
   add_mapping_string(contract, "execution_state_model", "vm_context_execution_snapshot");
@@ -1384,6 +1384,8 @@ mapping_t *vm_context_contract_mapping() {
   add_mapping_pair(contract, "apply_return_owner_bound_on_executor", 1);
   add_mapping_pair(contract, "apply_return_cleared_after_task", 1);
   add_mapping_pair(contract, "apply_return_owner_local", 1);
+  add_mapping_pair(contract, "sprintf_state_thread_local", 1);
+  add_mapping_pair(contract, "sprintf_format_buffers_static_free", 1);
   add_mapping_string(contract, "object_refs_model", "object_handle_boundary");
   add_mapping_pair(contract, "object_refs_owner_local", 1);
   add_mapping_string(contract, "cross_owner_object_refs_policy", "object_handle_or_frozen_payload_only");

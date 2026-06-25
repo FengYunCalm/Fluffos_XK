@@ -178,7 +178,7 @@ using sprintf_state_t = struct _sprintf_state {
   struct _sprintf_state *next;
 };
 
-static sprintf_state_t *sprintf_state = nullptr;
+static thread_local sprintf_state_t *sprintf_state = nullptr;
 
 static void add_space(outbuffer_t * /*outbuf*/, int indent);
 static void add_justified(const char *str, int swidth, int slen, pad_info_t *pad, int fs,
@@ -1242,9 +1242,9 @@ char *string_print_formatted(const char *format_str, int argc, svalue_t *argv) {
                                   (nelemno < (argv + sprintf_state->cur_arg)->u.arr->size))));
         } else if (finfo & INFO_T_INT) {
           /* one of the integer types */
-          static char cheat[40];
+          char cheat[40];
           // https://stackoverflow.com/questions/1701055/what-is-the-maximum-length-in-chars-needed-to-represent-any-double-value
-          static char temp[3 + DBL_MANT_DIG - DBL_MIN_EXP + 1];
+          char temp[3 + DBL_MANT_DIG - DBL_MIN_EXP + 1];
 
           *cheat = '%';
           i = 1;
