@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from collections import defaultdict
 import hashlib
 import json
 import os
@@ -67,6 +68,8 @@ class PlayerResult:
     timeouts: int = 0
     disconnected: bool = False
     latencies_ms: List[float] = field(default_factory=list)
+    command_latencies_ms: Dict[str, List[float]] = field(default_factory=dict)
+    command_timeouts: Dict[str, int] = field(default_factory=dict)
     errors: List[str] = field(default_factory=list)
 
 
@@ -424,6 +427,7 @@ def login_player(client: WebSocketClient, args: argparse.Namespace, result: Play
 
 
 def run_command(client: WebSocketClient, command: str, args: argparse.Namespace, result: PlayerResult) -> None:
+    command_key = command
     expects_token = "{token}" in command
     token = f"LT-{result.index:04d}-{result.commands_sent + 1:04d}"
     command = command.replace("{token}", token)
@@ -436,9 +440,11 @@ def run_command(client: WebSocketClient, command: str, args: argparse.Namespace,
     if has_content_response(messages) and (not expects_token or token in blob):
         result.commands_ok += 1
         result.latencies_ms.append(elapsed)
+        result.command_latencies_ms.setdefault(command_key, []).append(elapsed)
         return
     result.timeouts += 1
     result.command_failures += 1
+    result.command_timeouts[command_key] = result.command_timeouts.get(command_key, 0) + 1
     result.errors.append("timeout:" + command)
 
 
@@ -510,6 +516,18 @@ def percentile(values: List[float], pct: float) -> Optional[float]:
     return ordered[index]
 
 
+def latency_summary(values: List[float]) -> Dict[str, Optional[float]]:
+    return {
+        "count": len(values),
+        "min": min(values) if values else None,
+        "avg": statistics.fmean(values) if values else None,
+        "p50": percentile(values, 0.50),
+        "p95": percentile(values, 0.95),
+        "p99": percentile(values, 0.99),
+        "max": max(values) if values else None,
+    }
+
+
 def summarize(
     args: argparse.Namespace,
     results: List[PlayerResult],
@@ -519,8 +537,14 @@ def summarize(
     metrics_after: Dict[str, float],
 ) -> Dict[str, Any]:
     latencies = [value for result in results for value in result.latencies_ms]
+    command_latencies: Dict[str, List[float]] = defaultdict(list)
+    command_timeouts: Dict[str, int] = defaultdict(int)
     errors = []
     for result in results:
+        for command, values in result.command_latencies_ms.items():
+            command_latencies[command].extend(values)
+        for command, count in result.command_timeouts.items():
+            command_timeouts[command] += count
         for err in result.errors:
             errors.append({"account": result.account, "error": err})
     elapsed = max(0.001, ended - started)
@@ -590,14 +614,13 @@ def summarize(
         "command_failures": command_failures,
         "timeouts": timeouts,
         "commands_per_second": commands_sent / elapsed,
-        "latency_ms": {
-            "count": len(latencies),
-            "min": min(latencies) if latencies else None,
-            "avg": statistics.fmean(latencies) if latencies else None,
-            "p50": percentile(latencies, 0.50),
-            "p95": percentile(latencies, 0.95),
-            "p99": percentile(latencies, 0.99),
-            "max": max(latencies) if latencies else None,
+        "latency_ms": latency_summary(latencies),
+        "command_latency_ms": {
+            command: latency_summary(values)
+            for command, values in sorted(command_latencies.items())
+        },
+        "command_timeouts_by_command": {
+            command: count for command, count in sorted(command_timeouts.items())
         },
         "gateway_metrics_delta": gateway_metrics_delta,
         "production_gate_observations": {
