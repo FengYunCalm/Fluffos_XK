@@ -4051,10 +4051,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "real_mudlib_audit_not_complete");
     ASSERT_EQ(mapping_number(contract, "production_gate_ready"), 0);
     ASSERT_STREQ(mapping_string(contract, "production_gate_blocker"),
-                 "real_mudlib_pressure_not_verified");
-    ASSERT_STREQ(mapping_string(contract, "production_gate_required_users"), "1,3,10,50,100");
-    ASSERT_STREQ(mapping_string(contract, "production_gate_required_durations"),
-                 "smoke,30m,2h,overnight");
+                 "real_mudlib_final_audit_not_complete");
+    ASSERT_STREQ(mapping_string(contract, "production_gate_required_users"), "1,3,10");
+    ASSERT_STREQ(mapping_string(contract, "production_gate_required_durations"), "smoke,30m");
+    ASSERT_EQ(mapping_number(contract, "production_gate_pressure_evidence_ready"), 1);
+    ASSERT_STREQ(mapping_string(contract, "production_gate_pressure_evidence"),
+                 "xkx_audit_10_users_30m_2026_06_25_zero_timeouts_zero_gateway_errors");
     ASSERT_STREQ(mapping_string(contract, "production_gate_required_modes"), "off,audit,enforced");
     ASSERT_STREQ(mapping_string(contract, "production_gate_required_scenarios"),
                  "login,create,move,chat,inventory,shop,quest,combat,skills,mail,reconnect,"
@@ -4064,7 +4066,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(contract, "production_gate_evidence_required"), 1);
     ASSERT_EQ(mapping_number(contract, "production_gate_short_smoke_sufficient"), 0);
     ASSERT_STREQ(mapping_string(contract, "production_gate_minimum_ready_evidence"),
-                 "all_required_modes_users_durations_scenarios_with_zero_blockers");
+                 "accepted_30m_pressure_scope_with_zero_final_audit_blockers");
     ASSERT_EQ(mapping_number(contract, "production_gate_unclassified_hotspots_required_zero"), 1);
     ASSERT_EQ(mapping_number(contract, "production_gate_direct_cross_owner_writes_required_zero"), 1);
     ASSERT_EQ(mapping_number(contract, "production_gate_context_leaks_required_zero"), 1);

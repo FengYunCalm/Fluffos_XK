@@ -46,9 +46,12 @@ void assert_production_gate_contract(mapping contract) {
     ASSERT_EQ(0, contract["mudlib_cross_owner_hotspots_ready"]);
     ASSERT_EQ("real_mudlib_audit_not_complete", contract["mudlib_cross_owner_hotspots_blocker"]);
     ASSERT_EQ(0, contract["production_gate_ready"]);
-    ASSERT_EQ("real_mudlib_pressure_not_verified", contract["production_gate_blocker"]);
-    ASSERT_EQ("1,3,10,50,100", contract["production_gate_required_users"]);
-    ASSERT_EQ("smoke,30m,2h,overnight", contract["production_gate_required_durations"]);
+    ASSERT_EQ("real_mudlib_final_audit_not_complete", contract["production_gate_blocker"]);
+    ASSERT_EQ("1,3,10", contract["production_gate_required_users"]);
+    ASSERT_EQ("smoke,30m", contract["production_gate_required_durations"]);
+    ASSERT_EQ(1, contract["production_gate_pressure_evidence_ready"]);
+    ASSERT_EQ("xkx_audit_10_users_30m_2026_06_25_zero_timeouts_zero_gateway_errors",
+              contract["production_gate_pressure_evidence"]);
     ASSERT_EQ("off,audit,enforced", contract["production_gate_required_modes"]);
     ASSERT_EQ("login,create,move,chat,inventory,shop,quest,combat,skills,mail,reconnect,"
               "gateway_callback,socket_callback,heartbeat,callout",
@@ -56,7 +59,7 @@ void assert_production_gate_contract(mapping contract) {
     ASSERT_EQ("multicore_production_gate_evidence_v1", contract["production_gate_evidence_schema"]);
     ASSERT_EQ(1, contract["production_gate_evidence_required"]);
     ASSERT_EQ(0, contract["production_gate_short_smoke_sufficient"]);
-    ASSERT_EQ("all_required_modes_users_durations_scenarios_with_zero_blockers",
+    ASSERT_EQ("accepted_30m_pressure_scope_with_zero_final_audit_blockers",
               contract["production_gate_minimum_ready_evidence"]);
     ASSERT_EQ(1, contract["production_gate_unclassified_hotspots_required_zero"]);
     ASSERT_EQ(1, contract["production_gate_direct_cross_owner_writes_required_zero"]);

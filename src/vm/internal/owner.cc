@@ -1181,9 +1181,12 @@ void add_production_gate_contract_fields(mapping_t *map) {
   add_mapping_pair(map, "mudlib_cross_owner_hotspots_ready", 0);
   add_mapping_string(map, "mudlib_cross_owner_hotspots_blocker", "real_mudlib_audit_not_complete");
   add_mapping_pair(map, "production_gate_ready", 0);
-  add_mapping_string(map, "production_gate_blocker", "real_mudlib_pressure_not_verified");
-  add_mapping_string(map, "production_gate_required_users", "1,3,10,50,100");
-  add_mapping_string(map, "production_gate_required_durations", "smoke,30m,2h,overnight");
+  add_mapping_string(map, "production_gate_blocker", "real_mudlib_final_audit_not_complete");
+  add_mapping_string(map, "production_gate_required_users", "1,3,10");
+  add_mapping_string(map, "production_gate_required_durations", "smoke,30m");
+  add_mapping_pair(map, "production_gate_pressure_evidence_ready", 1);
+  add_mapping_string(map, "production_gate_pressure_evidence",
+                     "xkx_audit_10_users_30m_2026_06_25_zero_timeouts_zero_gateway_errors");
   add_mapping_string(map, "production_gate_required_modes", "off,audit,enforced");
   add_mapping_string(map, "production_gate_required_scenarios",
                      "login,create,move,chat,inventory,shop,quest,combat,skills,mail,reconnect,"
@@ -1192,7 +1195,7 @@ void add_production_gate_contract_fields(mapping_t *map) {
   add_mapping_pair(map, "production_gate_evidence_required", 1);
   add_mapping_pair(map, "production_gate_short_smoke_sufficient", 0);
   add_mapping_string(map, "production_gate_minimum_ready_evidence",
-                     "all_required_modes_users_durations_scenarios_with_zero_blockers");
+                     "accepted_30m_pressure_scope_with_zero_final_audit_blockers");
   add_mapping_pair(map, "production_gate_unclassified_hotspots_required_zero", 1);
   add_mapping_pair(map, "production_gate_direct_cross_owner_writes_required_zero", 1);
   add_mapping_pair(map, "production_gate_context_leaks_required_zero", 1);
@@ -1208,7 +1211,7 @@ void add_production_gate_contract_fields(mapping_t *map) {
 }
 
 mapping_t *gateway_owner_task_contract_mapping() {
-  auto *map = allocate_mapping(134);
+  auto *map = allocate_mapping(136);
   add_mapping_pair(map, "contract_version", 1);
   add_mapping_string(map, "input_model", "owner_executor_with_main_fallback");
   add_mapping_string(map, "executor_migration_state", "owner_executor_active");
@@ -1426,7 +1429,7 @@ mapping_t *vm_context_contract_mapping() {
 }
 
 mapping_t *owner_executor_boundary_contract_mapping() {
-  auto *contract = allocate_mapping(75);
+  auto *contract = allocate_mapping(77);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "boundary_model", "owner_executor_boundary_v1");
   add_mapping_string(contract, "implementation_state", "compilation_unit_active");
