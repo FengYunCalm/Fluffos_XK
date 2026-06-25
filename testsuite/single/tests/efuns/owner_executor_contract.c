@@ -43,10 +43,12 @@ void assert_dispatch_entry(mapping dispatch_contract, string task_type,
 
 void assert_production_gate_contract(mapping contract) {
     ASSERT_EQ(1, contract["mudlib_audit_required"]);
-    ASSERT_EQ(0, contract["mudlib_cross_owner_hotspots_ready"]);
-    ASSERT_EQ("real_mudlib_audit_not_complete", contract["mudlib_cross_owner_hotspots_blocker"]);
+    ASSERT_EQ(1, contract["mudlib_cross_owner_hotspots_ready"]);
+    ASSERT_EQ("", contract["mudlib_cross_owner_hotspots_blocker"]);
+    ASSERT_EQ("xkx_5513c8a12_multicore_mudlib_audit_2026_06_25_zero_delayed_object_payloads",
+              contract["mudlib_cross_owner_hotspots_evidence"]);
     ASSERT_EQ(0, contract["production_gate_ready"]);
-    ASSERT_EQ("real_mudlib_final_audit_not_complete", contract["production_gate_blocker"]);
+    ASSERT_EQ("socket_release_owner_safe_handshake_not_ready", contract["production_gate_blocker"]);
     ASSERT_EQ("1,3,10", contract["production_gate_required_users"]);
     ASSERT_EQ("smoke,30m", contract["production_gate_required_durations"]);
     ASSERT_EQ(1, contract["production_gate_pressure_evidence_ready"]);

@@ -1178,10 +1178,12 @@ array_t *gateway_owner_task_contract_entries_array() {
 
 void add_production_gate_contract_fields(mapping_t *map) {
   add_mapping_pair(map, "mudlib_audit_required", 1);
-  add_mapping_pair(map, "mudlib_cross_owner_hotspots_ready", 0);
-  add_mapping_string(map, "mudlib_cross_owner_hotspots_blocker", "real_mudlib_audit_not_complete");
+  add_mapping_pair(map, "mudlib_cross_owner_hotspots_ready", 1);
+  add_mapping_string(map, "mudlib_cross_owner_hotspots_blocker", "");
+  add_mapping_string(map, "mudlib_cross_owner_hotspots_evidence",
+                     "xkx_5513c8a12_multicore_mudlib_audit_2026_06_25_zero_delayed_object_payloads");
   add_mapping_pair(map, "production_gate_ready", 0);
-  add_mapping_string(map, "production_gate_blocker", "real_mudlib_final_audit_not_complete");
+  add_mapping_string(map, "production_gate_blocker", "socket_release_owner_safe_handshake_not_ready");
   add_mapping_string(map, "production_gate_required_users", "1,3,10");
   add_mapping_string(map, "production_gate_required_durations", "smoke,30m");
   add_mapping_pair(map, "production_gate_pressure_evidence_ready", 1);

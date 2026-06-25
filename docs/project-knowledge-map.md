@@ -450,8 +450,8 @@ payload 约束：
 - array、mapping、object ref 的完整跨线程内存模型仍不允许绕过 frozen payload/ObjectHandle 边界。
 - `owner_lpc_task_allowed()` 的正式注册、审计、domain 合同和验收仍未生产化。
 - gateway command、heartbeat、callout、async/db/file completion、DNS callback 和 socket read/write/close callback 已有 owner executor 入口，但真实 mudlib 长压吞吐仍未验收。
-- 长时间、高并发、真实 mudlib 压测仍未完成，`production_gate_ready` 必须保持 0。
-- production rollout 策略、回滚指标和发布阻断条件仍需以真实压测结果收口。
+- 10 用户 30 分钟 audit 压测和真实 XiaKeXing mudlib final audit 已收口；`socket_release` owner-safe release/acquire handshake 尚未完成，`production_gate_ready` 必须保持 0。
+- production rollout 策略、回滚指标和发布阻断条件仍需以 socket release handshake 合同和最终 production gate 证据收口。
 
 ## 维护原则
 

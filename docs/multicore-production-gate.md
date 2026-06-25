@@ -4,7 +4,7 @@
 
 当前 driver 侧多核化执行面已经进入 production gate 前夜：owner-local lifecycle、OwnerExecutor callback task boundary、heartbeat、callout、async/file/db、DNS、socket read/write/close callback 和 gateway command execute 都已经具备 owner executor 路径，并保留 `off` 或 owner executor 不可用时的 main fallback。
 
-这不等于生产完成。10 用户 30 分钟 `audit` 压测已经满足当前压力验收口径；生产 ready 仍取决于真实 mudlib final audit、cross-owner hotspot 清零和直接 cross-owner 可变写清零证据，因此机器可读合同必须继续报告 `production_gate_ready=0`。
+这不等于生产完成。10 用户 30 分钟 `audit` 压测已经满足当前压力验收口径；真实 XiaKeXing mudlib final audit 已完成 delayed callback payload 收口并证明未分类 cross-owner hotspot 为 0；生产 ready 仍取决于 `socket_release` owner-safe release/acquire handshake，因此机器可读合同必须继续报告 `production_gate_ready=0`。
 
 ## 机器可读状态
 
@@ -13,10 +13,11 @@
 | 字段 | 当前值 | 含义 |
 | --- | --- | --- |
 | `mudlib_audit_required` | `1` | 真实 mudlib audit 是 production gate 的硬前置 |
-| `mudlib_cross_owner_hotspots_ready` | `0` | cross-owner 热点尚未完成迁移验收 |
-| `mudlib_cross_owner_hotspots_blocker` | `real_mudlib_audit_not_complete` | 仍缺真实 mudlib audit 证据 |
+| `mudlib_cross_owner_hotspots_ready` | `1` | 真实 mudlib delayed callback payload 和 cross-owner hotspot audit 已收口 |
+| `mudlib_cross_owner_hotspots_blocker` | `` | 无剩余 mudlib hotspot blocker |
+| `mudlib_cross_owner_hotspots_evidence` | `xkx_5513c8a12_multicore_mudlib_audit_2026_06_25_zero_delayed_object_payloads` | XiaKeXing 真实源码提交与仓内 audit 报告证据 |
 | `production_gate_ready` | `0` | 不能声明生产可用 |
-| `production_gate_blocker` | `real_mudlib_final_audit_not_complete` | 压力口径已收口，仍缺最终非压测 audit 证据 |
+| `production_gate_blocker` | `socket_release_owner_safe_handshake_not_ready` | 压力口径和 mudlib audit 已收口，仍缺 socket release/acquire owner-safe handshake |
 | `production_gate_required_users` | `1,3,10` | 当前验收覆盖的并发用户档位 |
 | `production_gate_required_durations` | `smoke,30m` | 当前验收覆盖的时长档位 |
 | `production_gate_pressure_evidence_ready` | `1` | 10 用户 30 分钟 audit 证据已满足当前压力口径 |
@@ -64,29 +65,27 @@ python3 tools/loadtest/xkx_gateway_loadtest.py --host <gateway-host> --port <gat
 
 复核压力证据时显式设置 `--mode`、`--users`、`--duration`、`--ramp-up`、`--scenario`、`--metrics-url` 和 `--report-json`。`--mode` 只记录本次报告对应的 driver 模式，不负责启动或切换 driver；调用方必须先用匹配的 `off`、`audit` 或 `enforced` 配置启动真实链路。当前 loadtest 默认 `--command-timeout` 已提高到 5 秒，30 分钟复核仍建议显式传参记录本次预算。
 
-该脚本输出的 JSON 顶层 schema 为 `xkx_gateway_loadtest_report_v1`，并包含 `production_gate_observations.schema=multicore_production_gate_evidence_v1`。没有 `--metrics-url` 或指标缺失时，`production_gate_observations.metrics_available` 与 `gateway_error_delta_zero` 都必须为 `false`，该 run 只能作为功能 smoke，不能作为 production gate 证据。报告中的 `production_gate_observations.production_matrix_complete` 在单次入口内固定为 `false`；最终 ready 只能由当前接受的 30 分钟压力证据和 final audit 零 blocker 共同决定。
+该脚本输出的 JSON 顶层 schema 为 `xkx_gateway_loadtest_report_v1`，并包含 `production_gate_observations.schema=multicore_production_gate_evidence_v1`。没有 `--metrics-url` 或指标缺失时，`production_gate_observations.metrics_available` 与 `gateway_error_delta_zero` 都必须为 `false`，该 run 只能作为功能 smoke，不能作为 production gate 证据。报告中的 `production_gate_observations.production_matrix_complete` 在单次入口内固定为 `false`；最终 ready 只能由当前接受的 30 分钟压力证据、final audit 零 blocker 和 `socket_release` owner-safe handshake 共同决定。
 
 当前入口已通过 1 用户 `smoke` 场景，覆盖登录/建角和 `look`、`i`、`skills`、`score`、`map` 命令闭环；该结果只证明入口可用和最小路径未立即回归，不替代 production matrix。
 
 ## 当前阻塞项
 
-本轮只读 final audit 快照仍发现真实 mudlib 中存在未完成分类的入口，包括 generic callback dispatch、network packet wrapper、room/message wrapper 以及仍携带 object 引用的协议/广播路径。这些路径必须逐项证明为 same-owner、安全 snapshot、owner message 或 owner future 后，才能把生产 gate 置 ready。
+真实 XiaKeXing mudlib final audit 已在仓内报告 `docs/reports/multicore-mudlib-audit-2026-06-25.md` 收口：generic callback dispatch 已归类到 timer/heartbeat owner callback helper，network/command/daemon message wrapper 已归类到 session output facade，原有 delayed callback 裸 `object` payload 已改为 key/path/snapshot 并有静态合同覆盖。剩余生产 blocker 不再是 mudlib hotspot，而是 `socket_release` owner-safe release/acquire handshake。
 
-1. 真实 mudlib final audit 尚未输出完整清单：`call_other`、`present`、move/destruct、parser、mutable payload、socket/gateway callback 都需要按热点归类。
-2. 未分类 cross-owner hotspot 尚未以仓内最终报告证明为 0。
-3. 直接 cross-owner mutable write 尚未以仓内最终报告证明为 0。
-4. 高频同步返回路径尚未逐项证明已经迁成 snapshot、owner message 或 owner future。
-5. `socket_release` 仍是 main-required 例外，除非先设计并验证 release/acquire 替代 handshake，否则不得迁入 owner executor。
+1. `socket_release` 仍是 main-required 例外，除非先设计并验证 release/acquire 替代 handshake，否则不得迁入 owner executor。
+2. `production_gate_ready` 必须保持 `0`，直到 `production_gate_socket_release_handshake_ready=1`。
 
 ## 验收矩阵
 
-当前压力验收口径固定为 smoke 与 10 用户 30 分钟 `audit` 复核，不再追加更长时长或更高并发压力档位。final audit 是非压测门禁，负责证明 cross-owner hotspot 与 mutable write 已清零。
+当前压力验收口径固定为 smoke 与 10 用户 30 分钟 `audit` 复核，不再追加更长时长或更高并发压力档位。final audit 是非压测门禁，已由 XiaKeXing 真实源码报告证明 cross-owner hotspot 与 mutable write 已清零；最终 production ready 还必须补齐 `socket_release` handshake。
 
 | 项目 | 用户数 | 时长 | 必须覆盖 |
 | --- | --- | --- | --- |
 | smoke 入口 | 1、3 | smoke | 登录、建角、基础命令、gateway callback 基线 |
 | accepted pressure evidence | 10 | 30m | audit 模式、owner executor、gateway metrics、timeout/fatal/panic 为 0 |
-| final audit | 不适用 | 非压测 | cross-owner hotspot 分类、mutable write 清零、snapshot/message/future 迁移证明 |
+| final audit | 不适用 | 非压测 | 已完成：cross-owner hotspot 分类、mutable write 清零、snapshot/message/future 迁移证明 |
+| socket release handshake | 不适用 | 非压测 | 未完成：release/acquire owner-safe handshake |
 
 通过标准：
 
@@ -99,15 +98,14 @@ python3 tools/loadtest/xkx_gateway_loadtest.py --host <gateway-host> --port <gat
 
 ## 失败处理
 
-- accepted pressure evidence 失效或新增同类路径改动后，禁止把 `production_gate_ready` 改为 `1`，必须重新运行对应 smoke 或 30 分钟复核。
+- accepted pressure evidence、mudlib final audit evidence 或 socket release handshake evidence 失效后，禁止把 `production_gate_ready` 改为 `1`，必须重新运行对应 smoke、30 分钟复核或 handshake 合同测试。
 - 若 final audit 发现 mudlib 同步 cross-owner 调用，先迁 mudlib/API 模型，再重跑定向 smoke 或 audit 复核。
 - 若失败来自 gateway 协议解析或大 payload，先修协议/客户端解析，再重跑相关 smoke。
 - 若失败来自 owner executor context cleanup、future backlog 或 stale drop，先补 driver 合同测试，再重跑 C++、LPC 和真实 mudlib 定向验收。
 
 ## 下一步
 
-1. 完成真实 mudlib final audit 报告，输出按调用类型、owner、对象路径和频率聚合的 cross-owner hotspot 清单。
-2. 证明未分类 cross-owner hotspot 为 0，直接 cross-owner mutable write 为 0。
-3. 将仍需同步返回的高频路径迁移为 snapshot、owner message 或 owner future，并在报告中逐项列明。
-4. 复核 owner executor context cleanup、future backlog、stale/drop 和 gateway error delta 证据。
-5. final audit 零 blocker 后，才能把 `mudlib_cross_owner_hotspots_ready` 和 `production_gate_ready` 改为 `1`。
+1. 设计并实现 `socket_release` release/acquire owner-safe handshake。
+2. 补齐 C++/LPC 合同：`production_gate_socket_release_handshake_ready=1` 前不得置 production ready。
+3. 复核 owner executor context cleanup、future backlog、stale/drop 和 gateway error delta 证据。
+4. socket release handshake 零 blocker 后，才能把 `production_gate_ready` 改为 `1`。

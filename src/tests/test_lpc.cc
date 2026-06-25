@@ -4046,12 +4046,14 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
   };
   auto assert_production_gate_contract = [&](mapping_t* contract) {
     ASSERT_EQ(mapping_number(contract, "mudlib_audit_required"), 1);
-    ASSERT_EQ(mapping_number(contract, "mudlib_cross_owner_hotspots_ready"), 0);
+    ASSERT_EQ(mapping_number(contract, "mudlib_cross_owner_hotspots_ready"), 1);
     ASSERT_STREQ(mapping_string(contract, "mudlib_cross_owner_hotspots_blocker"),
-                 "real_mudlib_audit_not_complete");
+                 "");
+    ASSERT_STREQ(mapping_string(contract, "mudlib_cross_owner_hotspots_evidence"),
+                 "xkx_5513c8a12_multicore_mudlib_audit_2026_06_25_zero_delayed_object_payloads");
     ASSERT_EQ(mapping_number(contract, "production_gate_ready"), 0);
     ASSERT_STREQ(mapping_string(contract, "production_gate_blocker"),
-                 "real_mudlib_final_audit_not_complete");
+                 "socket_release_owner_safe_handshake_not_ready");
     ASSERT_STREQ(mapping_string(contract, "production_gate_required_users"), "1,3,10");
     ASSERT_STREQ(mapping_string(contract, "production_gate_required_durations"), "smoke,30m");
     ASSERT_EQ(mapping_number(contract, "production_gate_pressure_evidence_ready"), 1);
