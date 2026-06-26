@@ -2255,6 +2255,17 @@ TEST_F(DriverTest, TestVmOwnerSocketCallbacksDispatchThroughOwnerExecutor) {
         if (std::string(mapping_string(event, "task_type")) == "socket_callback" &&
             std::string(mapping_string(event, "owner_id")) == owner &&
             std::string(mapping_string(event, "state")) == state) {
+          if (std::string(state) == "thread_executor_callback_dispatched") {
+            EXPECT_EQ(mapping_number(event, "manifest_version"), 2);
+            EXPECT_STREQ(mapping_string(event, "manifest_schema"), "owner_task_manifest_v2");
+            EXPECT_STREQ(mapping_string(event, "task_kind"), "executor_callback");
+            EXPECT_STREQ(mapping_string(event, "payload_policy"), "frozen_payload_or_owner_handle_only");
+            EXPECT_STREQ(mapping_string(event, "cleanup_policy"), "main_thread_drop_cleanup");
+            EXPECT_STREQ(mapping_string(event, "reply_future_policy"), "main_reply_or_cleanup_queue");
+            EXPECT_STREQ(mapping_string(event, "admission_policy"), "owner_epoch_payload_allowlist_deadline_guard");
+            EXPECT_STREQ(mapping_string(event, "admission_state"), "accepted");
+            EXPECT_STREQ(mapping_string(event, "trace_schema"), "owner_executor_trace_v2");
+          }
           found = true;
           break;
         }
@@ -2353,6 +2364,12 @@ TEST_F(DriverTest, TestVmOwnerSocketCallbackExecutorDropsStaleOwnerEpoch) {
     EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
     return value && value->type == T_STRING ? value->u.string : "";
   };
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
   auto trace_has_socket_stale = [&] {
     auto* trace = vm_owner_task_trace(160);
     auto* events = find_string_in_mapping(trace, "events");
@@ -2376,6 +2393,12 @@ TEST_F(DriverTest, TestVmOwnerSocketCallbackExecutorDropsStaleOwnerEpoch) {
 
   std::atomic<int> blocker_started{0};
   std::atomic<int> release_blocker{0};
+  auto* before = vm_owner_thread_status();
+  auto before_callback_dropped = mapping_number(before, "executor_callback_dropped");
+  auto before_admission_dropped = mapping_number(before, "owner_executor_admission_dropped");
+  auto before_stale_drop = mapping_number(before, "owner_executor_stale_drop");
+  free_mapping(before);
+
   vm_owner_thread_start(1);
   ASSERT_TRUE(vm_owner_executor_available());
   auto blocker = vm_owner_enqueue_executor_task(obj, "socket_callback", "socket-stale-blocker", [&] {
@@ -2401,6 +2424,12 @@ TEST_F(DriverTest, TestVmOwnerSocketCallbackExecutorDropsStaleOwnerEpoch) {
   ASSERT_TRUE(trace_has_socket_stale());
   vm_owner_drain_main_tasks(64);
   ASSERT_EQ(call_number("get_socket_callback_called", obj), 0);
+
+  auto* after = vm_owner_thread_status();
+  ASSERT_GE(mapping_number(after, "executor_callback_dropped"), before_callback_dropped + 1);
+  ASSERT_GE(mapping_number(after, "owner_executor_admission_dropped"), before_admission_dropped + 1);
+  ASSERT_GE(mapping_number(after, "owner_executor_stale_drop"), before_stale_drop + 1);
+  free_mapping(after);
 }
 
 TEST_F(DriverTest, TestVmOwnerAccessTraceRecordsCrossOwnerAccess) {

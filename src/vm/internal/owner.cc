@@ -455,6 +455,8 @@ struct OwnerTaskTrace {
   uint64_t task_id;
   uint64_t sequence;
   uint64_t owner_epoch;
+  int manifest_version{0};
+  uint64_t deadline_ms{0};
   VMObjectHandle target_handle;
   std::shared_ptr<VMFrozenValue> payload;
   std::string owner_id;
@@ -463,6 +465,14 @@ struct OwnerTaskTrace {
   std::string state;
   std::string target_object;
   std::string payload_key;
+  std::string manifest_schema;
+  std::string task_kind;
+  std::string payload_policy;
+  std::string cleanup_policy;
+  std::string reply_future_policy;
+  std::string admission_policy;
+  std::string admission_state;
+  std::string trace_schema;
   std::string command_text_snapshot;
   std::string command_consume_model;
   std::string command_consume_blocker;
@@ -945,6 +955,16 @@ const char *owner_manifest_reply_future_policy(OwnerExecutorDispatchKind kind) {
     default:
       return "none";
   }
+}
+
+bool owner_handle_status_destructed(VMObjectHandleResolveStatus status) {
+  return status == VMObjectHandleResolveStatus::kObjectDestructed ||
+         status == VMObjectHandleResolveStatus::kRecordDestructed;
+}
+
+bool owner_handle_status_epoch_mismatch(VMObjectHandleResolveStatus status) {
+  return status == VMObjectHandleResolveStatus::kOwnerEpochMismatch ||
+         status == VMObjectHandleResolveStatus::kLiveOwnerEpochMismatch;
 }
 
 void apply_owner_task_manifest_v2(OwnerMailboxTask &task) {
@@ -1809,17 +1829,27 @@ mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
 mapping_t *owner_task_trace_mapping(const OwnerTaskTrace &trace) {
   auto target_status = trace.has_target_handle ? vm_object_handle_resolve_status(trace.target_handle).status
                                                : VMObjectHandleResolveStatus::kInvalidHandle;
-  auto *map = allocate_mapping(36);
+  auto *map = allocate_mapping(46);
   add_mapping_pair(map, "trace_id", static_cast<long>(trace.trace_id));
   add_mapping_string(map, "trace_model", "owner_task_lifecycle_event");
   add_mapping_pair(map, "task_id", static_cast<long>(trace.task_id));
   add_mapping_pair(map, "sequence", static_cast<long>(trace.sequence));
   add_mapping_pair(map, "owner_epoch", static_cast<long>(trace.owner_epoch));
+  add_mapping_pair(map, "manifest_version", trace.manifest_version);
+  add_mapping_pair(map, "deadline_ms", static_cast<long>(trace.deadline_ms));
   add_mapping_string(map, "owner_id", trace.owner_id.c_str());
   add_mapping_string(map, "task_type", trace.task_type.c_str());
   add_mapping_string(map, "task_key", trace.task_key.c_str());
   add_mapping_string(map, "state", trace.state.c_str());
   add_mapping_string(map, "target_object", trace.target_object.c_str());
+  add_mapping_string(map, "manifest_schema", trace.manifest_schema.c_str());
+  add_mapping_string(map, "task_kind", trace.task_kind.c_str());
+  add_mapping_string(map, "payload_policy", trace.payload_policy.c_str());
+  add_mapping_string(map, "cleanup_policy", trace.cleanup_policy.c_str());
+  add_mapping_string(map, "reply_future_policy", trace.reply_future_policy.c_str());
+  add_mapping_string(map, "admission_policy", trace.admission_policy.c_str());
+  add_mapping_string(map, "admission_state", trace.admission_state.c_str());
+  add_mapping_string(map, "trace_schema", trace.trace_schema.c_str());
   add_mapping_pair(map, "has_target_handle", trace.has_target_handle ? 1 : 0);
   add_mapping_pair(map, "target_handle_current",
                    target_status == VMObjectHandleResolveStatus::kCurrent ? 1 : 0);
@@ -2082,6 +2112,8 @@ uint64_t append_owner_task_trace(const OwnerMailboxTask &task, const char *state
   trace.task_id = task.task_id;
   trace.sequence = task.sequence;
   trace.owner_epoch = task.owner_epoch;
+  trace.manifest_version = task.manifest_version;
+  trace.deadline_ms = task.deadline_ms;
   trace.target_handle = task.target_handle;
   trace.payload = task.payload;
   trace.owner_id = task.owner_id;
@@ -2089,6 +2121,14 @@ uint64_t append_owner_task_trace(const OwnerMailboxTask &task, const char *state
   trace.task_key = task.task_key;
   trace.state = normalize_task_text(state, "observed");
   trace.target_object = task.target_object.empty() ? owner_object_name(task.target) : task.target_object;
+  trace.manifest_schema = task.manifest_schema;
+  trace.task_kind = task.task_kind;
+  trace.payload_policy = task.payload_policy;
+  trace.cleanup_policy = task.cleanup_policy;
+  trace.reply_future_policy = task.reply_future_policy;
+  trace.admission_policy = task.admission_policy;
+  trace.admission_state = task.admission_state;
+  trace.trace_schema = task.trace_schema;
   trace.has_target_handle = task.has_target_handle;
   owner_task_traces.push_back(std::move(trace));
   while (owner_task_traces.size() > kOwnerTraceLimit) {
@@ -3114,9 +3154,28 @@ void run_owner_command_frame_restore(const OwnerMailboxTask &task) {
   owner_executor_command_frame_restore_entry_executed.fetch_add(1, std::memory_order_relaxed);
 }
 
-void drop_owner_executor_callback(OwnerMailboxTask &task, const char *state) {
+void record_owner_executor_callback_drop_class(const char *state, VMObjectHandleResolveStatus status) {
+  owner_executor_admission_dropped.fetch_add(1, std::memory_order_relaxed);
+  if (owner_handle_status_destructed(status) || std::strcmp(normalize_task_text(state, ""), "thread_executor_callback_destructed") == 0) {
+    owner_executor_destructed_drop.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+  if (owner_handle_status_epoch_mismatch(status)) {
+    owner_executor_epoch_mismatch_drop.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+  if (std::strcmp(normalize_task_text(state, ""), "thread_executor_callback_guard_rejected") == 0) {
+    owner_executor_admission_rejected.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+  owner_executor_stale_drop.fetch_add(1, std::memory_order_relaxed);
+}
+
+void drop_owner_executor_callback(OwnerMailboxTask &task, const char *state,
+                                  VMObjectHandleResolveStatus status = VMObjectHandleResolveStatus::kInvalidHandle) {
   append_owner_task_trace_threadsafe(task, state);
   owner_executor_callback_dropped.fetch_add(1, std::memory_order_relaxed);
+  record_owner_executor_callback_drop_class(state, status);
   schedule_owner_executor_callback_cleanup_on_main(task);
 }
 
@@ -3129,19 +3188,22 @@ void run_owner_executor_callback(OwnerMailboxTask &task) {
   auto target_status = vm_object_handle_resolve_status(task.target_handle);
   if (target_status.status != VMObjectHandleResolveStatus::kCurrent) {
     drop_owner_executor_callback(task,
-                                 target_status.status == VMObjectHandleResolveStatus::kObjectDestructed
+                                 owner_handle_status_destructed(target_status.status)
                                      ? "thread_executor_callback_destructed"
-                                     : "thread_executor_callback_stale");
+                                     : "thread_executor_callback_stale",
+                                 target_status.status);
     return;
   }
 
   auto *target = target_status.object;
   if (!target || (target->flags & O_DESTRUCTED)) {
-    drop_owner_executor_callback(task, "thread_executor_callback_destructed");
+    drop_owner_executor_callback(task, "thread_executor_callback_destructed",
+                                 VMObjectHandleResolveStatus::kObjectDestructed);
     return;
   }
   if (!vm_owner_epoch_matches(target, task.owner_id.c_str(), task.owner_epoch)) {
-    drop_owner_executor_callback(task, "thread_executor_callback_stale");
+    drop_owner_executor_callback(task, "thread_executor_callback_stale",
+                                 VMObjectHandleResolveStatus::kOwnerEpochMismatch);
     return;
   }
 
@@ -3650,6 +3712,7 @@ uint64_t vm_owner_enqueue_executor_task(object_t *target, const char *task_type,
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     if (!owner_threads.empty()) {
+      apply_owner_task_manifest_v2(task);
       append_owner_task_trace(task, "executor_callback_queued");
       enqueue_owner_task_locked(std::move(task), normalized_owner_id, &notify_owner_thread);
       owner_executor_callback_queued.fetch_add(1, std::memory_order_relaxed);
