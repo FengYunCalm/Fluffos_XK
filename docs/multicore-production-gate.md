@@ -2,7 +2,7 @@
 
 ## 当前结论
 
-当前 driver 侧多核化执行面已经通过 production gate：owner-local lifecycle、OwnerExecutor callback task boundary、heartbeat、callout、async/file/db、DNS、socket read/write/close callback、gateway command execute 和 `socket_release` owner-safe release/acquire handshake 都已经具备生产合同，并保留 `off` 或 owner executor 不可用时的 main fallback。
+当前 driver 侧多核化执行面已经通过 production gate：owner-local lifecycle、OwnerExecutor callback task boundary、heartbeat、callout、async/file/db、DNS、socket read/write/close callback、gateway command execute 和 `socket_release` owner-safe release/acquire handshake 都已经具备生产合同。生产正常路径要求 `normal_path_main_fallback_count=0`；`off`、owner executor 不可用和 rollback/failure 场景只能作为显式兼容 fallback，不计入正常业务热路径。
 
 10 用户 30 分钟 `audit` 压测已经满足当前压力验收口径；真实 XiaKeXing mudlib final audit 已完成 delayed callback payload 收口并证明未分类 cross-owner hotspot 为 0；`socket_release` 已改为同步 release/acquire owner epoch guard handshake。因此机器可读合同可以报告 `production_gate_ready=1`，且 `production_gate_blocker=""`。
 
@@ -38,8 +38,15 @@
 | `production_gate_socket_release_handshake_evidence` | `socket_release_owner_epoch_handshake_contract_v1` | socket release/acquire handshake 证据标识 |
 | `production_gate_report_schema` | `xkx_gateway_loadtest_report_v1` | loadtest JSON 报告 schema |
 | `production_gate_report_required_fields` | `schema,run_id,mode,users_requested,duration_seconds,scenario,commands_ok,timeouts,gateway_metrics_delta,production_gate_observations` | 每个归档 JSON 必须包含的字段 |
+| `registered_owner_task_domains_ready` | `1` | driver 已注册生产 owner domain task allowlist |
+| `registered_owner_task_domain_count` | `18` | 当前生产 domain task 数量 |
+| `target_owner_message_executor_ready` | `1` | target-handle owner message 正常路径走 target owner mailbox/executor |
+| `normal_path_main_fallback_count` | `0` | 生产正常路径不允许隐式 main fallback |
+| `explicit_fallback_count` | runtime counter | 仅统计显式 owner main queue fallback 或兼容适配 |
+| `service_shard_executor_ready` | `1` | service shard/domain task 可走 owner executor |
+| `facade_only_runtime_claims` | `0` | 不允许仅声明 facade-ready 却没有 executor 路径 |
 
-这些字段只表达生产验收状态，不改变 gateway、heartbeat、callout 或 socket callback 的执行路径。
+这些字段表达生产验收状态和正常路径边界：业务命令、heartbeat、callout、async/DNS/socket callback 和 target-handle owner message 必须走 owner executor；main 线程只保留网络 IO、reply/prompt/telnet 适配、LPC 引用 cleanup、显式 fallback 和 documented main-required compatibility surface。
 
 ## 当前 smoke 证据
 
@@ -52,7 +59,7 @@
 - 客户端能完成登录并进入场景。
 - 基础玩家命令有响应。
 - smoke 期间未观察到新增 driver fatal error 或新增 enforced cross-owner 阻断错误。
-- gateway command 已走 `gateway_command_execute` owner executor 合同；网络 reply、prompt、telnet 和 cleanup 仍按合同保留 main-required 边界。
+- gateway command 已走 `gateway_command_execute` owner executor 合同；网络 reply、prompt、telnet 和 cleanup 仍按合同保留 main-required adapter 边界，不承载正常业务写路径。
 
 单用户 smoke 只能证明最小路径没有立即回归；当前压力验收以 10 用户 30 分钟 `audit` 结果为准，不再要求追加更长时长或更高并发压测档位。
 
@@ -93,6 +100,8 @@ python3 tools/loadtest/xkx_gateway_loadtest.py --host <gateway-host> --port <gat
 - owner executor trace 中同 owner 串行、不同 owner 可并行，没有 same-owner claim conflict。
 - `thread_eval_stack_leak_detected`、VMContext leak、object store sync rejection 都为 0。
 - future pending 不持续增长，stale/destructed/owner epoch mismatch 都明确 drop 或 fail。
+- `normal_path_main_fallback_count=0`，target-handle owner message 通过 owner mailbox/executor 完成，不再依赖 owner main queue bridge。
+- 生产 owner domain task allowlist 与真实 mudlib domain 注册保持一致，普通 legacy LPC 仍 default-closed。
 - gateway metrics 没有 rejected、dropped、queue full 或 write error 增量。
 - audit trace 中没有未分类 cross-owner write；enforced 模式没有静默同步 cross-owner fallback。
 
@@ -105,4 +114,4 @@ python3 tools/loadtest/xkx_gateway_loadtest.py --host <gateway-host> --port <gat
 
 ## 下一步
 
-当前 production gate 无剩余多核化尾项。后续只允许做常规维护：证据失效时回退对应 ready 字段并重跑验收；新增 executor callback 类型时必须先补 allowlist、payload policy、stale/drop cleanup 和合同测试。
+当前 production gate 无剩余多核化尾项。后续只允许做常规维护：证据失效时回退对应 ready 字段并重跑验收；新增 executor callback 或 production owner domain 类型时必须先补 allowlist、payload policy、stale/drop cleanup、normal-path fallback 计数和合同测试。
