@@ -19,8 +19,9 @@ This document records the owner runtime v2 contract and the production-perfect e
 - Ordinary legacy LPC execution remains default-closed; v2 does not open arbitrary background LPC execution.
 - Production owner domains are explicitly registered in the owner task allowlist: `owner_task_readonly`, `owner_task_player`, `owner_task_room`, `owner_task_session`, `owner_task_item`, `owner_task_economy`, `owner_task_combat`, `owner_task_mail`, `owner_task_reward`, `owner_task_world`, `owner_task_persistence`, `owner_task_team`, `owner_task_guild`, `owner_task_sect`, `owner_task_quest`, `owner_task_rank`, `owner_task_crafting`, and `owner_task_life_skill`.
 - Target-handle `owner_message` now routes through the target owner mailbox/executor with ObjectHandle stale, owner epoch, and destructed-object guards. It is no longer a normal-path owner main queue bridge.
-- Runtime status must expose `registered_owner_task_domains_ready=1`, `registered_owner_task_domain_count=18`, `target_owner_message_executor_ready=1`, `service_shard_executor_ready=1`, and `facade_only_runtime_claims=0`.
-- `normal_path_main_fallback_count` must remain `0` in the production path. Main-thread work is limited to IO adapters, cleanup adapters, explicit/off/failure fallback, and other documented main-required compatibility surfaces.
+- Runtime status must expose `registered_owner_task_domains_ready=1`, `registered_owner_task_domain_count=18`, `domain_task_registry_mudlib_aligned=1`, `target_owner_message_executor_ready=1`, `target_owner_message_main_fallback=0`, `service_shard_executor_ready=1`, `keyed_service_shard_ready=1`, `hot_path_service_owner_single_point=0`, and `facade_only_runtime_claims=0`.
+- `normal_path_main_fallback_count` must remain `0` and `normal_path_main_fallback_ready` must remain `1` in the production path. Main-thread work is limited to IO adapters, cleanup adapters, explicit/off/failure fallback, and other documented main-required compatibility surfaces.
+- `production_perfect_contract_ready=1` is only valid while the registered domain allowlist, target-owner message executor route, keyed service shard contract, and normal-path fallback counters all satisfy the fields above.
 
 ## Verification
 

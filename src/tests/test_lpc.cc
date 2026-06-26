@@ -4174,7 +4174,13 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "registered_owner_task_domain_count"), 18);
     ASSERT_EQ(mapping_number(status, "target_owner_message_executor_ready"), 1);
     ASSERT_EQ(mapping_number(status, "normal_path_main_fallback_count"), 0);
+    ASSERT_EQ(mapping_number(status, "normal_path_main_fallback_ready"), 1);
     ASSERT_EQ(mapping_number(status, "service_shard_executor_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "domain_task_registry_mudlib_aligned"), 1);
+    ASSERT_EQ(mapping_number(status, "keyed_service_shard_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "hot_path_service_owner_single_point"), 0);
+    ASSERT_EQ(mapping_number(status, "target_owner_message_main_fallback"), 0);
+    ASSERT_EQ(mapping_number(status, "production_perfect_contract_ready"), 1);
     ASSERT_EQ(mapping_number(status, "facade_only_runtime_claims"), 0);
     ASSERT_EQ(mapping_number(status, "executor_callback_task_boundary_ready"), 1);
     ASSERT_EQ(mapping_number(status, "executor_callback_allowlist_ready"), 1);
@@ -4561,7 +4567,13 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "registered_owner_task_domains_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "target_owner_message_executor_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "normal_path_main_fallback_count"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "normal_path_main_fallback_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "service_shard_executor_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "domain_task_registry_mudlib_aligned"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "keyed_service_shard_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "hot_path_service_owner_single_point"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "target_owner_message_main_fallback"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "production_perfect_contract_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "facade_only_runtime_claims"), 0);
     ASSERT_STREQ(mapping_string(boundary_contract, "next_refactor_target"), "");
     assert_production_gate_contract(boundary_contract);
@@ -5815,7 +5827,13 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredReadonlyLpcTaskWithMultipleWor
   ASSERT_EQ(mapping_number(pending_runtime, "registered_owner_task_domain_count"), 18);
   ASSERT_EQ(mapping_number(pending_runtime, "target_owner_message_executor_ready"), 1);
   ASSERT_EQ(mapping_number(pending_runtime, "normal_path_main_fallback_count"), 0);
+  ASSERT_EQ(mapping_number(pending_runtime, "normal_path_main_fallback_ready"), 1);
   ASSERT_EQ(mapping_number(pending_runtime, "service_shard_executor_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_runtime, "domain_task_registry_mudlib_aligned"), 1);
+  ASSERT_EQ(mapping_number(pending_runtime, "keyed_service_shard_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_runtime, "hot_path_service_owner_single_point"), 0);
+  ASSERT_EQ(mapping_number(pending_runtime, "target_owner_message_main_fallback"), 0);
+  ASSERT_EQ(mapping_number(pending_runtime, "production_perfect_contract_ready"), 1);
   ASSERT_EQ(mapping_number(pending_runtime, "facade_only_runtime_claims"), 0);
   free_mapping(pending_runtime);
   auto* pending_thread_status = vm_owner_thread_status();
@@ -5841,7 +5859,13 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredReadonlyLpcTaskWithMultipleWor
   ASSERT_EQ(mapping_number(pending_thread_status, "registered_owner_task_domain_count"), 18);
   ASSERT_EQ(mapping_number(pending_thread_status, "target_owner_message_executor_ready"), 1);
   ASSERT_EQ(mapping_number(pending_thread_status, "normal_path_main_fallback_count"), 0);
+  ASSERT_EQ(mapping_number(pending_thread_status, "normal_path_main_fallback_ready"), 1);
   ASSERT_EQ(mapping_number(pending_thread_status, "service_shard_executor_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_thread_status, "domain_task_registry_mudlib_aligned"), 1);
+  ASSERT_EQ(mapping_number(pending_thread_status, "keyed_service_shard_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_thread_status, "hot_path_service_owner_single_point"), 0);
+  ASSERT_EQ(mapping_number(pending_thread_status, "target_owner_message_main_fallback"), 0);
+  ASSERT_EQ(mapping_number(pending_thread_status, "production_perfect_contract_ready"), 1);
   ASSERT_EQ(mapping_number(pending_thread_status, "facade_only_runtime_claims"), 0);
   free_mapping(pending_thread_status);
 

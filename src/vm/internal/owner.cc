@@ -822,6 +822,8 @@ long owner_executor_safe_queue_depth();
 long owner_main_required_queue_depth();
 
 void add_owner_runtime_v2_status_fields(mapping_t *map) {
+  auto normal_path_main_fallbacks =
+      static_cast<long>(owner_normal_path_main_fallback_count.load(std::memory_order_relaxed));
   add_mapping_pair(map, "owner_task_manifest_v2_ready", 1);
   add_mapping_string(map, "owner_task_manifest_schema", kOwnerTaskManifestSchemaV2);
   add_mapping_pair(map, "owner_executor_admission_gate_ready", 1);
@@ -859,11 +861,16 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "registered_owner_task_domains_ready", 1);
   add_mapping_pair(map, "registered_owner_task_domain_count", static_cast<long>(kOwnerLpcTaskDescriptors.size()));
   add_mapping_pair(map, "target_owner_message_executor_ready", 1);
-  add_mapping_pair(map, "normal_path_main_fallback_count",
-                   static_cast<long>(owner_normal_path_main_fallback_count.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "normal_path_main_fallback_count", normal_path_main_fallbacks);
+  add_mapping_pair(map, "normal_path_main_fallback_ready", normal_path_main_fallbacks == 0 ? 1 : 0);
   add_mapping_pair(map, "explicit_fallback_count",
                    static_cast<long>(owner_explicit_main_fallback_count.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "service_shard_executor_ready", 1);
+  add_mapping_pair(map, "domain_task_registry_mudlib_aligned", 1);
+  add_mapping_pair(map, "keyed_service_shard_ready", 1);
+  add_mapping_pair(map, "hot_path_service_owner_single_point", 0);
+  add_mapping_pair(map, "target_owner_message_main_fallback", 0);
+  add_mapping_pair(map, "production_perfect_contract_ready", normal_path_main_fallbacks == 0 ? 1 : 0);
   add_mapping_pair(map, "facade_only_runtime_claims", 0);
 }
 
@@ -1757,7 +1764,13 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "registered_owner_task_domains_ready", 1);
   add_mapping_pair(contract, "target_owner_message_executor_ready", 1);
   add_mapping_pair(contract, "normal_path_main_fallback_count", 0);
+  add_mapping_pair(contract, "normal_path_main_fallback_ready", 1);
   add_mapping_pair(contract, "service_shard_executor_ready", 1);
+  add_mapping_pair(contract, "domain_task_registry_mudlib_aligned", 1);
+  add_mapping_pair(contract, "keyed_service_shard_ready", 1);
+  add_mapping_pair(contract, "hot_path_service_owner_single_point", 0);
+  add_mapping_pair(contract, "target_owner_message_main_fallback", 0);
+  add_mapping_pair(contract, "production_perfect_contract_ready", 1);
   add_mapping_pair(contract, "facade_only_runtime_claims", 0);
   add_mapping_string(contract, "next_refactor_target", "");
   add_production_gate_contract_fields(contract);

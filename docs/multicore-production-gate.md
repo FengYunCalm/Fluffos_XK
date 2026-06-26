@@ -40,10 +40,16 @@
 | `production_gate_report_required_fields` | `schema,run_id,mode,users_requested,duration_seconds,scenario,commands_ok,timeouts,gateway_metrics_delta,production_gate_observations` | 每个归档 JSON 必须包含的字段 |
 | `registered_owner_task_domains_ready` | `1` | driver 已注册生产 owner domain task allowlist |
 | `registered_owner_task_domain_count` | `18` | 当前生产 domain task 数量 |
+| `domain_task_registry_mudlib_aligned` | `1` | driver domain task allowlist 与真实 mudlib 注册域一致 |
 | `target_owner_message_executor_ready` | `1` | target-handle owner message 正常路径走 target owner mailbox/executor |
+| `target_owner_message_main_fallback` | `0` | target-handle owner message 不走正常路径 main fallback |
 | `normal_path_main_fallback_count` | `0` | 生产正常路径不允许隐式 main fallback |
+| `normal_path_main_fallback_ready` | `1` | 正常路径 fallback 计数仍为 0 |
 | `explicit_fallback_count` | runtime counter | 仅统计显式 owner main queue fallback 或兼容适配 |
 | `service_shard_executor_ready` | `1` | service shard/domain task 可走 owner executor |
+| `keyed_service_shard_ready` | `1` | service shard/domain task 由 owner/service key 分片 |
+| `hot_path_service_owner_single_point` | `0` | 玩家热路径不存在 service-owner 单点瓶颈 |
+| `production_perfect_contract_ready` | `1` | domain registry、target message、service shard 和 fallback 字段全部满足生产完美合同 |
 | `facade_only_runtime_claims` | `0` | 不允许仅声明 facade-ready 却没有 executor 路径 |
 
 这些字段表达生产验收状态和正常路径边界：业务命令、heartbeat、callout、async/DNS/socket callback 和 target-handle owner message 必须走 owner executor；main 线程只保留网络 IO、reply/prompt/telnet 适配、LPC 引用 cleanup、显式 fallback 和 documented main-required compatibility surface。
@@ -101,7 +107,8 @@ python3 tools/loadtest/xkx_gateway_loadtest.py --host <gateway-host> --port <gat
 - `thread_eval_stack_leak_detected`、VMContext leak、object store sync rejection 都为 0。
 - future pending 不持续增长，stale/destructed/owner epoch mismatch 都明确 drop 或 fail。
 - `normal_path_main_fallback_count=0`，target-handle owner message 通过 owner mailbox/executor 完成，不再依赖 owner main queue bridge。
-- 生产 owner domain task allowlist 与真实 mudlib domain 注册保持一致，普通 legacy LPC 仍 default-closed。
+- 生产 owner domain task allowlist 与真实 mudlib domain 注册保持一致，`domain_task_registry_mudlib_aligned=1`。
+- service shard/domain task 按 owner/service key 分片，`hot_path_service_owner_single_point=0`；普通 legacy LPC 仍 default-closed。
 - gateway metrics 没有 rejected、dropped、queue full 或 write error 增量。
 - audit trace 中没有未分类 cross-owner write；enforced 模式没有静默同步 cross-owner fallback。
 
