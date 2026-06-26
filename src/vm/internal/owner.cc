@@ -1306,7 +1306,7 @@ mapping_t *gateway_owner_task_contract_mapping() {
   add_mapping_pair(map, "gateway_command_execute_session_revalidate_ready", 1);
   add_mapping_pair(map, "gateway_command_execute_reply_queue_main_ready", 1);
   add_mapping_string(map, "command_executor_readiness_gate_model", "all_gates_required_before_owner_executor");
-  add_mapping_string(map, "command_executor_next_gate", "mudlib_cross_owner_hotspots");
+  add_mapping_string(map, "command_executor_next_gate", "");
   add_mapping_string(map, "command_executor_next_blocker", "");
   add_mapping_pair(map, "command_executor_readiness_gate_count",
                    static_cast<long>(kGatewayCommandExecutorReadinessGates.size()));

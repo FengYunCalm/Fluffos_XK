@@ -429,7 +429,7 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ(1, contract["gateway_command_execute_reply_queue_main_ready"]);
     ASSERT_EQ("all_gates_required_before_owner_executor",
               contract["command_executor_readiness_gate_model"]);
-    ASSERT_EQ("mudlib_cross_owner_hotspots", contract["command_executor_next_gate"]);
+    ASSERT_EQ("", contract["command_executor_next_gate"]);
     ASSERT_EQ("", contract["command_executor_next_blocker"]);
     assert_production_gate_contract(contract);
     ASSERT_EQ(7, contract["command_executor_readiness_gate_count"]);
@@ -543,8 +543,8 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ(0, contract["ordinary_lpc_ready_required"]);
     ASSERT_EQ(0, contract["main_required"]);
     ASSERT_EQ(1, contract["fallback_main_required"]);
-    ASSERT_EQ("mudlib_cross_owner_hotspots", contract["next_blocker"]);
-    ASSERT_EQ("mudlib_audit/cross_owner_hotspots/production_gate",
+    ASSERT_EQ("", contract["next_blocker"]);
+    ASSERT_EQ("production_gate_complete",
               contract["next_blocker_chain"]);
     assert_production_gate_contract(contract);
     ASSERT(arrayp(tasks));
@@ -721,7 +721,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["ordinary_lpc_explicit_open_required"]);
     ASSERT_EQ("explicit_open_same_owner_only", boundary_contract["ordinary_lpc_policy"]);
     ASSERT_EQ(0, boundary_contract["lpc_surface_expanded"]);
-    ASSERT_EQ("mudlib_cross_owner_hotspots", boundary_contract["next_refactor_target"]);
+    ASSERT_EQ("", boundary_contract["next_refactor_target"]);
     assert_production_gate_contract(boundary_contract);
     ASSERT(mapp(fairness));
     ASSERT_EQ("owner_executor_v1", status["executor_contract_version"]);

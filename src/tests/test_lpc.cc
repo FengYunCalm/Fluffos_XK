@@ -4467,7 +4467,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(boundary_contract, "ordinary_lpc_policy"),
                  "explicit_open_same_owner_only");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_surface_expanded"), 0);
-    ASSERT_STREQ(mapping_string(boundary_contract, "next_refactor_target"), "mudlib_cross_owner_hotspots");
+    ASSERT_STREQ(mapping_string(boundary_contract, "next_refactor_target"), "");
     assert_production_gate_contract(boundary_contract);
 
     auto* gateway_contract = mapping_entry(status, "gateway_owner_task_contract");
@@ -4588,7 +4588,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(gateway_contract, "gateway_command_execute_reply_queue_main_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_readiness_gate_model"),
                  "all_gates_required_before_owner_executor");
-    ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_gate"), "mudlib_cross_owner_hotspots");
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_gate"), "");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_next_blocker"), "");
     assert_production_gate_contract(gateway_contract);
     ASSERT_GE(mapping_number(status, "thread_gateway_command_guarded"), 0);
@@ -4716,9 +4716,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(gateway_contract, "ordinary_lpc_ready_required"), 0);
     ASSERT_EQ(mapping_number(gateway_contract, "main_required"), 0);
     ASSERT_EQ(mapping_number(gateway_contract, "fallback_main_required"), 1);
-    ASSERT_STREQ(mapping_string(gateway_contract, "next_blocker"), "mudlib_cross_owner_hotspots");
+    ASSERT_STREQ(mapping_string(gateway_contract, "next_blocker"), "");
     ASSERT_STREQ(mapping_string(gateway_contract, "next_blocker_chain"),
-                 "mudlib_audit/cross_owner_hotspots/production_gate");
+                 "production_gate_complete");
     assert_production_gate_contract(gateway_contract);
     auto* gateway_tasks = mapping_array(gateway_contract, "tasks");
     ASSERT_NE(gateway_tasks, nullptr);
