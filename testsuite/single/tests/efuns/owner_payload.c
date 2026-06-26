@@ -39,7 +39,7 @@ void assert_latest_message_trace(int future_id, string message_type,
     ASSERT_EQ(future_id, event["message_id"]);
     ASSERT_EQ(message_type, event["message_type"]);
     ASSERT_EQ(state, event["state"]);
-    ASSERT_EQ("owner_main_queue", event["route"]);
+    ASSERT_EQ("owner_mailbox", event["route"]);
     ASSERT_EQ(result_key, event["result_key"]);
     ASSERT_EQ(error, event["error"]);
     ASSERT_EQ(target_status, event["target_handle_status"]);
@@ -52,10 +52,10 @@ void assert_latest_message_trace(int future_id, string message_type,
     ASSERT_EQ(frozen_result, event["frozen_result"]);
     ASSERT_EQ(1, event["has_target_handle"]);
     ASSERT_EQ(target_current, event["target_handle_current"]);
-    ASSERT_EQ(0, event["requires_owner_mailbox"]);
-    ASSERT_EQ(1, event["requires_owner_main_queue"]);
-    ASSERT_EQ(1, event["main_required"]);
-    ASSERT_EQ(1, event["queued_on_main"]);
+    ASSERT_EQ(1, event["requires_owner_mailbox"]);
+    ASSERT_EQ(0, event["requires_owner_main_queue"]);
+    ASSERT_EQ(0, event["main_required"]);
+    ASSERT_EQ(0, event["queued_on_main"]);
     ASSERT_EQ(1, event["message_only_cross_owner"]);
 }
 
@@ -63,6 +63,8 @@ void do_tests() {
     mapping result, future, bad_mapping, async_payload;
     int i;
     string target_owner = "owner/test/payload";
+
+    vm_owner_thread_stop();
 
     result = owner_send(target_owner, ([
         "type": "payload_ok",
@@ -92,10 +94,10 @@ void do_tests() {
     ASSERT_EQ(1, result["frozen_payload"]);
     ASSERT_EQ(1, result["async_only"]);
     ASSERT_EQ(1, result["target_handle_valid"]);
-    ASSERT_EQ(0, result["requires_owner_mailbox"]);
-    ASSERT_EQ(1, result["requires_owner_main_queue"]);
-    ASSERT_EQ(1, result["main_required"]);
-    ASSERT_EQ(1, result["queued_on_main"]);
+    ASSERT_EQ(1, result["requires_owner_mailbox"]);
+    ASSERT_EQ(0, result["requires_owner_main_queue"]);
+    ASSERT_EQ(0, result["main_required"]);
+    ASSERT_EQ(0, result["queued_on_main"]);
     ASSERT_EQ(file_name(this_object())[1..], result["target_object_path"]);
     ASSERT_EQ(vm_owner_epoch(this_object()), result["target_owner_epoch"]);
     ASSERT_EQ(1, result["target_object_id"] > 0);
@@ -103,7 +105,13 @@ void do_tests() {
                                 "", "", "current", 1, 0, 0, 0, 0, 1);
     ASSERT_EQ(0, called);
     async_payload["value"] = 99;
-    ASSERT_EQ(1, vm_owner_drain_main(1));
+    ASSERT_EQ(1, vm_owner_thread_start(1));
+    for (i = 0; i < 1000; i++) {
+        future = owner_future_poll(result["future_id"]);
+        if (future["state"] != "pending") {
+            break;
+        }
+    }
     ASSERT_EQ(2, called);
     future = owner_future_poll(result["future_id"]);
     ASSERT_EQ(1, future["success"]);
@@ -115,15 +123,25 @@ void do_tests() {
     assert_latest_message_trace(result["future_id"], "dummy", "completed",
                                 "dummy", "", "current", 0, 1, 0, 1, 1, 1);
 
+    vm_owner_thread_stop();
     vm_set_owner_id(this_object(), "owner/test/payload/stale-old");
     result = owner_call_async(this_object(), "dummy", ([ "payload_key": "stale-owner/v1", "value": 7 ]));
     ASSERT_EQ(1, result["success"]);
     ASSERT_EQ(1, result["target_handle_current"]);
     ASSERT_EQ("current", result["target_handle_status"]);
-    ASSERT_EQ(1, result["requires_owner_main_queue"]);
+    ASSERT_EQ(1, result["requires_owner_mailbox"]);
+    ASSERT_EQ(0, result["requires_owner_main_queue"]);
+    ASSERT_EQ(0, result["main_required"]);
+    ASSERT_EQ(0, result["queued_on_main"]);
     ASSERT_EQ("owner/test/payload/stale-old", result["target_owner_id"]);
     vm_set_owner_id(this_object(), "owner/test/payload/stale-new");
-    ASSERT_EQ(1, vm_owner_drain_main(1));
+    ASSERT_EQ(1, vm_owner_thread_start(1));
+    for (i = 0; i < 1000; i++) {
+        future = owner_future_poll(result["future_id"]);
+        if (future["state"] != "pending") {
+            break;
+        }
+    }
     ASSERT_EQ(2, called);
     future = owner_future_poll(result["future_id"]);
     ASSERT_EQ(1, future["success"]);
@@ -158,11 +176,19 @@ void do_tests() {
     result = owner_call_async(this_object(), "deep_result", ([ "payload_key": "deep-result/v1", "value": 1 ]));
     ASSERT_EQ(1, result["success"]);
     ASSERT_EQ(1, result["frozen_payload"]);
-    ASSERT_EQ(1, vm_owner_drain_main(1));
+    vm_owner_thread_stop();
+    ASSERT_EQ(1, vm_owner_thread_start(1));
+    for (i = 0; i < 1000; i++) {
+        future = owner_future_poll(result["future_id"]);
+        if (future["state"] != "pending") {
+            break;
+        }
+    }
     future = owner_future_poll(result["future_id"]);
     ASSERT_EQ(1, future["success"]);
     ASSERT_EQ("failed", future["state"]);
     ASSERT_EQ("owner async result must be frozen data", future["error"]);
     ASSERT_EQ(1, future["payload_frozen"]);
     ASSERT_EQ(0, future["frozen_result"]);
+    vm_owner_thread_stop();
 }
