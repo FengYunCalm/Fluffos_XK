@@ -4094,7 +4094,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
   };
 
   auto assert_contract = [&](mapping_t* status) {
-    ASSERT_STREQ(mapping_string(status, "executor_contract_version"), "owner_executor_v1");
+    ASSERT_STREQ(mapping_string(status, "executor_contract_version"), "owner_executor_v2");
     ASSERT_STREQ(mapping_string(status, "executor_model"), "owner_executor");
     ASSERT_STREQ(mapping_string(status, "executor_dispatch_model"), "descriptor_manifest");
     ASSERT_STREQ(mapping_string(status, "executor_lpc_model"), "default_closed_explicit_open");
@@ -4105,6 +4105,32 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "ordinary_lpc_explicit_open_required"), 1);
     ASSERT_STREQ(mapping_string(status, "ordinary_lpc_activation_policy"), "default_closed_explicit_open");
     ASSERT_STREQ(mapping_string(status, "ordinary_lpc_next_blocker"), "");
+    ASSERT_EQ(mapping_number(status, "owner_task_manifest_v2_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_task_manifest_schema"), "owner_task_manifest_v2");
+    ASSERT_EQ(mapping_number(status, "owner_executor_admission_gate_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_executor_admission_policy"),
+                 "owner_epoch_payload_allowlist_deadline_guard");
+    ASSERT_GE(mapping_number(status, "owner_executor_admission_accepted"), 0);
+    ASSERT_GE(mapping_number(status, "owner_executor_admission_rejected"), 0);
+    ASSERT_GE(mapping_number(status, "owner_executor_admission_dropped"), 0);
+    ASSERT_EQ(mapping_number(status, "owner_executor_payload_policy_v2_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_executor_trace_schema_v2_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_executor_trace_schema"), "owner_executor_trace_v2");
+    ASSERT_EQ(mapping_number(status, "owner_executor_metrics_v2_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_executor_queue_depth_metrics_ready"), 1);
+    ASSERT_GE(mapping_number(status, "owner_executor_queue_depth"), 0);
+    ASSERT_GE(mapping_number(status, "owner_executor_runnable_queue_depth"), 0);
+    ASSERT_GE(mapping_number(status, "owner_executor_safe_queue_depth"), 0);
+    ASSERT_GE(mapping_number(status, "owner_executor_main_required_queue_depth"), 0);
+    ASSERT_EQ(mapping_number(status, "owner_executor_future_timeout_cancel_ready"), 1);
+    ASSERT_GE(mapping_number(status, "owner_executor_future_timeout"), 0);
+    ASSERT_GE(mapping_number(status, "owner_executor_future_cancelled"), 0);
+    ASSERT_GE(mapping_number(status, "owner_executor_stale_drop"), 0);
+    ASSERT_GE(mapping_number(status, "owner_executor_destructed_drop"), 0);
+    ASSERT_GE(mapping_number(status, "owner_executor_epoch_mismatch_drop"), 0);
+    ASSERT_GE(mapping_number(status, "owner_executor_context_cleanup_leaks"), 0);
+    ASSERT_GE(mapping_number(status, "owner_executor_future_pending_backlog"), 0);
+    ASSERT_EQ(mapping_number(status, "owner_executor_socket_release_trace_ready"), 1);
     ASSERT_EQ(mapping_number(status, "executor_callback_task_boundary_ready"), 1);
     ASSERT_EQ(mapping_number(status, "executor_callback_allowlist_ready"), 1);
     ASSERT_EQ(mapping_number(status, "executor_callback_allowlist_count"), 6);
@@ -4836,6 +4862,15 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
       dispatch_by_type.emplace(mapping_string(entry, "task_type"), entry);
       ASSERT_EQ(mapping_number(entry, "requires_owner_mailbox"), 1);
       ASSERT_EQ(mapping_number(entry, "requires_owner_main_queue"), 0);
+      ASSERT_EQ(mapping_number(entry, "manifest_version"), 2);
+      ASSERT_STREQ(mapping_string(entry, "manifest_schema"), "owner_task_manifest_v2");
+      ASSERT_STREQ(mapping_string(entry, "admission_policy"), "owner_epoch_payload_allowlist_deadline_guard");
+      ASSERT_STREQ(mapping_string(entry, "trace_schema"), "owner_executor_trace_v2");
+      ASSERT_EQ(mapping_number(entry, "deadline_required"), 0);
+      ASSERT_EQ(mapping_number(entry, "ordinary_lpc_default_closed"), 1);
+      ASSERT_NE(mapping_string(entry, "payload_policy"), nullptr);
+      ASSERT_NE(mapping_string(entry, "cleanup_policy"), nullptr);
+      ASSERT_NE(mapping_string(entry, "reply_future_policy"), nullptr);
     }
     auto dispatch_entry = [&](const char* task_type) -> mapping_t* {
       auto it = dispatch_by_type.find(task_type);
@@ -4849,6 +4884,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
       ASSERT_NE(entry, nullptr);
       ASSERT_STREQ(mapping_string(entry, "contract_key"), contract_key);
       ASSERT_STREQ(mapping_string(entry, "dispatch_kind"), dispatch_kind);
+      ASSERT_STREQ(mapping_string(entry, "task_kind"), dispatch_kind);
       ASSERT_STREQ(mapping_string(entry, "executor_mode"), executor_mode);
       ASSERT_STREQ(mapping_string(entry, "route"), "owner_executor");
       ASSERT_EQ(mapping_number(entry, "executor_runnable"), executor_runnable);
@@ -4983,6 +5019,53 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
   assert_contract(thread_status);
   ASSERT_EQ(mapping_number(thread_status, "ordinary_lpc_default_closed"), 1);
   free_mapping(thread_status);
+
+  auto* before_future_status = vm_owner_runtime_status();
+  auto before_cancelled = mapping_number(before_future_status, "owner_executor_future_cancelled");
+  auto before_timeout = mapping_number(before_future_status, "owner_executor_future_timeout");
+  auto before_failed = mapping_number(before_future_status, "futures_failed");
+  free_mapping(before_future_status);
+
+  auto cancel_future_id =
+      vm_owner_register_compute_future("owner/test/future-cancel", 9101, "manifest_cancel", "v2_cancel");
+  auto timeout_future_id =
+      vm_owner_register_compute_future("owner/test/future-timeout", 9102, "manifest_timeout", "v2_timeout");
+  ASSERT_GT(cancel_future_id, 0u);
+  ASSERT_GT(timeout_future_id, 0u);
+
+  auto* pending_cancel = vm_owner_future_poll(cancel_future_id);
+  ASSERT_STREQ(mapping_string(pending_cancel, "state"), "pending");
+  ASSERT_GT(mapping_number(pending_cancel, "created_at_ms"), 0);
+  ASSERT_STREQ(mapping_string(pending_cancel, "future_policy"), "owner_future_timeout_cancel_v2");
+  ASSERT_EQ(mapping_number(pending_cancel, "cancelled"), 0);
+  ASSERT_EQ(mapping_number(pending_cancel, "timed_out"), 0);
+  free_mapping(pending_cancel);
+
+  auto* cancelled = vm_owner_future_cancel(cancel_future_id, "unit cancel");
+  ASSERT_STREQ(mapping_string(cancelled, "state"), "failed");
+  ASSERT_STREQ(mapping_string(cancelled, "error"), "unit cancel");
+  ASSERT_EQ(mapping_number(cancelled, "cancelled"), 1);
+  ASSERT_EQ(mapping_number(cancelled, "timed_out"), 0);
+  ASSERT_EQ(mapping_number(cancelled, "terminal_cleanup_required"), 0);
+  ASSERT_STREQ(mapping_string(cancelled, "future_policy"), "owner_future_timeout_cancel_v2");
+  free_mapping(cancelled);
+
+  auto* timed_out = vm_owner_future_timeout(timeout_future_id, "unit timeout");
+  ASSERT_STREQ(mapping_string(timed_out, "state"), "failed");
+  ASSERT_STREQ(mapping_string(timed_out, "error"), "unit timeout");
+  ASSERT_EQ(mapping_number(timed_out, "cancelled"), 0);
+  ASSERT_EQ(mapping_number(timed_out, "timed_out"), 1);
+  ASSERT_EQ(mapping_number(timed_out, "terminal_cleanup_required"), 0);
+  ASSERT_STREQ(mapping_string(timed_out, "future_policy"), "owner_future_timeout_cancel_v2");
+  free_mapping(timed_out);
+
+  auto* after_future_status = vm_owner_runtime_status();
+  ASSERT_GE(mapping_number(after_future_status, "owner_executor_future_cancelled"), before_cancelled + 1);
+  ASSERT_GE(mapping_number(after_future_status, "owner_executor_future_timeout"), before_timeout + 1);
+  ASSERT_GE(mapping_number(after_future_status, "futures_failed"), before_failed + 2);
+  ASSERT_EQ(mapping_number(after_future_status, "owner_executor_future_pending_backlog"),
+            mapping_number(after_future_status, "pending_futures"));
+  free_mapping(after_future_status);
 }
 
 TEST_F(DriverTest, TestVmOwnerExecutorBudgetYieldsAndRequeuesSameOwnerBacklog) {
@@ -5093,7 +5176,10 @@ TEST_F(DriverTest, TestVmOwnerExecutorBudgetYieldsAndRequeuesSameOwnerBacklog) {
   ASSERT_EQ(mapping_number(executor_trace, "success"), 1);
   ASSERT_STREQ(mapping_string(executor_trace, "trace_kind"), "owner_executor_trace");
   ASSERT_STREQ(mapping_string(executor_trace, "trace_model"), "owner_executor_scheduler_trace");
-  ASSERT_STREQ(mapping_string(executor_trace, "executor_contract_version"), "owner_executor_v1");
+  ASSERT_STREQ(mapping_string(executor_trace, "trace_schema"), "owner_executor_trace_v2");
+  ASSERT_STREQ(mapping_string(executor_trace, "owner_task_manifest_schema"), "owner_task_manifest_v2");
+  ASSERT_STREQ(mapping_string(executor_trace, "admission_policy"), "owner_epoch_payload_allowlist_deadline_guard");
+  ASSERT_STREQ(mapping_string(executor_trace, "executor_contract_version"), "owner_executor_v2");
   ASSERT_STREQ(mapping_string(executor_trace, "executor_model"), "owner_executor");
   ASSERT_GT(mapping_number(executor_trace, "returned"), 0);
   auto* events = mapping_array(executor_trace, "events");
@@ -5107,7 +5193,10 @@ TEST_F(DriverTest, TestVmOwnerExecutorBudgetYieldsAndRequeuesSameOwnerBacklog) {
       continue;
     }
     ASSERT_STREQ(mapping_string(event, "trace_model"), "owner_executor_scheduler_event");
-    ASSERT_STREQ(mapping_string(event, "executor_contract_version"), "owner_executor_v1");
+    ASSERT_STREQ(mapping_string(event, "trace_schema"), "owner_executor_trace_v2");
+    ASSERT_STREQ(mapping_string(event, "owner_task_manifest_schema"), "owner_task_manifest_v2");
+    ASSERT_STREQ(mapping_string(event, "admission_policy"), "owner_epoch_payload_allowlist_deadline_guard");
+    ASSERT_STREQ(mapping_string(event, "executor_contract_version"), "owner_executor_v2");
     ASSERT_STREQ(mapping_string(event, "executor_model"), "owner_executor");
     ASSERT_STREQ(mapping_string(event, "executor_dispatch_model"), "descriptor_manifest");
     auto event_name = std::string(mapping_string(event, "event"));
