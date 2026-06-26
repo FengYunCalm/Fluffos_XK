@@ -9,6 +9,8 @@ This document records the owner runtime v2 contract and the production-perfect e
 - v2 commits:
   - `452d3eed multicore: add owner runtime v2 manifest contract`
   - `9c1c9bbc multicore: trace owner executor callback manifests`
+  - `85b0393c multicore: make owner messages executor safe`
+  - `27a37ab8 multicore: expose production perfect runtime contract`
 
 ## Contract Additions
 
