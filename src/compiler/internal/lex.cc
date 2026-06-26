@@ -3508,7 +3508,7 @@ static void init_instrs() {
   add_instr_name("??", 0, F_NULLISH, -1);
 #endif
 #ifdef F_NULLISH_EQ
-  add_instr_name("??=", 0, F_NULLISH_EQ, -1);
+  add_instr_name("?\?=", 0, F_NULLISH_EQ, -1);
 #endif
 #ifdef F_ASSIGN_VALUE
   add_instr_name("assign_value", 0, F_ASSIGN_VALUE, -1);

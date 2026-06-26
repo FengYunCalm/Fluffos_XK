@@ -81,10 +81,17 @@ char *get_current_dir(char *buf, int limit) { return getcwd(buf, limit); /* POSI
 /* jemalloc stub, this function can't otherwise be replaced */
 #ifdef HAVE_JEMALLOC
 char *strdup(const char *str) {
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnonnull-compare"
+#endif
   if (!str) {
     errno = EINVAL;
     return nullptr;
   }
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
   size_t const ln = strlen(str);
   void *p = malloc(ln + 1);
   return static_cast<char *>(memcpy(p, str, ln + 1));

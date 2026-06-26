@@ -499,7 +499,10 @@ static void restore_stat_list(const char *file, mudlib_stats_t **list) {
   }
   while (fscanf(f, "%s", fname) != EOF) {
     entry = add_stat_entry(fname, list);
-    fscanf(f, "%d %d\n", &entry->moves, &entry->heart_beats);
+    if (fscanf(f, "%d %d\n", &entry->moves, &entry->heart_beats) != 2) {
+      debug_message("*Warning: invalid stat entry in %s.\n", file);
+      break;
+    }
   }
   fclose(f);
 }

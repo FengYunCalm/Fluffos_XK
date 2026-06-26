@@ -109,16 +109,20 @@ cd Fluffos_XK
 
 ## Build
 
+Use `tools/wsl-cmake-build.sh` for build steps. It is a thin `cmake --build`
+wrapper that keeps temporary files on the Linux `/tmp` path when WSL is launched
+from a Windows shell.
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target driver lpcc lpc_tests
+tools/wsl-cmake-build.sh build --target driver lpcc lpc_tests
 build/src/tests/lpc_tests
 ```
 
 For install-oriented environments:
 
 ```bash
-cmake --build build --target install
+tools/wsl-cmake-build.sh build --target install
 ```
 
 Windows/MSYS2 users should prefer the CMake install path instead of manually copying generated binaries.

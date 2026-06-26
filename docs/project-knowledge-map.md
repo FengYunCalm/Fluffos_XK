@@ -49,7 +49,7 @@ FluffOS_XK 是一个面向实际 MUD/LPC 运行项目的 FluffOS 维护分支。
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target driver lpcc lpc_tests
+tools/wsl-cmake-build.sh build --target driver lpcc lpc_tests
 build/src/tests/lpc_tests
 cd testsuite && ../build/bin/driver etc/config.test -ftest
 ```

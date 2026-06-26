@@ -396,21 +396,27 @@ char *int_string_copy(const char *const str)
 #endif
 {
   // TODO: probabaly not a good idea to have it here.
-  auto max_string_length = CONFIG_INT(__MAX_STRING_LENGTH__);
+  auto const configured_max_string_length = CONFIG_INT(__MAX_STRING_LENGTH__);
+  size_t max_string_length = configured_max_string_length > 0
+                                 ? static_cast<size_t>(configured_max_string_length)
+                                 : 0;
+  if (max_string_length > UINT_MAX) {
+    max_string_length = UINT_MAX;
+  }
 
   char *p;
-  int len;
+  size_t len;
 
   DEBUG_CHECK(!str, "Null string passed to string_copy.\n");
   len = strlen(str);
   if (len > max_string_length) {
     len = max_string_length;
-    p = new_string(len, desc);
-    (void)strncpy(p, str, len);
+    p = new_string(static_cast<unsigned int>(len), desc);
+    memcpy(p, str, len);
     p[len] = '\0';
   } else {
-    p = new_string(len, desc);
-    (void)strncpy(p, str, len + 1);
+    p = new_string(static_cast<unsigned int>(len), desc);
+    memcpy(p, str, len + 1);
   }
   return p;
 }

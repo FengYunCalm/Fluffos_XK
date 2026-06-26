@@ -60,16 +60,19 @@ cd Fluffos_XK
 
 ## 构建
 
+构建步骤使用 `tools/wsl-cmake-build.sh`。它只是 `cmake --build` 的薄包装，
+用于在从 Windows shell 启动 WSL 时把临时文件固定到 Linux `/tmp` 路径。
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target driver lpcc lpc_tests
+tools/wsl-cmake-build.sh build --target driver lpcc lpc_tests
 build/src/tests/lpc_tests
 ```
 
 面向安装的环境可以使用：
 
 ```bash
-cmake --build build --target install
+tools/wsl-cmake-build.sh build --target install
 ```
 
 Windows/MSYS2 用户应优先使用 CMake install 路径，而不是手工复制生成的二进制。

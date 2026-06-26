@@ -43,6 +43,17 @@
 #endif
 
 #ifdef F_HASH
+#if defined(__GNUC__) || defined(__clang__)
+#define FLUFFOS_CRYPTO_DIAGNOSTIC_PUSH _Pragma("GCC diagnostic push")
+#define FLUFFOS_CRYPTO_IGNORE_DEPRECATED \
+  _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+#define FLUFFOS_CRYPTO_DIAGNOSTIC_POP _Pragma("GCC diagnostic pop")
+#else
+#define FLUFFOS_CRYPTO_DIAGNOSTIC_PUSH
+#define FLUFFOS_CRYPTO_IGNORE_DEPRECATED
+#define FLUFFOS_CRYPTO_DIAGNOSTIC_POP
+#endif
+
 static char *hexdump(const unsigned char *data, int len) {
   const char hexchars[] = "0123456789abcdef";
   char *result, *p;
@@ -139,7 +150,11 @@ void f_hash() {
     goto result;                               \
   })
 
-  /* Legacy hash algorithms using direct functions */
+  /* Keep direct legacy calls to preserve MD4/MDC2/RIPEMD compatibility on
+   * OpenSSL 3 installations where EVP may require a legacy provider.
+   */
+  FLUFFOS_CRYPTO_DIAGNOSTIC_PUSH
+  FLUFFOS_CRYPTO_IGNORE_DEPRECATED
 #ifndef OPENSSL_NO_SHA1
   DO_HASH_IF("sha1", SHA1, SHA_DIGEST_LENGTH);
 #endif
@@ -173,6 +188,7 @@ void f_hash() {
 #ifndef OPENSSL_NO_RIPEMD160
   DO_HASH_IF("ripemd160", RIPEMD160, RIPEMD160_DIGEST_LENGTH);
 #endif
+  FLUFFOS_CRYPTO_DIAGNOSTIC_POP
 
   /* Modern hash algorithms using EVP interface */
   /* These algorithms require OpenSSL 1.1.1+ and will gracefully fail on older versions */

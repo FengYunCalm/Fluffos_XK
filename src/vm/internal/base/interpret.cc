@@ -2415,7 +2415,7 @@ void eval_instruction(char *p) {
       }
       case F_NULLISH_EQ: {
         if (sp->type != T_LVALUE) {
-          error("Invalid Program: non-lvalue argument to ??=.");
+          error("Invalid Program: non-lvalue argument to ?\?=.");
         }
         svalue_t *lval = sp->u.lvalue;
         if (lval->type == T_NUMBER && !lval->u.number && (lval->subtype == T_UNDEFINED)) {

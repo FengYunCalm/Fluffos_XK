@@ -372,7 +372,9 @@ int yylex() {
         continue;
       case '!': {
         char buff[2048];
-        fgets(buff, 2047, yyin);
+        if (fgets(buff, sizeof(buff), yyin) == nullptr) {
+          buff[0] = '\0';
+        }
         fprintf(stderr, "Configuration problem: %s\n", buff);
         exit(-1);
       }

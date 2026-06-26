@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <string>
 #include <thread>
@@ -45,7 +47,8 @@ extern bool gateway_dispatch_message_for_test(int fd, const char *payload);
 class DriverTest : public ::testing::Test {
  public:
   static void SetUpTestSuite() {
-    chdir(TESTSUITE_DIR);
+    ASSERT_EQ(0, chdir(TESTSUITE_DIR))
+        << "failed to chdir to " << TESTSUITE_DIR << ": " << strerror(errno);
     // Initialize libevent, This should be done before executing LPC.
     auto* base = init_main("etc/config.test");
     vm_start();
