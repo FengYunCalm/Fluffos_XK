@@ -5,6 +5,8 @@
 #include "vm/context.h"
 #include "vm/owner.h"
 
+#include <string>
+
 #include <event2/event.h>
 #include <event2/dns.h>
 #include <event2/util.h>
@@ -79,13 +81,26 @@ void query_name_by_addr(object_t *ob) {
 }
 
 struct AddrNumberQuery {
-  LPC_INT key;
-  const char *name;
-  svalue_t call_back;
-  object_t *ob_to_call;
-  evdns_getaddrinfo_request *req;
-  int err;
-  evutil_addrinfo *res;
+  LPC_INT key{0};
+  const char *name{nullptr};
+  svalue_t call_back{};
+  object_t *ob_to_call{nullptr};
+  evdns_getaddrinfo_request *req{nullptr};
+  int err{0};
+  evutil_addrinfo *res{nullptr};
+  std::string owner_id;
+  uint64_t owner_epoch{0};
+};
+
+class ControlledLpcScope {
+ public:
+  ControlledLpcScope() : previous_(vm_context().owner.controlled_lpc_active) {
+    vm_context().owner.controlled_lpc_active = true;
+  }
+  ~ControlledLpcScope() { vm_context().owner.controlled_lpc_active = previous_; }
+
+ private:
+  bool previous_;
 };
 
 object_t *dns_callback_owner(AddrNumberQuery *query) {
@@ -96,6 +111,30 @@ object_t *dns_callback_owner(AddrNumberQuery *query) {
     return query->call_back.u.fp->hdr.owner;
   }
   return query->ob_to_call;
+}
+
+void bind_dns_query_owner(AddrNumberQuery *query) {
+  auto *owner = dns_callback_owner(query);
+  query->owner_id = vm_owner_id(owner);
+  query->owner_epoch = vm_owner_epoch(owner);
+}
+
+const char *dns_query_task_key(AddrNumberQuery *query) {
+  return query && query->call_back.type == T_STRING ? query->call_back.u.string : "<function>";
+}
+
+bool dns_query_owner_stale(AddrNumberQuery *query, object_t *owner, const char *task_key) {
+  if (!query || !owner || (owner->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(query ? query->owner_id.c_str() : vm_owner_default_id(), "dns_callback",
+                               task_key ? task_key : "", query ? query->owner_epoch : 0, "destructed");
+    return true;
+  }
+  if (query->owner_id != vm_owner_id(owner) || query->owner_epoch != vm_owner_epoch(owner)) {
+    vm_owner_record_task_trace(vm_owner_id(owner), "dns_callback", task_key ? task_key : "",
+                               vm_owner_epoch(owner), "stale");
+    return true;
+  }
+  return false;
 }
 
 void free_addr_number_query(AddrNumberQuery *query) {
@@ -111,8 +150,31 @@ void free_addr_number_query(AddrNumberQuery *query) {
   delete query;
 }
 
+void cleanup_addr_number_query(AddrNumberQuery *query, const char *task_key, bool main_required) {
+  if (!query) {
+    return;
+  }
+  if (!main_required || vm_context_is_main_thread()) {
+    free_addr_number_query(query);
+    return;
+  }
+  auto task_id = vm_owner_enqueue_executor_callback_cleanup(
+      query->owner_id.c_str(), query->owner_epoch, "dns_callback", task_key,
+      [query] { free_addr_number_query(query); });
+  if (task_id == 0) {
+    free_addr_number_query(query);
+  }
+}
+
 // query finished, call the LPC callback.
-void on_query_addr_by_name_finish(AddrNumberQuery *query) {
+void on_query_addr_by_name_finish(AddrNumberQuery *query, bool cleanup_main_required = false) {
+  auto *owner = dns_callback_owner(query);
+  auto *task_key = dns_query_task_key(query);
+  if (dns_query_owner_stale(query, owner, task_key)) {
+    cleanup_addr_number_query(query, task_key, cleanup_main_required);
+    return;
+  }
+
   if (query->err) {
     debug(dns, "DNS lookup fail: %" LPC_INT_FMTSTR_P ",request: %s, err: %s.\n", query->key,
           query->name, evutil_gai_strerror(query->err));
@@ -154,29 +216,39 @@ void on_query_addr_by_name_finish(AddrNumberQuery *query) {
   // push the key
   push_number(query->key);
   set_eval(max_eval_cost);
+  ControlledLpcScope controlled_lpc;
   if (query->call_back.type == T_STRING) {
-    VMOwnerScope owner_scope(vm_context(), vm_owner_id(query->ob_to_call), vm_owner_epoch(query->ob_to_call));
-    vm_owner_record_task_trace(vm_owner_id(query->ob_to_call), "dns_callback", query->call_back.u.string,
-                               vm_owner_epoch(query->ob_to_call), "dispatched");
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(owner), vm_owner_epoch(owner));
+    vm_owner_record_task_trace(vm_owner_id(owner), "dns_callback", query->call_back.u.string,
+                               vm_owner_epoch(owner), "dispatched");
     safe_apply(query->call_back.u.string, query->ob_to_call, 3, ORIGIN_INTERNAL);
   } else {
-    auto *owner = query->call_back.u.fp ? query->call_back.u.fp->hdr.owner : query->ob_to_call;
     VMOwnerScope owner_scope(vm_context(), vm_owner_id(owner), vm_owner_epoch(owner));
     vm_owner_record_task_trace(vm_owner_id(owner), "dns_callback", "<function>", vm_owner_epoch(owner),
                                "dispatched");
     safe_call_function_pointer(query->call_back.u.fp, 3);
   }
 
-  free_addr_number_query(query);
+  cleanup_addr_number_query(query, task_key, cleanup_main_required);
 }
 
 void enqueue_addr_by_name_callback(AddrNumberQuery *query) {
   auto *owner = dns_callback_owner(query);
+  auto *task_key = dns_query_task_key(query);
   if (!owner || (owner->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(query ? query->owner_id.c_str() : vm_owner_default_id(), "dns_callback", task_key,
+                               query ? query->owner_epoch : 0, "destructed");
     free_addr_number_query(query);
     return;
   }
-  auto *task_key = query->call_back.type == T_STRING ? query->call_back.u.string : "<function>";
+  if (vm_owner_executor_available()) {
+    auto task_id = vm_owner_enqueue_executor_task(
+        owner, "dns_callback", task_key, [query] { on_query_addr_by_name_finish(query, true); },
+        [query] { cleanup_addr_number_query(query, dns_query_task_key(query), true); });
+    if (task_id != 0) {
+      return;
+    }
+  }
   auto task_id = vm_owner_enqueue_main_task(
       owner, "dns_callback", task_key, [query] { on_query_addr_by_name_finish(query); },
       [query] { free_addr_number_query(query); });
@@ -207,8 +279,7 @@ int query_addr_by_name(const char *name, svalue_t *call_back) {
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_protocol = 0;
 
-  auto *query = new AddrNumberQuery;
-  memset(query, 0, sizeof(AddrNumberQuery));
+  auto *query = new AddrNumberQuery();
 
   query->key = key++;
   query->name = make_shared_string(name);
@@ -216,6 +287,7 @@ int query_addr_by_name(const char *name, svalue_t *call_back) {
   assign_svalue_no_free(&query->call_back, call_back);
 
   add_ref(current_object, "query_addr_number: ");
+  bind_dns_query_owner(query);
 
   query->req = evdns_getaddrinfo(g_dns_base, name, nullptr, &hints, on_getaddr_result, query);
 
@@ -223,6 +295,24 @@ int query_addr_by_name(const char *name, svalue_t *call_back) {
 
   return query->key;
 } /* query_addr_number() */
+
+bool vm_dns_test_support_dispatch_callback(object_t *owner, const char *method, LPC_INT key) {
+  if (!owner || !method) {
+    return false;
+  }
+  auto *query = new AddrNumberQuery();
+  query->key = key;
+  query->name = make_shared_string("owner-executor.test");
+  query->ob_to_call = owner;
+  add_ref(owner, "dns test support: ");
+  query->call_back.type = T_STRING;
+  query->call_back.subtype = STRING_SHARED;
+  query->call_back.u.string = make_shared_string(method);
+  query->err = EVUTIL_EAI_FAIL;
+  bind_dns_query_owner(query);
+  enqueue_addr_by_name_callback(query);
+  return true;
+}
 
 enum { IPSIZE = 200 };
 using ipentry_t = struct {

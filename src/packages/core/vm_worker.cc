@@ -8,44 +8,21 @@
 #include <utility>
 #include <vector>
 
+#include "vm/frozen_value.h"
 #include "vm/worker.h"
 
 namespace {
 
 bool is_json_safe_value(const svalue_t *value, int depth, std::string *error) {
-  if (depth > 8) {
-    *error = "worker value nesting is too deep";
-    return false;
+  if (vm_frozen_value_safe(value, depth, "worker value", error)) {
+    return true;
   }
-  switch (value->type) {
-    case T_NUMBER:
-    case T_REAL:
-    case T_STRING:
-      return true;
-    case T_ARRAY:
-      for (int i = 0; i < value->u.arr->size; i++) {
-        if (!is_json_safe_value(&value->u.arr->item[i], depth + 1, error)) {
-          return false;
-        }
-      }
-      return true;
-    case T_MAPPING:
-      for (unsigned int i = 0; i < value->u.map->table_size; i++) {
-        for (auto *node = value->u.map->table[i]; node; node = node->next) {
-          if (node->values[0].type != T_STRING) {
-            *error = "worker mapping keys must be strings";
-            return false;
-          }
-          if (!is_json_safe_value(&node->values[1], depth + 1, error)) {
-            return false;
-          }
-        }
-      }
-      return true;
-    default:
-      *error = "worker value contains unsupported type";
-      return false;
+  if (*error == "worker value must be frozen data, not object/function/buffer/class") {
+    *error = "worker value contains unsupported type";
+  } else if (*error == "worker value mapping keys must be strings") {
+    *error = "worker mapping keys must be strings";
   }
+  return false;
 }
 
 int mapping_number(mapping_t *map, const char *key, int fallback) {

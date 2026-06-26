@@ -19,9 +19,22 @@
 #include <unordered_map>
 #include <vector>
 
+uint64_t gateway_enqueue_pending_command_internal(object_t *user);
+
 namespace {
 std::unordered_map<std::string, std::unique_ptr<GatewaySession>> g_gateway_sessions;
 std::unordered_map<object_t *, GatewaySession *> g_gateway_obj_to_session;
+
+class GatewayControlledLpcScope {
+ public:
+  GatewayControlledLpcScope() : previous_(vm_context().owner.controlled_lpc_active) {
+    vm_context().owner.controlled_lpc_active = true;
+  }
+  ~GatewayControlledLpcScope() { vm_context().owner.controlled_lpc_active = previous_; }
+
+ private:
+  bool previous_;
+};
 
 bool gateway_object_valid(object_t *ob) {
   return ob && !(ob->flags & O_DESTRUCTED) && ob->obname && ob->obname[0] != '\0';
@@ -38,6 +51,169 @@ void gateway_debugf(const char *fmt, ...) {
   vsnprintf(buffer, sizeof(buffer), fmt, args);
   va_end(args);
   debug_message("%s", buffer);
+}
+
+std::string gateway_pending_command_snapshot(interactive_t *user) {
+  if (!user || !(user->iflags & CMD_IN_BUF) || user->text_end < user->text_start) {
+    return {};
+  }
+
+  if (user->iflags & SINGLE_CHAR) {
+    if (user->text_start >= user->text_end) {
+      return {};
+    }
+    auto c = user->text[user->text_start];
+    if (c == 8 || c == 127) {
+      return {};
+    }
+    return std::string(1, c);
+  }
+
+  auto end = user->text_start;
+  while (end < user->text_end && user->text[end] != '\n' && user->text[end] != '\r') {
+    end++;
+  }
+  return std::string(user->text + user->text_start, user->text + end);
+}
+
+bool gateway_executor_session_current(object_t *user, interactive_t *ip) {
+  return ip && ::gateway_is_session(user) && user->interactive == ip && ip->ob == user &&
+         !(user->flags & O_DESTRUCTED);
+}
+
+svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, size_t snapshot_bytes) {
+  svalue_t payload{};
+  auto pending_bytes = user && user->text_end >= user->text_start ? user->text_end - user->text_start : 0;
+#if defined(F_INPUT_TO) || defined(F_GET_CHAR)
+  auto input_callback_active = user && user->input_to ? 1 : 0;
+  auto input_callback_carryover_count = user ? user->num_carry : 0;
+#else
+  auto input_callback_active = 0;
+  auto input_callback_carryover_count = 0;
+#endif
+
+  payload.type = T_MAPPING;
+  payload.u.map = allocate_mapping(96);
+  add_mapping_string(payload.u.map, "payload_model", "gateway_command_buffer_metadata_v1");
+  add_mapping_string(payload.u.map, "payload_policy", "no_raw_command_text_in_trace");
+  add_mapping_string(payload.u.map, "input_source", "interactive_text_buffer");
+  add_mapping_string(payload.u.map, "command_text_snapshot_policy", "owner_private_redacted_from_trace");
+  add_mapping_pair(payload.u.map, "command_text_snapshot_ready", snapshot_ready ? 1 : 0);
+  add_mapping_pair(payload.u.map, "command_text_snapshot_bytes", static_cast<long>(snapshot_bytes));
+  add_mapping_pair(payload.u.map, "command_text_snapshot_redacted", snapshot_ready ? 1 : 0);
+  add_mapping_string(payload.u.map, "input_callback_state_policy", "redacted_input_to_get_char_state_v1");
+  add_mapping_pair(payload.u.map, "input_callback_state_snapshot_ready", 1);
+  add_mapping_pair(payload.u.map, "input_callback_state_redacted", 1);
+  add_mapping_string(payload.u.map, "input_callback_frame_model", "owner_command_frame_input_callback_detach_v1");
+  add_mapping_pair(payload.u.map, "input_callback_frame_detach_ready", 1);
+  add_mapping_pair(payload.u.map, "input_callback_frame_executor_ready", 1);
+  add_mapping_string(payload.u.map, "input_callback_apply_frame_model", "owner_command_frame_input_callback_apply");
+  add_mapping_string(payload.u.map, "input_callback_apply_frame_task_type", "interactive_input_callback");
+  add_mapping_pair(payload.u.map, "input_callback_apply_frame_ready", 1);
+  add_mapping_pair(payload.u.map, "input_callback_apply_frame_executor_ready", 1);
+  add_mapping_string(payload.u.map, "input_callback_mode_delta_model",
+                     "owner_command_frame_input_callback_mode_delta");
+  add_mapping_pair(payload.u.map, "input_callback_mode_delta_ready", 1);
+  add_mapping_pair(payload.u.map, "input_callback_mode_delta_executor_ready", 1);
+  add_mapping_pair(payload.u.map, "input_callback_active", input_callback_active);
+  add_mapping_pair(payload.u.map, "input_callback_single_char", user && (user->iflags & SINGLE_CHAR) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "input_callback_noescape", user && (user->iflags & NOESC) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "input_callback_noecho", user && (user->iflags & NOECHO) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "input_callback_carryover_count", input_callback_carryover_count);
+  add_mapping_pair(payload.u.map, "input_callback_function_redacted", input_callback_active);
+  add_mapping_pair(payload.u.map, "input_callback_object_redacted", input_callback_active);
+  add_mapping_string(payload.u.map, "process_input_add_action_parser_state_policy",
+                     "redacted_process_input_add_action_parser_state_v1");
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_state_snapshot_ready", 1);
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_state_redacted", 1);
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_has_process_input",
+                   user && (user->iflags & HAS_PROCESS_INPUT) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_safe_parse_fallback", 1);
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_requires_command_giver", 1);
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_command_giver_redacted", 1);
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_command_text_redacted", snapshot_ready ? 1 : 0);
+  add_mapping_string(payload.u.map, "process_input_apply_frame_model", "owner_command_frame_process_input_apply");
+  add_mapping_string(payload.u.map, "process_input_apply_frame_task_type", "interactive_command_parser");
+  add_mapping_pair(payload.u.map, "process_input_apply_frame_ready", 1);
+  add_mapping_pair(payload.u.map, "process_input_apply_frame_executor_ready", 1);
+  add_mapping_string(payload.u.map, "process_input_add_action_parser_frame_model",
+                     "owner_command_parser_context_v1");
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_frame_ready", 1);
+  add_mapping_pair(payload.u.map, "process_input_add_action_parser_frame_executor_ready", 1);
+  add_mapping_string(payload.u.map, "process_input_add_action_parser_blocker", "");
+  add_mapping_string(payload.u.map, "interactive_mode_flags_state_policy", "redacted_interactive_mode_flags_v1");
+  add_mapping_pair(payload.u.map, "interactive_mode_flags_state_snapshot_ready", 1);
+  add_mapping_pair(payload.u.map, "interactive_mode_flags_state_redacted", 1);
+  add_mapping_pair(payload.u.map, "interactive_mode_noecho", user && (user->iflags & NOECHO) ? 1 : 0);
+  add_mapping_string(payload.u.map, "interactive_mode_localecho_restore_model",
+                     "owner_command_frame_localecho_restore");
+  add_mapping_string(payload.u.map, "interactive_mode_localecho_restore_task_type", "interactive_mode_flags");
+  add_mapping_string(payload.u.map, "interactive_mode_localecho_restore_boundary",
+                     "main_reply_queue_after_command_consume");
+  add_mapping_pair(payload.u.map, "interactive_mode_localecho_restore_ready", 1);
+  add_mapping_pair(payload.u.map, "interactive_mode_localecho_restore_executor_ready", 1);
+  add_mapping_pair(payload.u.map, "interactive_mode_localecho_restore_required", user && (user->iflags & NOECHO) ? 1 : 0);
+  add_mapping_string(payload.u.map, "interactive_mode_terminal_mode_delta_boundary",
+                     "main_mode_delta_queue_after_command_consume");
+  add_mapping_pair(payload.u.map, "interactive_mode_terminal_mode_delta_ready", 1);
+  add_mapping_pair(payload.u.map, "interactive_mode_terminal_linemode_restore_required",
+                   input_callback_active && user && (user->iflags & SINGLE_CHAR) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "interactive_mode_terminal_charmode_restore_required",
+                   user && (user->iflags & WAS_SINGLE_CHAR) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "interactive_mode_noescape", user && (user->iflags & NOESC) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "interactive_mode_single_char", user && (user->iflags & SINGLE_CHAR) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "interactive_mode_was_single_char", user && (user->iflags & WAS_SINGLE_CHAR) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "interactive_mode_using_mxp", user && (user->iflags & USING_MXP) ? 1 : 0);
+  add_mapping_string(payload.u.map, "interactive_mode_mxp_tag_filter_model", "owner_command_frame_mxp_tag_filter");
+  add_mapping_string(payload.u.map, "interactive_mode_mxp_tag_filter_task_type", "interactive_mode_flags");
+  add_mapping_pair(payload.u.map, "interactive_mode_mxp_tag_filter_ready", 1);
+  add_mapping_pair(payload.u.map, "interactive_mode_mxp_tag_filter_executor_ready", 1);
+  add_mapping_pair(payload.u.map, "interactive_mode_mxp_tag_filter_required",
+                   user && (user->iflags & USING_MXP) ? 1 : 0);
+  add_mapping_string(payload.u.map, "interactive_mode_ed_command_model", "owner_command_frame_ed_command");
+  add_mapping_string(payload.u.map, "interactive_mode_ed_command_task_type", "interactive_mode_flags");
+  add_mapping_pair(payload.u.map, "interactive_mode_ed_command_ready", 1);
+  add_mapping_pair(payload.u.map, "interactive_mode_ed_command_executor_ready", 1);
+  add_mapping_pair(payload.u.map, "interactive_mode_ed_command_required", user && user->ed_buffer ? 1 : 0);
+  add_mapping_pair(payload.u.map, "interactive_mode_ed_buffer_active", user && user->ed_buffer ? 1 : 0);
+  add_mapping_string(payload.u.map, "prompt_telnet_reschedule_state_policy",
+                     "redacted_prompt_telnet_reschedule_io_v1");
+  add_mapping_pair(payload.u.map, "prompt_telnet_reschedule_state_snapshot_ready", 1);
+  add_mapping_pair(payload.u.map, "prompt_telnet_reschedule_state_redacted", 1);
+  add_mapping_string(payload.u.map, "prompt_telnet_reschedule_boundary", "main_reply_queue_after_owner_command");
+  add_mapping_pair(payload.u.map, "prompt_telnet_reschedule_reply_queue_ready", 1);
+  add_mapping_pair(payload.u.map, "prompt_telnet_reschedule_blocks_activation", 0);
+  add_mapping_pair(payload.u.map, "prompt_has_write_prompt", user && (user->iflags & HAS_WRITE_PROMPT) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "prompt_text_redacted", user && user->prompt ? 1 : 0);
+  add_mapping_pair(payload.u.map, "prompt_write_prompt_apply_required",
+                   user && (user->iflags & HAS_WRITE_PROMPT) && !user->ed_buffer ? 1 : 0);
+  add_mapping_string(payload.u.map, "prompt_write_prompt_apply_frame_model",
+                     "owner_command_frame_write_prompt_apply");
+  add_mapping_string(payload.u.map, "prompt_write_prompt_apply_frame_task_type", "command_reply");
+  add_mapping_pair(payload.u.map, "prompt_write_prompt_apply_frame_ready", 1);
+  add_mapping_pair(payload.u.map, "prompt_write_prompt_apply_frame_executor_ready", 0);
+  add_mapping_pair(payload.u.map, "telnet_handle_active", user && user->telnet ? 1 : 0);
+  add_mapping_pair(payload.u.map, "telnet_using_telnet", user && (user->iflags & USING_TELNET) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "telnet_suppress_ga", user && (user->iflags & SUPPRESS_GA) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "telnet_ga_required",
+                   user && user->telnet && (user->iflags & USING_TELNET) && !(user->iflags & SUPPRESS_GA) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "reschedule_cmd_in_buf", user && (user->iflags & CMD_IN_BUF) ? 1 : 0);
+  add_mapping_string(payload.u.map, "command_executor_blocker",
+                     snapshot_ready ? "" : "interactive_command_buffer_not_snapshotted");
+  add_mapping_string(payload.u.map, "command_consume_model", "owner_owned_snapshot_main_thread_consume");
+  add_mapping_pair(payload.u.map, "command_consume_snapshot_ready", snapshot_ready ? 1 : 0);
+  add_mapping_pair(payload.u.map, "command_consume_executor_ready", snapshot_ready ? 1 : 0);
+  add_mapping_string(payload.u.map, "command_consume_blocker", snapshot_ready ? "" : "interactive_command_buffer_not_snapshotted");
+  add_mapping_string(payload.u.map, "execution_frame_restore_policy", "owner_executor_vmcontext_restore");
+  add_mapping_pair(payload.u.map, "execution_frame_restore_ready", 1);
+  add_mapping_string(payload.u.map, "execution_frame_restore_blocker", "");
+  add_mapping_string(payload.u.map, "session_id", user && user->gateway_session_id ? user->gateway_session_id : "");
+  add_mapping_pair(payload.u.map, "pending_bytes", pending_bytes);
+  add_mapping_pair(payload.u.map, "text_start", user ? user->text_start : 0);
+  add_mapping_pair(payload.u.map, "text_end", user ? user->text_end : 0);
+  add_mapping_pair(payload.u.map, "cmd_in_buf", user && (user->iflags & CMD_IN_BUF) ? 1 : 0);
+  add_mapping_pair(payload.u.map, "gateway_session", user && (user->iflags & GATEWAY_SESSION) ? 1 : 0);
+  return payload;
 }
 
 void cleanup_temp_gateway_interactive(object_t *owner) {
@@ -76,12 +252,10 @@ void gateway_command_callback(evutil_socket_t /*fd*/, short /*what*/, void *arg)
   }
 
   if (user->ob && !(user->ob->flags & O_DESTRUCTED)) {
-    vm_owner_enqueue_main_task(user->ob, "gateway", "process_user_command", [user] {
-      set_eval(max_eval_cost);
-      process_user_command(user);
-      vm_context_set_current_interactive(vm_context(), nullptr);
-    });
-    vm_owner_drain_main_tasks(64);
+    auto task_id = gateway_enqueue_pending_command_internal(user->ob);
+    if (task_id != 0) {
+      vm_owner_drain_main_tasks(64);
+    }
   } else {
     set_eval(max_eval_cost);
     process_user_command(user);
@@ -187,6 +361,60 @@ void gateway_cleanup_master_sessions(int master_fd) {
 
 bool gateway_is_session(object_t *ob) {
   return ob && ob->interactive && (ob->interactive->iflags & GATEWAY_SESSION);
+}
+
+uint64_t gateway_enqueue_pending_command_internal(object_t *user) {
+  if (!gateway_is_session(user) || !user->interactive || !user->obname || (user->flags & O_DESTRUCTED)) {
+    return 0;
+  }
+
+  auto *ip = user->interactive;
+  auto command_snapshot = gateway_pending_command_snapshot(ip);
+  auto snapshot_ready = (ip->iflags & CMD_IN_BUF) != 0;
+  auto payload = gateway_command_task_payload(ip, snapshot_ready, command_snapshot.size());
+  if (snapshot_ready && vm_owner_executor_available()) {
+    auto task_id = vm_owner_enqueue_executor_task(
+        user, "gateway_command_execute", "process_user_command", [user, ip, command_snapshot] {
+          if (!gateway_executor_session_current(user, ip)) {
+            vm_owner_record_task_trace(user ? vm_owner_id(user) : vm_owner_default_id(), "gateway_command_execute",
+                                       "process_user_command", user ? vm_owner_epoch(user) : 0, "session_stale");
+            vm_context_set_current_interactive(vm_context(), nullptr);
+            return;
+          }
+
+          GatewayControlledLpcScope controlled_lpc;
+          set_eval(max_eval_cost);
+          vm_owner_record_task_trace(vm_owner_id(user), "gateway_command_execute", "process_user_command",
+                                     vm_owner_epoch(user), "snapshot_dispatched");
+          if (!process_user_command_snapshot(ip, command_snapshot.c_str(), command_snapshot.size())) {
+            vm_owner_record_task_trace(vm_owner_id(user), "gateway_command_execute", "process_user_command",
+                                       vm_owner_epoch(user), "snapshot_dropped");
+          }
+          vm_context_set_current_interactive(vm_context(), nullptr);
+        });
+    if (task_id != 0) {
+      free_svalue(&payload, "gateway_command_task_payload");
+      return task_id;
+    }
+  }
+  auto task_id = vm_owner_enqueue_main_task_with_payload(
+      user, "gateway", "process_user_command", "gateway_command_input", &payload, [ip, command_snapshot] {
+        set_eval(max_eval_cost);
+        process_user_command_snapshot(ip, command_snapshot.c_str(), command_snapshot.size());
+        vm_context_set_current_interactive(vm_context(), nullptr);
+      }, nullptr, "gateway_command_execution_frame_v1", "owner_scope_current_interactive_command_giver",
+      "owner_owned_snapshot_main_thread_consume", "", true, true, "owner_executor_vmcontext_restore", "",
+      snapshot_ready ? command_snapshot.c_str() : nullptr, command_snapshot.size());
+  free_svalue(&payload, "gateway_command_task_payload");
+  return task_id;
+}
+
+int gateway_process_pending_command_internal(object_t *user) {
+  if (!gateway_is_session(user) || !user->interactive) {
+    return 0;
+  }
+  gateway_command_callback(0, 0, user->interactive);
+  return 1;
 }
 
 void gateway_session_exec_update(object_t *new_ob, object_t *old_ob) {
@@ -562,13 +790,16 @@ void f_gateway_session_info() {
     return;
   }
 
-  map = allocate_mapping(6);
+  map = allocate_mapping(9);
   add_mapping_string(map, "session_id", sess->session_id.c_str());
   add_mapping_string(map, "ip", sess->real_ip.c_str());
   add_mapping_pair(map, "port", sess->real_port);
   add_mapping_pair(map, "master_fd", sess->master_fd);
   add_mapping_pair(map, "connected_at", sess->connected_at);
   add_mapping_pair(map, "last_active", sess->last_active);
+  add_mapping_string(map, "object_name", sess->user_ob->obname);
+  add_mapping_string(map, "owner_id", vm_owner_id(sess->user_ob));
+  add_mapping_pair(map, "owner_epoch", static_cast<long>(vm_owner_epoch(sess->user_ob)));
   push_refed_mapping(map);
 }
 

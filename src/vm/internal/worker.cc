@@ -251,6 +251,63 @@ std::string actor_state_from_score(int total_score) {
   return "down";
 }
 
+std::vector<VMOwnerComputeResultField> compute_result_fields(const AsyncRecord &record) {
+  std::vector<VMOwnerComputeResultField> fields;
+  if (record.state != VMWorkerTaskState::kSucceeded) {
+    return fields;
+  }
+
+  auto add_number = [&fields](const char *key, int64_t value) {
+    fields.push_back(VMOwnerComputeResultField{key, nullptr, value, false});
+  };
+  auto add_string = [&fields](const char *key, const std::string &value) {
+    fields.push_back(VMOwnerComputeResultField{key, value.c_str(), 0, true});
+  };
+
+  add_string("type", record.type);
+  if (record.type == "actor_score") {
+    const auto &score = record.actor_score;
+    add_string("owner_key", score.owner_key);
+    add_number("worker_count", score.worker_count);
+    add_number("elapsed_ms", score.elapsed_ms);
+    add_number("hp_pct_bp", score.hp_pct_bp);
+    add_number("mp_pct_bp", score.mp_pct_bp);
+    add_number("ep_pct_bp", score.ep_pct_bp);
+    add_number("survival_score", score.survival_score);
+    add_number("resource_score", score.resource_score);
+    add_number("total_score", score.total_score);
+    add_string("state", score.state);
+  } else if (record.type == "snapshot_digest") {
+    const auto &digest = record.snapshot_digest;
+    add_string("owner_key", digest.owner_key);
+    add_number("worker_count", digest.worker_count);
+    add_number("elapsed_ms", digest.elapsed_ms);
+    add_number("input_bytes", static_cast<int64_t>(digest.input_bytes));
+    add_number("repeat", digest.repeat);
+    add_number("checksum", static_cast<int64_t>(digest.checksum));
+  } else if (record.type == "combat_damage") {
+    const auto &damage = record.combat_damage;
+    add_string("owner_key", damage.owner_key);
+    add_number("worker_count", damage.worker_count);
+    add_number("elapsed_ms", damage.elapsed_ms);
+    add_number("damage", damage.damage);
+    add_number("armor_break_bp", damage.armor_break_bp);
+    add_number("reduction_bp", damage.reduction_bp);
+    add_number("critical_rate", damage.critical_rate);
+    add_number("critical_hit", damage.critical_hit);
+    add_number("snapshot_hash", static_cast<int64_t>(damage.snapshot_hash));
+    add_number("input_hash", static_cast<int64_t>(damage.input_hash));
+  } else if (record.type == "bench") {
+    const auto &bench = record.bench;
+    add_number("tasks", bench.tasks);
+    add_number("worker_count", bench.worker_count);
+    add_number("max_parallel", bench.max_parallel);
+    add_number("elapsed_ms", bench.elapsed_ms);
+    add_number("checksum", static_cast<int64_t>(bench.checksum));
+  }
+  return fields;
+}
+
 class VMWorkerRuntime {
  public:
   ~VMWorkerRuntime() { stop(); }
@@ -543,8 +600,8 @@ class VMWorkerRuntime {
       auto it = async_results_.find(id);
       if (it != async_results_.end() && it->second.state == VMWorkerTaskState::kPending) {
         it->second.state = VMWorkerTaskState::kSucceeded;
-        mark_completed(&it->second);
         it->second.actor_score = score;
+        mark_completed(&it->second);
       }
     });
     return id;
@@ -581,8 +638,8 @@ class VMWorkerRuntime {
       auto it = async_results_.find(id);
       if (it != async_results_.end() && it->second.state == VMWorkerTaskState::kPending) {
         it->second.state = VMWorkerTaskState::kSucceeded;
-        mark_completed(&it->second);
         it->second.combat_damage = damage;
+        mark_completed(&it->second);
       }
     });
     return id;
@@ -660,8 +717,8 @@ class VMWorkerRuntime {
       auto it = async_results_.find(id);
       if (it != async_results_.end() && it->second.state == VMWorkerTaskState::kPending) {
         it->second.state = VMWorkerTaskState::kSucceeded;
-        mark_completed(&it->second);
         it->second.snapshot_digest = digest;
+        mark_completed(&it->second);
       }
     });
     return id;
@@ -734,8 +791,10 @@ class VMWorkerRuntime {
       record->envelope.expires_at_ms = record->envelope.completed_at_ms + record->envelope.ttl_ms;
     }
     auto state = record->state == VMWorkerTaskState::kFailed ? "failed" : "completed";
-    vm_owner_enqueue_compute_result(record->envelope.owner_key.c_str(), record->envelope.task_id,
-                                    record->type.c_str(), state, record->type.c_str(), record->error.c_str());
+    auto fields = compute_result_fields(*record);
+    vm_owner_enqueue_compute_result_fields(record->envelope.owner_key.c_str(), record->envelope.task_id,
+                                           record->type.c_str(), state, record->type.c_str(), record->error.c_str(),
+                                           fields.data(), fields.size());
   }
 
   void apply_deadline_locked(AsyncRecord *record) {
@@ -846,8 +905,8 @@ class VMWorkerRuntime {
       auto it = async_results_.find(state->task_id);
       if (it != async_results_.end() && it->second.state == VMWorkerTaskState::kPending) {
         it->second.state = VMWorkerTaskState::kSucceeded;
-        mark_completed(&it->second);
         it->second.bench = bench;
+        mark_completed(&it->second);
       }
     }
   }

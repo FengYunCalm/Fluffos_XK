@@ -368,6 +368,7 @@ static object_t *load_virtual_object(const char *name, int clone) {
   }
   SETOBNAME(new_ob, new_name);
   ObjectTable::instance().insert(new_ob->obname, new_ob);
+  vm_object_store_register(new_ob);
 
   /* finish initialization */
   new_ob->flags |= O_VIRTUAL;
@@ -1542,6 +1543,9 @@ object_t *find_object(const char *str) {
   }
 
   if ((ob = ObjectTable::instance().find(tmpbuf))) {
+    if ((ob->flags & O_DESTRUCTED) == 0) {
+      vm_object_store_register(ob);
+    }
     return ob;
   }
   ob = load_object(tmpbuf, 1);
@@ -1561,6 +1565,9 @@ object_t *find_object2(const char *str) {
   }
 
   if ((ob = ObjectTable::instance().find(p))) {
+    if ((ob->flags & O_DESTRUCTED) == 0) {
+      vm_object_store_register(ob);
+    }
     return ob;
   }
   return nullptr;

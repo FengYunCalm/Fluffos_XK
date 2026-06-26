@@ -75,7 +75,7 @@ class EGCIterator {
   int32_t len_;
 
   static BreakIteratorPool* pool() {
-    static BreakIteratorPool pool(32);
+    static thread_local BreakIteratorPool pool(32);
     return &pool;
   }
 

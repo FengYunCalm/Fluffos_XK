@@ -3,6 +3,8 @@
 
 #include "base/package_api.h"
 
+#include <cstdint>
+
 #include <event2/listener.h>
 
 extern int g_gateway_debug;
@@ -60,6 +62,8 @@ object_t *gateway_create_session_internal(const char *session_id, svalue_t *data
 int gateway_destroy_session_internal(const char *session_id, const char *reason_code,
                                      const char *reason_text);
 int gateway_inject_input_internal(object_t *user, const char *input);
+uint64_t gateway_enqueue_pending_command_internal(object_t *user);
+int gateway_process_pending_command_internal(object_t *user);
 int gateway_send_to_session(const char *session_id, const char *data, size_t len);
 void gateway_check_session_timeouts();
 void cleanup_gateway_sessions();

@@ -1,54 +1,19 @@
 #include "base/package_api.h"
 
 #include "vm/context.h"
+#include "vm/frozen_value.h"
 #include "vm/object_handle.h"
 #include "vm/owner.h"
 
 #include <string>
 
 namespace {
-bool owner_payload_safe(svalue_t *value, int depth, std::string *error) {
-  if (depth > 8) {
-    *error = "owner payload nesting is too deep";
-    return false;
-  }
-  switch (value->type) {
-    case T_NUMBER:
-    case T_REAL:
-    case T_STRING:
-      return true;
-    case T_ARRAY:
-      for (int i = 0; i < value->u.arr->size; i++) {
-        if (!owner_payload_safe(&value->u.arr->item[i], depth + 1, error)) {
-          return false;
-        }
-      }
-      return true;
-    case T_MAPPING:
-      for (unsigned int i = 0; i <= value->u.map->table_size; i++) {
-        for (auto *node = value->u.map->table[i]; node; node = node->next) {
-          if (node->values[0].type != T_STRING) {
-            *error = "owner payload mapping keys must be strings";
-            return false;
-          }
-          if (!owner_payload_safe(&node->values[1], depth + 1, error)) {
-            return false;
-          }
-        }
-      }
-      return true;
-    default:
-      *error = "owner payload must be frozen data, not object/function/buffer/class";
-      return false;
-  }
-}
-
 bool owner_payload_mapping_safe(svalue_t *value, std::string *error) {
   if (value->type != T_MAPPING) {
     *error = "owner payload top-level value must be a mapping";
     return false;
   }
-  return owner_payload_safe(value, 0, error);
+  return vm_frozen_value_safe(value, 0, "owner payload", error);
 }
 
 std::string owner_mapping_string(mapping_t *map, const char *key, const char *fallback) {
@@ -214,6 +179,14 @@ void f_vm_owner_trace() {
 }
 #endif
 
+#ifdef F_VM_OWNER_EXECUTOR_TRACE
+void f_vm_owner_executor_trace() {
+  auto *result = vm_owner_executor_trace(static_cast<int>(sp->u.number));
+  pop_stack();
+  push_refed_mapping(result);
+}
+#endif
+
 #ifdef F_VM_OWNER_ACCESS_TRACE
 void f_vm_owner_access_trace() {
   auto *result = vm_owner_access_trace(static_cast<int>(sp->u.number));
@@ -299,6 +272,19 @@ void f_vm_owner_lpc_task() {
 }
 #endif
 
+#ifdef F_VM_OWNER_ORDINARY_LPC_TASK
+void f_vm_owner_ordinary_lpc_task() {
+  auto *explicit_open = sp;
+  auto *method = sp - 1;
+  auto *owner_id = sp - 2;
+  auto *target = sp - 3;
+  auto *result = vm_owner_ordinary_lpc_task(target->u.ob, owner_id->u.string, method->u.string,
+                                           explicit_open->u.number != 0);
+  pop_n_elems(4);
+  push_refed_mapping(result);
+}
+#endif
+
 #ifdef F_VM_CONTEXT_IS_MAIN_THREAD
 void f_vm_context_is_main_thread() { push_number(vm_context_is_main_thread() ? 1 : 0); }
 #endif
@@ -324,6 +310,14 @@ void f_vm_owner_schedule() {
   auto *result = vm_owner_schedule(static_cast<int>(sp->u.number));
   pop_stack();
   push_refed_mapping(result);
+}
+#endif
+
+#ifdef F_VM_OWNER_DRAIN_MAIN
+void f_vm_owner_drain_main() {
+  auto drained = vm_owner_drain_main_tasks(static_cast<int>(sp->u.number));
+  pop_stack();
+  push_number(drained);
 }
 #endif
 

@@ -104,6 +104,8 @@ int32_t u8_egc_find_as_offset(EGCIterator &iter, const char *needle, size_t need
 UChar32 u8_egc_index_as_single_codepoint(const char *src, int32_t src_len, int32_t index) {
   UChar32 c = U_SENTINEL;
 
+  if (src == nullptr || src_len <= 0) return -2;
+
   EGCSmartIterator iter(src, src_len);
   if (!iter.ok()) return c;
 

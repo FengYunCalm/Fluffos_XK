@@ -2,6 +2,7 @@
 
 #include "vm/context.h"
 
+#include "vm/internal/apply.h"
 #include "vm/internal/base/interpret.h"
 #include "vm/internal/base/machine.h"
 #include "vm/internal/simulate.h"
@@ -215,6 +216,85 @@ void vm_context_sync_execution(VMContext &context) {
   }
   context.execution = vm_context_capture_execution();
 }
+
+void vm_context_sync_eval_stack(VMContext &context) {
+  if (!is_current_thread_context(context)) {
+    return;
+  }
+  auto sync_count = context.eval_stack.sync_count + 1;
+  context.eval_stack.owner_id = context.owner.current_owner_id;
+  context.eval_stack.owner_epoch = context.owner.current_owner_epoch;
+  context.eval_stack.depth = vm_eval_stack_depth();
+  context.eval_stack.capacity = vm_eval_stack_capacity();
+  context.eval_stack.thread_local_storage = vm_eval_stack_thread_local_storage_ready();
+  context.eval_stack.context_bound = true;
+  context.eval_stack.owner_bound = !context.owner.current_owner_id.empty();
+  context.eval_stack.empty = context.eval_stack.depth == 0;
+  context.eval_stack.sync_count = sync_count;
+}
+
+void vm_context_clear_eval_stack(VMContext &context) { context.eval_stack = VMEvalStackState{}; }
+
+void vm_context_sync_value_stack(VMContext &context) {
+  if (!is_current_thread_context(context)) {
+    return;
+  }
+  auto sync_count = context.value_stack.sync_count + 1;
+  context.value_stack.owner_id = context.owner.current_owner_id;
+  context.value_stack.owner_epoch = context.owner.current_owner_epoch;
+  context.value_stack.depth = vm_value_stack_depth();
+  context.value_stack.capacity = vm_value_stack_capacity();
+  context.value_stack.lvalue_ref_count = vm_value_stack_lvalue_ref_count();
+  context.value_stack.thread_local_storage = vm_value_stack_thread_local_storage_ready();
+  context.value_stack.context_bound = true;
+  context.value_stack.owner_bound = !context.owner.current_owner_id.empty();
+  context.value_stack.lvalue_refs_empty = context.value_stack.lvalue_ref_count == 0;
+  context.value_stack.empty = context.value_stack.depth == 0 && context.value_stack.lvalue_refs_empty;
+  context.value_stack.sync_count = sync_count;
+}
+
+void vm_context_clear_value_stack(VMContext &context) { context.value_stack = VMValueStackState{}; }
+
+void vm_context_sync_apply_return(VMContext &context) {
+  if (!is_current_thread_context(context)) {
+    return;
+  }
+  auto sync_count = context.apply_return.sync_count + 1;
+  context.apply_return.owner_id = context.owner.current_owner_id;
+  context.apply_return.owner_epoch = context.owner.current_owner_epoch;
+  context.apply_return.value_type = vm_apply_return_value_type();
+  context.apply_return.value_subtype = vm_apply_return_value_subtype();
+  context.apply_return.thread_local_storage = vm_apply_return_thread_local_storage_ready();
+  context.apply_return.context_bound = true;
+  context.apply_return.owner_bound = !context.owner.current_owner_id.empty();
+  context.apply_return.empty = vm_apply_return_empty();
+  context.apply_return.sync_count = sync_count;
+}
+
+void vm_context_clear_apply_return(VMContext &context) {
+  if (is_current_thread_context(context)) {
+    vm_apply_return_clear();
+  }
+  context.apply_return = VMApplyReturnState{};
+}
+
+void vm_context_sync_control_stack(VMContext &context) {
+  if (!is_current_thread_context(context)) {
+    return;
+  }
+  auto sync_count = context.control_stack.sync_count + 1;
+  context.control_stack.owner_id = context.owner.current_owner_id;
+  context.control_stack.owner_epoch = context.owner.current_owner_epoch;
+  context.control_stack.depth = vm_control_stack_depth();
+  context.control_stack.capacity = vm_control_stack_capacity();
+  context.control_stack.thread_local_storage = vm_control_stack_thread_local_storage_ready();
+  context.control_stack.context_bound = true;
+  context.control_stack.owner_bound = !context.owner.current_owner_id.empty();
+  context.control_stack.empty = context.control_stack.depth == 0;
+  context.control_stack.sync_count = sync_count;
+}
+
+void vm_context_clear_control_stack(VMContext &context) { context.control_stack = VMControlStackState{}; }
 
 void vm_context_sync_object_store(VMContext &context) {
   if (!can_sync_object_store_to_context(context)) {

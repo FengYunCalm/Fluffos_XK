@@ -7,9 +7,10 @@
 #include "vm/owner.h"
 
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <functional>
-#include <cmath>
+#include <string>
 #include <unordered_map>
 
 #include "packages/core/sprintf.h"
@@ -47,6 +48,67 @@ namespace {
 int new_call_out_zero_last_gametick = 0;
 // Total number of call_out(0) that was scheduled on this gametick.
 int new_call_out_zero_scheduled_on_this_gametick = 0;
+
+class ControlledLpcScope {
+ public:
+  ControlledLpcScope() : previous_(vm_context().owner.controlled_lpc_active) {
+    vm_context().owner.controlled_lpc_active = true;
+  }
+  ~ControlledLpcScope() { vm_context().owner.controlled_lpc_active = previous_; }
+
+ private:
+  bool previous_;
+};
+
+const char *callout_owner_id(pending_call_t *cop) {
+  return cop && cop->owner_id ? cop->owner_id : vm_owner_default_id();
+}
+
+const char *callout_task_key(pending_call_t *cop) {
+  return cop && cop->ob ? cop->function.s : "<function>";
+}
+
+void detach_due_callout_handle(pending_call_t *cop) {
+  if (!cop) {
+    return;
+  }
+  int const found = g_callout_handle_map.erase(cop->handle);
+  DEBUG_CHECK(!found, "BUG: Rogue callout, not found in map.\n");
+}
+
+void release_callout_tick_event(pending_call_t *cop) {
+  if (!cop || !cop->tick_event) {
+    return;
+  }
+  cop->tick_event->valid = false;
+  cop->tick_event = nullptr;
+}
+
+void free_call_on_main(pending_call_t *cop, bool called) {
+  if (!cop) {
+    return;
+  }
+  if (called) {
+    free_called_call(cop);
+  } else {
+    free_call(cop);
+  }
+}
+
+void cleanup_callout(pending_call_t *cop, bool called, bool main_required) {
+  if (!cop) {
+    return;
+  }
+  if (!main_required || vm_context_is_main_thread()) {
+    free_call_on_main(cop, called);
+    return;
+  }
+  std::string owner_id = callout_owner_id(cop);
+  std::string task_key = callout_task_key(cop);
+  uint64_t owner_epoch = cop->owner_epoch;
+  vm_owner_enqueue_executor_callback_cleanup(owner_id.c_str(), owner_epoch, "call_out", task_key.c_str(),
+                                             [cop, called] { free_call_on_main(cop, called); });
+}
 }  // namespace
 
 /*
@@ -185,7 +247,7 @@ LPC_INT new_call_out(object_t *ob, svalue_t *fun, std::chrono::milliseconds dela
  * if it is a living object. Check for shadowing objects, which may also
  * be living objects.
  */
-static void execute_call_out(pending_call_t *cop) {
+static void execute_call_out(pending_call_t *cop, bool handle_detached = false, bool cleanup_main_required = false) {
   auto callout_execution = vm_context_capture_execution();
   callout_execution.current_interactive = nullptr;
   VMExecutionScope callout_scope(vm_context(), callout_execution);
@@ -204,24 +266,23 @@ static void execute_call_out(pending_call_t *cop) {
                                      .count()
                                : g_current_gametick);
 
-  // Remove self from callout map
-  {
-    int const found = g_callout_handle_map.erase(cop->handle);
-    DEBUG_CHECK(!found, "BUG: Rogue callout, not found in map.\n");
+  // Remove self from callout map on the main path. Owner executor tasks detach before dispatch.
+  if (!handle_detached) {
+    detach_due_callout_handle(cop);
   }
 
   if (!ob || (ob->flags & O_DESTRUCTED)) {
     DBG_CALLOUT("  ob destructed, ignored.\n");
     vm_owner_record_task_trace(cop->owner_id ? cop->owner_id : vm_owner_default_id(), "call_out", "<destructed>",
                                cop->owner_epoch, "destructed");
-    free_call(cop);
+    cleanup_callout(cop, false, cleanup_main_required);
     return;
   }
 
   if ((cop->owner_id && strcmp(cop->owner_id, vm_owner_id(ob)) != 0) || cop->owner_epoch != vm_owner_epoch(ob)) {
     vm_owner_record_task_trace(cop->owner_id ? cop->owner_id : vm_owner_default_id(), "call_out",
                                cop->ob ? cop->function.s : "<function>", cop->owner_epoch, "stale");
-    free_call(cop);
+    cleanup_callout(cop, false, cleanup_main_required);
     return;
   }
   vm_owner_record_task_trace(vm_owner_id(ob), "call_out", cop->ob ? cop->function.s : "<function>",
@@ -230,7 +291,7 @@ static void execute_call_out(pending_call_t *cop) {
   // FIXME: Figure out why this is useful. Maybe a security thing.
   if (cop->ob && cop->function.s[0] == APPLY___INIT_SPECIAL_CHAR) {
     DBG_CALLOUT("  Trying to call illegal function, ignored.\n");
-    free_call(cop);
+    cleanup_callout(cop, false, cleanup_main_required);
     return;
   }
 
@@ -268,6 +329,7 @@ static void execute_call_out(pending_call_t *cop) {
     /* cop->vs is ref one */
     transfer_push_some_svalues(cop->vs->item, vec->size);
     free_empty_array(cop->vs);
+    cop->vs = nullptr;
   }
 
   // Executing LPC callback
@@ -275,6 +337,7 @@ static void execute_call_out(pending_call_t *cop) {
 
   save_command_giver(new_command_giver);
   /* current object no longer set */
+  ControlledLpcScope controlled_lpc;
   VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob), vm_owner_epoch(ob));
   if (cop->ob) {
     DBG_CALLOUT("  func: %s\n", cop->function.s);
@@ -285,7 +348,7 @@ static void execute_call_out(pending_call_t *cop) {
   }
   restore_command_giver();
 
-  free_called_call(cop);
+  cleanup_callout(cop, true, cleanup_main_required);
 }
 
 void call_out(pending_call_t *cop) {
@@ -297,8 +360,35 @@ void call_out(pending_call_t *cop) {
     execute_call_out(cop);
     return;
   }
-  vm_owner_enqueue_main_task(ob, "call_out", cop->ob ? cop->function.s : "<function>", [cop] { execute_call_out(cop); });
+
+  auto task_key = std::string(callout_task_key(cop));
+  if (vm_owner_executor_available()) {
+    detach_due_callout_handle(cop);
+    release_callout_tick_event(cop);
+    auto task_id = vm_owner_enqueue_executor_task(
+        ob, "call_out", task_key.c_str(), [cop] { execute_call_out(cop, true, true); },
+        [cop] { cleanup_callout(cop, false, true); });
+    if (task_id > 0) {
+      return;
+    }
+    vm_owner_enqueue_main_task(ob, "call_out", task_key.c_str(), [cop] { execute_call_out(cop, true, false); },
+                               [cop] { cleanup_callout(cop, false, false); });
+    vm_owner_drain_main_tasks(64);
+    return;
+  }
+
+  vm_owner_enqueue_main_task(ob, "call_out", task_key.c_str(), [cop] { execute_call_out(cop); },
+                             [cop] { cleanup_callout(cop, false, false); });
   vm_owner_drain_main_tasks(64);
+}
+
+bool vm_call_out_test_support_run_handle(LPC_INT handle) {
+  auto iter = g_callout_handle_map.find(handle);
+  if (iter == g_callout_handle_map.end()) {
+    return false;
+  }
+  call_out(iter->second);
+  return true;
 }
 
 static int time_left(pending_call_t *cop) {

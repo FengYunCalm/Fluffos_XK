@@ -3,6 +3,7 @@
 #include "packages/async/async.h"
 
 #include <chrono>
+#include <cstring>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -30,7 +31,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <zlib.h>
+#include <vm/internal/base/function.h>
 #include <vm/internal/base/interpret.h>
+#include <vm/internal/base/program.h>
 
 #include "vm/context.h"
 #include "vm/owner.h"
@@ -72,6 +75,17 @@ std::mutex reqs_lock;
 std::deque<struct Request *> finished_reqs;
 std::mutex finished_reqs_lock;
 
+class ControlledLpcScope {
+ public:
+  ControlledLpcScope() : previous_(vm_context().owner.controlled_lpc_active) {
+    vm_context().owner.controlled_lpc_active = true;
+  }
+  ~ControlledLpcScope() { vm_context().owner.controlled_lpc_active = previous_; }
+
+ private:
+  bool previous_;
+};
+
 object_t *callback_owner(function_to_call_t *fun) {
   if (!fun) {
     return nullptr;
@@ -101,6 +115,7 @@ svalue_t *safe_call_async_callback(Request *req, int narg, const char *operation
                            owner ? vm_owner_epoch(owner) : req->owner_epoch);
   vm_owner_record_task_trace(owner ? vm_owner_id(owner) : req->owner_id.c_str(), "async_callback", operation,
                              owner ? vm_owner_epoch(owner) : req->owner_epoch, "dispatched");
+  ControlledLpcScope controlled_lpc;
   return safe_call_efun_callback(req->fun, narg);
 }
 
@@ -131,6 +146,22 @@ void free_async_request(Request *req) {
   free_funp(req->fun->f.fp);
   delete req->fun;
   delete req;
+}
+
+void cleanup_async_request(Request *req, const char *operation, bool main_required) {
+  if (!req) {
+    return;
+  }
+  if (!main_required || vm_context_is_main_thread()) {
+    free_async_request(req);
+    return;
+  }
+  auto task_id = vm_owner_enqueue_executor_callback_cleanup(
+      req->owner_id.c_str(), req->owner_epoch, "async_callback", operation,
+      [req] { free_async_request(req); });
+  if (task_id == 0) {
+    free_async_request(req);
+  }
 }
 
 void thread_func() {
@@ -503,15 +534,28 @@ void handle_finished_request(Request *req, enum atypes type) {
 
 void dispatch_finished_request(Request *req, enum atypes type) {
   auto *owner = callback_owner(req->fun);
-  auto *operation = async_operation_name(type);
+  auto operation = std::string(async_operation_name(type));
   if (!owner || (owner->flags & O_DESTRUCTED)) {
     handle_finished_request(req, type);
     free_async_request(req);
     return;
   }
 
+  if (vm_owner_executor_available()) {
+    auto task_id = vm_owner_enqueue_executor_task(
+        owner, "async_callback", operation.c_str(),
+        [req, type, operation] {
+          handle_finished_request(req, type);
+          cleanup_async_request(req, operation.c_str(), true);
+        },
+        [req, operation] { cleanup_async_request(req, operation.c_str(), true); });
+    if (task_id != 0) {
+      return;
+    }
+  }
+
   auto task_id = vm_owner_enqueue_main_task(
-      owner, "async_callback", operation,
+      owner, "async_callback", operation.c_str(),
       [req, type] {
         handle_finished_request(req, type);
         free_async_request(req);
@@ -550,6 +594,50 @@ void complete_all_asyncio() {
     }
   }
   check_reqs();
+}
+
+int find_test_lfun_index(object_t *owner, const char *method) {
+  if (!owner || !owner->prog || !method) {
+    return -1;
+  }
+  for (int i = 0; i < owner->prog->num_functions_defined; i++) {
+    auto *entry = find_func_entry(owner->prog, i);
+    if (entry && entry->funcname && std::strcmp(entry->funcname, method) == 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function_to_call_t *make_test_lfun_callback(object_t *owner, int function_index) {
+  VMExecutionState execution;
+  execution.current_object = owner;
+  execution.current_prog = owner ? owner->prog : nullptr;
+  VMExecutionScope execution_scope(vm_context(), execution);
+  svalue_t no_args{};
+  no_args.type = T_NUMBER;
+  auto *fun = new function_to_call_t;
+  fun->ob = nullptr;
+  fun->f.fp = make_lfun_funp(function_index, &no_args);
+  fun->narg = 0;
+  fun->args = nullptr;
+  return fun;
+}
+
+bool vm_async_test_support_dispatch_read_callback(object_t *owner, const char *method, const char *payload) {
+  auto function_index = find_test_lfun_index(owner, method);
+  if (function_index < 0) {
+    return false;
+  }
+  auto *req = new Request();
+  req->fun = make_test_lfun_callback(owner, function_index);
+  req->type = AREAD;
+  req->status = DONE;
+  req->data = payload ? payload : "";
+  req->ret = static_cast<int>(req->data.size());
+  bind_request_owner(req);
+  dispatch_finished_request(req, AREAD);
+  return true;
 }
 
 #ifdef F_ASYNC_READ

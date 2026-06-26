@@ -20,6 +20,8 @@
 #include <cstring>            // for NULL, memcpy, strlen, etc
 #include <unistd.h>           // for gethostname
 #include <memory>             // for unique_ptr
+#include <string>             // for string
+#include <vector>             // for vector
 // Network stuff
 #ifndef _WIN32
 #include <netdb.h>        // for addrinfo, freeaddrinfo, etc
@@ -54,6 +56,9 @@ extern void update_load_av();
  */
 static char *get_user_command(interactive_t * /*ip*/);
 static char *first_cmd_in_buf(interactive_t * /*ip*/);
+static int consume_user_command_snapshot(interactive_t * /*ip*/, const char * /*command_snapshot*/,
+                                         size_t /*command_snapshot_length*/);
+static int process_user_command_text(interactive_t * /*ip*/, char * /*user_command*/);
 static int call_function_interactive(interactive_t * /*i*/, char * /*str*/);
 static void print_prompt(interactive_t * /*ip*/);
 
@@ -90,6 +95,120 @@ void maybe_schedule_user_command(interactive_t *user) {
     evtimer_del(user->ev_command);
     evtimer_add(user->ev_command, &zero_sec);
   }
+}
+
+void run_user_localecho_restore(interactive_t *ip, object_t *reply_command_giver) {
+  if (!IP_VALID(ip, reply_command_giver)) {
+    return;
+  }
+
+  save_command_giver(reply_command_giver);
+  VMCurrentInteractiveScope interactive_scope(vm_context(), reply_command_giver);
+  set_localecho(ip, true);
+  restore_command_giver();
+}
+
+void enqueue_user_localecho_restore(interactive_t *ip, object_t *reply_command_giver) {
+  if (!IP_VALID(ip, reply_command_giver)) {
+    return;
+  }
+
+  auto task_id = vm_owner_enqueue_main_task(reply_command_giver, "command_reply", "localecho_restore",
+                                            [ip, reply_command_giver] {
+                                              run_user_localecho_restore(ip, reply_command_giver);
+                                            });
+  if (task_id == 0) {
+    run_user_localecho_restore(ip, reply_command_giver);
+    return;
+  }
+  vm_owner_drain_main_tasks(64);
+}
+
+int detach_user_noecho_localecho_restore_in_owner_frame(interactive_t *ip, object_t *reply_command_giver) {
+  if (!ip || !(ip->iflags & NOECHO)) {
+    return 0;
+  }
+
+  ip->iflags &= ~NOECHO;
+  if (IP_VALID(ip, reply_command_giver)) {
+    vm_owner_record_task_trace(vm_owner_id(reply_command_giver), "interactive_mode_flags",
+                               "noecho_localecho_restore", vm_owner_epoch(reply_command_giver),
+                               "frame_detached");
+  }
+  enqueue_user_localecho_restore(ip, reply_command_giver);
+  return 1;
+}
+
+enum class UserTerminalModeDelta { LineMode, CharMode };
+
+void run_user_terminal_mode_delta(interactive_t *ip, object_t *reply_command_giver,
+                                  UserTerminalModeDelta mode_delta) {
+  if (!IP_VALID(ip, reply_command_giver)) {
+    return;
+  }
+
+  save_command_giver(reply_command_giver);
+  VMCurrentInteractiveScope interactive_scope(vm_context(), reply_command_giver);
+  if (mode_delta == UserTerminalModeDelta::LineMode) {
+    set_linemode(ip, true);
+  } else {
+    set_charmode(ip, true);
+  }
+  restore_command_giver();
+}
+
+void enqueue_user_terminal_mode_delta(interactive_t *ip, object_t *reply_command_giver,
+                                      UserTerminalModeDelta mode_delta, const char *task_key) {
+  if (!IP_VALID(ip, reply_command_giver)) {
+    return;
+  }
+
+  auto task_id = vm_owner_enqueue_main_task(reply_command_giver, "command_mode_delta", task_key,
+                                            [ip, reply_command_giver, mode_delta] {
+                                              run_user_terminal_mode_delta(ip, reply_command_giver, mode_delta);
+                                            });
+  if (task_id == 0) {
+    run_user_terminal_mode_delta(ip, reply_command_giver, mode_delta);
+    return;
+  }
+  vm_owner_drain_main_tasks(64);
+}
+
+void run_user_command_reply_side_effects(interactive_t *ip, object_t *reply_command_giver) {
+  if (!IP_VALID(ip, reply_command_giver)) {
+    return;
+  }
+
+  save_command_giver(reply_command_giver);
+  VMCurrentInteractiveScope interactive_scope(vm_context(), reply_command_giver);
+  if (IP_VALID(ip, command_giver)) {
+    if (ip->input_to == nullptr) {
+      print_prompt(ip);
+    }
+    if (IP_VALID(ip, command_giver) && ip->telnet && (ip->iflags & USING_TELNET) &&
+        !(ip->iflags & SUPPRESS_GA)) {
+      telnet_send_ga(ip->telnet);
+    }
+    if (IP_VALID(ip, command_giver)) {
+      maybe_schedule_user_command(ip);
+    }
+  }
+  restore_command_giver();
+}
+
+void enqueue_user_command_reply_side_effects(interactive_t *ip, object_t *reply_command_giver) {
+  if (!IP_VALID(ip, reply_command_giver)) {
+    return;
+  }
+
+  auto task_id = vm_owner_enqueue_main_task(
+      reply_command_giver, "command_reply", "prompt_telnet_reschedule_io",
+      [ip, reply_command_giver] { run_user_command_reply_side_effects(ip, reply_command_giver); });
+  if (task_id == 0) {
+    run_user_command_reply_side_effects(ip, reply_command_giver);
+    return;
+  }
+  vm_owner_drain_main_tasks(64);
 }
 
 void on_user_command(evutil_socket_t fd, short what, void *arg) {
@@ -589,7 +708,15 @@ void add_message(object_t *who, const char *data, int len) {
 #ifdef PACKAGE_GATEWAY
   if ((ip->iflags & GATEWAY_SESSION) && ip->gateway_session_id) {
     extern int gateway_send_to_session(const char *session_id, const char *data, size_t len);
-    gateway_send_to_session(ip->gateway_session_id, data, len);
+    if (vm_context_is_main_thread()) {
+      gateway_send_to_session(ip->gateway_session_id, data, len);
+    } else {
+      auto session_id = std::string(ip->gateway_session_id);
+      auto payload = std::string(data, len);
+      vm_owner_enqueue_main_task(who, "gateway", "gateway_output", [session_id, payload] {
+        gateway_send_to_session(session_id.c_str(), payload.data(), payload.size());
+      });
+    }
 #ifdef SHADOW_CATCH_MESSAGE
     if (shadow_catch_message(who, data)) {
       if (CONFIG_INT(__RC_SNOOP_SHADOWED__)) {
@@ -1127,15 +1254,70 @@ static char *get_user_command(interactive_t *ip) {
   debug(connections, "get_user_command: user_command = (%s)\n", user_command);
   save_command_giver(ip->ob);
 
-  if ((ip->iflags & NOECHO)) {
+  if (ip->iflags & NOECHO) {
     /* must not enable echo before the user input is received */
-    set_localecho(command_giver->interactive, true);
-    ip->iflags &= ~NOECHO;
+    detach_user_noecho_localecho_restore_in_owner_frame(ip, command_giver);
   }
 
   ip->last_time = get_current_time();
   return user_command;
 } /* get_user_command() */
+
+static int consume_user_command_snapshot(interactive_t *ip, const char *command_snapshot,
+                                         size_t command_snapshot_length) {
+  if (!ip || !ip->ob || (ip->ob->flags & O_DESTRUCTED) || !command_snapshot) {
+    return 0;
+  }
+  if (!(ip->iflags & CMD_IN_BUF)) {
+    return 0;
+  }
+  if (!clean_buf(ip)) {
+    return 0;
+  }
+
+  if (ip->iflags & SINGLE_CHAR) {
+    if (ip->text_start >= ip->text_end) {
+      return 0;
+    }
+    auto c = ip->text[ip->text_start];
+    if (c == 8 || c == 127) {
+      c = 0;
+    }
+    if (!((command_snapshot_length == 0 && c == 0) ||
+          (command_snapshot_length == 1 && command_snapshot[0] == c))) {
+      return 0;
+    }
+    ip->text[ip->text_start++] = 0;
+    if (!clean_buf(ip)) {
+      ip->iflags &= ~CMD_IN_BUF;
+    }
+  } else {
+    auto start = ip->text_start;
+    auto end = start;
+    while (end < ip->text_end && ip->text[end] != '\n' && ip->text[end] != '\r') {
+      end++;
+    }
+    if (end >= ip->text_end || command_snapshot_length != static_cast<size_t>(end - start) ||
+        (command_snapshot_length > 0 && memcmp(command_snapshot, ip->text + start, command_snapshot_length) != 0)) {
+      return 0;
+    }
+    ip->text_start = end;
+    if (ip->text_start + 1 < ip->text_end &&
+        ((ip->text[ip->text_start] == '\r' && ip->text[ip->text_start + 1] == '\n') ||
+         (ip->text[ip->text_start] == '\n' && ip->text[ip->text_start + 1] == '\r'))) {
+      ip->text[ip->text_start++] = 0;
+    }
+    ip->text[ip->text_start++] = 0;
+    if (!cmd_in_buf(ip)) {
+      ip->iflags &= ~CMD_IN_BUF;
+    }
+  }
+
+  save_command_giver(ip->ob);
+  detach_user_noecho_localecho_restore_in_owner_frame(ip, command_giver);
+  ip->last_time = get_current_time();
+  return 1;
+}
 
 static int escape_command(interactive_t *ip, const char *user_command) {
   if (user_command[0] != '!') {
@@ -1154,11 +1336,67 @@ static int escape_command(interactive_t *ip, const char *user_command) {
   return 0;
 }
 
+static void parse_user_command_in_owner_frame(char *user_command, object_t *parser_command_giver) {
+  if (!parser_command_giver) {
+    safe_parse_command(user_command, parser_command_giver);
+    return;
+  }
+
+  VMOwnerScope owner_scope(vm_context(), vm_owner_id(parser_command_giver),
+                           vm_owner_epoch(parser_command_giver));
+  vm_owner_record_task_trace(vm_owner_id(parser_command_giver), "interactive_command_parser",
+                             "safe_parse_command", vm_owner_epoch(parser_command_giver),
+                             "frame_entered");
+  safe_parse_command(user_command, parser_command_giver);
+}
+
+static svalue_t *apply_user_process_input_in_owner_frame(char *user_command,
+                                                        object_t *parser_command_giver) {
+  copy_and_push_string(user_command);
+  if (parser_command_giver && !(parser_command_giver->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(vm_owner_id(parser_command_giver), "interactive_command_parser",
+                               "process_input_apply", vm_owner_epoch(parser_command_giver),
+                               "frame_entered");
+  }
+  return owner_bound_safe_apply(APPLY_PROCESS_INPUT, parser_command_giver, 1, ORIGIN_DRIVER,
+                                "interactive");
+}
+
+static int handle_user_mxp_tag_filter_in_owner_frame(interactive_t *ip, const char *user_command) {
+  if (!(ip->iflags & USING_MXP)) {
+    return 1;
+  }
+  if (!(user_command[0] == ' ' && user_command[1] == '[' && user_command[3] == 'z')) {
+    return 1;
+  }
+
+  if (ip->ob && !(ip->ob->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(vm_owner_id(ip->ob), "interactive_mode_flags", "mxp_tag_filter",
+                               vm_owner_epoch(ip->ob), "frame_entered");
+  }
+  return on_receive_mxp_tag(ip, user_command) ? 1 : 0;
+}
+
+#ifdef OLD_ED
+static int handle_user_ed_command_in_owner_frame(interactive_t *ip, char *user_command) {
+  if (!ip->ed_buffer) {
+    return 0;
+  }
+
+  if (ip->ob && !(ip->ob->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(vm_owner_id(ip->ob), "interactive_mode_flags", "ed_command",
+                               vm_owner_epoch(ip->ob), "frame_entered");
+  }
+  ed_cmd(user_command);
+  return 1;
+}
+#endif
+
 static void process_input(interactive_t *ip, char *user_command) {
   svalue_t *ret;
 
   if (!(ip->iflags & HAS_PROCESS_INPUT)) {
-    safe_parse_command(user_command, command_giver);
+    parse_user_command_in_owner_frame(user_command, command_giver);
     return;
   }
 
@@ -1167,14 +1405,13 @@ static void process_input(interactive_t *ip, char *user_command) {
    * support for things like command history and mud shell
    * programming languages.
   */
-  copy_and_push_string(user_command);
-  ret = owner_bound_safe_apply(APPLY_PROCESS_INPUT, command_giver, 1, ORIGIN_DRIVER, "interactive");
+  ret = apply_user_process_input_in_owner_frame(user_command, command_giver);
   if (!IP_VALID(ip, command_giver)) {
     return;
   }
   if (!ret) {
     ip->iflags &= ~HAS_PROCESS_INPUT;
-    safe_parse_command(user_command, command_giver);
+    parse_user_command_in_owner_frame(user_command, command_giver);
     return;
   }
 
@@ -1182,10 +1419,10 @@ static void process_input(interactive_t *ip, char *user_command) {
   if (ret->type == T_STRING) {
     auto *command = string_copy(ret->u.string, "current_command: " __CURRENT_FILE_LINE__);
     DEFER { FREE_MSTR(command); };
-    safe_parse_command(command, command_giver);
+    parse_user_command_in_owner_frame(command, command_giver);
   } else {
     if (ret->type != T_NUMBER || !ret->u.number) {
-      safe_parse_command(user_command, command_giver);
+      parse_user_command_in_owner_frame(user_command, command_giver);
     }
   }
 #endif
@@ -1197,14 +1434,8 @@ static void process_input(interactive_t *ip, char *user_command) {
  * This function calls get_user_command() to get a user command.
  * One user command is processed per execution of this function.
  */
-int process_user_command(interactive_t *ip) {
-  char *user_command;
-
-  /*
-   * WARNING: get_user_command() sets command_giver via
-   * save_command_giver(), but only when the return is non-zero!
-   */
-  if (!(user_command = get_user_command(ip))) {
+static int process_user_command_text(interactive_t *ip, char *user_command) {
+  if (!user_command) {
     return 0;
   }
 
@@ -1229,12 +1460,8 @@ int process_user_command(interactive_t *ip) {
     goto exit;
   }
 
-  if (ip->iflags & USING_MXP) {
-    if (user_command[0] == ' ' && user_command[1] == '[' && user_command[3] == 'z') {
-      if (!on_receive_mxp_tag(ip, user_command)) {
-        goto exit;
-      }
-    }
+  if (!handle_user_mxp_tag_filter_in_owner_frame(ip, user_command)) {
+    goto exit;
   }
 
   if (escape_command(ip, user_command)) {
@@ -1243,13 +1470,15 @@ int process_user_command(interactive_t *ip) {
       ip->iflags |= WAS_SINGLE_CHAR;
       ip->iflags &= ~SINGLE_CHAR;
       ip->text_start = ip->text_end = *ip->text = 0;
-      set_linemode(ip, true);
+      enqueue_user_terminal_mode_delta(ip, command_giver, UserTerminalModeDelta::LineMode,
+                                       "single_char_escape_linemode");
     } else {
       if (ip->iflags & WAS_SINGLE_CHAR) {
         /* we now have a string ... switch back to char mode */
         ip->iflags &= ~WAS_SINGLE_CHAR;
         ip->iflags |= SINGLE_CHAR;
-        set_charmode(ip, true);
+        enqueue_user_terminal_mode_delta(ip, command_giver, UserTerminalModeDelta::CharMode,
+                                         "single_char_escape_charmode_restore");
         if (!IP_VALID(ip, command_giver)) {
           goto exit;
         }
@@ -1262,8 +1491,7 @@ int process_user_command(interactive_t *ip) {
   }
 
 #ifdef OLD_ED
-  if (ip->ed_buffer) {
-    ed_cmd(user_command);
+  if (handle_user_ed_command_in_owner_frame(ip, user_command)) {
     goto exit;
   }
 #endif
@@ -1277,22 +1505,43 @@ int process_user_command(interactive_t *ip) {
 
 exit:
   /*
-   * Print a prompt if user is still here.
+   * Queue post-command prompt/telnet/reschedule side effects separately so owner
+   * command execution can move off-main before network-visible replies do.
    */
   if (IP_VALID(ip, command_giver)) {
-    if (ip->input_to == nullptr) {
-      print_prompt(ip);
-    }
-    if (ip->telnet && (ip->iflags & USING_TELNET) && !(ip->iflags & SUPPRESS_GA)) {
-      telnet_send_ga(ip->telnet);
-    }
-    // FIXME: this doesn't belong here, should be moved to event.cc
-    maybe_schedule_user_command(ip);
+    enqueue_user_command_reply_side_effects(ip, command_giver);
   }
 
   vm_context_set_current_interactive(vm_context(), nullptr);
   restore_command_giver();
   return 1;
+}
+
+int process_user_command(interactive_t *ip) {
+  char *user_command;
+
+  /*
+   * WARNING: get_user_command() sets command_giver via
+   * save_command_giver(), but only when the return is non-zero!
+   */
+  if (!(user_command = get_user_command(ip))) {
+    return 0;
+  }
+  return process_user_command_text(ip, user_command);
+}
+
+int process_user_command_snapshot(interactive_t *ip, const char *command_snapshot, size_t command_snapshot_length) {
+  if (!consume_user_command_snapshot(ip, command_snapshot, command_snapshot_length)) {
+    return 0;
+  }
+
+  std::vector<char> user_command;
+  user_command.reserve(command_snapshot_length + 1);
+  if (command_snapshot_length > 0) {
+    user_command.insert(user_command.end(), command_snapshot, command_snapshot + command_snapshot_length);
+  }
+  user_command.push_back('\0');
+  return process_user_command_text(ip, user_command.data());
 }
 
 /*
@@ -1422,17 +1671,123 @@ void remove_interactive(object_t *ob, int dested) {
 } /* remove_interactive() */
 
 #if defined(F_INPUT_TO) || defined(F_GET_CHAR)
-static int call_function_interactive(interactive_t *i, char *str) {
-  object_t *ob;
-  funptr_t *funp;
-  const char *function;
-  svalue_t *args;
-  sentence_t *sent;
-  int num_arg;
+struct UserInputCallbackFrame {
+  object_t *ob = nullptr;
+  funptr_t *funp = nullptr;
+  const char *function = nullptr;
+  svalue_t *args = nullptr;
+  int num_arg = 0;
+};
+
+static int detach_user_input_callback_frame(interactive_t *i, sentence_t *sent,
+                                            UserInputCallbackFrame *frame) {
+  if (!i || !sent || !frame) {
+    return 0;
+  }
+
+  frame->ob = sent->ob;
+  if (!(sent->flags & V_FUNCTION) && sent->function.s &&
+      sent->function.s[0] == APPLY___INIT_SPECIAL_CHAR) {
+    return 0;
+  }
+
+  STACK_INC;
+  if (sent->flags & V_FUNCTION) {
+    sp->type = T_FUNCTION;
+    sp->u.fp = frame->funp = sent->function.f;
+    frame->funp->hdr.ref++;
+  } else {
+    frame->function = sent->function.s;
+    sp->type = T_STRING;
+    sp->subtype = STRING_SHARED;
+    sp->u.string = frame->function;
+    ref_string(frame->function);
+  }
+
+  free_object(&sent->ob, "call_function_interactive");
+  free_sentence(sent);
+
+  frame->num_arg = i->num_carry;
+  if (frame->num_arg) {
+    frame->args = i->carryover;
+    i->num_carry = 0;
+    i->carryover = nullptr;
+  }
+  i->input_to = nullptr;
+
+  if (frame->ob && !(frame->ob->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(vm_owner_id(frame->ob), "interactive_input_callback",
+                               frame->function ? frame->function : "<function>", vm_owner_epoch(frame->ob),
+                               "frame_detached");
+  }
+  return 1;
+}
+
+struct UserInputCallbackModeDelta {
+  int noescape_cleared = 0;
   int was_single = 0;
   int was_noecho = 0;
+};
+
+static UserInputCallbackModeDelta detach_user_input_callback_mode_delta(interactive_t *i,
+                                                                        int noescape_cleared) {
+  UserInputCallbackModeDelta delta;
+  delta.noescape_cleared = noescape_cleared;
+  if (!i) {
+    return delta;
+  }
+
+  if (i->iflags & SINGLE_CHAR) {
+    i->iflags &= ~SINGLE_CHAR;
+    delta.was_single = 1;
+  }
+  if (i->iflags & NOECHO) {
+    i->iflags &= ~NOECHO;
+    delta.was_noecho = 1;
+  }
+
+  if (i->ob && !(i->ob->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(vm_owner_id(i->ob), "interactive_input_callback_mode",
+                               "input_to_get_char_mode_flags", vm_owner_epoch(i->ob),
+                               "frame_detached");
+  }
+  return delta;
+}
+
+static void apply_user_input_callback_in_owner_frame(UserInputCallbackFrame *frame, object_t *ob, char *str) {
+  copy_and_push_string(str);
+  if (frame->args) {
+    transfer_push_some_svalues(frame->args, frame->num_arg);
+    FREE(frame->args);
+    frame->args = nullptr;
+  }
+
+  if (frame->function) {
+    if (ob && !(ob->flags & O_DESTRUCTED)) {
+      vm_owner_record_task_trace(vm_owner_id(ob), "interactive_input_callback", frame->function,
+                                 vm_owner_epoch(ob), "frame_entered");
+    }
+    (void)owner_bound_safe_apply(frame->function, ob, frame->num_arg + 1, ORIGIN_INTERNAL,
+                                 "interactive_input_to");
+  } else {
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(frame->funp->hdr.owner),
+                             vm_owner_epoch(frame->funp->hdr.owner));
+    vm_owner_record_task_trace(vm_owner_id(frame->funp->hdr.owner), "interactive_input_callback", "<function>",
+                               vm_owner_epoch(frame->funp->hdr.owner), "frame_entered");
+    vm_owner_record_task_trace(vm_owner_id(frame->funp->hdr.owner), "interactive_input_to", "<function>",
+                               vm_owner_epoch(frame->funp->hdr.owner), "dispatched");
+    safe_call_function_pointer(frame->funp, frame->num_arg + 1);
+  }
+
+  pop_stack(); /* remove `function' from stack */
+}
+
+static int call_function_interactive(interactive_t *i, char *str) {
+  object_t *ob;
+  sentence_t *sent;
   int ret = 0;
 
+  int noescape_cleared = (i->iflags & NOESC) ? 1 : 0;
   i->iflags &= ~NOESC;
   if (!(sent = i->input_to)) {
     return (0);
@@ -1443,17 +1798,7 @@ static int call_function_interactive(interactive_t *i, char *str) {
    * Special feature: input_to() has been called to setup a call to a
    * function.
    */
-  if (i->iflags & SINGLE_CHAR) {
-    /*
-     * clear single character mode
-     */
-    i->iflags &= ~SINGLE_CHAR;
-    was_single = 1;
-  }
-  if (i->iflags & NOECHO) {
-    was_noecho = 1;
-    i->iflags &= ~NOECHO;
-  }
+  auto mode_delta = detach_user_input_callback_mode_delta(i, noescape_cleared);
   if (ob->flags & O_DESTRUCTED) {
     /* Sorry, the object has selfdestructed ! */
     free_object(&sent->ob, "call_function_interactive");
@@ -1467,83 +1812,29 @@ static int call_function_interactive(interactive_t *i, char *str) {
     i->input_to = nullptr;
     ret = 0;
   } else {
-    /*
-     * We must all references to input_to fields before the call to apply(),
-     * because someone might want to set up a new input_to().
-     */
-
-    /* we put the function on the stack in case of an error */
-    STACK_INC;
-    if (sent->flags & V_FUNCTION) {
-      function = nullptr;
-      sp->type = T_FUNCTION;
-      sp->u.fp = funp = sent->function.f;
-      funp->hdr.ref++;
-    } else {
-      function = sent->function.s;
-      if (function && function[0] == APPLY___INIT_SPECIAL_CHAR) {
-        return 0;
-      }
-      sp->type = T_STRING;
-      sp->subtype = STRING_SHARED;
-      sp->u.string = function;
-      ref_string(function);
+    UserInputCallbackFrame frame;
+    if (!detach_user_input_callback_frame(i, sent, &frame)) {
+      return 0;
     }
 
-    free_object(&sent->ob, "call_function_interactive");
-    free_sentence(sent);
-
-    /*
-     * If we have args, we have to copy them, so the svalues on the
-     * interactive struct can be FREEd
-     */
-    num_arg = i->num_carry;
-    if (num_arg) {
-      args = i->carryover;
-      i->num_carry = 0;
-      i->carryover = nullptr;
-    } else {
-      args = nullptr;
-    }
-
-    i->input_to = nullptr;
-
-    copy_and_push_string(str);
-    /*
-     * If we have args, we have to push them onto the stack in the order they
-     * were in when we got them.  They will be popped off by the called
-     * function.
-     */
-    if (args) {
-      transfer_push_some_svalues(args, num_arg);
-      FREE(args);
-    }
-    /* current_object no longer set */
-    if (function) {
-      (void)owner_bound_safe_apply(function, ob, num_arg + 1, ORIGIN_INTERNAL, "interactive_input_to");
-    } else {
-      VMOwnerScope owner_scope(vm_context(), vm_owner_id(funp->hdr.owner), vm_owner_epoch(funp->hdr.owner));
-      vm_owner_record_task_trace(vm_owner_id(funp->hdr.owner), "interactive_input_to", "<function>",
-                                 vm_owner_epoch(funp->hdr.owner), "dispatched");
-      safe_call_function_pointer(funp, num_arg + 1);
-    }
+    apply_user_input_callback_in_owner_frame(&frame, ob, str);
     // NOTE: we can't use "i" here anymore, it is possible that it
     // has been freed.
-    pop_stack(); /* remove `function' from stack */
 
     ret = 1;
   }
 
   if (!(ob->flags & O_DESTRUCTED) && ob->interactive) {
     i = ob->interactive;
-    if (was_single && !(i->iflags & SINGLE_CHAR)) {
+    if (mode_delta.was_single && !(i->iflags & SINGLE_CHAR)) {
       i->text_start = i->text_end = 0;
       i->text[0] = '\0';
       i->iflags &= ~CMD_IN_BUF;
-      set_linemode(i, true);
+      enqueue_user_terminal_mode_delta(i, ob, UserTerminalModeDelta::LineMode,
+                                       "get_char_linemode_restore");
     }
-    if (was_noecho && !(i->iflags & NOECHO)) {
-      set_localecho(i, true);
+    if (mode_delta.was_noecho && !(i->iflags & NOECHO)) {
+      enqueue_user_localecho_restore(i, ob);
     }
   }
   return ret;
@@ -1575,6 +1866,14 @@ void set_prompt(const char *str) {
   }
 } /* set_prompt() */
 
+static svalue_t *apply_user_write_prompt_in_owner_frame(interactive_t *ip) {
+  if (ip && ip->ob && !(ip->ob->flags & O_DESTRUCTED)) {
+    vm_owner_record_task_trace(vm_owner_id(ip->ob), "command_reply", "write_prompt_apply",
+                               vm_owner_epoch(ip->ob), "frame_entered");
+  }
+  return owner_bound_safe_apply(APPLY_WRITE_PROMPT, ip->ob, 0, ORIGIN_DRIVER, "interactive");
+}
+
 /*
  * Print the prompt, but only if input_to not is disabled.
  */
@@ -1591,7 +1890,7 @@ static void print_prompt(interactive_t *ip) {
     tell_object(ip->ob, ip->prompt, strlen(ip->prompt));
   }
 #endif
-  else if (!owner_bound_safe_apply(APPLY_WRITE_PROMPT, ip->ob, 0, ORIGIN_DRIVER, "interactive")) {
+  else if (!apply_user_write_prompt_in_owner_frame(ip)) {
     ip->iflags &= ~HAS_WRITE_PROMPT;
     tell_object(ip->ob, ip->prompt, strlen(ip->prompt));
   }

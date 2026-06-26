@@ -1,0 +1,672 @@
+# FluffOS_XK 多核化重构可执行详细方案
+
+## 最终结论
+
+FluffOS_XK 的正确多核化路线是 owner/actor 分片 VM，不是给传统全局对象系统补锁。最终目标是：
+
+- 同一 owner 内 LPC 严格串行。
+- 不同 owner 可并行执行。
+- 跨 owner 不允许直接写对象或同步调用目标 LPC。
+- 跨 owner 只允许 snapshot、message、future 和 frozen/deep-copy payload。
+- 主线程退化为事件接入、全局索引维护、兼容桥和不可迁移 legacy 边界，不再是唯一 LPC 执行点。
+
+当前仓库已经完成第一阶段地基，并开始具备受控只读 off-main LPC 样例、owner-local object directory、object message 主线程 bridge、一条可验证的 cross-owner async 替代样例、owner executor 消费 worker v2 `compute_result` 并完成 owner future 的受控闭环，以及同 owner 混合 mailbox 中跳过 main-required 头部继续执行 executor-runnable task 的调度防卡死验证；但尚未完成真正并行 owner-local LPC 执行，也尚未完成旧 mudlib 的跨 owner 同步调用迁移。后续方案必须围绕“证明安全边界”推进，不能为了制造多核效果而打开任意后台 LPC。
+
+## 当前基线
+
+当前分支阶段：多核化 readiness 串行推进；本文记录 object store owner-local complete gate 完成后的方案状态，具体提交边界以 `git log` 为准。
+
+已经落地：
+
+- `multicore mode : off/audit/enforced` 配置。
+- `VMContext` 线程本地化和主要执行状态迁移。
+- object store 仅主线程可同步，非主线程 sync 被拒绝。
+- owner id、owner epoch、owner guard。
+- owner mailbox、main owner queue、task/access/message/commit trace；这些 trace 顶层已暴露 `trace_kind`/`trace_model`，事件 mapping 暴露对应事件 `trace_model`；message trace 已包含 route、pending/completed/failed/terminal 分类、result/error、target handle 状态、main queue/mailbox 路由和 frozen result 标志；LPC 层已显式暴露 `vm_owner_drain_main(int)`，用于测试和运维手动 drain main-required owner task。
+- ObjectHandle 和 stale 校验；resolve 失败已能区分 invalid handle、missing path、object id mismatch、owner mismatch、owner epoch mismatch、record destructed 等状态。
+- owner shard 状态索引、显式 `VMObjectShard` 合同、`VMObjectShard.object_directory`、`VMObjectShard.local_records`、`VMObjectShard.local_objects`、`VMObjectShard.local_object_index`、`VMObjectShard.destructed_records`、`VMObjectShard.object_path_index`、`VMObjectShard.destructed_path_index`、按 owner/object_id 和 owner/path 的只读 lookup/resolve API、ObjectHandle live/current owner-local 快路径、同 owner stale/tombstone owner-local 诊断、跨 owner shard mismatch 诊断、live/ref/path/tombstone 一致性状态、owner-local/global bridge 双向一致性门禁和 runnable 观测；状态接口明确暴露 `vm_object_shard`、`directory_model=owner_local_object_directory`、`owner_local_directory_ready=1`、`owner_local_record_count`、`owner_local_object_ref_count`、`owner_local_object_ref_index_count`、`owner_local_object_ref_index_consistent`、`owner_local_destructed_record_count`、`owner_local_path_index_count`、`owner_local_destructed_path_index_count`、`owner_local_live_index_consistent`、`owner_local_live_path_index_consistent`、`owner_local_destructed_path_index_consistent`、`global_record_total`、`global_live_record_total`、`global_destructed_record_total`、`owner_local_to_global_mismatch_record_total`、`global_to_owner_local_record_mismatch_record_total`、`global_to_owner_local_mismatch_record_total`、`owner_local_record_index_ready`、`owner_local_canonical_record_ready`、`global_record_bridge_consistent`、`global_record_bridge_retirement_ready`、`global_live_object_bridge_retirement_ready`、`owner_local_to_global_bridge_consistent`、`global_to_owner_local_bridge_consistent`、`owner_local_global_bridge_check=bidirectional`、`owner_local_global_bridge_consistent`、`owner_local_store_ready`、`owner_local_store_complete=1`、`global_index_bridge=0`、`global_live_object_bridge_ready/source`、`global_record_bridge_ready/source`。当前 directory membership 已由 `VMObjectShard.object_directory` 驱动，live 目录记录快照来自 `VMObjectShard.local_records`，directory record 报告 `resolved_via_owner_local_store=1` 和 `resolved_via_global_index=0`，live object reference 和 owner-local resolve 来自 `VMObjectShard.local_objects` 与反向 `VMObjectShard.local_object_index`，live path index 来自 `VMObjectShard.object_path_index`，destruct 后诊断 tombstone 和 path tombstone 来自 `VMObjectShard.destructed_records`/`VMObjectShard.destructed_path_index`，跨 owner migration 后旧 owner lookup 会先扫描其他 owner shard 的 live/destructed record 或 path index 并报告 `owner_local_cross_shard_record_found`/`owner_local_cross_shard_record_source`，旧 ObjectHandle 的 `owner_mismatch` 也会优先报告 `diagnosed_via_owner_local_store=1` 和 `diagnosed_via_owner_local_cross_shard=1`；`owner_local_store_ready=1` 只表示 canonical record/ref/path/tombstone 镜像和 live-object bridge 退休门禁已足以承担 lookup/resolve，不表示生命周期、destruct 或 global index 已迁出；global object record 只保留为缺失时的 fallback，owner lookup/path lookup 会通过 `global_live_object_bridge_retirement_ready`、`owner_local_global_live_object_found/source`、`owner_local_global_live_object_fallback_skipped/reason` 与 `owner_local_global_record_found/source` 区分 live-object bridge 和 record bridge，ObjectHandle 诊断也会通过 `global_live_object_found/source`、`global_record_found/source`、`global_record_fallback_skipped/reason` 和 `diagnosed_via_global_index` 暴露；`status.objects` 仅保留为兼容统计并由同一增删 helper 同步维护；ObjectHandle 解析会先在 owner-local shard 上验证 live record、正反向 local object ref、live path index、owner id 和 owner epoch，失败时优先用同 owner shard live/tombstone record 诊断 epoch drift/destruct，因此当前 lookup/resolve gate 已完成；状态合同新增 `owner_local_lifecycle_contract_version=1`、`owner_local_lookup_resolve_ready=1`、`owner_local_create_canonical_ready=1`、`owner_local_move_canonical_ready=1`、`owner_local_destruct_canonical_ready=1`，同时保持 `owner_local_deferred_destruct_ready=1`、`owner_local_deferred_destruct_blocker=""`、`global_index_physical_retirement_ready=1`、`global_index_physical_retirement_blocker=""`、`owner_local_lifecycle_ready=1`，明确 canonical create/move/destruct/deferred destruct 写入已 owner-shard 化，global index 只保留诊断、兼容统计和 bridge 一致性检查。
+- owner 生命周期入口已有回归覆盖 singleton load 默认 owner、command singleton、std database service、`std/http`、`std/present_clone` 和 `std/telnet` 这类共享 service 在玩家 owner scope 内仍默认 owner、`std/base64`、`std/break_string`、`std/element_of_weighted`、`std/reduce`、`std/highest`、`std/lowest`、`std/number_string` 和 `std/sum` 这类 simul_efun 继承 helper 在玩家 owner scope 内仍默认 owner 且只在 default owner-local store 中可解析、`single/simul_efun` 及其关键继承 helper `std/all_environment`、`std/json` 不被玩家 owner scope 污染、`/adm/daemons/gateway_d` daemon singleton 在玩家 owner scope 内仍默认 owner 且 system message 以 daemon owner/epoch 记录 trace、master `compile_object` virtual object 默认 owner 且重命名后同步 owner-local directory path、clone 不继承裸 ambient owner scope、move 时非显式 owner 继承 destination owner、显式 owner move 后保持原 owner、普通 interactive `exec()` 保持新旧对象 owner/epoch 不被隐式改写、gateway `exec()` 后 session lookup 绑定新 user owner/epoch，以及 destruct 后 owner-local directory 清理。
+- VM worker 确定性任务、owner-key 串行化、async poll/future。
+- worker v2 task 的 owner future 注册、`bench`/`snapshot_digest`/`actor_score`/`combat_damage` 成功 frozen result 和 timeout failed/error 反射；`compute_result` 可以由 owner executor 消费并完成 owner future。
+- gateway receive、network reply、prompt/telnet/reschedule I/O 和 ED/main-required cleanup 仍以主线程 owner queue 作为兼容入口；gateway `process_user_command`、heartbeat、callout、async/db/file completion、DNS callback 和 socket read/write/close callback 已在 `audit`/`enforced` 且 owner thread 可用时投递 owner executor，`off` 或 executor unavailable 时回退 owner main queue；callout、async、DNS、socket callback 和 gateway command stale/drop/destructed 清理都回主线程 cleanup 释放 LPC 引用；`socket_release` 因同步 release/acquire 语义仍保留主线程路径。
+- 有 target handle 的 object message 已进入主线程 owner queue bridge，stale handle 会失败并清理 pending message，目标结果非 frozen 时 future 会失败。
+- cross-owner `call_other`、`present`、parser、`move_object`、`destruct` 在 enforced 模式下有阻断。
+- `owner_query_object_snapshot()` 安全结构快照 API。
+- `owner_send()`、`owner_call_async()`、`owner_future_poll()` 等消息/future API；`owner_call_async()` 已有 enforced cross-owner `call_other` 替代样例测试。
+- 普通 off-main LPC 默认关闭，`owner_task_readonly` 已从裸 allowlist 收敛为显式 LPC task descriptor/contract manifest，owner executor task type 也已收敛为只读 dispatch manifest；线程侧执行前必须满足 owner/context/object-store 边界，并通过 owner future 暴露 pending/completed/failed 与 frozen result。
+- owner message trace 已覆盖 mailbox message、ObjectHandle/main queue bridge、purge、stale target resolve 状态、非 frozen result 等 completed/failed 可诊断路径；ObjectHandle 失败会以 `stale target: <resolve_status>` 暴露到 future 和 trace，destruct 后旧 handle 会报告 `record_destructed` 而不是被粗略归为 object not found。
+
+尚未完成：
+
+- owner-local lifecycle retirement 已完成：lookup/resolve、create/move/destruct/deferred destruct canonical write 和 global index 物理退休门禁均为 ready；global records 只保留诊断、兼容统计和 bridge 一致性检查。
+- eval stack/value/object ref 的跨线程内存模型。
+- OwnerExecutor callback task boundary 已完成：`heartbeat`、`call_out`、`async_callback`、`dns_callback`、`socket_callback`、`gateway_command_execute` 进入 driver callback allowlist；heartbeat、callout、async/db/file completion、DNS callback、socket read/write/close callback 和 gateway command execute 均已绑定真实 owner executor 入口并具备 stale owner/epoch drop。
+- input/gateway command 已在 `audit`/`enforced` 且 owner thread 可用时投递 owner executor，`off` 或 executor unavailable 时回退 owner main queue；heartbeat、callout、async、DNS、socket callback 和 gateway command execute 仍需纳入后续真实 mudlib 长压。
+- 完整旧 mudlib 级 cross-owner `call_other` message/future 替代链。
+- 长时间、高并发、真实 mudlib 验收。
+
+## 不可违反的约束
+
+1. 不允许把任意 `object_t *` 长期跨 owner 或跨线程保存。
+2. 不允许后台线程直接遍历主线程 object list。
+3. 不允许跨 owner 传 mutable array/mapping/object/function pointer。
+4. 不允许同一 owner 被两个 executor 同时 claim。
+5. 不允许在 enforced 模式下静默回退到同步 cross-owner `call_other`。
+6. 不允许用全局大锁包装解释器作为最终方案。
+7. 不允许把短压测结果当作生产完成证明。
+
+## 成功标准
+
+### 工程成功标准
+
+- 所有 owner-bound 入口都有 owner id/epoch。
+- 所有后台 LPC 执行都绑定 owner-local `VMContext`。
+- 同一 owner 串行性有测试证明。
+- 不同 owner 并行性有测试和压测证明。
+- stale handle/task/future 均能失败而不是误执行。
+- `off/audit/enforced` 三种模式行为清楚且可回滚。
+
+### 性能成功标准
+
+- 多用户命令延迟不因单 owner 的 CPU/heartbeat/callout 阻塞而整体上升。
+- 多 owner workload 下 CPU 利用率能跨核心扩展。
+- 单 owner workload 不破坏旧语义，也不因调度引入明显额外延迟。
+- owner queue 长度、budget yield、executor claim/release 可观测。
+
+### 安全成功标准
+
+- enforced 模式下无未分类 direct cross-owner write。
+- owner payload/future result 不包含裸 object/function/buffer/class。
+- owner executor 无 VMContext 泄漏、owner 泄漏、execution state 泄漏。
+- 旧 mudlib 迁移失败时可以回退到 audit/off。
+
+## 阶段 0：冻结基线和观测口径
+
+目标：确保后续每一步都能回归到可验证状态。
+
+涉及文件：
+
+- `README.md`
+- `docs/multicore-runtime.md`
+- `docs/multicore-actor-vm-plan.md`
+- `src/base/internal/rc.cc`
+- `src/include/runtime_config.h`
+- `src/vm/internal/owner.cc`
+- `src/tests/test_lpc.cc`
+
+任务：
+
+1. 固定 `off/audit/enforced` 配置语义，不再使用文档中的旧 `0/1/2` 作为用户入口。
+2. 建立 baseline 指标输出：runtime status、owner thread status、mailbox status、object store status、task/access/message/commit trace、future count；trace 必须暴露稳定 `trace_kind`/`trace_model`，queue 指标必须区分 executor-safe、main-required、runnable owner 和 claimed owner。
+3. 为每次重构记录基线命令和结果。
+4. 将“当前主线程 owner queue 不是并行执行”写入文档边界。
+
+验收：
+
+- `vm_owner_runtime_status()` 能显示 multicore mode、queue、executor-safe/main-required queue depth、runnable owner、claimed owner、future、cross-owner 计数；`executor_queue_fairness` 能汇总 executor-ready、main-required-only、mixed backlog、claim-blocked owner 与最大 backlog；`vm_owner_executor_trace()` 能显示 `trace_kind=owner_executor_trace`、`trace_model=owner_executor_scheduler_trace`、`executor_contract_version=owner_executor_v1`、`executor_model=owner_executor`，并在事件 mapping 中显示 `trace_model=owner_executor_scheduler_event`、`executor_dispatch_model=descriptor_manifest`、owner claim、budget yield、release 这类调度事件。
+- `testsuite/etc/config.test` 在 audit 下稳定运行。
+- 文档不再暗示任意 LPC 已可后台并行。
+
+## 阶段 1：补齐 owner 归属规则
+
+目标：让每个对象的 owner 来源可解释、可审计、可复现。
+
+涉及文件：
+
+- `src/vm/internal/owner.cc`
+- `src/vm/internal/base/object.cc`
+- `src/vm/internal/simulate.cc`
+- `src/packages/gateway/gateway.cc`
+- `src/packages/gateway/gateway_session.cc`
+- `src/comm.cc`
+- `src/tests/test_lpc.cc`
+
+任务：
+
+1. 梳理对象创建路径：load、clone、move、exec、gateway session、interactive user、daemon singleton。
+2. 保持加载型 singleton、daemon、命令对象默认归 `legacy/main`。
+3. clone 继承 prototype owner 或 current object owner，不继承裸 ambient owner scope。
+4. move 时仅在 item 没有显式 owner 时继承 destination owner。
+5. destruct 时保留原 owner/epoch 用于 stale trace。
+6. 新增测试覆盖每个对象生命周期入口。
+
+验收：
+
+- 启动测试 mudlib 后无大量空 owner 对象。
+- singleton/command/std service object 不被首个玩家 owner 污染。
+- owner epoch 在 owner 变化、clear、destruct 时按预期变化。
+- ObjectHandle 能检测 owner/epoch stale，并在同 owner epoch 漂移时返回 `owner_epoch_mismatch`。
+- `TestCommandSingletonUsesDefaultOwnerInsidePlayerOwnerScope` 覆盖 command object 在 current object 和 owner scope 均为玩家 owner 时仍归 `legacy/main`，避免命令 singleton 被玩家 owner 污染。
+- `TestStdServiceUsesDefaultOwnerInsidePlayerOwnerScope` 覆盖 std shared service 在 current object 和 owner scope 均为玩家 owner 时仍归 `legacy/main`，避免共享服务被玩家 owner 污染。
+- `TestSharedStdServicesUseDefaultOwnerInsidePlayerOwnerScope` 覆盖 `std/http`、`std/present_clone`、`std/telnet` 这类带回调状态、socket 状态或 object 查询逻辑的共享 service 在玩家 owner scope 内仍归 `legacy/main`。
+- `TestStdHelperServicesUseDefaultOwnerInsidePlayerOwnerScope` 覆盖 `std/base64`、`std/break_string`、`std/element_of_weighted`、`std/reduce`、`std/highest`、`std/lowest`、`std/number_string`、`std/sum` 这类 simul_efun 继承 helper 在玩家 owner scope 内仍归 `legacy/main`，并且 ObjectHandle/object-store resolve 只从 default owner-local store 命中，不从玩家 owner shard 命中。
+- `TestSimulEfunSingletonKeepsDefaultOwnerInsidePlayerOwnerScope` 覆盖 `single/simul_efun` 以及其关键继承 helper `std/all_environment`、`std/json` 在玩家 owner scope 内仍归 `legacy/main`，避免启动核心 singleton/helper 被后续玩家执行上下文污染。
+- `TestVirtualObjectUsesDefaultOwnerAndUpdatesStorePath` 覆盖 master `compile_object` 生成的 virtual object 在玩家 owner scope 内仍归 `legacy/main`，并且 object store 的 owner-local directory 记录重命名后的 `test/virtual`，不是临时来源对象路径。
+- `TestMoveObjectOwnerInheritanceRespectsExplicitOwner` 覆盖非显式 owner move 继承 destination owner、显式 owner move 不被覆盖、相关 owner epoch 变化规则。
+- `TestInteractiveExecPreservesNewObjectOwner` 覆盖普通 interactive `exec()` 迁移 interactive 指针和 command giver 后，新对象保持自身显式 owner/epoch，旧对象 owner/epoch 不被新连接状态污染。
+- `TestGatewayDaemonUsesDefaultOwnerForSystemMessages` 覆盖 `/adm/daemons/gateway_d` 在玩家 owner scope 内加载时仍归 `legacy/main`，gateway system message 入口绑定 daemon owner/epoch 并记录 `receive_system_message` trace；`TestGatewaySessionExecLogonKeepsSessionLookupWorking` 覆盖 gateway `exec()` 后 session lookup 指向新 user object，`gateway_session_info()` 暴露的新 user `object_name`、`owner_id`、`owner_epoch` 与实际对象一致，disconnect/remove interactive 不改写该 owner/epoch。
+
+风险：
+
+- 过度自动继承 owner 会把共享 daemon 变成玩家私有 owner。
+- 过度保留 `legacy/main` 会掩盖需要迁移的玩家/session 对象。
+
+## 阶段 2：ObjectHandle 从观测升级为跨 owner 标准引用
+
+目标：跨 owner 不能依赖裸 `object_t *`。
+
+涉及文件：
+
+- `src/vm/object_handle.h`
+- `src/vm/internal/object_store.cc`
+- `src/vm/internal/simulate.cc`
+- `src/vm/internal/apply.cc`
+- `src/packages/core/vm_owner.cc`
+- `src/tests/test_lpc.cc`
+
+任务：
+
+1. 明确哪些 C++ API 可以返回裸 `object_t *`，哪些跨 owner API 必须返回 handle。
+2. 为 owner message/future、snapshot、trace 统一携带 ObjectHandle 元信息。
+3. 在 enforced 下禁止 cross-owner payload 携带 object。
+4. 在 handle resolve 前强制 owner id、epoch、object id、path、destructed 状态全部匹配。
+5. 对 handle resolve 失败路径做错误分类：destructed、owner changed、epoch changed、path missing。
+
+验收：
+
+- destruct 后旧 handle resolve 失败并返回 `record_destructed`。
+- owner 变化后旧 handle resolve 失败并返回 `owner_mismatch`。
+- 同 owner epoch 漂移后旧 handle resolve 失败并返回 `owner_epoch_mismatch`。
+- invalid handle、missing path、object id mismatch 有独立 resolve 状态。
+- owner async target stale 时 future failed。
+- trace 能报告 target handle current 状态和具体 resolve 失败状态。
+
+## 阶段 3：owner shard object store 正式化
+
+目标：把当前状态索引升级为可执行分片模型。
+
+涉及文件：
+
+- `src/vm/internal/object_store.cc`
+- `src/vm/internal/base/object.cc`
+- `src/vm/internal/vm.cc`
+- `src/vm/internal/context.cc`
+- `src/packages/core/heartbeat.cc`
+- `src/packages/core/call_out.cc`
+
+任务：
+
+1. `VMObjectShard` 最小结构和只读合同已引入，明确拆分 status record、execution shard、`object_directory`、`local_records`、`local_objects`、`local_object_index`、`destructed_records`、live/destructed path index 与当前 global index bridge storage model；`status.objects` 现在只作为兼容统计跟随 shard directory 增删，不再作为 directory lookup 来源。后续要把该合同从诊断面推进到真实 owner-local storage。
+2. 每个 shard 维护 local objects、pending destruct、heartbeat queue、callout queue、message queue。
+3. 主线程保留 global index，但不直接拥有所有执行队列。
+4. owner executor 只能访问当前 claimed shard 的 local objects。
+5. 设计 shard migration：对象 owner 改变时，必须走迁移协议，而不是直接改 map。
+6. destruct 改成 owner-local deferred destruct，主线程只做全局 index 清理。
+
+验收：
+
+- `vm_object_store_status()` 显示每个 owner shard 的 local objects 和 runnable tasks，并在顶层暴露 `store_kind=vm_object_store`、`status_model=object_store_status`、`directory_model=owner_local_object_directory`、`storage_model=owner_local_store`，并通过 `vm_object_shard` 合同明确报告 status model、execution model、`object_directory`、`local_records`、`local_objects`、`local_object_index`、`destructed_records`、live/destructed path index 与 global index bridge 边界；`object_directory_count`、`owner_local_directory_count`、`owner_local_record_count`、`owner_local_object_ref_count`、`owner_local_object_ref_index_count` 与 `owner_local_path_index_count` 在 live 路径保持一致，destruct 后 `owner_local_object_ref_count=0`、`owner_local_object_ref_index_count=0`，`owner_local_destructed_record_count` 和 `owner_local_destructed_path_index_count` 保留 tombstone 诊断但不产生 directory entry；`owner_local_live_index_consistent`、`owner_local_object_ref_index_consistent`、`owner_local_live_path_index_consistent` 和 `owner_local_destructed_path_index_consistent` 用于观测 live/ref/path/tombstone 索引是否漂移；聚合层额外报告 `owner_local_record_total`、`owner_local_object_ref_total`、`owner_local_object_ref_index_total`、`owner_local_destructed_record_total`、live/destructed path index total、`owner_local_orphan_record_total`、`global_record_total`、`global_live_record_total`、`global_destructed_record_total`、`owner_local_to_global_mismatch_record_total`、`global_to_owner_local_record_mismatch_record_total`、`global_to_owner_local_mismatch_record_total`、`owner_local_record_index_ready`、`owner_local_canonical_record_ready`、`owner_local_store_ready`、`global_record_bridge_consistent`、`global_record_bridge_retirement_ready`、`global_live_object_bridge_retirement_ready`、`owner_local_to_global_bridge_consistent`、`global_to_owner_local_bridge_consistent`、`owner_local_global_bridge_check=bidirectional`、`global_live_object_bridge_ready/source`、`global_record_bridge_ready/source` 和兼容聚合字段 `owner_local_global_bridge_consistent`，作为后续移除 global canonical record 前的双向门禁、owner-local canonical record readiness、global record 基线与 bridge 来源观测。
+- `vm_object_store_owner_lookup_status(owner_id, object_id)` 与 `vm_object_store_owner_path_lookup_status(owner_id, object_path)` 能按 owner-local directory/path index 口径查询对象是否仍属于该 owner，并通过 `owner_local_object_ref_found`、`owner_local_object_ref_index_found`、`owner_local_object_ref_index_source`、`owner_local_object_pointer_index_found`、`owner_local_object_pointer_index_source`、`owner_local_resolve_found`、`owner_local_resolve_source`、`owner_local_canonical_record_ready` 和 `owner_local_store_ready` 报告是否能从 shard-local `local_objects` 与反向 `local_object_index` 得到可解析 live object，当前 owner shard record/ref/path/tombstone 镜像是否满足 canonical readiness，以及该镜像是否已经可承担 lookup/resolve；`owner_local_store_ready=1` 与 `owner_local_store_complete=1` 同时出现，表示 lookup/resolve canonical gate 已完成；它不等价于对象生命周期已可后台并发写入。`vm_object_store_owner_resolve(owner_id, object_id)` 与 `vm_object_store_owner_path_resolve(owner_id, object_path)` 只在 shard-local live object reference 正反向完整命中时返回对象。owner migration 后旧 owner lookup 返回 `owner_mismatch` 且 live path index 清空，旧 owner resolve 返回空；该 mismatch 诊断优先来自其他 owner shard，并通过 `owner_local_cross_shard_record_found`/`owner_local_cross_shard_record_source` 与 `owner_local_global_record_found=0` 证明没有依赖 global fallback；新 owner lookup/resolve 命中 live record/path index/object ref；destruct 后 lookup 保留 record/path tombstone 但不再作为 directory entry，resolve 返回空。
+- 通用 object_id/path record fallback 查询已先检查 `VMObjectShard.local_records`、`VMObjectShard.destructed_records`、`VMObjectShard.object_path_index` 和 `VMObjectShard.destructed_path_index`；当 `global_record_bridge_retirement_ready=1` 时，缺失查询会跳过 global record fallback 并通过 `owner_local_global_record_fallback_skipped=1`、`owner_local_global_record_fallback_reason=global_record_bridge_retirement_ready` 暴露原因，path lookup 还会通过 `owner_local_global_record_scan_bridge_skipped=1`、`owner_local_global_record_scan_bridge_skip_reason=global_record_bridge_retirement_ready` 证明没有执行 `global_object_records.path_scan_bridge`；当 `global_live_object_bridge_retirement_ready=1` 时，缺失 path lookup 会跳过 global live-object fallback，并通过 `owner_local_global_live_object_fallback_skipped=1`、`owner_local_global_live_object_fallback_reason=global_live_object_bridge_retirement_ready` 暴露原因；只有 readiness 未满足时才通过显式 global object_id/path/pointer helper 回落 global object records，path record fallback 在 live-object bridge 已可退休时也不会先查 `ObjectTable`，并通过 `owner_local_global_record_scan_bridge_used/found/source` 暴露显式 path scan bridge 是否被使用和命中；当 `global_record_bridge_retirement_ready=1` 且 live-object bridge 只允许查 live object、不附带 record 时，pointer record bridge 会被跳过，并通过 `owner_local_global_record_pointer_bridge_skipped=1`、`owner_local_global_record_pointer_bridge_skip_reason=global_record_bridge_retirement_ready` 暴露。所有直接 `ObjectTable` 查找已集中到单一 global live-object bridge helper，owner lookup 的最后 fallback 也只调用显式 global helper，混合 owner-local/global record helper 已移除，避免把 owner-local 命中误标成 global 来源。这只是减少 global bridge 依赖并让 bridge 来源可观测的中间态；status/contract 已明确暴露 `global_live_object_bridge_ready/source` 与 `global_record_bridge_ready/source`，lookup status 也暴露 `global_live_object_bridge_retirement_ready`、`owner_local_global_live_object_found/source`、`owner_local_global_live_object_fallback_skipped/reason`、`owner_local_global_record_found/source`、`owner_local_global_record_scan_bridge_used/found/source/skipped/reason` 与 `owner_local_global_record_pointer_bridge_used/found/source/skipped/reason`，ObjectHandle status 暴露 `global_live_object_found/source`、`global_live_object_fallback_skipped/reason`、`global_live_object_bridge_retirement_ready`、`global_record_found/source`、`global_record_pointer_bridge_used/found/source/skipped/reason`、`global_record_fallback_skipped/reason` 和 `global_record_bridge_retirement_ready`，并与 `owner_local_store_complete=1`、`global_index_bridge=0` 的状态口径一致。
+- object_id 方向的 `object_records` 扫描已拆成显式 `global_object_records.object_id_scan_bridge`，owner lookup status 暴露 `owner_local_global_record_id_scan_bridge_used/found/source/skipped/reason`，ObjectHandle status 暴露 `global_record_id_scan_bridge_used/found/source/skipped/reason`。pointer 方向的 `object_records.find(object_t*)` 已拆成显式 `global_object_records.pointer_bridge`，owner path lookup status 暴露 `owner_local_global_record_pointer_bridge_used/found/source/skipped/reason`，ObjectHandle status 暴露 `global_record_pointer_bridge_used/found/source/skipped/reason`。当 `global_record_bridge_retirement_ready=1` 时，object_id 缺失查询、ObjectHandle object-id fallback，以及 live-object bridge 只允许找 live object 而不附带 global record 的 pointer fallback 都必须跳过对应 bridge，并用 `global_record_bridge_retirement_ready` 作为 skip reason；只有 readiness 未满足时才允许这些 bridge 作为迁出前诊断 fallback。
+- object store、owner shard、owner lookup/path lookup 与 shard contract 必须在 `owner_local_store_complete=1` 时暴露 `owner_local_store_complete_blocker=""`，并保持 `global_live_object_bridge_ready=0`、`global_record_bridge_ready=0`，把“lookup/resolve canonical gate 已完成但普通 LPC 仍由 activation policy 默认关闭”固定为机器可读合同。
+- `vm_object_handle_resolve_status()` 对 live/current handle 优先使用 owner-local shard 快路径，只有 live record、local object ref、live path index、owner id 和 owner epoch 全部一致才返回 `current` 并报告 owner-local 来源；同 owner object id mismatch 会优先由 owner-local path index 诊断并报告 `diagnosed_via_owner_local_path_index`，path mismatch、owner epoch 漂移和 destruct tombstone 会优先由 owner-local live/tombstone record 诊断并报告 `diagnosed_via_owner_local_store`，跨 owner migration 旧 handle 的 `owner_mismatch` 会先由其他 owner shard 诊断并报告 `diagnosed_via_owner_local_cross_shard`。最后的 `ObjectTable` live-object fallback 已收束为显式 global live-object bridge，resolve result 和 `vm_object_handle_status()` mapping 均通过 `global_live_object_found`/`global_live_object_source` 暴露同一来源；global bridge 诊断路径仍作为当前未完成迁出项保留并报告 `diagnosed_via_global_index`；当 `global_live_object_bridge_retirement_ready=1` 时，ObjectHandle 会跳过 global live-object fallback 并报告 `global_live_object_fallback_skipped=1` 与 `global_live_object_fallback_reason=global_live_object_bridge_retirement_ready`；当 `global_record_bridge_retirement_ready=1` 且 live-object bridge 缺失、已跳过或只允许查 live object 而不附带 global record 时，会跳过 global record fallback 并报告 `global_record_fallback_skipped=1` 与 `global_record_fallback_reason=global_record_bridge_retirement_ready`。
+- 同 owner 对象只在一个 shard。
+- owner 改变产生 migration trace。
+- 非 owner 线程不能同步或遍历全局 object store。
+
+风险：
+
+- object list 与 living table、environment/inventory 链表存在历史耦合。
+- destruct 顺序和 `move_or_destruct` 语义容易破坏兼容性。
+
+## 阶段 4：OwnerExecutor 替代实验 owner thread
+
+目标：把 owner thread 从验证工具升级为正式 LPC 调度器。
+
+涉及文件：
+
+- `src/vm/internal/owner.cc`
+- `src/vm/owner.h`
+- `src/vm/internal/context.cc`
+- `src/backend.cc`
+- `src/tests/test_lpc.cc`
+
+任务：
+
+1. 新增 `OwnerExecutor` 抽象，封装 claim/release、budget、thread-local context、error cleanup。
+2. 统一 runnable owner 队列，区分 main-required task 与 executor-safe task。
+3. 保证同一 owner 只能被一个 executor claim。
+4. 每个 owner 执行固定 task budget 后 yield。
+5. 执行后必须检查 owner、execution、error、object_store、canary 状态已清理。
+6. 把当前 owner thread counters 升级为 executor metrics。
+
+验收：
+
+- 两个不同 owner 的 executor-safe task 可并行。
+- 同一 owner `max_owner_parallel == 1`。
+- executor claim/release 数量匹配。
+- context leak counter 为 0。
+- worker v2 `compute_result` 可由 owner executor 消费，`thread_compute_result_completed` 增长，owner future 从 pending 进入 completed/failed；成功 future 携带 frozen mapping result，timeout/失败 future 携带 failed/error，且 pending future 不残留。
+- 同一 owner mailbox 前部存在 main-required task 时，owner executor 可以跳过该任务并执行后续 executor-safe task；main-required task 不会被后台 executor 执行，仍可被状态接口观测为 main-required backlog。
+- `vm_owner_runtime_status()` 与 `vm_owner_thread_status()` 暴露 `executor_contract_version=owner_executor_v1`、`executor_model=owner_executor`、`executor_dispatch_model=descriptor_manifest`、`executor_lpc_model=default_closed_explicit_open`、`ordinary_lpc_default_policy=default_closed_explicit_open`、`executor_task_contract`、`executor_task_dispatch_contracts` 和逐方法 `executor_lpc_task_contracts`，明确 `compute_result`、无目标 `owner_message`、`executor_probe`、受控注册 `lpc_task` 和显式开放 `ordinary_lpc` 的 executor-safe 合同，有 target handle 的 `owner_message` 的 main-required 合同，以及 legacy `lpc` 的 rejected/default-closed 合同；legacy `lpc` 与 `owner_state` 仍可由 executor 取走并拒绝/guard，避免拒绝型任务卡住 mailbox，但 `executor_safe=0`。`vm_owner_ordinary_lpc_task(object, owner, method, explicit_open)` 现在提供 generic owner LPC dispatch path：只有 `explicit_open=1` 且 target same-owner 时才入队，执行时要求 owner-bound VMContext、same-owner epoch 和 frozen result。status、fairness、mailbox mapping 和 executor trace 同时暴露 `executor_runnable`/runnable backlog 与 `executor_safe`/safe backlog，并拆分 `executor_runnable_task_dispatched` 与 `executor_safe_task_dispatched`，避免把“可消费/已拒绝”误解为“可后台安全执行”。该合同在 C++ 单测和 `testsuite/single/tests/efuns/owner_executor_contract.c` 的 LPC 层回归中同时验证；`testsuite/single/tests/efuns/owner_payload.c` 同时验证 target-handle `owner_call_async()` 必须经 `vm_owner_drain_main()` 显式处理 main-required route，并且 owner 迁移后的 stale target 会以 `owner_mismatch` 失败而不执行目标方法。
+- `vm_owner_runtime_status()` 与 `vm_owner_thread_status()` 额外暴露 `owner_executor_boundary_contract`，把 OwnerExecutor 边界固定为机器可读合同：`implementation_state=compilation_unit_active`、`class_extracted=1`、`module_extracted=1`、`module_file=vm/internal/owner_executor.h`、`compilation_unit_extracted=1`、`compilation_unit_file=vm/internal/owner_executor.cc`，说明当前 `OwnerExecutor` 已从 `owner.cc` 的内联类抽成内部模块文件和独立编译单元，并继续由 `owner_thread_loop()` 使用；具体 `OwnerExecutorRuntimeImpl` 仍依赖 `owner.cc` 匿名命名空间运行时状态；合同同步暴露 `dependency_manifest_ready=1`、`dependency_domains=scheduler_state,mailbox_state,task_dispatch,vm_context,metric_counters,future_completion`、`owner_runtime_facade_required=1`、`owner_runtime_facade_ready=1`、`owner_runtime_facade_model=owner_executor_runtime_facade_v1`、`owner_runtime_facade_domains=scheduler_state,mailbox_state,future_completion` 和 `compilation_unit_blocker=owner_cc_anonymous_runtime_state`，把独立编译单元前需要收口的运行时依赖固定下来；当前 facade 已把薄 `OwnerExecutor` 编译单元与 scheduler/mailbox/future completion 锁内状态隔离，但具体 task dispatch、VMContext 和 metric counter 仍在 `owner.cc` runtime 实现内；claim/release、budget、thread context、dispatch manifest、same-owner serial、target-handle main-required、`compute_result` executor-safe、`gateway_command` guarded executor-safe、普通 LPC default-closed/explicit-open 都已作为边界输入；callback task boundary 已新增 `heartbeat`、`call_out`、`async_callback`、`dns_callback`、`socket_callback`、`gateway_command_execute` 六类 driver callback allowlist；heartbeat、callout、async/db/file completion、DNS callback 和 socket read/write/close callback 真实入口已迁到 owner executor，runtime/thread status 额外暴露 `heartbeat_owner_executor_ready=1`、`heartbeat_owner_executor_route=owner_executor`、`heartbeat_owner_executor_fallback_route=owner_main_queue`、`heartbeat_owner_executor_policy=audit_enforced_owner_thread_else_main`、`heartbeat_owner_executor_fallback_main_ready=1`、`heartbeat_current_object_thread_local=1`、`callout_owner_executor_ready=1`、`callout_owner_executor_route=owner_executor`、`callout_owner_executor_fallback_route=owner_main_queue`、`callout_owner_executor_cleanup_main_ready=1`、`callout_owner_executor_drop_cleanup_ready=1`、`async_owner_executor_ready=1`、`async_owner_executor_route=owner_executor`、`async_owner_executor_cleanup_main_ready=1`、`async_owner_executor_drop_cleanup_ready=1`、`dns_owner_executor_ready=1`、`dns_owner_executor_owner_epoch_capture_ready=1`、`dns_owner_executor_cleanup_main_ready=1` 和 `dns_owner_executor_drop_cleanup_ready=1`、`socket_owner_executor_ready=1`、`socket_owner_executor_route=owner_executor`、`socket_owner_executor_fallback_route=owner_main_queue`、`socket_owner_executor_policy=audit_enforced_owner_thread_else_main`、`socket_owner_executor_result_policy=frozen_deep_copy_args`、`socket_owner_executor_cleanup_main_ready=1`、`socket_owner_executor_drop_cleanup_ready=1`、`socket_release_main_required=0` 和 `socket_release_owner_safe_handshake_ready=1`，真实 mudlib audit、production gate 和 socket release handshake 均已收口；`next_refactor_target=""`，不扩大任意 LPC 后台执行面。
+- 同一 owner 的 executor-safe backlog 超过 `executor_task_budget` 时，`executor_budget_yields` 增长，当前 claim 会释放并重新调度剩余 backlog；runtime/thread status 会记录最近一次 budget yield 的 owner 和剩余 backlog；`executor_queue_fairness` 会暴露 mixed backlog、main-required-only backlog 和最大 safe/main-required backlog；独立 `vm_owner_executor_trace()` 能通过顶层 `owner_executor_scheduler_trace` 与事件级 `owner_executor_scheduler_event` 合同观察 owner_claimed、budget_yield、owner_released 调度事件，且事件会绑定 `executor_contract_version=owner_executor_v1` 和 `executor_dispatch_model=descriptor_manifest`；最终 backlog 可 drain 完成，且 same-owner executor conflict 仍为 0。
+- owner 卡住时其他 owner 可以继续执行，至少在可中断/budget 边界可观测。
+
+风险：
+
+- 即使 generic owner LPC dispatch path 已实现，普通 LPC 仍必须保持默认关闭；只有 `vm_owner_ordinary_lpc_task(..., explicit_open=1)` 且 same-owner target 才允许进入 owner executor，gateway/player command 仍需独立 activation gate 后才能迁移。
+- executor-safe task 必须白名单化，不能默认开放。
+
+## 阶段 5：VMContext 收口剩余全局状态
+
+目标：让后台 owner executor 具备执行 LPC 的上下文前提。
+
+涉及文件：
+
+- `src/vm/context.h`
+- `src/vm/internal/context.cc`
+- `src/vm/internal/base/interpret.cc`
+- `src/vm/internal/base/machine.h`
+- `src/vm/internal/base/function.cc`
+- `src/vm/internal/apply.cc`
+- `src/vm/internal/simulate.cc`
+
+任务：
+
+1. 审计所有解释器全局状态，分类为 owner-local、thread-local、immutable global、main-only。
+2. 保持 eval stack/control stack/value stack/apply return 的 VMContext snapshot 合同，继续收敛剩余 object ref 边界和 owner-local object store。
+3. 将 error context、eval flags、handler depth 的所有写入口改为 VMContext API。
+4. 将 `this_player()`、`previous_object()`、`origin()` 等语义绑定到当前 owner execution frame。
+5. 禁止后台线程读取未迁移的 process-global mutable VM 状态。
+
+验收：
+
+- `rg` 不再出现绕过 VMContext API 的关键全局状态写入。
+- detached context setter 测试继续通过。
+- owner executor 中 probe/canary 能执行且状态清理为 0 泄漏。
+- `vm_owner_runtime_status()` 与 `vm_owner_thread_status()` 的 `vm_context_contract` 暴露 `ordinary_lpc_readiness_gates`，并以 `ordinary_lpc_readiness_gate_model=all_gates_required_before_open` 固定普通后台 LPC 开放门禁。当前 gate 计数为 13，已满足 13 项，阻塞 0 项；`eval_stack_owner_local`、`control_stack_owner_local`、`value_stack_owner_local`、`apply_return_owner_local`、`object_refs_owner_local` 和 `ordinary_lpc_dispatch_path` 已完成：前三者是 thread-local owner execution stack，apply return 是 thread-local owner apply return，并通过 VMContext snapshot 在 owner executor task 内 owner-bound、task 后 cleared；object refs gate 的口径是跨 owner 边界只允许 ObjectHandle 或 frozen payload/result，显式开放普通 LPC 提交会在提交时拒绝 owner/target 不一致，不把跨 owner 裸 `object_t*` 放进 executor mailbox。`ordinary_lpc_ready=1` 只表示 explicit-open same-owner generic dispatch path 就绪；`ordinary_lpc_default_closed=1` 和 `ordinary_lpc_explicit_open_required=1` 仍禁止把 legacy `lpc` 或 gateway/player command 自动扩大为任意后台 LPC。
+
+风险：
+
+- 解释器栈迁移影响面最大，必须小步提交、每步测试。
+
+## 阶段 6：冻结值与跨 owner payload 协议正式化
+
+目标：封住 mutable value 跨线程共享。
+
+涉及文件：
+
+- `src/packages/core/vm_owner.cc`
+- `src/packages/core/vm_worker.cc`
+- `src/vm/frozen_value.h`
+- `src/vm/internal/frozen_value.cc`
+- `src/vm/internal/owner.cc`
+- `src/vm/internal/base/array.cc`
+- `src/vm/internal/base/mapping.cc`
+- `src/vm/internal/base/svalue.cc`
+- `src/vm/internal/base/function.cc`
+- `src/vm/internal/base/object.cc`
+- `src/vm/internal/stralloc.cc`
+- `testsuite/single/tests/efuns/owner_payload.c`
+- `testsuite/single/tests/efuns/worker_payload.c`
+
+任务：
+
+1. 定义 `OwnerFrozenValue` 的正式语义：deep copy、不可含 object/function/buffer/class。
+2. mapping key 继续限制为 string。
+3. 对 string refcount 做 atomic 或确保跨线程只读共享安全。
+4. 对 array/mapping/class 明确 owner-local mutable，不允许跨 owner 共享。
+5. future result 必须 frozen/deep copy；受控 off-main LPC task 的 result 已进入 owner future，`domain_task` 输入/输出协议已纳入 `frozen_payload_contract`，正式执行器实现前仍只作为合同边界。
+6. worker snapshot 输入、owner message payload 与 `domain_task` payload/result 合同已接入同一 `vm_frozen_value_safe()` 安全检查库，避免双实现漂移。
+7. `vm_owner_runtime_status()` 与 `vm_owner_thread_status()` 暴露 `frozen_payload_contract`，把 validator、deep copy、最大深度、允许/拒绝类型和 owner/worker/future/snapshot/domain task 路径策略固定为机器可读合同。
+
+验收：
+
+- payload 嵌套、mapping traversal、非法类型、深度限制都有测试。
+- worker 公开 efun 对 object/function/buffer/class、非字符串 mapping key、深层嵌套和 batch unsafe snapshot 有 LPC 层回归。
+- future result 包含 frozen_result 标志。
+- runtime/thread status 的 `frozen_payload_contract` 有 C++ 与 LPC 层合同测试，并显式覆盖 `domain_task` 的 top-level mapping 输入和 frozen future result 策略。
+- 跨 owner payload 中 object/function/buffer/class 全部拒绝。
+
+## 阶段 7：cross-owner call_other 替代链
+
+目标：让 enforced 模式不只是阻断，还能提供完整替代能力。
+
+涉及文件：
+
+- `src/packages/core/efuns_main.cc`
+- `src/vm/internal/apply.cc`
+- `src/vm/internal/simulate.cc`
+- `src/packages/core/vm_owner.cc`
+- `src/packages/core/core.spec`
+- `src/tests/test_lpc.cc`
+
+任务：
+
+1. 保持 same owner `call_other` 同步 fast path。
+2. audit 模式记录所有 cross-owner `call_other`，包含 source/target/method/owner/epoch。
+3. enforced 模式继续阻断同步 `call_other`。
+4. 完善 `owner_call_async(object, method, mapping payload)`，用 ObjectHandle、owner message、future 承载调用；当前最小样例已经可替代一个 enforced 下被阻断的 cross-owner `call_other`。
+5. 目标 owner 执行 method 后，结果必须 frozen 后写入 future；非 frozen 结果必须 failed。
+6. 调用方只能 poll future 或注册 continuation，不能同步等待跨 owner LPC。
+
+验收：
+
+- enforced 下 cross-owner `call_other` 必定失败。
+- `owner_call_async()` 能替代一个核心读/写交互路径，且测试同时覆盖 direct call 被拒、async future completed、result frozen。
+- target stale 时 future failed，并暴露具体 ObjectHandle resolve 状态。
+- result 非 frozen 时 future failed。
+- message trace 从 submitted 到 completed/failed 状态同步，并能暴露 `trace_kind=owner_message_trace`、`trace_model=owner_message_lifecycle_trace`、事件 `trace_model=owner_message_lifecycle_event`、`owner_mailbox`/`owner_main_queue` route、terminal 分类、result key、失败原因、queued_on_main、target handle resolve 状态和 frozen result；`testsuite/single/tests/efuns/owner_payload.c` 已在 LPC 层覆盖 `owner_call_async()` 的 submitted、completed 和 stale-target failed trace 合同。
+
+风险：
+
+- 旧 mudlib 大量同步调用依赖返回值，必须配套迁移业务逻辑。
+
+## 阶段 8：input/gateway owner executor 化
+
+目标：玩家命令从主线程 owner queue 迁移到 owner executor。
+
+涉及文件：
+
+- `src/comm.cc`
+- `src/user.cc`
+- `src/interactive.h`
+- `src/packages/gateway/gateway.cc`
+- `src/packages/gateway/gateway_session.cc`
+- `src/vm/internal/owner.cc`
+- `src/vm/internal/context.cc`
+
+任务：
+
+1. 网络层只负责读包、解析、session 定位、投递任务。
+2. interactive/user 绑定 session owner。
+3. command task 携带 ObjectHandle、owner id、owner epoch、input payload。
+4. executor 执行命令前恢复 `current_interactive`、`command_giver`、execution frame。
+5. 单 session owner 保持命令串行。
+6. gateway create/destroy/send/inject 都按 owner 投递。
+
+当前已落地的阶段 8 合同增量：
+
+- `vm_owner_runtime_status()` 与 `vm_owner_thread_status()` 暴露 `gateway_owner_task_contract`，固定当前 input/gateway command execute 已进入 `owner_executor` 路由；`off` 或 owner executor unavailable 时仍回退 `owner_main_queue`，普通 LPC 仍保持 default-closed / explicit-open-only。
+- 合同逐项声明 `gateway_receive`、`process_user_command`、`gateway_logon`、`gateway_disconnected` 的 route、owner scope、`current_interactive`、`command_giver`、stale policy 和单 owner 串行要求；其中 receive 仍走 `owner_main_queue`，`process_user_command` 在 `audit`/`enforced` 且 owner thread 可用时走 `gateway_command_execute` owner executor callback，logon/disconnected 仍是 `direct_main_owner_scope`。
+- `process_user_command` owner executor task 捕获 current ObjectHandle、owner id/epoch、owner-private command snapshot 和 `gateway_command_execution_frame_v1` command frame；公开 trace 只暴露 redacted bytes/metadata，不写入原始命令文本。executor callback 会恢复 owner VMContext、`current_interactive`、`command_giver` 与受控 LPC scope，并记录 `snapshot_dispatched` / `snapshot_dropped`；main fallback 仍通过 `vm_owner_enqueue_main_task_with_payload()` 携带同一类脱敏 payload。
+- gateway command 输入缓冲区 snapshot 合同已机器可读化：`command_input_source=interactive_text_buffer`、`command_text_snapshot_policy=owner_private_redacted_from_trace`、`command_text_snapshot_ready=1`、`command_input_callback_state_policy=redacted_input_to_get_char_state_v1`、`command_input_callback_snapshot_ready=1`、`command_input_callback_frame_model=owner_command_frame_input_callback_detach_v1`、`command_input_callback_frame_detach_ready=1`、`command_input_callback_frame_executor_ready=1`、`command_executor_blocker=""`。实际 trace 只暴露 pending bytes、buffer offset、session id、snapshot bytes 和 redacted 标志，不暴露 raw command text；owner executor callback 已用该 owner-private snapshot 校验并消费首条命令，main fallback 仍保留同等脱敏观测。
+- gateway command 命令消费模型合同已机器可读化：`command_consume_model=owner_owned_snapshot_owner_executor_consume`、`command_consume_snapshot_ready=1`、`command_consume_executor_ready=1`、`command_consume_blocker=""`、`command_reply_queue_model=main_reply_queue_after_owner_command`、`command_reply_queue_task_type=command_reply`、`command_reply_queue_task_key=prompt_telnet_reschedule_io`、`command_reply_queue_ready=1`、`command_reply_queue_main_required=1`、`command_mode_delta_model=owner_command_frame_mode_delta`、`command_mode_delta_localecho_restore_boundary=main_reply_queue_after_command_consume`、`command_mode_delta_localecho_restore_ready=1`、`command_mode_delta_terminal_mode_task_type=command_mode_delta`、`command_mode_delta_terminal_mode_task_keys=get_char_linemode_restore,single_char_escape_linemode,single_char_escape_charmode_restore`、`command_mode_delta_terminal_mode_boundary=main_mode_delta_queue_after_command_consume`、`command_mode_delta_terminal_mode_ready=1`、`command_mode_delta_ready=1`。executor callback 使用 owner-private snapshot 在 owner thread 校验并消费首条命令，`interactive_t::text/text_start/text_end/CMD_IN_BUF` 只作为 snapshot 匹配和 buffer 推进来源；命令结束后的 prompt/telnet/reschedule I/O 已拆为同 owner `command_reply/prompt_telnet_reschedule_io` 主线程 reply task。`gateway_owner_task_contract` 进一步暴露 `command_executor_readiness_gates`：7 个 gate 已全部满足；当前 `command_executor_next_gate=""`、`command_executor_next_blocker=""`，生产门禁已完成。
+- gateway command execution-frame restore 合同已机器可读化：`command_execution_frame_restore_policy=owner_executor_vmcontext_restore`、`command_execution_frame_restore_ready=1`、`command_execution_frame_restore_blocker=\"\"`；executor callback 会恢复 owner scope、`current_interactive`、`command_giver` 与命令执行帧后调用 `process_user_command_snapshot()`，普通 legacy LPC 仍保持 default-closed / explicit-open-only。
+- gateway command stale 合同已机器可读化：`command_stale_guard=owner_epoch_target_handle_guard`、`command_stale_trace_state=thread_executor_callback_stale`、`command_stale_target_status=owner_epoch_mismatch`。入队后 owner epoch 漂移时，owner executor callback 会在 dispatch 前丢弃旧 task 且不消费旧命令；main fallback 仍保留 `main_stale` 诊断。
+- process_input/add_action parser frame 合同已机器可读化：gateway contract 与 payload 同步暴露 `process_input_add_action_parser_frame_model=owner_command_parser_context_v1`、`process_input_add_action_parser_frame_ready=1`、`process_input_add_action_parser_frame_executor_ready=1` 和 `process_input_add_action_parser_blocker=""`；`process_input()` 内所有 `safe_parse_command()` 路径已收敛到 `parse_user_command_in_owner_frame()`，并记录 `interactive_command_parser/safe_parse_command/frame_entered` trace。该增量把 parser owner-frame 边界和脱敏观测收敛进 owner command frame，`process_input_add_action_parser` side-effect gate 已满足，并可随 gateway command executor 运行，但不表示普通 legacy LPC 默认开放。
+- process_input apply frame 合同已机器可读化：gateway contract 与 payload 同步暴露 `process_input_apply_frame_model=owner_command_frame_process_input_apply`、`process_input_apply_frame_task_type=interactive_command_parser`、`process_input_apply_frame_ready=1`、`process_input_apply_frame_executor_ready=1`；`process_input()` 的 `APPLY_PROCESS_INPUT` 调用已收敛到 `apply_user_process_input_in_owner_frame()`，并记录 `interactive_command_parser/process_input_apply/frame_entered` trace。该增量把 process_input apply 子边界收敛进 owner command frame，`process_input_add_action_parser` side-effect gate 已满足。
+- input_to/get_char mode delta frame 合同已机器可读化：gateway contract 与 payload 同步暴露 `command_input_callback_mode_delta_model=owner_command_frame_input_callback_mode_delta`、`command_input_callback_mode_delta_ready=1`、`command_input_callback_mode_delta_executor_ready=1` 以及 payload 侧 `input_callback_mode_delta_*` 字段；`call_function_interactive()` 的 `NOESC`、`SINGLE_CHAR`、`NOECHO` 清理已收敛到 `detach_user_input_callback_mode_delta()`，并记录 `interactive_input_callback_mode/input_to_get_char_mode_flags/frame_detached` trace。该增量只固定 input callback mode flag 清理边界，`input_to_get_char_state` gate 已满足，不表示 input callback 已可后台执行。
+- input_to/get_char callback apply frame 合同已机器可读化：gateway contract 与 payload 同步暴露 `command_input_callback_apply_frame_model=owner_command_frame_input_callback_apply`、`command_input_callback_apply_frame_task_type=interactive_input_callback`、`command_input_callback_apply_frame_ready=1`、`command_input_callback_apply_frame_executor_ready=1` 以及 payload 侧 `input_callback_apply_frame_*` 字段；`call_function_interactive()` 的回调 apply/function-pointer dispatch 已收敛到 `apply_user_input_callback_in_owner_frame()`，并记录 `interactive_input_callback/<callback>/frame_entered` trace。该增量只固定 input callback apply 子边界，`input_to_get_char_state` gate 已满足，不表示 input callback 已可后台执行。
+- NOECHO localecho restore frame 合同已机器可读化：gateway contract 与 payload 同步暴露 `interactive_mode_localecho_restore_model=owner_command_frame_localecho_restore`、`interactive_mode_localecho_restore_task_type=interactive_mode_flags`、`interactive_mode_localecho_restore_ready=1`、`interactive_mode_localecho_restore_executor_ready=1`，payload 额外暴露 `interactive_mode_localecho_restore_required`；`get_user_command()` 和 `consume_user_command_snapshot()` 的 `NOECHO` 清理已收敛到 `detach_user_noecho_localecho_restore_in_owner_frame()`，并记录 `interactive_mode_flags/noecho_localecho_restore/frame_detached` trace。该增量固定 NOECHO/localecho restore 子边界，并计入已满足的 `interactive_mode_flags` gate。
+- interactive mode MXP tag filter 合同已机器可读化：gateway contract 与 payload 同步暴露 `interactive_mode_mxp_tag_filter_model=owner_command_frame_mxp_tag_filter`、`interactive_mode_mxp_tag_filter_task_type=interactive_mode_flags`、`interactive_mode_mxp_tag_filter_ready=1`、`interactive_mode_mxp_tag_filter_executor_ready=1`，payload 额外暴露 `interactive_mode_mxp_tag_filter_required`；`process_user_command_text()` 的 `USING_MXP` tag 分支已收敛到 `handle_user_mxp_tag_filter_in_owner_frame()`，并记录 `interactive_mode_flags/mxp_tag_filter/frame_entered` trace。该增量固定 MXP tag filter 子边界，并计入已满足的 `interactive_mode_flags` gate。
+- OLD_ED command frame 合同已机器可读化：gateway contract 与 payload 同步暴露 `interactive_mode_ed_command_model=owner_command_frame_ed_command`、`interactive_mode_ed_command_task_type=interactive_mode_flags`、`interactive_mode_ed_command_ready=1`、`interactive_mode_ed_command_executor_ready=1`，payload 额外暴露 `interactive_mode_ed_command_required`；`process_user_command_text()` 的 `ed_cmd()` 分支已收敛到 `handle_user_ed_command_in_owner_frame()`，并记录 `interactive_mode_flags/ed_command/frame_entered` trace。该增量固定 OLD_ED command 子边界，并计入已满足的 `interactive_mode_flags` gate。
+- prompt write_prompt apply frame 合同已机器可读化：gateway contract 暴露 `command_reply_write_prompt_apply_frame_model=owner_command_frame_write_prompt_apply`、`command_reply_write_prompt_apply_frame_task_type=command_reply`、`command_reply_write_prompt_apply_frame_ready=1`、`command_reply_write_prompt_apply_frame_executor_ready=0`，payload 同步暴露 `prompt_write_prompt_apply_frame_*`；`print_prompt()` 的 `APPLY_WRITE_PROMPT` 调用已收敛到 `apply_user_write_prompt_in_owner_frame()`，并记录 `command_reply/write_prompt_apply/frame_entered` trace。该增量只固定 prompt reply side-effect 子边界，reply queue 仍是 main-required 网络 I/O 边界。
+- C++ 层 `TestVmOwnerRuntimeReportsExecutorTaskContract`、`TestVmOwnerExecutorCommandConsumeEntryDispatchesWithoutLpc`、`TestGatewayCommandTaskCarriesOwnerHandlePayload`、`TestGatewayCommandMainQueueDropsStaleOwnerEpoch` 和 LPC 层 `testsuite/single/tests/efuns/owner_executor_contract.c` 同时验证该合同；其中 `TestVmOwnerRuntimeReportsExecutorTaskContract` 与 LPC 合同测试也覆盖 `owner_executor_boundary_contract`，固定 OwnerExecutor 已为 `compilation_unit_active`、已经 `compilation_unit_extracted=1`，且 `gateway_command_executor_activation_ready=1`，防止后续迁移时误把 consume entry 或主线程桥接解释为已完成后台 owner executor 玩家命令执行。
+
+验收：
+
+- 单玩家命令顺序不变。
+- 多玩家不同 owner 命令可并行。
+- `this_player()`、`current_interactive`、`command_giver` 语义正确。
+- gateway session 生命周期不依赖主线程直接执行 LPC。
+- 断线、reconnect、session stale 不误执行旧命令。
+- 当前增量验收：`gateway_owner_task_contract` 可由 C++ 与 LPC 层读取，且明确 gateway command execute 在 `audit`/`enforced` 且 owner thread 可用时走 `gateway_command_execute` owner executor callback，`off` 或 executor unavailable 时回退 owner main queue；executor route 可验证 ObjectHandle、owner epoch、owner-private command snapshot、off-main `process_input()` 探针和 execution-frame 恢复，入队后 owner epoch 漂移会以 `thread_executor_callback_stale` / `owner_epoch_mismatch` 失败而不消费旧命令。`command_executor_readiness_gates` 当前 7 项已全部满足，`command_executor_next_gate=""` / `command_executor_next_blocker=""`，且 `next_blocker=""` / `next_blocker_chain=production_gate_complete` 表示真实 mudlib audit 和 production gate 已收口。`executor_task_dispatch_contracts` 已把 `gateway_command` / `gateway_command_executor_activation` 切为 guarded executor-safe，`executor_mode=executor_safe`、`executor_safe=1`、`rejected=0`；同时暴露 `heartbeat`、`call_out`、`async_callback`、`dns_callback`、`socket_callback`、`gateway_command_execute` 六类 `owner_executor_callback` allowlist task，`executor_mode=executor_safe_callback`，drop cleanup 仍走主线程；heartbeat、callout、async/db/file completion、DNS callback、socket read/write/close callback 和 gateway command execute 真实入口已绑定 owner executor，`thread_executor_callback_dispatched/completed/stale` trace 可观测，socket callback 的 args 采用 deep-copy/frozen payload policy 且 cleanup/free refs 回主线程；`socket_release` 已是 owner-safe 同步 release/acquire owner epoch guard handshake。`command_side_effect_readiness_gates` 已把 activation blocker 拆成 5 项：`interactive_buffer_consume`、`input_to_get_char_state`、`process_input_add_action_parser` 和 `prompt_telnet_reschedule_io` 已满足；`interactive_mode_flags` 已满足，echo/MXP/ed/interactive flags 状态已收敛到 owner command frame。每个 side-effect gate 同时暴露 `state_owner`、`migration_boundary`、`side_effect_class`、`snapshot_policy`、`snapshot_ready`、`state_redacted` 和 `blocks_activation`，用于把后续迁移边界固定为机器可读合同；顶层合同同步暴露 `command_side_effect_satisfied_gate_count=5`、`command_side_effect_blocked_gate_count=0`、`command_side_effect_snapshot_gate_count=5`、`command_side_effect_snapshot_ready_count=5`、`command_side_effect_observability_ready=1` 与 `command_side_effect_activation_ready=1`，`gateway_command_executor_activation` 嵌套合同也暴露同一组 side-effect readiness 和 `activation_blocker=""`，明确当前 side-effect activation 前置和 guarded gateway executor activation 均已齐备。gateway command payload 还暴露 `input_callback_state_policy=redacted_input_to_get_char_state_v1`、`input_callback_state_snapshot_ready=1`、`input_callback_frame_model=owner_command_frame_input_callback_detach_v1`、`input_callback_frame_detach_ready=1`、`input_callback_frame_executor_ready=1`、`input_callback_active`、`input_callback_single_char`、`input_callback_noescape`、`input_callback_noecho`、`input_callback_carryover_count` 以及函数/对象 redacted 标志；当前 C++ 回归已覆盖 inactive input callback、active `input_to`、active `get_char`/single-char 三类 payload 快照，并验证 `interactive_input_callback/*/frame_detached` trace，且不暴露 callback function、callback object 或 raw command text；这只是 input_to/get_char frame detach 子边界和脱敏观测，`input_to_get_char_state` gate 已满足。gateway command payload 同时暴露 `process_input_add_action_parser_state_policy=redacted_process_input_add_action_parser_state_v1`、`process_input_add_action_parser_has_process_input`、`process_input_add_action_parser_safe_parse_fallback`、`process_input_add_action_parser_requires_command_giver` 以及 command_giver/command_text redacted 标志；C++ 回归已验证这些字段存在且不暴露 command_giver 对象或命令文本；这只是 process_input/add_action/parser 状态的脱敏观测，`process_input_add_action_parser` gate 已满足。gateway command payload 还暴露 `interactive_mode_flags_state_policy=redacted_interactive_mode_flags_v1`、`interactive_mode_flags_state_snapshot_ready=1`、`interactive_mode_flags_state_redacted=1`、`interactive_mode_terminal_mode_delta_boundary=main_mode_delta_queue_after_command_consume`、`interactive_mode_terminal_mode_delta_ready=1`、`interactive_mode_terminal_linemode_restore_required` 和 `interactive_mode_terminal_charmode_restore_required`，以及 noecho/noescape/single_char/was_single_char/MXP/ed buffer 状态快照；C++ 回归已验证 baseline、active `input_to`、active `get_char`/single-char 快照，以及 `command_mode_delta/get_char_linemode_restore` 同 owner main task queued/dispatched trace，且仍不暴露 raw command text；这固定 terminal mode delta 子边界和 interactive mode flags 的脱敏观测，`interactive_mode_flags` gate 已满足。gateway command payload 还暴露 `prompt_telnet_reschedule_state_policy=redacted_prompt_telnet_reschedule_io_v1`、`prompt_telnet_reschedule_state_snapshot_ready=1`、`prompt_telnet_reschedule_state_redacted=1`、`prompt_telnet_reschedule_boundary=main_reply_queue_after_owner_command`、`prompt_telnet_reschedule_reply_queue_ready=1`、`prompt_telnet_reschedule_blocks_activation=0`、`prompt_has_write_prompt`、`prompt_text_redacted`、`prompt_write_prompt_apply_required`、`telnet_handle_active`、`telnet_using_telnet`、`telnet_suppress_ga`、`telnet_ga_required` 和 `reschedule_cmd_in_buf`；C++ 回归已验证默认 gateway 会话的 prompt/telnet/reschedule 快照、同 owner `command_reply/prompt_telnet_reschedule_io` main task queued/dispatched trace，且不暴露 prompt text 或 raw command text；这表示 prompt/telnet/reschedule I/O 已迁到命令后的主线程 reply queue，`prompt_telnet_reschedule_io` gate 已满足，但该 reply queue 仍是 main-required 网络 I/O 边界，不表示网络 reply I/O 可后台执行。
+
+- 当前 parser frame 增量验收：`process_input_add_action_parser_frame_model=owner_command_parser_context_v1`、`process_input_add_action_parser_frame_ready=1`、`process_input_add_action_parser_frame_executor_ready=1` 和 `process_input_add_action_parser_blocker=""` 已由 C++/LPC 合同覆盖；baseline gateway 命令 trace 额外验证 `interactive_command_parser/safe_parse_command/frame_entered`。这固定 parser context frame 子边界；当前 `command_side_effect_satisfied_gate_count` 为 5、blocked gate 为 0，gateway executor activation 已 guarded 打开，真实玩家命令 owner executor 执行已由 `gateway_command_execute` 路径覆盖；后续仍需真实 mudlib audit 和 production gate。
+- 当前 process_input apply 增量验收：`process_input_apply_frame_model=owner_command_frame_process_input_apply`、`process_input_apply_frame_ready=1`、`process_input_apply_frame_executor_ready=1` 已由 C++/LPC 合同覆盖；baseline gateway 命令 trace 额外验证 `interactive_command_parser/process_input_apply/frame_entered`。这只是 `APPLY_PROCESS_INPUT` 调用 frame 子边界，`process_input_add_action_parser` gate 已满足。
+- 当前 input callback mode delta 增量验收：`command_input_callback_mode_delta_model=owner_command_frame_input_callback_mode_delta`、`command_input_callback_mode_delta_ready=1`、`command_input_callback_mode_delta_executor_ready=1` 和 payload 侧 `input_callback_mode_delta_*` 已由 C++/LPC 合同覆盖；active get_char 回归额外验证 `interactive_input_callback_mode/input_to_get_char_mode_flags/frame_detached`。这只是 `NOESC`、`SINGLE_CHAR`、`NOECHO` 清理边界，`input_to_get_char_state` gate 已满足。
+- 当前 input callback apply 增量验收：`command_input_callback_apply_frame_model=owner_command_frame_input_callback_apply`、`command_input_callback_apply_frame_ready=1`、`command_input_callback_apply_frame_executor_ready=1` 已由 C++/LPC 合同覆盖；active input_to/get_char 回归额外验证 `interactive_input_callback/<callback>/frame_entered`。这只是 input callback apply 子边界，`input_to_get_char_state` gate 已满足。
+- 当前 NOECHO localecho restore 增量验收：`interactive_mode_localecho_restore_model=owner_command_frame_localecho_restore`、`interactive_mode_localecho_restore_ready=1`、`interactive_mode_localecho_restore_executor_ready=1` 已由 C++/LPC 合同覆盖；active `input_to` 回归额外验证 `interactive_mode_localecho_restore_required=1`、`interactive_mode_flags/noecho_localecho_restore/frame_detached` trace 和 `command_reply/localecho_restore` 同 owner main task queued/dispatched。该子边界现在计入已满足的 `interactive_mode_flags` gate。
+- 当前 MXP tag filter 增量验收：`interactive_mode_mxp_tag_filter_model=owner_command_frame_mxp_tag_filter`、`interactive_mode_mxp_tag_filter_ready=1`、`interactive_mode_mxp_tag_filter_executor_ready=1` 已由 C++/LPC 合同覆盖；新增 `TestGatewayCommandMxpTagFilterFrame` 验证 `interactive_mode_mxp_tag_filter_required=1` 和 `interactive_mode_flags/mxp_tag_filter/frame_entered` trace。该子边界现在计入已满足的 `interactive_mode_flags` gate。
+- 当前 OLD_ED command 增量验收：`interactive_mode_ed_command_model=owner_command_frame_ed_command`、`interactive_mode_ed_command_ready=1`、`interactive_mode_ed_command_executor_ready=1` 已由 C++/LPC 合同覆盖；新增 `TestGatewayCommandEdCommandFrame` 验证 `interactive_mode_ed_command_required=1`、active `ed_buffer` payload 和 `interactive_mode_flags/ed_command/frame_entered` trace。该子边界现在计入已满足的 `interactive_mode_flags` gate。
+- 当前 prompt write_prompt apply 增量验收：`command_reply_write_prompt_apply_frame_model=owner_command_frame_write_prompt_apply`、`command_reply_write_prompt_apply_frame_ready=1`、`command_reply_write_prompt_apply_frame_executor_ready=0` 已由 C++/LPC 合同覆盖；baseline gateway 命令 trace 额外验证 `command_reply/write_prompt_apply/frame_entered`。这只是 prompt reply side-effect 子边界，`prompt_telnet_reschedule_io` 仍是 main-required reply queue。
+
+风险：
+
+- command path 涉及 mudlib 行为最多，必须先从 audit 模式统计高频跨 owner 访问。
+
+## 阶段 9：heartbeat/callout owner-local 化
+
+目标：让世界 tick 能按 owner 分片并行。当前 heartbeat 和 callout 已完成真实 owner executor 路径：到期 tick/callout 在 `audit`/`enforced` 且 owner thread 可用时投递 owner executor，`off` 或 executor unavailable 时回退 owner main queue；callout 到期时先在主线程摘除 handle，成功执行、destructed、stale 和 drop cleanup 都回主线程释放 LPC 引用。
+
+涉及文件：
+
+- `src/packages/core/heartbeat.cc`
+- `src/packages/core/call_out.cc`
+- `src/backend.cc`
+- `src/vm/internal/object_store.cc`
+- `src/vm/internal/owner.cc`
+
+任务：
+
+1. heartbeat 到期入口已迁为 owner executor callback task；owner epoch 变化后 stale heartbeat 会由 callback boundary drop，`g_current_heartbeat_obj` 已改为 thread-local/scope-bound。
+2. callout 注册到目标 object/function owner shard，到期后在主线程摘除 handle，再投递 owner executor。
+3. owner executor 执行到期 callout，并保持同 owner 顺序；`off` 或 executor unavailable 时回退 owner main queue。
+4. callout 成功执行、destructed、stale 和 drop cleanup 都回主线程释放 LPC 引用。
+5. cross-owner callout 参数中 object 必须转换为 handle 或拒绝；该项仍需真实 mudlib audit 和长压继续收敛。
+6. owner epoch 变化后 stale callout 必须跳过。
+
+验收：
+
+- heartbeat owner executor dispatch、completion 和 stale drop 有 C++/LPC 合同覆盖。
+- callout owner executor dispatch、completion、main cleanup 和 stale drop 有 C++ 合同覆盖，runtime/LPC 合同暴露 callout executor readiness 字段。
+- 不同 owner heartbeat/callout 可并行的长期吞吐仍纳入真实 mudlib 长压。
+- 同 owner callout 顺序稳定。
+- 高频 NPC/房间不会阻塞所有玩家。
+- stale callout 不执行。
+
+风险：
+
+- heartbeat 修改 heartbeat 队列时的历史语义复杂，必须保持兼容。
+
+## 阶段 10：async/db/file/DNS/socket 回调 owner executor 化
+
+目标：外部 I/O 完成后回到正确 owner，而不是主线程直接执行 LPC。
+
+当前状态：async/db/file completion、DNS callback 和 socket read/write/close callback 已在 `audit`/`enforced` 且 owner thread 可用时投递 owner executor，`off` 或 executor unavailable 时回退 owner main queue；成功执行、stale/drop 和 destructed 清理都走主线程 cleanup。`socket_release` 仍保持 main-required 例外，生产级开放仍需要真实 mudlib 长压覆盖。
+
+涉及文件：
+
+- `src/packages/async/`
+- `src/packages/db/`
+- `src/packages/core/file.cc`
+- `src/packages/core/dns.cc`
+- `src/packages/sockets/socket_efuns.cc`
+- `src/packages/external/`
+
+任务：
+
+1. async request 捕获 callback owner id/epoch，completion 投递到 owner executor。
+2. DNS query 捕获 callback owner id/epoch，DNS callback 投递到 owner executor。
+3. async/DNS owner stale/destructed 时 drop callback、记录 trace，并派发主线程 cleanup。
+4. socket read/write/close callback owner executor 化。
+5. `socket_release` 暂保留同步路径，直到设计替代 handshake。
+6. DB/file result payload 必须 frozen/deep copy。
+
+验收：
+
+- async/DNS completion 不跨 owner 修改对象。
+- async/DNS/socket/file/db 回调 stale 时安全丢弃。
+- async/DNS executor success/drop cleanup 均在主线程释放 LPC 引用。
+- 登录、存档、网关事件闭环正常。
+- `socket_release` 同步例外在文档和代码中都有明确边界。
+
+## 阶段 11：VM worker 并入统一 future/message 体系
+
+目标：compute worker 成为 owner runtime 的纯计算后端，而不是旁路系统。
+
+涉及文件：
+
+- `src/vm/internal/worker.cc`
+- `src/vm/internal/owner.cc`
+- `src/packages/core/vm_worker.cc`
+- `src/packages/core/vm_owner.cc`
+
+任务：
+
+1. 保持 worker 只执行 pure/frozen CPU task。
+2. worker 不允许触碰 object store。
+3. worker async result 必须投递回发起 owner future；成功结果必须是 frozen/deep-copy data，失败只暴露 error。
+4. worker task 与 owner message 使用统一 future 状态机。
+5. 为 `snapshot_digest`、`actor_score`、`combat_damage` 增加真实业务 benchmark。
+
+验收：
+
+- worker task 的 owner future id 可查询。
+- worker timeout/TTL/failure 正确反映到 future。
+- worker v2 成功/失败结果先进入 owner queue，再可由 owner executor 消费 `compute_result` 并完成 owner future。
+- worker v2 `bench`、`snapshot_digest`、`actor_score`、`combat_damage` 成功 future 携带 frozen mapping result，timeout/失败 future 不伪造 result。
+- `vm_worker_task()`、`vm_worker_submit()` 和 `vm_worker_submit_batch()` 的输入拒绝合同与 owner payload 使用同一 frozen-value 规则。
+- 同 owner worker task 串行，不同 owner 可并行。
+- worker 不读取任何 `object_t *`。
+
+## 阶段 12：真实 mudlib audit 迁移
+
+目标：让引擎改造在真实业务上成立。
+
+素材：
+
+- 本地存在 XiaKeXing 运行树和 loadtest 工具，但这些属于本地验证素材，不应进入公开仓库规则。
+- 正式生产验收状态记录在 `docs/multicore-production-gate.md`；该文档只记录验收口径、当前 smoke 证据和阻塞项，不记录本地账号、远端连接或机器路径。
+
+当前执行记录：
+
+- 2026-06-24 已完成一次 `enforced` 单用户 gateway smoke：新角色创建、查看环境、背包、技能、状态、移动、地图和聊天均有响应，driver 日志未观察到新增 fatal error 或新增 enforced cross-owner 阻断错误。
+- smoke 中出现客户端侧大 payload JSON 解析 warning，当前判断为 production gate blocker，不能据此宣布生产完成。
+- 本地旧 loadtest 入口依赖未随仓库提交的客户端模块；仓库现已新增 `tools/loadtest/xkx_gateway_loadtest.py` 自包含入口，且 1 用户 `smoke` 场景已覆盖登录/建角和基础命令闭环，仍需用它跑完整 production matrix。
+
+执行：
+
+1. 使用新 driver 替换测试运行树 driver。
+2. `multicore mode : off` 下跑兼容 smoke。
+3. 切 `audit`，收集 cross-owner `call_other`、present、move、destruct、parser、mutable payload、stale handle。
+4. 按审计结果迁移 mudlib：daemon/service、player/session、room/NPC/item。
+5. 对高频同步返回调用改成 snapshot 或 owner future。
+6. 切 `enforced` 做短验收。
+7. 扩展为长时间、多用户、多场景压测。
+
+验收：
+
+- 多用户登录稳定。
+- 玩家命令进入 session owner。
+- 主要 daemon 不被玩家 owner 污染。
+- enforced 下核心命令闭环成功。
+- 长压测无 timeout、断线、VMContext leak、future 堆积。
+
+风险：
+
+- 旧 mudlib 依赖同步返回值，迁移量可能大于 driver 侧改造。
+
+## 阶段 13：清理 legacy/main 例外
+
+目标：减少默认 owner 对真实问题的掩盖。
+
+涉及文件：
+
+- `src/vm/internal/owner.cc`
+- `src/vm/internal/simulate.cc`
+- `src/tests/test_lpc.cc`
+- mudlib 侧 owner 规则
+
+任务：
+
+1. 统计 `legacy/main` 对象类型和访问频率。
+2. 将真正共享 daemon/service 显式标记为 `service:<name>`。
+3. 将玩家/session 相关对象迁移出 `legacy/main`。
+4. 对不能迁移的 legacy 对象建立白名单和审计说明。
+5. enforced 模式下逐步缩小默认 owner bypass 范围。
+
+验收：
+
+- `legacy/main` 只保留 master、simul_efun、系统命令、共享 daemon 等明确对象。
+- audit 报告中无大面积玩家对象落在 `legacy/main`。
+- enforced 仍能通过核心测试。
+
+## 阶段 14：生产化压测与回滚
+
+目标：证明多核化可部署，而不是只在单元测试里成立。
+
+压测维度：
+
+- 用户数：1、3、10、50、100。
+- 模式：off、audit、enforced。
+- 场景：登录、移动、聊天、战斗、物品、任务、存档、断线重连、socket/gateway。
+- 时长：短 smoke、30 分钟、2 小时、隔夜。
+
+指标：
+
+- 命令成功率。
+- timeout/断线数。
+- 平均/P95/P99 命令延迟。
+- owner queue depth。
+- main queue depth。
+- executor budget yields。
+- future pending/completed/failed。
+- VMContext leak counter。
+- object_store sync rejection。
+- CPU 核心利用率。
+
+回滚：
+
+- 任意阶段都必须可切回 `audit` 或 `off`。
+- enforced 只在核心路径压测稳定后打开。
+- 若 future pending 持续增长或 context leak 非 0，必须阻断发布。
+
+## 推荐执行顺序
+
+1. 固定文档和 baseline 指标。
+2. 补 owner 归属规则测试。
+3. 把 ObjectHandle 作为跨 owner 标准引用。
+4. owner shard 从状态索引升级为执行模型。
+5. 完成 VMContext 剩余执行栈/value 状态收口。
+6. 完成 frozen payload/future 协议。
+7. 补齐 OwnerExecutor scheduler trace、budget、公平性和 default-closed 合同诊断面。
+8. 实现正式 OwnerExecutor。
+9. 先迁移 compute result 和无 target message。
+10. input/gateway 前置 gate、guarded activation 和 `gateway_command_execute` 真实 owner executor 路径已完成；仍需 production gate 验收。
+11. heartbeat、callout、async/db/file completion、DNS callback 和 socket read/write/close callback 已迁到 owner executor，`socket_release` 保留 main-required 例外。
+12. 扩展受控 owner-local LPC task allowlist 到正式注册和审计模型。
+13. 用真实 mudlib audit 迁移 cross-owner hotspots。
+14. 完成 production gate、长压和验收文档。
+15. enforced 长压测。
+15. 缩小 legacy/main 例外。
+
+## 每阶段必须新增的测试
+
+| 阶段 | 必测内容 |
+| --- | --- |
+| owner 归属 | load/clone/move/exec/destruct owner/epoch |
+| ObjectHandle | stale path、owner changed、destructed、epoch mismatch |
+| shard | owner shard runnable、migration、destruct queue |
+| executor | same owner 串行、different owner 并行、budget yield、context cleanup |
+| VMContext | 所有全局状态 setter/scope 不泄漏 |
+| payload | deep copy、非法类型、mapping key、深度限制 |
+| call async | completed、failed、stale target resolve 状态、non-frozen result |
+| input | this_player/current_interactive/command_giver 语义 |
+| heartbeat/callout | stale、顺序、跨 owner 参数 |
+| async/socket | stale owner drop、result frozen、callback ordering |
+| pressure | queue/future 不堆积，P95/P99 延迟稳定 |
+
+## 禁止采用的捷径
+
+- 用一个全局 mutex 包住所有 LPC 执行后宣称多核化。
+- 让后台线程直接访问 `obj_list`。
+- 把 object 指针塞进 owner payload。
+- 在 enforced 下为了兼容静默执行 cross-owner 同步调用。
+- 只看短命令 smoke 就宣布生产可用。
+- 为单个 mudlib 特例污染 driver 通用规则。
+
+## 下一步最小可执行任务
+
+第一批真正应该做的不是继续开放后台 LPC，而是收口边界：
+
+1. owner 归属规则已覆盖 load/clone/move/exec/destruct、command singleton、std database/http/present_clone/telnet shared service、simul_efun 继承的 std helper、`single/simul_efun` 关键 singleton、`/adm/daemons/gateway_d` daemon singleton、master virtual object、普通 interactive exec 和 gateway exec/session lookup 的关键合同；继续补更多真实 mudlib daemon/shared service 的入口级 owner/epoch 回归。
+2. `/adm/daemons/gateway_d` 已建立 audit 观测和 owner/epoch 合同；`single/simul_efun` 和 std helper 已补默认 owner 污染防线。下一步继续选择有真实跨 owner 交互的 daemon/shared service，再决定是否迁移为 snapshot/message/future 交互。
+3. `vm_frozen_value_safe()` 已抽出公共校验，并已接入 owner payload、worker snapshot 与 `domain_task` 输入/输出合同；下一步是在正式 domain task 执行器实现时复用该合同，不另起 payload/future 校验分支。
+4. owner shard 已有 `VMObjectShard` 合同、`status_record`、`execution_shard`、`VMObjectShard.object_directory`、`VMObjectShard.local_records`、`VMObjectShard.local_objects`、`VMObjectShard.local_object_index`、`VMObjectShard.destructed_records`、`VMObjectShard.object_path_index`、`VMObjectShard.destructed_path_index`、owner/object_id lookup/resolve、owner/path lookup/resolve API、ObjectHandle live/current owner-local 快路径、ObjectHandle path-index stale 诊断、live/ref/path/tombstone 一致性状态、owner-local/global bridge 双向一致性门禁、`owner_local_store_ready` lookup/resolve readiness 和 `owner_local_store_complete=1` 状态口径；`status.objects` 只是兼容统计，directory/lookup/resolve 以 shard-local directory、live record snapshot、正反向 live object reference、live path index、destruct tombstone 和 destruct path tombstone 为准，global bridge ready/source 已关闭，retirement readiness 作为审计证据保留。下一步不再是证明 lookup/resolve owner-local，而是迁移对象生命周期、deferred destruct 和全局索引物理边界。
+5. OwnerExecutor 合同、trace、budget、公平性和最小 dispatch 已有；继续补正式设计文档和类边界，仍只接 `compute_result`/无 target message，不接普通 LPC。
+
+这些基础已经支撑 heartbeat、callout、async/db/file completion 和 DNS callback 真实入口迁到 owner executor；当前最小后续任务是迁移 socket callback，再推进真实 gateway command 执行。
