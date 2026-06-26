@@ -39,6 +39,16 @@ void assert_dispatch_entry(mapping dispatch_contract, string task_type,
     ASSERT_EQ(rejected, entry["rejected"]);
     ASSERT_EQ(1, entry["requires_owner_mailbox"]);
     ASSERT_EQ(0, entry["requires_owner_main_queue"]);
+    ASSERT_EQ(2, entry["manifest_version"]);
+    ASSERT_EQ("owner_task_manifest_v2", entry["manifest_schema"]);
+    ASSERT_EQ(dispatch_kind, entry["task_kind"]);
+    ASSERT_EQ("owner_epoch_payload_allowlist_deadline_guard", entry["admission_policy"]);
+    ASSERT_EQ("owner_executor_trace_v2", entry["trace_schema"]);
+    ASSERT_EQ(0, entry["deadline_required"]);
+    ASSERT_EQ(1, entry["ordinary_lpc_default_closed"]);
+    ASSERT(stringp(entry["payload_policy"]));
+    ASSERT(stringp(entry["cleanup_policy"]));
+    ASSERT(stringp(entry["reply_future_policy"]));
 }
 
 void assert_production_gate_contract(mapping contract) {
@@ -724,7 +734,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("", boundary_contract["next_refactor_target"]);
     assert_production_gate_contract(boundary_contract);
     ASSERT(mapp(fairness));
-    ASSERT_EQ("owner_executor_v1", status["executor_contract_version"]);
+    ASSERT_EQ("owner_executor_v2", status["executor_contract_version"]);
     ASSERT_EQ("owner_executor", status["executor_model"]);
     ASSERT_EQ("descriptor_manifest", status["executor_dispatch_model"]);
     ASSERT_EQ("default_closed_explicit_open", status["executor_lpc_model"]);
@@ -735,6 +745,31 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["ordinary_lpc_explicit_open_required"]);
     ASSERT_EQ("default_closed_explicit_open", status["ordinary_lpc_activation_policy"]);
     ASSERT_EQ("", status["ordinary_lpc_next_blocker"]);
+    ASSERT_EQ(1, status["owner_task_manifest_v2_ready"]);
+    ASSERT_EQ("owner_task_manifest_v2", status["owner_task_manifest_schema"]);
+    ASSERT_EQ(1, status["owner_executor_admission_gate_ready"]);
+    ASSERT_EQ("owner_epoch_payload_allowlist_deadline_guard", status["owner_executor_admission_policy"]);
+    ASSERT(intp(status["owner_executor_admission_accepted"]));
+    ASSERT(intp(status["owner_executor_admission_rejected"]));
+    ASSERT(intp(status["owner_executor_admission_dropped"]));
+    ASSERT_EQ(1, status["owner_executor_payload_policy_v2_ready"]);
+    ASSERT_EQ(1, status["owner_executor_trace_schema_v2_ready"]);
+    ASSERT_EQ("owner_executor_trace_v2", status["owner_executor_trace_schema"]);
+    ASSERT_EQ(1, status["owner_executor_metrics_v2_ready"]);
+    ASSERT_EQ(1, status["owner_executor_queue_depth_metrics_ready"]);
+    ASSERT(intp(status["owner_executor_queue_depth"]));
+    ASSERT(intp(status["owner_executor_runnable_queue_depth"]));
+    ASSERT(intp(status["owner_executor_safe_queue_depth"]));
+    ASSERT(intp(status["owner_executor_main_required_queue_depth"]));
+    ASSERT_EQ(1, status["owner_executor_future_timeout_cancel_ready"]);
+    ASSERT(intp(status["owner_executor_future_timeout"]));
+    ASSERT(intp(status["owner_executor_future_cancelled"]));
+    ASSERT(intp(status["owner_executor_stale_drop"]));
+    ASSERT(intp(status["owner_executor_destructed_drop"]));
+    ASSERT(intp(status["owner_executor_epoch_mismatch_drop"]));
+    ASSERT(intp(status["owner_executor_context_cleanup_leaks"]));
+    ASSERT(intp(status["owner_executor_future_pending_backlog"]));
+    ASSERT_EQ(1, status["owner_executor_socket_release_trace_ready"]);
     ASSERT_EQ(1, status["executor_callback_task_boundary_ready"]);
     ASSERT_EQ(1, status["executor_callback_allowlist_ready"]);
     ASSERT_EQ(6, status["executor_callback_allowlist_count"]);
@@ -968,7 +1003,10 @@ void assert_owner_executor_trace(mapping trace) {
     ASSERT_EQ(1, trace["success"]);
     ASSERT_EQ("owner_executor_trace", trace["trace_kind"]);
     ASSERT_EQ("owner_executor_scheduler_trace", trace["trace_model"]);
-    ASSERT_EQ("owner_executor_v1", trace["executor_contract_version"]);
+    ASSERT_EQ("owner_executor_trace_v2", trace["trace_schema"]);
+    ASSERT_EQ("owner_task_manifest_v2", trace["owner_task_manifest_schema"]);
+    ASSERT_EQ("owner_epoch_payload_allowlist_deadline_guard", trace["admission_policy"]);
+    ASSERT_EQ("owner_executor_v2", trace["executor_contract_version"]);
     ASSERT_EQ("owner_executor", trace["executor_model"]);
     ASSERT(intp(trace["returned"]));
     ASSERT(intp(trace["total_traced"]));
@@ -981,7 +1019,10 @@ void assert_owner_executor_trace(mapping trace) {
         ASSERT(intp(event["trace_id"]));
         ASSERT(intp(event["sequence"]));
         ASSERT_EQ("owner_executor_scheduler_event", event["trace_model"]);
-        ASSERT_EQ("owner_executor_v1", event["executor_contract_version"]);
+        ASSERT_EQ("owner_executor_trace_v2", event["trace_schema"]);
+        ASSERT_EQ("owner_task_manifest_v2", event["owner_task_manifest_schema"]);
+        ASSERT_EQ("owner_epoch_payload_allowlist_deadline_guard", event["admission_policy"]);
+        ASSERT_EQ("owner_executor_v2", event["executor_contract_version"]);
         ASSERT_EQ("owner_executor", event["executor_model"]);
         ASSERT_EQ("descriptor_manifest", event["executor_dispatch_model"]);
         ASSERT(stringp(event["owner_id"]));

@@ -95,6 +95,8 @@ uint64_t vm_owner_enqueue_compute_result_fields(const char *owner_id, uint64_t w
 uint64_t vm_owner_enqueue_command_frame_restore(object_t *target);
 mapping_t *vm_owner_message_trace(int limit);
 mapping_t *vm_owner_future_poll(uint64_t future_id);
+mapping_t *vm_owner_future_cancel(uint64_t future_id, const char *reason);
+mapping_t *vm_owner_future_timeout(uint64_t future_id, const char *reason);
 mapping_t *vm_owner_record_commit_boundary(const char *source_owner_id, const char *target_owner_id,
                                              const char *operation, uint64_t message_id, const char *state);
 mapping_t *vm_owner_commit_trace(int limit);
