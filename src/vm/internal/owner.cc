@@ -5,6 +5,7 @@
 #include "vm/object_handle.h"
 #include "vm/owner.h"
 #include "vm/internal/owner_executor.h"
+#include "vm/internal/owner_future_store.h"
 #include "vm/internal/owner_task_manifest.h"
 #include "vm/internal/owner_trace_store.h"
 
@@ -208,8 +209,6 @@ std::atomic<uint64_t> total_cross_owner_snapshot_accesses{0};
 std::atomic<uint64_t> total_cross_owner_message_accesses{0};
 std::atomic<uint64_t> total_cross_owner_rejected_accesses{0};
 std::atomic<uint64_t> total_cross_owner_enforced_blocks{0};
-std::atomic<uint64_t> total_futures_completed{0};
-std::atomic<uint64_t> total_futures_failed{0};
 std::atomic<uint64_t> owner_thread_dispatched{0};
 std::atomic<uint64_t> owner_executor_budget_yields{0};
 std::string owner_executor_last_budget_yield_owner;
@@ -322,26 +321,6 @@ struct OwnerMailboxTask {
   std::function<void()> drop_callback;
 };
 
-struct OwnerFutureRecord {
-  uint64_t future_id;
-  uint64_t target_task_id;
-  VMObjectHandle target_handle;
-  std::string source_owner_id;
-  std::string target_owner_id;
-  std::string message_type;
-  std::string payload_key;
-  std::string state;
-  std::string result_key;
-  std::string error;
-  uint64_t created_at_ms{0};
-  uint64_t deadline_ms{0};
-  bool cancelled{false};
-  bool timed_out{false};
-  bool terminal_cleanup_required{false};
-  bool has_target_handle{false};
-  std::shared_ptr<VMFrozenValue> result;
-};
-
 struct OwnerMainTask {
   uint64_t task_id;
   uint64_t sequence;
@@ -395,8 +374,8 @@ std::unordered_set<std::string> main_schedulable_owner_set;
 std::unordered_set<std::string> active_owner_set;
 std::unordered_map<std::string, int> active_owner_claim_counts;
 std::unordered_set<std::string> active_main_owner_set;
-std::unordered_map<uint64_t, OwnerFutureRecord> owner_futures;
 std::vector<object_t *> owner_deferred_target_releases;
+OwnerFutureStore owner_future_store;
 OwnerTraceStore owner_trace_store;
 std::mutex owner_runtime_mutex;
 std::condition_variable owner_runtime_cv;
@@ -540,13 +519,7 @@ long owner_mailbox_active_owners() {
 }
 
 long owner_pending_future_count() {
-  long pending = 0;
-  for (const auto &entry : owner_futures) {
-    if (entry.second.state == "pending") {
-      pending++;
-    }
-  }
-  return pending;
+  return owner_future_store.pending_count();
 }
 
 long owner_executor_runnable_queue_depth();
@@ -1909,24 +1882,20 @@ bool owner_message_target_current(const OwnerMailboxTask &task) {
          vm_object_handle_resolve_status(task.target_handle).status == VMObjectHandleResolveStatus::kCurrent;
 }
 
+void update_owner_message_trace_state_for_task_locked(uint64_t target_task_id, const char *state,
+                                                      const char *result_key, const char *error,
+                                                      bool frozen_result,
+                                                      VMObjectHandleResolveStatus target_handle_status);
+
 void complete_owner_future_locked(uint64_t future_id, const char *state, const char *result_key, const char *error,
                                   std::shared_ptr<VMFrozenValue> result = nullptr) {
-  auto it = owner_futures.find(future_id);
-  if (it == owner_futures.end()) {
+  auto completion = owner_future_store.complete(future_id, state, result_key, error, std::move(result));
+  if (!completion) {
     return;
   }
-  if (it->second.state != "pending") {
-    return;
-  }
-  it->second.state = normalize_task_text(state, "completed");
-  it->second.result_key = normalize_task_text(result_key, "");
-  it->second.error = normalize_task_text(error, "");
-  it->second.result = std::move(result);
-  if (it->second.state == "failed") {
-    total_futures_failed.fetch_add(1, std::memory_order_relaxed);
-  } else {
-    total_futures_completed.fetch_add(1, std::memory_order_relaxed);
-  }
+  update_owner_message_trace_state_for_task_locked(
+      completion->record.target_task_id, completion->record.state.c_str(), completion->record.result_key.c_str(),
+      completion->record.error.c_str(), completion->completed_with_frozen_result, completion->target_status);
 }
 
 void update_owner_message_trace_state_for_task_locked(uint64_t target_task_id, const char *state,
@@ -1940,39 +1909,24 @@ void update_owner_message_trace_state_for_task_locked(uint64_t target_task_id, c
 void complete_owner_future_for_task_locked(uint64_t target_task_id, const char *state, const char *result_key,
                                             const char *error,
                                             std::shared_ptr<VMFrozenValue> result = nullptr) {
-  for (auto &entry : owner_futures) {
-    if (entry.second.target_task_id == target_task_id && entry.second.state == "pending") {
-      auto target_status = entry.second.has_target_handle ? vm_object_handle_resolve_status(entry.second.target_handle).status
-                                                          : VMObjectHandleResolveStatus::kCurrent;
-      entry.second.state = normalize_task_text(state, "completed");
-      entry.second.result_key = normalize_task_text(result_key, "");
-      entry.second.error = normalize_task_text(error, "");
-      auto completed_with_frozen_result = entry.second.state == "completed" && result != nullptr;
-      entry.second.result = std::move(result);
-      update_owner_message_trace_state_for_task_locked(target_task_id, entry.second.state.c_str(),
-                                                       entry.second.result_key.c_str(), entry.second.error.c_str(),
-                                                       completed_with_frozen_result, target_status);
-      if (entry.second.state == "failed") {
-        total_futures_failed.fetch_add(1, std::memory_order_relaxed);
-      } else {
-        total_futures_completed.fetch_add(1, std::memory_order_relaxed);
-      }
-      return;
-    }
+  auto completion = owner_future_store.complete_for_task(target_task_id, state, result_key, error, std::move(result));
+  if (!completion) {
+    return;
   }
+  update_owner_message_trace_state_for_task_locked(
+      target_task_id, completion->record.state.c_str(), completion->record.result_key.c_str(),
+      completion->record.error.c_str(), completion->completed_with_frozen_result, completion->target_status);
 }
 
 void complete_owner_future_for_task_threadsafe(uint64_t target_task_id, const char *state, const char *result_key,
                                                const char *error,
                                                std::shared_ptr<VMFrozenValue> result = nullptr) {
-  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
   complete_owner_future_for_task_locked(target_task_id, state, result_key, error, std::move(result));
 }
 
 mapping_t *mark_owner_future_failed_terminal(uint64_t future_id, const char *reason, bool cancelled, bool timed_out) {
-  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto it = owner_futures.find(future_id);
-  if (it == owner_futures.end()) {
+  auto result = owner_future_store.fail_terminal(future_id, reason, cancelled, timed_out);
+  if (!result.found) {
     auto *map = allocate_mapping(10);
     add_mapping_pair(map, "success", 0);
     add_mapping_pair(map, "future_id", static_cast<long>(future_id));
@@ -1987,20 +1941,10 @@ mapping_t *mark_owner_future_failed_terminal(uint64_t future_id, const char *rea
     return map;
   }
 
-  auto &future = it->second;
-  if (future.state == "pending") {
-    future.state = "failed";
-    future.result_key.clear();
-    future.error = normalize_task_text(reason, cancelled ? "future cancelled" : "future timed out");
-    future.cancelled = cancelled;
-    future.timed_out = timed_out;
-    future.terminal_cleanup_required = false;
-    update_owner_message_trace_state_for_task_locked(future.target_task_id, future.state.c_str(), "",
-                                                     future.error.c_str(), false,
-                                                     future.has_target_handle
-                                                         ? vm_object_handle_resolve_status(future.target_handle).status
-                                                         : VMObjectHandleResolveStatus::kCurrent);
-    total_futures_failed.fetch_add(1, std::memory_order_relaxed);
+  if (result.changed) {
+    update_owner_message_trace_state_for_task_locked(result.record.target_task_id, result.record.state.c_str(),
+                                                     result.record.result_key.c_str(), result.record.error.c_str(),
+                                                     false, result.target_status);
     if (cancelled) {
       owner_executor_future_cancelled.fetch_add(1, std::memory_order_relaxed);
     }
@@ -2008,7 +1952,7 @@ mapping_t *mark_owner_future_failed_terminal(uint64_t future_id, const char *rea
       owner_executor_future_timeout.fetch_add(1, std::memory_order_relaxed);
     }
   }
-  return owner_future_mapping(future);
+  return owner_future_mapping(result.record);
 }
 
 void complete_owner_message_task_locked(const OwnerMailboxTask &task) {
@@ -2022,14 +1966,12 @@ void complete_owner_message_task_locked(const OwnerMailboxTask &task) {
 void complete_owner_message_task_threadsafe(const OwnerMailboxTask &task, const char *state,
                                             const char *result_key, const char *error,
                                             std::shared_ptr<VMFrozenValue> result = nullptr) {
-  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
   complete_owner_future_for_task_locked(task.task_id, state, result_key, error, std::move(result));
 }
 
 void complete_owner_main_message_task_threadsafe(const OwnerMainTask &task, const char *state,
                                                  const char *result_key, const char *error,
                                                  std::shared_ptr<VMFrozenValue> result = nullptr) {
-  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
   complete_owner_future_for_task_locked(task.task_id, state, result_key, error, std::move(result));
   vm_object_store_remove_message(task.owner_id.c_str(), task.task_id);
 }
@@ -3611,7 +3553,7 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
 
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    owner_futures[future.future_id] = std::move(future);
+    owner_future_store.insert(std::move(future));
     append_owner_task_trace(task, "queued");
     auto &queue = owner_mailboxes[normalized_owner_id];
     auto had_thread_task = owner_queue_has_thread_task(queue);
@@ -3732,7 +3674,7 @@ mapping_t *vm_owner_ordinary_lpc_task(object_t *target, const char *owner_id, co
 
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    owner_futures[future.future_id] = std::move(future);
+    owner_future_store.insert(std::move(future));
     append_owner_task_trace(task, "queued");
     auto &queue = owner_mailboxes[normalized_owner_id];
     auto had_thread_task = owner_queue_has_thread_task(queue);
@@ -4393,7 +4335,7 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     vm_object_store_record_message(target_owner.c_str(), target_task_id);
-    owner_futures[future.future_id] = std::move(future);
+    owner_future_store.insert(std::move(future));
     owner_trace_store.append_message(std::move(trace));
     if (target_handle) {
       auto resolved_target = vm_object_handle_resolve_status(*target_handle);
@@ -4473,8 +4415,7 @@ uint64_t vm_owner_register_compute_future(const char *owner_id, uint64_t worker_
   future.state = "pending";
   future.created_at_ms = owner_now_ms();
 
-  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  owner_futures[future.future_id] = std::move(future);
+  owner_future_store.insert(std::move(future));
   return future_id;
 }
 
@@ -4549,9 +4490,8 @@ mapping_t *vm_owner_message_trace(int limit) {
 }
 
 mapping_t *vm_owner_future_poll(uint64_t future_id) {
-  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto it = owner_futures.find(future_id);
-  if (it == owner_futures.end()) {
+  auto record = owner_future_store.poll(future_id);
+  if (!record) {
     auto *map = allocate_mapping(6);
     add_mapping_pair(map, "success", 0);
     add_mapping_pair(map, "future_id", static_cast<long>(future_id));
@@ -4561,7 +4501,7 @@ mapping_t *vm_owner_future_poll(uint64_t future_id) {
     add_mapping_pair(map, "direct_cross_owner_write", 0);
     return map;
   }
-  return owner_future_mapping(it->second);
+  return owner_future_mapping(*record);
 }
 
 mapping_t *vm_owner_future_cancel(uint64_t future_id, const char *reason) {
@@ -4941,11 +4881,11 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_pair(map, "owner_threads", static_cast<long>(owner_threads.size()));
   add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "total_drained", static_cast<long>(total_drained.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "future_count", static_cast<long>(owner_futures.size()));
+  add_mapping_pair(map, "future_count", owner_future_store.size());
   add_mapping_pair(map, "pending_futures", owner_pending_future_count());
   add_owner_runtime_v2_status_fields(map);
-  add_mapping_pair(map, "futures_completed", static_cast<long>(total_futures_completed.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "futures_failed", static_cast<long>(total_futures_failed.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "futures_completed", static_cast<long>(owner_future_store.completed_count()));
+  add_mapping_pair(map, "futures_failed", static_cast<long>(owner_future_store.failed_count()));
   add_mapping_pair(map, "executor_budget_yields",
                    static_cast<long>(owner_executor_budget_yields.load(std::memory_order_relaxed)));
   add_mapping_string(map, "executor_last_budget_yield_owner", owner_executor_last_budget_yield_owner.c_str());

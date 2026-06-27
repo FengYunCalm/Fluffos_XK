@@ -417,6 +417,7 @@ set(SRC
   "vm/internal/object_store.cc"
   "vm/internal/owner.cc"
   "vm/internal/owner_executor.cc"
+  "vm/internal/owner_future_store.cc"
   "vm/internal/owner_task_manifest.cc"
   "vm/internal/owner_trace_store.cc"
   "vm/internal/posix_timers.cc"
