@@ -51,54 +51,24 @@ FluffOS_XK focuses on engine-level foundations, not gameplay rules.
 
 ## Multicore Runtime Status
 
-### Owner/Actor Shard VM
+FluffOS_XK has completed and sealed the current production multicore baseline for
+the owner/service executor model. The production path supports owner-local object
+lifecycle, OwnerExecutor callback tasks, heartbeat, callout, async/file/db, DNS,
+socket callbacks, gateway command execution, target-owner messages, and the
+`socket_release` owner-safe release/acquire handshake.
 
-FluffOS_XK supports owner-based object boundaries for controlled actor-style execution. Each player-owned object can be
-assigned to an owner shard, while legacy system objects remain under the default `legacy/main` owner. The current design
-keeps arbitrary LPC execution on guarded paths and uses owner-aware queues, worker tasks, and explicit snapshot/message
-contracts for migration.
+This is a controlled multicore runtime, not unrestricted background execution for
+all legacy LPC. Ordinary legacy LPC remains default-closed by design. Executor
+entry requires explicit allowlist coverage, same-owner execution, a driver
+callback contract, frozen payloads, ObjectHandle routing, or an owner/service
+shard domain.
 
-**Key Features:**
-- **Owner-based isolation**: Objects can carry an owner ID such as `"player/<account>"` or `"legacy/main"`.
-- **Enforced mode**: Cross-owner synchronous writes/calls are blocked unless they use an explicit owner contract.
-- **Snapshot inspection**: `owner_query_object_snapshot()` exposes structural information without calling target LPC methods.
-- **Controlled multicore paths**: Deterministic worker tasks and restricted owner LPC probe/canary paths can run off-main;
-  ordinary and registered LPC tasks remain guarded rather than freely parallelized.
+Current references:
 
-**Validated status:**
-- Owner/multicore engine regression tests cover owner scope, owner queues, enforced blocking, object handles, and guarded owner threads.
-- Downstream XiaKeXing load testing has validated the enforced-mode player command path with clean runtime logs for targeted scenarios.
-- Longer stress tests should be run by downstream projects with their mudlib-specific workloads before treating a deployment as production-ready.
-
-**Safe Cross-Owner Access API:**
-```lpc
-// Get object snapshot without cross-owner call
-mapping snapshot = owner_query_object_snapshot(target);
-if (mapp(snapshot)) {
-    // Cross-owner - use snapshot data only
-    if (snapshot["living"]) { ... }
-} else {
-    // Same owner - direct access
-    if (living(target)) { ... }
-}
-```
-
-**Configuration:**
-```c
-// In driver config
-multicore mode : 0    // Disabled
-multicore mode : 1    // Owner-based (default)
-multicore mode : 2    // Enforced isolation
-```
-
-See [`docs/owner-multicore-api.md`](docs/owner-multicore-api.md) for complete API documentation and migration guide.
-
-### Worker Infrastructure
-
-The driver includes thread-local VMContext binding, owner-aware worker runtime, owner mailboxes, and task tracing 
-infrastructure for controlled off-main execution.
-
-See `docs/multicore-runtime.md` for worker infrastructure details.
+- [`docs/multicore-runtime-v2.md`](docs/multicore-runtime-v2.md): owner runtime v2 and production-perfect contract.
+- [`docs/multicore-production-gate.md`](docs/multicore-production-gate.md): production gate fields and accepted evidence.
+- [`docs/owner-multicore-api.md`](docs/owner-multicore-api.md): owner/snapshot API guide.
+- [`docs/releases/multicore-production-baseline-2026-06-27.md`](docs/releases/multicore-production-baseline-2026-06-27.md): production baseline and driver checksum.
 
 ## Get The Code
 
@@ -158,7 +128,9 @@ Out of scope:
 ## Documentation
 
 - Official FluffOS docs: https://www.fluffos.info
-- Multicore runtime status: `docs/multicore-runtime.md`
+- Multicore production baseline: `docs/releases/multicore-production-baseline-2026-06-27.md`
+- Multicore runtime contract: `docs/multicore-runtime-v2.md`
+- Multicore production gate: `docs/multicore-production-gate.md`
 - Local docs entry: `docs/index.md`
 - Fork changelog: `CHANGELOG.md`
 - Release notes and workflow notes: `RELEASE.md`

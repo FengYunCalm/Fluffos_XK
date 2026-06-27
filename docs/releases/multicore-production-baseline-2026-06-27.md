@@ -5,9 +5,11 @@
 - Engine repository: `FengYunCalm/Fluffos_XK`
 - Engine branch: `master`
 - Engine runtime commit: `4e4811c13eb448a6f1e4ac3d1fcc030e8c22d57d`
-- Release tag target: the commit containing this baseline document
+- Release tag: `multicore-production-2026-06-27`
+- Release tag target: `de550ad90afe74f0a2752804760b790d4e4e9170`
 - Paired XiaKeXing main commit: `5b5e433e0ad02c0432246f7a4369694669f1aef0`
 - Paired XiaKeXing cloud commit: `87007f089a3d431a1dfd12af54e94fa6b62cc5c7`
+- Paired XiaKeXing main tag target: `5041b078e2e08ae2c58bdfd694ac43312bbd2603`
 
 ## Driver Runtime
 

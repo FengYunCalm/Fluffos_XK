@@ -19,12 +19,21 @@ FluffOS codebase contains three parts:
 
 ## FluffOS_XK Runtime Notes
 
-This repository is the FluffOS_XK maintenance fork. The current fork-specific runtime work focuses on controlled
-multicore foundations: thread-local VMContext, owner-aware VM workers, owner mailboxes, gateway sessions, and explicit
-owner execution boundaries.
+This repository is the FluffOS_XK maintenance fork. The current fork-specific
+runtime work has completed the production multicore baseline for controlled
+owner/service executor execution. Ordinary legacy LPC remains default-closed by
+design; executor paths require explicit allowlist, same-owner, driver callback,
+frozen payload, ObjectHandle, or owner/service shard contracts.
 
-See [FluffOS_XK 项目现状与多核化改造说明](./multicore-runtime.md) for the current status, effect analysis, safety
-boundaries, and downstream migration guidance.
+Current entry points:
+
+- [Multicore Runtime v2 Contract](./multicore-runtime-v2.md)
+- [Multicore Production Gate](./multicore-production-gate.md)
+- [Owner/Actor Shard VM Multicore API Guide](./owner-multicore-api.md)
+- [Multicore Production Baseline - 2026-06-27](./releases/multicore-production-baseline-2026-06-27.md)
+
+Historical plans and v1 notes are archived under
+[docs/archive/multicore](./archive/multicore/).
 
 ## Current Release
 

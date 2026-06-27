@@ -40,16 +40,22 @@ FluffOS_XK 关注引擎基础能力，不承载具体玩法规则。
 
 ## 多核化运行时状态
 
-当前多核化工作已经落地为受控运行时基础设施，而不是不受限制的后台 LPC 执行。driver 现在具备线程本地 VMContext、owner-aware worker runtime、owner mailbox、owner task trace，以及受保护的 owner LPC probe/canary 路径。
+FluffOS_XK 当前 owner/service executor 模型的生产多核化基线已经完成并封版。
+生产路径已覆盖 owner-local object lifecycle、OwnerExecutor callback task、heartbeat、
+callout、async/file/db、DNS、socket callback、gateway command execute、target-owner
+message，以及 `socket_release` owner-safe release/acquire handshake。
 
-目前的实际效果：
+这是一套受控多核运行时，不是不受限制的任意 legacy LPC 后台执行。普通 legacy LPC
+继续 default-closed，这是当前生产设计边界，不是未完成缺口。进入 executor 必须满足
+显式 allowlist、same-owner、driver callback、frozen payload、ObjectHandle route 或
+owner/service shard domain 合同。
 
-- 快照摘要、角色评分、战斗伤害计算等 CPU 型任务可以通过 VM worker 执行。
-- worker 队列按 owner key 约束，同一 owner 内保持串行，不同 owner 之间可以并行推进。
-- owner id、epoch、mailbox trace、access trace、message/commit trace 为下游迁移到 actor-style 服务边界提供观测和迁移路径。
-- 普通和注册 LPC task 仍默认禁止 off-main；只有受控 probe/canary 这类验证路径可以进入后台执行。
+当前权威入口：
 
-当前状态、改造效果、边界和下游迁移建议见 `docs/multicore-runtime.md`。
+- `docs/multicore-runtime-v2.md`：owner runtime v2 与 production-perfect 合同。
+- `docs/multicore-production-gate.md`：生产门禁字段与已接受证据。
+- `docs/owner-multicore-api.md`：owner/snapshot API 迁移指南。
+- `docs/releases/multicore-production-baseline-2026-06-27.md`：生产基线与 driver checksum。
 
 ## 获取源码
 
@@ -107,7 +113,9 @@ Windows/MSYS2 用户应优先使用 CMake install 路径，而不是手工复制
 ## 文档
 
 - FluffOS 官方文档：https://www.fluffos.info
-- 多核化运行时说明：`docs/multicore-runtime.md`
+- 多核化生产基线：`docs/releases/multicore-production-baseline-2026-06-27.md`
+- 多核化运行时合同：`docs/multicore-runtime-v2.md`
+- 多核化生产门禁：`docs/multicore-production-gate.md`
 - 本地文档入口：`docs/index.md`
 - 本分支变更记录：`CHANGELOG.md`
 - 发布与工作流说明：`RELEASE.md`

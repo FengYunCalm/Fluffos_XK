@@ -1,5 +1,12 @@
 # FluffOS_XK 项目知识文档
 
+> 当前状态说明：本文是仓库知识地图和历史学习产物，用于理解 FluffOS_XK
+> 的结构与多核化演进。当前生产事实以
+> [`multicore-runtime-v2.md`](multicore-runtime-v2.md)、
+> [`multicore-production-gate.md`](multicore-production-gate.md) 和
+> [`releases/multicore-production-baseline-2026-06-27.md`](releases/multicore-production-baseline-2026-06-27.md)
+> 为准；归档计划不再代表当前待办。
+
 ## 结论
 
 FluffOS_XK 是一个面向实际 MUD/LPC 运行项目的 FluffOS 维护分支。仓库核心仍是传统 driver、LPC VM、事件循环和对象系统，但当前主线已经在 owner/actor 方向上完成生产多核化执行面：线程本地 `VMContext`、受控 `VMWorkerRuntime`、owner metadata、owner mailbox、主线程 owner queue、ObjectHandle、owner shard 状态索引、cross-owner 访问审计、enforced 模式边界、gateway/player command、heartbeat、callout、async/DNS/socket callback 和 `socket_release` owner-safe handshake。
@@ -472,25 +479,27 @@ payload 约束：
 | mutable value 跨线程共享 | array/mapping/object ref 可能被双方修改 | owner payload 只允许 frozen/deep-copy 风格数据 |
 | legacy scope 误判 | `legacy/main` 与显式 owner 混用会掩盖问题 | effective owner、command_giver 特判、trace |
 | 后台 LPC 执行风险 | 任意 LPC 会触碰全局 VM 和对象系统 | 普通 LPC 默认关闭，只开放受控只读 allowlist |
-| 短验收不足 | 3 用户短验收不能代表生产稳定 | 后续必须做长时间、多场景、高并发压测 |
+| 验收口径漂移 | 旧计划曾要求更长时长和更高并发档位 | 当前以已接受的 10 用户 30 分钟 audit、final audit 和 production gate 文档为准 |
 
 ## 建议阅读顺序
 
 1. `README.md`
-2. `docs/multicore-runtime.md`
-3. `docs/multicore-actor-vm-plan.md`
-4. `docs/owner-multicore-api.md`
-5. `src/vm/context.h`
-6. `src/vm/owner.h`
-7. `src/vm/worker.h`
-8. `src/vm/internal/context.cc`
-9. `src/vm/internal/owner.cc`
-10. `src/vm/internal/object_store.cc`
-11. `src/vm/internal/worker.cc`
-12. `src/packages/core/vm_owner.cc`
-13. `src/packages/core/vm_worker.cc`
-14. `src/packages/core/call_out.cc`
-15. `src/packages/core/heartbeat.cc`
-16. `src/comm.cc`
-17. `src/packages/gateway/gateway_session.cc`
-18. `src/tests/test_lpc.cc`
+2. `docs/multicore-runtime-v2.md`
+3. `docs/multicore-production-gate.md`
+4. `docs/releases/multicore-production-baseline-2026-06-27.md`
+5. `docs/owner-multicore-api.md`
+6. `docs/archive/multicore/README.md`
+7. `src/vm/context.h`
+8. `src/vm/owner.h`
+9. `src/vm/worker.h`
+10. `src/vm/internal/context.cc`
+11. `src/vm/internal/owner.cc`
+12. `src/vm/internal/object_store.cc`
+13. `src/vm/internal/worker.cc`
+14. `src/packages/core/vm_owner.cc`
+15. `src/packages/core/vm_worker.cc`
+16. `src/packages/core/call_out.cc`
+17. `src/packages/core/heartbeat.cc`
+18. `src/comm.cc`
+19. `src/packages/gateway/gateway_session.cc`
+20. `src/tests/test_lpc.cc`
