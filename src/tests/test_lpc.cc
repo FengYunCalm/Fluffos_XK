@@ -7449,6 +7449,10 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
   ASSERT_EQ(mapping_number(before, "object_store_owner_fast_path_ready"), 1);
   ASSERT_EQ(mapping_number(before, "owner_local_fast_path_ready"), 1);
   ASSERT_STREQ(mapping_string(before, "owner_local_fast_path_lock_model"), "shared_mutex_read_lock");
+  ASSERT_STREQ(mapping_string(before, "owner_local_lifecycle_write_model"),
+               "owner_shard_canonical_with_global_compat_mirror");
+  ASSERT_STREQ(mapping_string(before, "global_record_write_model"), "compatibility_mirror");
+  ASSERT_EQ(mapping_number(before, "global_record_canonical_write"), 0);
   ASSERT_EQ(mapping_number(before, "owner_local_global_bridge_consistent"), 1);
   ASSERT_EQ(mapping_number(before, "owner_local_to_global_bridge_consistent"), 1);
   ASSERT_EQ(mapping_number(before, "global_to_owner_local_bridge_consistent"), 1);
