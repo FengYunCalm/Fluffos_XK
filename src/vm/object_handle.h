@@ -35,6 +35,7 @@ struct VMObjectHandleResolveResult {
   object_t *object{nullptr};
   VMObjectHandleResolveStatus status{VMObjectHandleResolveStatus::kInvalidHandle};
   bool resolved_via_owner_local_store{false};
+  bool owner_local_fast_path_used{false};
   bool diagnosed_via_owner_local_store{false};
   bool diagnosed_via_owner_local_path_index{false};
   bool diagnosed_via_owner_local_cross_shard{false};

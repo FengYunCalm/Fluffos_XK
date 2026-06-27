@@ -890,6 +890,7 @@ TEST_F(DriverTest, TestVirtualObjectUsesDefaultOwnerAndUpdatesStorePath) {
   ASSERT_EQ(handle_resolve.object, virtual_object);
   ASSERT_STREQ(vm_object_handle_resolve_status_name(handle_resolve.status), "current");
   ASSERT_TRUE(handle_resolve.resolved_via_owner_local_store);
+  ASSERT_TRUE(handle_resolve.owner_local_fast_path_used);
   ASSERT_FALSE(handle_resolve.global_live_object_found);
   ASSERT_FALSE(handle_resolve.resolved_via_global_index);
   ASSERT_EQ(vm_object_handle_resolve(handle), virtual_object);
@@ -900,6 +901,9 @@ TEST_F(DriverTest, TestVirtualObjectUsesDefaultOwnerAndUpdatesStorePath) {
   ASSERT_EQ(mapping_number(handle_status, "current"), 1);
   ASSERT_STREQ(mapping_string(handle_status, "resolve_status"), "current");
   ASSERT_EQ(mapping_number(handle_status, "resolved_via_owner_local_store"), 1);
+  ASSERT_EQ(mapping_number(handle_status, "owner_local_fast_path_used"), 1);
+  ASSERT_STREQ(mapping_string(handle_status, "owner_local_fast_path_lock_model"),
+               "shared_mutex_read_lock");
   ASSERT_EQ(mapping_number(handle_status, "diagnosed_via_owner_local_store"), 0);
   ASSERT_EQ(mapping_number(handle_status, "diagnosed_via_owner_local_path_index"), 0);
   ASSERT_EQ(mapping_number(handle_status, "owner_local_object_pointer_index_found"), 1);
@@ -7442,6 +7446,9 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
   ASSERT_STREQ(mapping_string(before, "status_model"), "object_store_status");
   ASSERT_STREQ(mapping_string(before, "directory_model"), "owner_local_object_directory");
   ASSERT_STREQ(mapping_string(before, "storage_model"), "owner_local_store");
+  ASSERT_EQ(mapping_number(before, "object_store_owner_fast_path_ready"), 1);
+  ASSERT_EQ(mapping_number(before, "owner_local_fast_path_ready"), 1);
+  ASSERT_STREQ(mapping_string(before, "owner_local_fast_path_lock_model"), "shared_mutex_read_lock");
   ASSERT_EQ(mapping_number(before, "owner_local_global_bridge_consistent"), 1);
   ASSERT_EQ(mapping_number(before, "owner_local_to_global_bridge_consistent"), 1);
   ASSERT_EQ(mapping_number(before, "global_to_owner_local_bridge_consistent"), 1);
@@ -7926,6 +7933,7 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
   ASSERT_EQ(handle_resolve.object, obj);
   ASSERT_STREQ(vm_object_handle_resolve_status_name(handle_resolve.status), "current");
   ASSERT_TRUE(handle_resolve.resolved_via_owner_local_store);
+  ASSERT_TRUE(handle_resolve.owner_local_fast_path_used);
   ASSERT_FALSE(handle_resolve.diagnosed_via_owner_local_store);
   ASSERT_FALSE(handle_resolve.diagnosed_via_owner_local_path_index);
   ASSERT_TRUE(handle_resolve.owner_local_object_pointer_index_found);
