@@ -669,6 +669,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["compute_result_executor_safe"]);
     ASSERT_EQ(1, boundary_contract["executor_callback_task_boundary_ready"]);
     ASSERT_EQ(1, boundary_contract["executor_callback_allowlist_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_callback_admission_unified"]);
     ASSERT_EQ(1, boundary_contract["executor_callback_cleanup_main_required"]);
     ASSERT_EQ("heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute",
               boundary_contract["executor_callback_allowlist"]);
@@ -762,6 +763,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["owner_task_manifest_v2_ready"]);
     ASSERT_EQ("owner_task_manifest_v2", status["owner_task_manifest_schema"]);
     ASSERT_EQ(1, status["owner_executor_admission_gate_ready"]);
+    ASSERT_EQ(1, status["owner_callback_admission_unified"]);
     ASSERT_EQ("owner_epoch_payload_allowlist_deadline_guard", status["owner_executor_admission_policy"]);
     ASSERT(intp(status["owner_executor_admission_accepted"]));
     ASSERT(intp(status["owner_executor_admission_rejected"]));

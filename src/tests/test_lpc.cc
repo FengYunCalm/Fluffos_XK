@@ -4162,6 +4162,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "owner_task_manifest_v2_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_task_manifest_schema"), "owner_task_manifest_v2");
     ASSERT_EQ(mapping_number(status, "owner_executor_admission_gate_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_callback_admission_unified"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_executor_admission_policy"),
                  "owner_epoch_payload_allowlist_deadline_guard");
     ASSERT_GE(mapping_number(status, "owner_executor_admission_accepted"), 0);
@@ -4499,6 +4500,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "compute_result_executor_safe"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "executor_callback_task_boundary_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "executor_callback_allowlist_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_callback_admission_unified"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "executor_callback_cleanup_main_required"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "executor_callback_allowlist"),
                  "heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute");

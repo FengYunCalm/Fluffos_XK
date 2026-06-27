@@ -356,6 +356,7 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "owner_task_manifest_v2_ready", 1);
   add_mapping_string(map, "owner_task_manifest_schema", kOwnerTaskManifestSchemaV2);
   add_mapping_pair(map, "owner_executor_admission_gate_ready", 1);
+  add_mapping_pair(map, "owner_callback_admission_unified", 1);
   add_mapping_string(map, "owner_executor_admission_policy", kOwnerTaskAdmissionPolicyV2);
   add_mapping_pair(map, "owner_executor_admission_accepted",
                    static_cast<long>(metrics.owner_executor_admission_accepted));
@@ -1074,7 +1075,7 @@ mapping_t *vm_context_contract_mapping() {
 }
 
 mapping_t *owner_executor_boundary_contract_mapping() {
-  auto *contract = allocate_mapping(77);
+  auto *contract = allocate_mapping(78);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "boundary_model", "owner_executor_boundary_v1");
   add_mapping_string(contract, "implementation_state", "compilation_unit_active");
@@ -1114,6 +1115,7 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "compute_result_executor_safe", 1);
   add_mapping_pair(contract, "executor_callback_task_boundary_ready", 1);
   add_mapping_pair(contract, "executor_callback_allowlist_ready", 1);
+  add_mapping_pair(contract, "owner_callback_admission_unified", 1);
   add_mapping_pair(contract, "executor_callback_cleanup_main_required", 1);
   add_mapping_string(contract, "executor_callback_allowlist",
                      "heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute");
@@ -1432,6 +1434,48 @@ void enqueue_owner_executor_callback_cleanup_locked(OwnerMailboxTask &task) {
 void schedule_owner_executor_callback_cleanup_on_main(OwnerMailboxTask &task) {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
   enqueue_owner_executor_callback_cleanup_locked(task);
+}
+
+struct OwnerTaskAdmissionResult {
+  bool accepted{false};
+};
+
+OwnerTaskAdmissionResult reject_owner_executor_callback_admission_locked(OwnerMailboxTask &task, const char *state,
+                                                                         const char *admission_state,
+                                                                         bool dropped) {
+  task.admission_state = normalize_task_text(admission_state, "rejected");
+  append_owner_task_trace(task, state);
+  if (dropped) {
+    owner_executor_admission_dropped.fetch_add(1, std::memory_order_relaxed);
+    owner_executor_callback_dropped.fetch_add(1, std::memory_order_relaxed);
+    owner_executor_stale_drop.fetch_add(1, std::memory_order_relaxed);
+    enqueue_owner_executor_callback_cleanup_locked(task);
+  } else {
+    owner_executor_admission_rejected.fetch_add(1, std::memory_order_relaxed);
+  }
+  return OwnerTaskAdmissionResult{false};
+}
+
+OwnerTaskAdmissionResult admit_owner_executor_callback_task_locked(OwnerMailboxTask &task) {
+  apply_owner_task_manifest_v2(task);
+
+  const auto *descriptor = find_owner_executor_task_descriptor(task.task_type);
+  if (!descriptor || descriptor->dispatch_kind != OwnerExecutorDispatchKind::ExecutorCallback ||
+      descriptor->rejected || descriptor->executor_runnable == 0 || descriptor->executor_safe == 0) {
+    return reject_owner_executor_callback_admission_locked(task, "executor_callback_admission_rejected",
+                                                          "rejected_callback_not_allowlisted", false);
+  }
+
+  if (!task.callback || !task.has_target_handle || !task.target || !task.target_handle.valid ||
+      task.owner_id.empty()) {
+    return reject_owner_executor_callback_admission_locked(task, "executor_callback_admission_dropped",
+                                                          "dropped_callback_invalid_target", true);
+  }
+
+  task.admission_state = "accepted";
+  owner_executor_admission_accepted.fetch_add(1, std::memory_order_relaxed);
+  append_owner_task_trace(task, "executor_callback_admission_accepted");
+  return OwnerTaskAdmissionResult{true};
 }
 
 int drain_owner_executor_callback_cleanups(int limit) {
@@ -1989,9 +2033,14 @@ void store_max_atomic(std::atomic<uint64_t> &target, uint64_t value) {
   }
 }
 
-void enqueue_owner_task_locked(OwnerMailboxTask task, const std::string &owner_id, bool *notify_owner_thread) {
-  apply_owner_task_manifest_v2(task);
-  owner_executor_admission_accepted.fetch_add(1, std::memory_order_relaxed);
+void enqueue_owner_task_locked(OwnerMailboxTask task, const std::string &owner_id, bool *notify_owner_thread,
+                               bool admission_recorded = false) {
+  if (task.manifest_version == 0 || task.admission_policy.empty()) {
+    apply_owner_task_manifest_v2(task);
+  }
+  if (!admission_recorded) {
+    owner_executor_admission_accepted.fetch_add(1, std::memory_order_relaxed);
+  }
   append_owner_task_trace(task, "queued");
   auto task_requires_main = owner_task_requires_main_drain(task);
   if (owner_scheduler_state.enqueue_owner_task(std::move(task), owner_id, task_requires_main,
@@ -2855,10 +2904,6 @@ uint64_t vm_owner_enqueue_executor_task(object_t *target, const char *task_type,
   }
 
   auto normalized_task_type = std::string(normalize_task_text(task_type, ""));
-  const auto *descriptor = find_owner_executor_task_descriptor(normalized_task_type);
-  if (!descriptor || descriptor->dispatch_kind != OwnerExecutorDispatchKind::ExecutorCallback) {
-    return 0;
-  }
 
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
@@ -2894,11 +2939,13 @@ uint64_t vm_owner_enqueue_executor_task(object_t *target, const char *task_type,
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     if (!owner_threads.empty()) {
-      apply_owner_task_manifest_v2(task);
-      append_owner_task_trace(task, "executor_callback_queued");
-      enqueue_owner_task_locked(std::move(task), normalized_owner_id, &notify_owner_thread);
-      owner_executor_callback_queued.fetch_add(1, std::memory_order_relaxed);
-      queued = true;
+      auto admission = admit_owner_executor_callback_task_locked(task);
+      if (admission.accepted) {
+        append_owner_task_trace(task, "executor_callback_queued");
+        enqueue_owner_task_locked(std::move(task), normalized_owner_id, &notify_owner_thread, true);
+        owner_executor_callback_queued.fetch_add(1, std::memory_order_relaxed);
+        queued = true;
+      }
     }
   }
   if (!queued) {
