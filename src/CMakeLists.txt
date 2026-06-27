@@ -418,6 +418,7 @@ set(SRC
   "vm/internal/owner.cc"
   "vm/internal/owner_executor.cc"
   "vm/internal/owner_task_manifest.cc"
+  "vm/internal/owner_trace_store.cc"
   "vm/internal/posix_timers.cc"
   "vm/internal/master.cc"
   "vm/internal/otable.cc"
