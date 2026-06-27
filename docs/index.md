@@ -21,12 +21,18 @@ FluffOS codebase contains three parts:
 
 This repository is the FluffOS_XK maintenance fork. The current fork-specific
 runtime work has completed the production multicore baseline for controlled
-owner/service executor execution. Ordinary legacy LPC remains default-closed by
-design; executor paths require explicit allowlist, same-owner, driver callback,
-frozen payload, ObjectHandle, or owner/service shard contracts.
+owner/service executor execution. The fork is intended to be consumed as a
+source-level engine repository by downstream LPC/MUD projects that keep mudlib
+content, accounts, deployment secrets, and operations policy in their own
+repositories.
+
+Ordinary legacy LPC remains default-closed by design; executor paths require
+explicit allowlist, same-owner, driver callback, frozen payload, ObjectHandle,
+or owner/service shard contracts.
 
 Current entry points:
 
+- [FluffOS_XK Engine Overview](./fluffos-xk-overview.md)
 - [Multicore Runtime v2 Contract](./multicore-runtime-v2.md)
 - [Multicore Production Gate](./multicore-production-gate.md)
 - [Owner/Actor Shard VM Multicore API Guide](./owner-multicore-api.md)
