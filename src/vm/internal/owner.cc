@@ -6,6 +6,7 @@
 #include "vm/owner.h"
 #include "vm/internal/owner_executor.h"
 #include "vm/internal/owner_future_store.h"
+#include "vm/internal/owner_runtime_metrics.h"
 #include "vm/internal/owner_scheduler_state.h"
 #include "vm/internal/owner_task_manifest.h"
 #include "vm/internal/owner_trace_store.h"
@@ -193,96 +194,13 @@ constexpr std::array<VMContextReadinessGate, 13> kVMContextOrdinaryLpcReadinessG
      "keep_generic_dispatch_explicit_open_and_frozen_result_guarded", 1},
 }};
 
-std::atomic<uint64_t> total_checks{0};
-std::atomic<uint64_t> mismatch_checks{0};
-std::atomic<uint64_t> next_mailbox_task_id{1};
-std::atomic<uint64_t> total_enqueued{0};
-std::atomic<uint64_t> total_drained{0};
-std::atomic<uint64_t> total_cross_owner_accesses{0};
-std::atomic<uint64_t> total_cross_owner_snapshot_accesses{0};
-std::atomic<uint64_t> total_cross_owner_message_accesses{0};
-std::atomic<uint64_t> total_cross_owner_rejected_accesses{0};
-std::atomic<uint64_t> total_cross_owner_enforced_blocks{0};
-std::atomic<uint64_t> owner_thread_dispatched{0};
-std::atomic<uint64_t> owner_executor_budget_yields{0};
+OwnerRuntimeMetrics owner_runtime_metrics;
+#define OWNER_RUNTIME_METRIC_ALIAS(name, initial) std::atomic<uint64_t> &name = owner_runtime_metrics.name;
+OWNER_RUNTIME_METRIC_FIELDS(OWNER_RUNTIME_METRIC_ALIAS)
+#undef OWNER_RUNTIME_METRIC_ALIAS
 std::string owner_executor_last_budget_yield_owner;
 long owner_executor_last_budget_yield_backlog{0};
 long owner_executor_last_budget_yield_safe_backlog{0};
-std::atomic<uint64_t> owner_thread_starts{0};
-std::atomic<uint64_t> owner_thread_stops{0};
-std::atomic<uint64_t> owner_thread_context_bound{0};
-std::atomic<uint64_t> owner_thread_object_store_isolated{0};
-std::atomic<uint64_t> owner_thread_owner_bound{0};
-std::atomic<uint64_t> owner_thread_owner_cleared{0};
-std::atomic<uint64_t> owner_thread_execution_cleared{0};
-std::atomic<uint64_t> owner_thread_eval_stack_owner_bound{0};
-std::atomic<uint64_t> owner_thread_eval_stack_cleared{0};
-std::atomic<uint64_t> owner_thread_eval_stack_leak_detected{0};
-std::atomic<uint64_t> owner_thread_control_stack_owner_bound{0};
-std::atomic<uint64_t> owner_thread_control_stack_cleared{0};
-std::atomic<uint64_t> owner_thread_control_stack_leak_detected{0};
-std::atomic<uint64_t> owner_thread_value_stack_owner_bound{0};
-std::atomic<uint64_t> owner_thread_value_stack_cleared{0};
-std::atomic<uint64_t> owner_thread_value_stack_leak_detected{0};
-std::atomic<uint64_t> owner_thread_apply_return_owner_bound{0};
-std::atomic<uint64_t> owner_thread_apply_return_cleared{0};
-std::atomic<uint64_t> owner_thread_apply_return_leak_detected{0};
-std::atomic<uint64_t> owner_thread_lpc_canary_flag_cleared{0};
-std::atomic<uint64_t> owner_thread_context_leak_detected{0};
-std::atomic<uint64_t> owner_thread_lpc_rejected{0};
-std::atomic<uint64_t> owner_thread_owner_state_guarded{0};
-std::atomic<uint64_t> owner_thread_message_dispatched{0};
-std::atomic<uint64_t> owner_executor_command_consume_entry_executed{0};
-std::atomic<uint64_t> owner_executor_command_frame_restore_entry_executed{0};
-std::atomic<uint64_t> owner_thread_gateway_command_guarded{0};
-std::atomic<uint64_t> owner_thread_gateway_command_rejected{0};
-std::atomic<uint64_t> owner_thread_lpc_probe_executed{0};
-std::atomic<uint64_t> owner_thread_lpc_probe_failed{0};
-std::atomic<uint64_t> owner_thread_lpc_probe_guarded{0};
-std::atomic<uint64_t> owner_thread_lpc_canary_executed{0};
-std::atomic<uint64_t> owner_thread_lpc_canary_succeeded{0};
-std::atomic<uint64_t> owner_thread_lpc_canary_failed{0};
-std::atomic<uint64_t> owner_thread_lpc_canary_rejected{0};
-std::atomic<uint64_t> owner_thread_lpc_task_executed{0};
-std::atomic<uint64_t> owner_thread_lpc_task_succeeded{0};
-std::atomic<uint64_t> owner_thread_lpc_task_failed{0};
-std::atomic<uint64_t> owner_thread_lpc_task_rejected{0};
-std::atomic<uint64_t> owner_thread_ordinary_lpc_executed{0};
-std::atomic<uint64_t> owner_thread_ordinary_lpc_succeeded{0};
-std::atomic<uint64_t> owner_thread_ordinary_lpc_failed{0};
-std::atomic<uint64_t> owner_thread_ordinary_lpc_rejected{0};
-std::atomic<uint64_t> owner_thread_compute_result_completed{0};
-std::atomic<uint64_t> owner_executor_callback_queued{0};
-std::atomic<uint64_t> owner_executor_callback_dispatched{0};
-std::atomic<uint64_t> owner_executor_callback_dropped{0};
-std::atomic<uint64_t> owner_executor_callback_main_cleanup_queued{0};
-std::atomic<uint64_t> owner_executor_callback_main_cleanup_dispatched{0};
-std::atomic<uint64_t> owner_executor_admission_accepted{0};
-std::atomic<uint64_t> owner_executor_admission_rejected{0};
-std::atomic<uint64_t> owner_executor_admission_dropped{0};
-std::atomic<uint64_t> owner_executor_stale_drop{0};
-std::atomic<uint64_t> owner_executor_destructed_drop{0};
-std::atomic<uint64_t> owner_executor_epoch_mismatch_drop{0};
-std::atomic<uint64_t> owner_executor_future_timeout{0};
-std::atomic<uint64_t> owner_executor_future_cancelled{0};
-std::atomic<uint64_t> owner_executor_owner_claims{0};
-std::atomic<uint64_t> owner_executor_owner_releases{0};
-std::atomic<uint64_t> owner_executor_runnable_task_dispatched{0};
-std::atomic<uint64_t> owner_executor_safe_task_dispatched{0};
-std::atomic<uint64_t> owner_executor_probe_executed{0};
-std::atomic<uint64_t> owner_executor_main_required_skipped{0};
-std::atomic<uint64_t> owner_executor_max_parallel_owners{0};
-std::atomic<uint64_t> owner_executor_max_owner_parallel{0};
-std::atomic<uint64_t> owner_executor_same_owner_claim_conflicts{0};
-std::atomic<uint64_t> owner_main_queued{0};
-std::atomic<uint64_t> owner_main_dispatched{0};
-std::atomic<uint64_t> owner_main_stale{0};
-std::atomic<uint64_t> owner_main_destructed{0};
-std::atomic<uint64_t> owner_main_budget_yields{0};
-std::atomic<uint64_t> owner_normal_path_main_fallback_count{0};
-std::atomic<uint64_t> owner_explicit_main_fallback_count{0};
-std::atomic<uint64_t> owner_main_owner_claims{0};
-std::atomic<uint64_t> owner_main_owner_releases{0};
 
 struct OwnerExecutorCallbackCleanup {
   uint64_t task_id;
@@ -433,18 +351,18 @@ long owner_executor_safe_queue_depth();
 long owner_main_required_queue_depth();
 
 void add_owner_runtime_v2_status_fields(mapping_t *map) {
-  auto normal_path_main_fallbacks =
-      static_cast<long>(owner_normal_path_main_fallback_count.load(std::memory_order_relaxed));
+  auto metrics = owner_runtime_metrics.snapshot();
+  auto normal_path_main_fallbacks = static_cast<long>(metrics.owner_normal_path_main_fallback_count);
   add_mapping_pair(map, "owner_task_manifest_v2_ready", 1);
   add_mapping_string(map, "owner_task_manifest_schema", kOwnerTaskManifestSchemaV2);
   add_mapping_pair(map, "owner_executor_admission_gate_ready", 1);
   add_mapping_string(map, "owner_executor_admission_policy", kOwnerTaskAdmissionPolicyV2);
   add_mapping_pair(map, "owner_executor_admission_accepted",
-                   static_cast<long>(owner_executor_admission_accepted.load(std::memory_order_relaxed)));
+                   static_cast<long>(metrics.owner_executor_admission_accepted));
   add_mapping_pair(map, "owner_executor_admission_rejected",
-                   static_cast<long>(owner_executor_admission_rejected.load(std::memory_order_relaxed)));
+                   static_cast<long>(metrics.owner_executor_admission_rejected));
   add_mapping_pair(map, "owner_executor_admission_dropped",
-                   static_cast<long>(owner_executor_admission_dropped.load(std::memory_order_relaxed)));
+                   static_cast<long>(metrics.owner_executor_admission_dropped));
   add_mapping_pair(map, "owner_executor_payload_policy_v2_ready", 1);
   add_mapping_pair(map, "owner_executor_trace_schema_v2_ready", 1);
   add_mapping_string(map, "owner_executor_trace_schema", kOwnerExecutorTraceSchemaV2);
@@ -455,18 +373,14 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "owner_executor_safe_queue_depth", owner_executor_safe_queue_depth());
   add_mapping_pair(map, "owner_executor_main_required_queue_depth", owner_main_required_queue_depth());
   add_mapping_pair(map, "owner_executor_future_timeout_cancel_ready", 1);
-  add_mapping_pair(map, "owner_executor_future_timeout",
-                   static_cast<long>(owner_executor_future_timeout.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "owner_executor_future_cancelled",
-                   static_cast<long>(owner_executor_future_cancelled.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "owner_executor_stale_drop",
-                   static_cast<long>(owner_executor_stale_drop.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "owner_executor_destructed_drop",
-                   static_cast<long>(owner_executor_destructed_drop.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "owner_executor_future_timeout", static_cast<long>(metrics.owner_executor_future_timeout));
+  add_mapping_pair(map, "owner_executor_future_cancelled", static_cast<long>(metrics.owner_executor_future_cancelled));
+  add_mapping_pair(map, "owner_executor_stale_drop", static_cast<long>(metrics.owner_executor_stale_drop));
+  add_mapping_pair(map, "owner_executor_destructed_drop", static_cast<long>(metrics.owner_executor_destructed_drop));
   add_mapping_pair(map, "owner_executor_epoch_mismatch_drop",
-                   static_cast<long>(owner_executor_epoch_mismatch_drop.load(std::memory_order_relaxed)));
+                   static_cast<long>(metrics.owner_executor_epoch_mismatch_drop));
   add_mapping_pair(map, "owner_executor_context_cleanup_leaks",
-                   static_cast<long>(owner_thread_context_leak_detected.load(std::memory_order_relaxed)));
+                   static_cast<long>(metrics.owner_thread_context_leak_detected));
   add_mapping_pair(map, "owner_executor_future_pending_backlog", owner_pending_future_count());
   add_mapping_pair(map, "owner_executor_socket_release_trace_ready", 1);
   add_mapping_pair(map, "registered_owner_task_domains_ready", 1);
@@ -474,8 +388,7 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "target_owner_message_executor_ready", 1);
   add_mapping_pair(map, "normal_path_main_fallback_count", normal_path_main_fallbacks);
   add_mapping_pair(map, "normal_path_main_fallback_ready", normal_path_main_fallbacks == 0 ? 1 : 0);
-  add_mapping_pair(map, "explicit_fallback_count",
-                   static_cast<long>(owner_explicit_main_fallback_count.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "explicit_fallback_count", static_cast<long>(metrics.owner_explicit_main_fallback_count));
   add_mapping_pair(map, "service_shard_executor_ready", 1);
   add_mapping_pair(map, "domain_task_registry_mudlib_aligned", 1);
   add_mapping_pair(map, "keyed_service_shard_ready", 1);
