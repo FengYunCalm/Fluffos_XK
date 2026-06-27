@@ -1673,9 +1673,11 @@ TEST_F(DriverTest, TestVmOwnerHeartbeatDispatchesThroughOwnerExecutor) {
   ASSERT_EQ(mapping_number(after, "heartbeat_owner_executor_ready"), 1);
   ASSERT_STREQ(mapping_string(after, "heartbeat_owner_executor_task_type"), "heartbeat");
   ASSERT_STREQ(mapping_string(after, "heartbeat_owner_executor_route"), "owner_executor");
-  ASSERT_STREQ(mapping_string(after, "heartbeat_owner_executor_fallback_route"), "owner_main_queue");
-  ASSERT_STREQ(mapping_string(after, "heartbeat_owner_executor_policy"), "audit_enforced_owner_thread_else_main");
-  ASSERT_EQ(mapping_number(after, "heartbeat_owner_executor_fallback_main_ready"), 1);
+  ASSERT_STREQ(mapping_string(after, "heartbeat_owner_executor_fallback_route"),
+               "explicit_fallback_owner_main_queue");
+  ASSERT_STREQ(mapping_string(after, "heartbeat_owner_executor_policy"),
+               "audit_enforced_owner_thread_normal_path");
+  ASSERT_EQ(mapping_number(after, "heartbeat_owner_executor_fallback_main_ready"), 0);
   ASSERT_EQ(mapping_number(after, "heartbeat_current_object_thread_local"), 1);
   free_mapping(after);
 }
@@ -1876,12 +1878,14 @@ TEST_F(DriverTest, TestVmOwnerCalloutDispatchesThroughOwnerExecutor) {
   ASSERT_EQ(mapping_number(after, "callout_owner_executor_ready"), 1);
   ASSERT_STREQ(mapping_string(after, "callout_owner_executor_task_type"), "call_out");
   ASSERT_STREQ(mapping_string(after, "callout_owner_executor_route"), "owner_executor");
-  ASSERT_STREQ(mapping_string(after, "callout_owner_executor_fallback_route"), "owner_main_queue");
-  ASSERT_STREQ(mapping_string(after, "callout_owner_executor_policy"), "audit_enforced_owner_thread_else_main");
+  ASSERT_STREQ(mapping_string(after, "callout_owner_executor_fallback_route"),
+               "explicit_fallback_owner_main_queue");
+  ASSERT_STREQ(mapping_string(after, "callout_owner_executor_policy"),
+               "audit_enforced_owner_thread_normal_path");
   ASSERT_EQ(mapping_number(after, "callout_owner_executor_expired_handle_detach_ready"), 1);
   ASSERT_EQ(mapping_number(after, "callout_owner_executor_cleanup_main_ready"), 1);
   ASSERT_EQ(mapping_number(after, "callout_owner_executor_drop_cleanup_ready"), 1);
-  ASSERT_EQ(mapping_number(after, "callout_owner_executor_fallback_main_ready"), 1);
+  ASSERT_EQ(mapping_number(after, "callout_owner_executor_fallback_main_ready"), 0);
   free_mapping(after);
 }
 
@@ -2097,16 +2101,20 @@ TEST_F(DriverTest, TestVmOwnerAsyncDnsCallbacksDispatchThroughOwnerExecutor) {
   ASSERT_EQ(mapping_number(after, "async_owner_executor_ready"), 1);
   ASSERT_STREQ(mapping_string(after, "async_owner_executor_task_type"), "async_callback");
   ASSERT_STREQ(mapping_string(after, "async_owner_executor_route"), "owner_executor");
-  ASSERT_STREQ(mapping_string(after, "async_owner_executor_fallback_route"), "owner_main_queue");
-  ASSERT_STREQ(mapping_string(after, "async_owner_executor_policy"), "audit_enforced_owner_thread_else_main");
+  ASSERT_STREQ(mapping_string(after, "async_owner_executor_fallback_route"),
+               "explicit_fallback_owner_main_queue");
+  ASSERT_STREQ(mapping_string(after, "async_owner_executor_policy"),
+               "audit_enforced_owner_thread_normal_path");
   ASSERT_STREQ(mapping_string(after, "async_owner_executor_result_policy"), "frozen_deep_copy_result");
   ASSERT_EQ(mapping_number(after, "async_owner_executor_cleanup_main_ready"), 1);
   ASSERT_EQ(mapping_number(after, "async_owner_executor_drop_cleanup_ready"), 1);
   ASSERT_EQ(mapping_number(after, "dns_owner_executor_ready"), 1);
   ASSERT_STREQ(mapping_string(after, "dns_owner_executor_task_type"), "dns_callback");
   ASSERT_STREQ(mapping_string(after, "dns_owner_executor_route"), "owner_executor");
-  ASSERT_STREQ(mapping_string(after, "dns_owner_executor_fallback_route"), "owner_main_queue");
-  ASSERT_STREQ(mapping_string(after, "dns_owner_executor_policy"), "audit_enforced_owner_thread_else_main");
+  ASSERT_STREQ(mapping_string(after, "dns_owner_executor_fallback_route"),
+               "explicit_fallback_owner_main_queue");
+  ASSERT_STREQ(mapping_string(after, "dns_owner_executor_policy"),
+               "audit_enforced_owner_thread_normal_path");
   ASSERT_STREQ(mapping_string(after, "dns_owner_executor_result_policy"), "frozen_deep_copy_result");
   ASSERT_EQ(mapping_number(after, "dns_owner_executor_owner_epoch_capture_ready"), 1);
   ASSERT_EQ(mapping_number(after, "dns_owner_executor_cleanup_main_ready"), 1);
@@ -2314,8 +2322,10 @@ TEST_F(DriverTest, TestVmOwnerSocketCallbacksDispatchThroughOwnerExecutor) {
   ASSERT_EQ(mapping_number(after, "socket_owner_executor_ready"), 1);
   ASSERT_STREQ(mapping_string(after, "socket_owner_executor_task_type"), "socket_callback");
   ASSERT_STREQ(mapping_string(after, "socket_owner_executor_route"), "owner_executor");
-  ASSERT_STREQ(mapping_string(after, "socket_owner_executor_fallback_route"), "owner_main_queue");
-  ASSERT_STREQ(mapping_string(after, "socket_owner_executor_policy"), "audit_enforced_owner_thread_else_main");
+  ASSERT_STREQ(mapping_string(after, "socket_owner_executor_fallback_route"),
+               "explicit_fallback_owner_main_queue");
+  ASSERT_STREQ(mapping_string(after, "socket_owner_executor_policy"),
+               "audit_enforced_owner_thread_normal_path");
   ASSERT_STREQ(mapping_string(after, "socket_owner_executor_result_policy"), "frozen_deep_copy_args");
   ASSERT_EQ(mapping_number(after, "socket_owner_executor_cleanup_main_ready"), 1);
   ASSERT_EQ(mapping_number(after, "socket_owner_executor_drop_cleanup_ready"), 1);
@@ -3182,10 +3192,10 @@ TEST_F(DriverTest, TestCallOtherEnforcedModeBlocksCrossOwnerCall) {
   ASSERT_EQ(mapping_number(submitted_map, "async_only"), 1);
   ASSERT_EQ(mapping_number(submitted_map, "frozen_payload"), 1);
   ASSERT_EQ(mapping_number(submitted_map, "payload_frozen"), 1);
-  ASSERT_EQ(mapping_number(submitted_map, "requires_owner_mailbox"), 0);
-  ASSERT_EQ(mapping_number(submitted_map, "requires_owner_main_queue"), 1);
-  ASSERT_EQ(mapping_number(submitted_map, "main_required"), 1);
-  ASSERT_EQ(mapping_number(submitted_map, "queued_on_main"), 1);
+  ASSERT_EQ(mapping_number(submitted_map, "requires_owner_mailbox"), 1);
+  ASSERT_EQ(mapping_number(submitted_map, "requires_owner_main_queue"), 0);
+  ASSERT_EQ(mapping_number(submitted_map, "main_required"), 0);
+  ASSERT_EQ(mapping_number(submitted_map, "queued_on_main"), 0);
   ASSERT_EQ(mapping_number(submitted_map, "message_only_cross_owner"), 1);
   ASSERT_EQ(mapping_number(submitted_map, "direct_cross_owner_write"), 0);
   ASSERT_EQ(mapping_number(submitted_map, "target_handle_current"), 1);
@@ -3202,7 +3212,16 @@ TEST_F(DriverTest, TestCallOtherEnforcedModeBlocksCrossOwnerCall) {
   ASSERT_EQ(mapping_number(pending, "frozen_result"), 0);
   free_mapping(pending);
 
-  ASSERT_EQ(vm_owner_drain_main_tasks(1), 1);
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 100; i++) {
+    auto* maybe_completed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+    auto completed_state = std::string(mapping_string(maybe_completed, "state"));
+    free_mapping(maybe_completed);
+    if (completed_state == "completed") {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
   auto* completed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
   ASSERT_EQ(mapping_number(completed, "success"), 1);
   ASSERT_STREQ(mapping_string(completed, "state"), "completed");
@@ -3218,6 +3237,7 @@ TEST_F(DriverTest, TestCallOtherEnforcedModeBlocksCrossOwnerCall) {
   ASSERT_STREQ(mapping_string(result->u.map, "payload_key"), "cross-owner/echo/v1");
   ASSERT_STREQ(mapping_string(result->u.map, "target_owner_id"), "owner/test/call/enforced/target");
   free_mapping(completed);
+  vm_owner_thread_stop();
 
   auto* trace = vm_owner_message_trace(1);
   auto* events = find_string_in_mapping(trace, "events");
@@ -3230,7 +3250,7 @@ TEST_F(DriverTest, TestCallOtherEnforcedModeBlocksCrossOwnerCall) {
   ASSERT_STREQ(mapping_string(message_event, "target_owner_id"), "owner/test/call/enforced/target");
   ASSERT_STREQ(mapping_string(message_event, "message_type"), "owner_async_echo");
   ASSERT_STREQ(mapping_string(message_event, "state"), "completed");
-  ASSERT_STREQ(mapping_string(message_event, "route"), "owner_main_queue");
+  ASSERT_STREQ(mapping_string(message_event, "route"), "owner_mailbox");
   ASSERT_STREQ(mapping_string(message_event, "result_key"), "owner_async_echo");
   ASSERT_STREQ(mapping_string(message_event, "error"), "");
   ASSERT_STREQ(mapping_string(message_event, "target_handle_status"), "current");
@@ -3243,10 +3263,10 @@ TEST_F(DriverTest, TestCallOtherEnforcedModeBlocksCrossOwnerCall) {
   ASSERT_EQ(mapping_number(message_event, "frozen_result"), 1);
   ASSERT_EQ(mapping_number(message_event, "has_target_handle"), 1);
   ASSERT_EQ(mapping_number(message_event, "target_handle_current"), 1);
-  ASSERT_EQ(mapping_number(message_event, "requires_owner_mailbox"), 0);
-  ASSERT_EQ(mapping_number(message_event, "requires_owner_main_queue"), 1);
-  ASSERT_EQ(mapping_number(message_event, "main_required"), 1);
-  ASSERT_EQ(mapping_number(message_event, "queued_on_main"), 1);
+  ASSERT_EQ(mapping_number(message_event, "requires_owner_mailbox"), 1);
+  ASSERT_EQ(mapping_number(message_event, "requires_owner_main_queue"), 0);
+  ASSERT_EQ(mapping_number(message_event, "main_required"), 0);
+  ASSERT_EQ(mapping_number(message_event, "queued_on_main"), 0);
   ASSERT_EQ(mapping_number(message_event, "message_only_cross_owner"), 1);
   free_mapping(trace);
 
@@ -3289,12 +3309,24 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageRejectsNonFrozenResult) {
   ASSERT_EQ(mapping_number(submitted, "has_target_handle"), 1);
   ASSERT_EQ(mapping_number(submitted, "target_handle_current"), 1);
   ASSERT_EQ(mapping_number(submitted, "payload_frozen"), 1);
-  ASSERT_EQ(mapping_number(submitted, "queued_on_main"), 1);
+  ASSERT_EQ(mapping_number(submitted, "requires_owner_mailbox"), 1);
+  ASSERT_EQ(mapping_number(submitted, "requires_owner_main_queue"), 0);
+  ASSERT_EQ(mapping_number(submitted, "main_required"), 0);
+  ASSERT_EQ(mapping_number(submitted, "queued_on_main"), 0);
   ASSERT_STREQ(mapping_string(submitted, "source_owner_id"), source_owner);
   ASSERT_STREQ(mapping_string(submitted, "target_owner_id"), target_owner);
   free_mapping(submitted);
 
-  ASSERT_EQ(vm_owner_drain_main_tasks(1), 1);
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 100; i++) {
+    auto* maybe_failed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+    auto failed_state = std::string(mapping_string(maybe_failed, "state"));
+    free_mapping(maybe_failed);
+    if (failed_state == "failed") {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
 
   auto* failed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
   ASSERT_EQ(mapping_number(failed, "success"), 1);
@@ -3306,6 +3338,7 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageRejectsNonFrozenResult) {
   ASSERT_EQ(mapping_number(failed, "frozen_result"), 0);
   ASSERT_EQ(mapping_number(failed, "direct_cross_owner_write"), 0);
   free_mapping(failed);
+  vm_owner_thread_stop();
 
   auto* trace = vm_owner_message_trace(1);
   auto* events = find_string_in_mapping(trace, "events");
@@ -3317,7 +3350,7 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageRejectsNonFrozenResult) {
   ASSERT_EQ(mapping_number(message_event, "target_task_id"), target_task_id);
   ASSERT_STREQ(mapping_string(message_event, "message_type"), "owner_async_non_frozen_result");
   ASSERT_STREQ(mapping_string(message_event, "state"), "failed");
-  ASSERT_STREQ(mapping_string(message_event, "route"), "owner_main_queue");
+  ASSERT_STREQ(mapping_string(message_event, "route"), "owner_mailbox");
   ASSERT_STREQ(mapping_string(message_event, "result_key"), "");
   ASSERT_STREQ(mapping_string(message_event, "error"), "owner async result must be frozen data");
   ASSERT_STREQ(mapping_string(message_event, "target_handle_status"), "current");
@@ -3330,10 +3363,10 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageRejectsNonFrozenResult) {
   ASSERT_EQ(mapping_number(message_event, "frozen_result"), 0);
   ASSERT_EQ(mapping_number(message_event, "has_target_handle"), 1);
   ASSERT_EQ(mapping_number(message_event, "target_handle_current"), 1);
-  ASSERT_EQ(mapping_number(message_event, "requires_owner_mailbox"), 0);
-  ASSERT_EQ(mapping_number(message_event, "requires_owner_main_queue"), 1);
-  ASSERT_EQ(mapping_number(message_event, "main_required"), 1);
-  ASSERT_EQ(mapping_number(message_event, "queued_on_main"), 1);
+  ASSERT_EQ(mapping_number(message_event, "requires_owner_mailbox"), 1);
+  ASSERT_EQ(mapping_number(message_event, "requires_owner_main_queue"), 0);
+  ASSERT_EQ(mapping_number(message_event, "main_required"), 0);
+  ASSERT_EQ(mapping_number(message_event, "queued_on_main"), 0);
   free_mapping(trace);
 
   auto* owner_status = vm_object_store_owner_status(target_owner);
@@ -3820,9 +3853,9 @@ TEST_F(DriverTest, TestVmOwnerThreadDrainsPendingOwnerMessages) {
   vm_owner_thread_stop();
 }
 
-TEST_F(DriverTest, TestVmOwnerObjectMessageUsesMainQueueBridge) {
-  const char* owner = "owner/test/executor/main-required";
-  const char* source_owner = "owner/test/executor/main-source";
+TEST_F(DriverTest, TestVmOwnerObjectMessageUsesOwnerExecutorRoute) {
+  const char* owner = "owner/test/executor/target-route";
+  const char* source_owner = "owner/test/executor/source";
 
   vm_owner_thread_stop();
   object_t* obj = load_object_for_test("single/void");
@@ -3850,16 +3883,16 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageUsesMainQueueBridge) {
   auto before_main_dispatched = mapping_number(before, "main_dispatched");
   free_mapping(before);
 
-  auto* submitted = vm_owner_submit_object_message(source_owner, handle, "owner_lpc_probe", "main-required/payload");
+  auto* submitted = vm_owner_submit_object_message(source_owner, handle, "owner_lpc_probe", "executor-target/payload");
   auto future_id = mapping_number(submitted, "future_id");
   ASSERT_EQ(mapping_number(submitted, "has_target_handle"), 1);
   ASSERT_EQ(mapping_number(submitted, "target_handle_current"), 1);
-  ASSERT_EQ(mapping_number(submitted, "requires_owner_mailbox"), 0);
-  ASSERT_EQ(mapping_number(submitted, "requires_owner_main_queue"), 1);
-  ASSERT_EQ(mapping_number(submitted, "main_required"), 1);
-  ASSERT_EQ(mapping_number(submitted, "queued_on_main"), 1);
+  ASSERT_EQ(mapping_number(submitted, "requires_owner_mailbox"), 1);
+  ASSERT_EQ(mapping_number(submitted, "requires_owner_main_queue"), 0);
+  ASSERT_EQ(mapping_number(submitted, "main_required"), 0);
+  ASSERT_EQ(mapping_number(submitted, "queued_on_main"), 0);
   free_mapping(submitted);
-  auto probe_task = vm_owner_enqueue_task(owner, "executor_probe", "safe-after-main-required");
+  auto probe_task = vm_owner_enqueue_task(owner, "executor_probe", "safe-after-target-message");
   ASSERT_GT(probe_task, 0u);
 
   vm_owner_thread_start(2);
@@ -3867,7 +3900,10 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageUsesMainQueueBridge) {
     auto* status = vm_owner_thread_status();
     auto probe_done = mapping_number(status, "executor_probe_executed");
     free_mapping(status);
-    if (probe_done >= before_probe + 1) {
+    auto* maybe_completed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+    auto completed_state = std::string(mapping_string(maybe_completed, "state"));
+    free_mapping(maybe_completed);
+    if (probe_done >= before_probe + 1 && completed_state == "completed") {
       break;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -3878,52 +3914,23 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageUsesMainQueueBridge) {
   ASSERT_GE(mapping_number(running, "executor_safe_task_dispatched"), before_safe + 1);
   ASSERT_EQ(mapping_number(running, "executor_main_required_skipped"), before_skipped);
   ASSERT_EQ(mapping_number(running, "executor_same_owner_claim_conflicts"), 0);
-  ASSERT_GE(mapping_number(running, "main_queued"), before_main_queued + 1);
+  ASSERT_EQ(mapping_number(running, "main_queued"), before_main_queued);
   ASSERT_EQ(mapping_number(running, "main_dispatched"), before_main_dispatched);
   free_mapping(running);
 
-  auto* queued = vm_owner_mailbox_status(owner);
-  ASSERT_EQ(mapping_number(queued, "owner_queue_depth"), 0);
-  ASSERT_EQ(mapping_number(queued, "owner_main_queue_depth"), 1);
-  ASSERT_GE(mapping_number(queued, "main_queue_depth"), 1);
-  free_mapping(queued);
+  auto* drained = vm_owner_mailbox_status(owner);
+  ASSERT_EQ(mapping_number(drained, "owner_queue_depth"), 0);
+  ASSERT_EQ(mapping_number(drained, "owner_main_queue_depth"), 0);
+  free_mapping(drained);
 
-  auto* pending = vm_owner_future_poll(static_cast<uint64_t>(future_id));
-  ASSERT_STREQ(mapping_string(pending, "state"), "pending");
-  ASSERT_EQ(mapping_number(pending, "requires_owner_message_completion"), 1);
-  free_mapping(pending);
-  auto* pending_trace = vm_owner_message_trace(1);
-  auto* pending_events = find_string_in_mapping(pending_trace, "events");
-  ASSERT_NE(pending_events, nullptr);
-  ASSERT_EQ(pending_events->type, T_ARRAY);
-  ASSERT_EQ(pending_events->u.arr->size, 1);
-  auto* pending_event = pending_events->u.arr->item[0].u.map;
-  ASSERT_EQ(mapping_number(pending_event, "message_id"), future_id);
-  ASSERT_STREQ(mapping_string(pending_event, "state"), "message_submitted");
-  ASSERT_STREQ(mapping_string(pending_event, "route"), "owner_main_queue");
-  ASSERT_STREQ(mapping_string(pending_event, "target_handle_status"), "current");
-  ASSERT_EQ(mapping_number(pending_event, "pending"), 1);
-  ASSERT_EQ(mapping_number(pending_event, "terminal"), 0);
-  ASSERT_EQ(mapping_number(pending_event, "has_target_handle"), 1);
-  ASSERT_EQ(mapping_number(pending_event, "requires_owner_mailbox"), 0);
-  ASSERT_EQ(mapping_number(pending_event, "requires_owner_main_queue"), 1);
-  ASSERT_EQ(mapping_number(pending_event, "queued_on_main"), 1);
-  free_mapping(pending_trace);
-
-  vm_owner_thread_stop();
-  ASSERT_EQ(vm_owner_drain_main_tasks(1), 1);
   auto* completed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
   ASSERT_STREQ(mapping_string(completed, "state"), "completed");
   ASSERT_EQ(mapping_number(completed, "requires_owner_message_completion"), 0);
   ASSERT_EQ(mapping_number(completed, "frozen_result"), 1);
   free_mapping(completed);
   auto* after = vm_owner_thread_status();
-  ASSERT_GE(mapping_number(after, "main_dispatched"), before_main_dispatched + 1);
+  ASSERT_EQ(mapping_number(after, "main_dispatched"), before_main_dispatched);
   free_mapping(after);
-  auto* drained = vm_owner_mailbox_status(owner);
-  ASSERT_EQ(mapping_number(drained, "owner_queue_depth"), 0);
-  ASSERT_EQ(mapping_number(drained, "owner_main_queue_depth"), 0);
-  free_mapping(drained);
   auto* completed_trace = vm_owner_message_trace(1);
   auto* completed_events = find_string_in_mapping(completed_trace, "events");
   ASSERT_NE(completed_events, nullptr);
@@ -3932,7 +3939,7 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageUsesMainQueueBridge) {
   auto* completed_event = completed_events->u.arr->item[0].u.map;
   ASSERT_EQ(mapping_number(completed_event, "message_id"), future_id);
   ASSERT_STREQ(mapping_string(completed_event, "state"), "completed");
-  ASSERT_STREQ(mapping_string(completed_event, "route"), "owner_main_queue");
+  ASSERT_STREQ(mapping_string(completed_event, "route"), "owner_mailbox");
   ASSERT_STREQ(mapping_string(completed_event, "result_key"), "owner_lpc_probe");
   ASSERT_STREQ(mapping_string(completed_event, "error"), "");
   ASSERT_EQ(mapping_number(completed_event, "pending"), 0);
@@ -3940,14 +3947,17 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageUsesMainQueueBridge) {
   ASSERT_EQ(mapping_number(completed_event, "failed"), 0);
   ASSERT_EQ(mapping_number(completed_event, "terminal"), 1);
   ASSERT_EQ(mapping_number(completed_event, "frozen_result"), 1);
-  ASSERT_EQ(mapping_number(completed_event, "queued_on_main"), 1);
+  ASSERT_EQ(mapping_number(completed_event, "requires_owner_mailbox"), 1);
+  ASSERT_EQ(mapping_number(completed_event, "requires_owner_main_queue"), 0);
+  ASSERT_EQ(mapping_number(completed_event, "queued_on_main"), 0);
   free_mapping(completed_trace);
+  vm_owner_thread_stop();
   vm_owner_clear_id(obj);
   destruct_object(obj);
 }
 
-TEST_F(DriverTest, TestVmOwnerExecutorSkipsMainRequiredMailboxHead) {
-  const char* owner = "owner/test/executor/skip-main-required-head";
+TEST_F(DriverTest, TestVmOwnerExecutorDrainsTargetMessagesWithoutMainFallback) {
+  const char* owner = "owner/test/executor/target-message-no-main-fallback";
 
   vm_owner_thread_stop();
   auto mapping_number = [](mapping_t* map, const char* key) -> long {
@@ -3973,6 +3983,10 @@ TEST_F(DriverTest, TestVmOwnerExecutorSkipsMainRequiredMailboxHead) {
   auto before_safe = mapping_number(before, "executor_safe_task_dispatched");
   auto before_skipped = mapping_number(before, "executor_main_required_skipped");
   free_mapping(before);
+  auto* before_runtime = vm_owner_runtime_status();
+  auto before_normal_fallback = mapping_number(before_runtime, "normal_path_main_fallback_count");
+  auto before_target_message_fallback = mapping_number(before_runtime, "target_owner_message_main_fallback");
+  free_mapping(before_runtime);
 
   auto main_required_task = vm_owner_enqueue_test_main_required_message(owner, "blocked-object-message");
   auto probe_task = vm_owner_enqueue_task(owner, "executor_probe", "safe-after-main-required-head");
@@ -3981,16 +3995,16 @@ TEST_F(DriverTest, TestVmOwnerExecutorSkipsMainRequiredMailboxHead) {
 
   auto* queued = vm_owner_mailbox_status(owner);
   ASSERT_EQ(mapping_number(queued, "owner_queue_depth"), 2);
-  ASSERT_EQ(mapping_number(queued, "owner_executor_safe_queue_depth"), 1);
-  ASSERT_EQ(mapping_number(queued, "owner_main_required_queue_depth"), 1);
+  ASSERT_EQ(mapping_number(queued, "owner_executor_safe_queue_depth"), 2);
+  ASSERT_EQ(mapping_number(queued, "owner_main_required_queue_depth"), 0);
   free_mapping(queued);
   auto* queued_thread = vm_owner_thread_status();
   ASSERT_GE(mapping_number(queued_thread, "runnable_owner_count"), 1);
   auto* queued_fairness = mapping_entry(queued_thread, "executor_queue_fairness");
   ASSERT_GE(mapping_number(queued_fairness, "executor_ready_owner_count"), 1);
-  ASSERT_GE(mapping_number(queued_fairness, "mixed_backlog_owner_count"), 1);
-  ASSERT_GE(mapping_number(queued_fairness, "max_executor_safe_backlog"), 1);
-  ASSERT_GE(mapping_number(queued_fairness, "max_main_required_backlog"), 1);
+  ASSERT_EQ(mapping_number(queued_fairness, "mixed_backlog_owner_count"), 0);
+  ASSERT_GE(mapping_number(queued_fairness, "max_executor_safe_backlog"), 2);
+  ASSERT_EQ(mapping_number(queued_fairness, "max_main_required_backlog"), 0);
   free_mapping(queued_thread);
 
   vm_owner_thread_start(1);
@@ -3998,7 +4012,10 @@ TEST_F(DriverTest, TestVmOwnerExecutorSkipsMainRequiredMailboxHead) {
     auto* status = vm_owner_thread_status();
     auto probe_done = mapping_number(status, "executor_probe_executed");
     free_mapping(status);
-    if (probe_done >= before_probe + 1) {
+    auto* mailbox = vm_owner_mailbox_status(owner);
+    auto queue_depth = mapping_number(mailbox, "owner_queue_depth");
+    free_mapping(mailbox);
+    if (probe_done >= before_probe + 1 && queue_depth == 0) {
       break;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -4006,46 +4023,50 @@ TEST_F(DriverTest, TestVmOwnerExecutorSkipsMainRequiredMailboxHead) {
 
   auto* running = vm_owner_thread_status();
   ASSERT_GE(mapping_number(running, "executor_probe_executed"), before_probe + 1);
-  ASSERT_GE(mapping_number(running, "executor_safe_task_dispatched"), before_safe + 1);
-  ASSERT_GE(mapping_number(running, "executor_main_required_skipped"), before_skipped + 1);
+  ASSERT_GE(mapping_number(running, "executor_safe_task_dispatched"), before_safe + 2);
+  ASSERT_EQ(mapping_number(running, "executor_main_required_skipped"), before_skipped);
   ASSERT_EQ(mapping_number(running, "executor_same_owner_claim_conflicts"), 0);
   free_mapping(running);
 
   auto* after = vm_owner_mailbox_status(owner);
-  ASSERT_EQ(mapping_number(after, "owner_queue_depth"), 1);
+  ASSERT_EQ(mapping_number(after, "owner_queue_depth"), 0);
   ASSERT_EQ(mapping_number(after, "owner_executor_safe_queue_depth"), 0);
-  ASSERT_EQ(mapping_number(after, "owner_main_required_queue_depth"), 1);
+  ASSERT_EQ(mapping_number(after, "owner_main_required_queue_depth"), 0);
   free_mapping(after);
   auto* after_thread = vm_owner_thread_status();
   ASSERT_EQ(mapping_number(after_thread, "runnable_owner_count"), 0);
   auto* after_fairness = mapping_entry(after_thread, "executor_queue_fairness");
-  ASSERT_GE(mapping_number(after_fairness, "main_required_only_owner_count"), 1);
+  ASSERT_EQ(mapping_number(after_fairness, "main_required_only_owner_count"), 0);
   ASSERT_EQ(mapping_number(after_fairness, "mixed_backlog_owner_count"), 0);
   free_mapping(after_thread);
+  auto* after_runtime = vm_owner_runtime_status();
+  ASSERT_EQ(mapping_number(after_runtime, "normal_path_main_fallback_count"), before_normal_fallback);
+  ASSERT_EQ(mapping_number(after_runtime, "target_owner_message_main_fallback"), before_target_message_fallback);
+  ASSERT_EQ(mapping_number(after_runtime, "normal_path_main_fallback_ready"), 1);
+  free_mapping(after_runtime);
 
   auto* trace = vm_owner_task_trace(16);
   auto* events = find_string_in_mapping(trace, "events");
   ASSERT_NE(events, nullptr);
   ASSERT_EQ(events->type, T_ARRAY);
-  int main_required_dispatched = 0;
+  int target_message_progressed = 0;
   int probe_completed = 0;
   for (int i = 0; i < events->u.arr->size; i++) {
     auto* event = events->u.arr->item[i].u.map;
     if (mapping_number(event, "task_id") == static_cast<long>(main_required_task) &&
-        std::string(mapping_string(event, "state")) == "thread_dispatched") {
-      main_required_dispatched = 1;
+        std::string(mapping_string(event, "state")) != "queued") {
+      target_message_progressed = 1;
     }
     if (mapping_number(event, "task_id") == static_cast<long>(probe_task) &&
         std::string(mapping_string(event, "state")) == "executor_probe_completed") {
       probe_completed = 1;
     }
   }
-  ASSERT_EQ(main_required_dispatched, 0);
+  ASSERT_EQ(target_message_progressed, 1);
   ASSERT_EQ(probe_completed, 1);
   free_mapping(trace);
 
   auto* purged = vm_owner_purge_mailbox(owner);
-  ASSERT_EQ(mapping_number(purged, "purged"), 1);
   free_mapping(purged);
   auto* purged_status = vm_owner_thread_status();
   auto* purged_fairness = mapping_entry(purged_status, "executor_queue_fairness");
@@ -4160,6 +4181,18 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_GE(mapping_number(status, "owner_executor_context_cleanup_leaks"), 0);
     ASSERT_GE(mapping_number(status, "owner_executor_future_pending_backlog"), 0);
     ASSERT_EQ(mapping_number(status, "owner_executor_socket_release_trace_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "registered_owner_task_domains_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "registered_owner_task_domain_count"), 18);
+    ASSERT_EQ(mapping_number(status, "target_owner_message_executor_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "normal_path_main_fallback_count"), 0);
+    ASSERT_EQ(mapping_number(status, "normal_path_main_fallback_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "service_shard_executor_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "domain_task_registry_mudlib_aligned"), 1);
+    ASSERT_EQ(mapping_number(status, "keyed_service_shard_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "hot_path_service_owner_single_point"), 0);
+    ASSERT_EQ(mapping_number(status, "target_owner_message_main_fallback"), 0);
+    ASSERT_EQ(mapping_number(status, "production_perfect_contract_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "facade_only_runtime_claims"), 0);
     ASSERT_EQ(mapping_number(status, "executor_callback_task_boundary_ready"), 1);
     ASSERT_EQ(mapping_number(status, "executor_callback_allowlist_ready"), 1);
     ASSERT_EQ(mapping_number(status, "executor_callback_allowlist_count"), 6);
@@ -4167,32 +4200,38 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "heartbeat_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "heartbeat_owner_executor_task_type"), "heartbeat");
     ASSERT_STREQ(mapping_string(status, "heartbeat_owner_executor_route"), "owner_executor");
-    ASSERT_STREQ(mapping_string(status, "heartbeat_owner_executor_fallback_route"), "owner_main_queue");
-    ASSERT_STREQ(mapping_string(status, "heartbeat_owner_executor_policy"), "audit_enforced_owner_thread_else_main");
-    ASSERT_EQ(mapping_number(status, "heartbeat_owner_executor_fallback_main_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "heartbeat_owner_executor_fallback_route"),
+                 "explicit_fallback_owner_main_queue");
+    ASSERT_STREQ(mapping_string(status, "heartbeat_owner_executor_policy"),
+                 "audit_enforced_owner_thread_normal_path");
+    ASSERT_EQ(mapping_number(status, "heartbeat_owner_executor_fallback_main_ready"), 0);
     ASSERT_EQ(mapping_number(status, "heartbeat_current_object_thread_local"), 1);
     ASSERT_EQ(mapping_number(status, "callout_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "callout_owner_executor_task_type"), "call_out");
     ASSERT_STREQ(mapping_string(status, "callout_owner_executor_route"), "owner_executor");
-    ASSERT_STREQ(mapping_string(status, "callout_owner_executor_fallback_route"), "owner_main_queue");
-    ASSERT_STREQ(mapping_string(status, "callout_owner_executor_policy"), "audit_enforced_owner_thread_else_main");
+    ASSERT_STREQ(mapping_string(status, "callout_owner_executor_fallback_route"),
+                 "explicit_fallback_owner_main_queue");
+    ASSERT_STREQ(mapping_string(status, "callout_owner_executor_policy"),
+                 "audit_enforced_owner_thread_normal_path");
     ASSERT_EQ(mapping_number(status, "callout_owner_executor_expired_handle_detach_ready"), 1);
     ASSERT_EQ(mapping_number(status, "callout_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(status, "callout_owner_executor_drop_cleanup_ready"), 1);
-    ASSERT_EQ(mapping_number(status, "callout_owner_executor_fallback_main_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "callout_owner_executor_fallback_main_ready"), 0);
     ASSERT_EQ(mapping_number(status, "async_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "async_owner_executor_task_type"), "async_callback");
     ASSERT_STREQ(mapping_string(status, "async_owner_executor_route"), "owner_executor");
-    ASSERT_STREQ(mapping_string(status, "async_owner_executor_fallback_route"), "owner_main_queue");
-    ASSERT_STREQ(mapping_string(status, "async_owner_executor_policy"), "audit_enforced_owner_thread_else_main");
+    ASSERT_STREQ(mapping_string(status, "async_owner_executor_fallback_route"),
+                 "explicit_fallback_owner_main_queue");
+    ASSERT_STREQ(mapping_string(status, "async_owner_executor_policy"),
+                 "audit_enforced_owner_thread_normal_path");
     ASSERT_STREQ(mapping_string(status, "async_owner_executor_result_policy"), "frozen_deep_copy_result");
     ASSERT_EQ(mapping_number(status, "async_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(status, "async_owner_executor_drop_cleanup_ready"), 1);
     ASSERT_EQ(mapping_number(status, "dns_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "dns_owner_executor_task_type"), "dns_callback");
     ASSERT_STREQ(mapping_string(status, "dns_owner_executor_route"), "owner_executor");
-    ASSERT_STREQ(mapping_string(status, "dns_owner_executor_fallback_route"), "owner_main_queue");
-    ASSERT_STREQ(mapping_string(status, "dns_owner_executor_policy"), "audit_enforced_owner_thread_else_main");
+    ASSERT_STREQ(mapping_string(status, "dns_owner_executor_fallback_route"), "explicit_fallback_owner_main_queue");
+    ASSERT_STREQ(mapping_string(status, "dns_owner_executor_policy"), "audit_enforced_owner_thread_normal_path");
     ASSERT_STREQ(mapping_string(status, "dns_owner_executor_result_policy"), "frozen_deep_copy_result");
     ASSERT_EQ(mapping_number(status, "dns_owner_executor_owner_epoch_capture_ready"), 1);
     ASSERT_EQ(mapping_number(status, "dns_owner_executor_cleanup_main_ready"), 1);
@@ -4200,8 +4239,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "socket_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "socket_owner_executor_task_type"), "socket_callback");
     ASSERT_STREQ(mapping_string(status, "socket_owner_executor_route"), "owner_executor");
-    ASSERT_STREQ(mapping_string(status, "socket_owner_executor_fallback_route"), "owner_main_queue");
-    ASSERT_STREQ(mapping_string(status, "socket_owner_executor_policy"), "audit_enforced_owner_thread_else_main");
+    ASSERT_STREQ(mapping_string(status, "socket_owner_executor_fallback_route"),
+                 "explicit_fallback_owner_main_queue");
+    ASSERT_STREQ(mapping_string(status, "socket_owner_executor_policy"),
+                 "audit_enforced_owner_thread_normal_path");
     ASSERT_STREQ(mapping_string(status, "socket_owner_executor_result_policy"), "frozen_deep_copy_args");
     ASSERT_EQ(mapping_number(status, "socket_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(status, "socket_owner_executor_drop_cleanup_ready"), 1);
@@ -4213,8 +4254,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "gateway_command_execute_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "gateway_command_execute_task_type"), "gateway_command_execute");
     ASSERT_STREQ(mapping_string(status, "gateway_command_execute_route"), "owner_executor");
-    ASSERT_STREQ(mapping_string(status, "gateway_command_execute_fallback_route"), "owner_main_queue");
-    ASSERT_STREQ(mapping_string(status, "gateway_command_execute_policy"), "audit_enforced_owner_thread_else_main");
+    ASSERT_STREQ(mapping_string(status, "gateway_command_execute_fallback_route"),
+                 "explicit_fallback_owner_main_queue");
+    ASSERT_STREQ(mapping_string(status, "gateway_command_execute_policy"),
+                 "audit_enforced_owner_thread_normal_path");
     ASSERT_STREQ(mapping_string(status, "gateway_command_execute_payload_policy"), "owner_private_command_snapshot");
     ASSERT_EQ(mapping_number(status, "gateway_command_execute_reply_queue_main_ready"), 1);
     ASSERT_EQ(mapping_number(status, "gateway_command_execute_stale_drop_ready"), 1);
@@ -4447,7 +4490,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "dispatch_manifest_boundary_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "same_owner_serial_required"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "main_required_tasks_excluded"), 1);
-    ASSERT_EQ(mapping_number(boundary_contract, "target_handle_messages_main_required"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "target_handle_messages_main_required"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "target_handle_messages_executor_safe"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "compute_result_executor_safe"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "executor_callback_task_boundary_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "executor_callback_allowlist_ready"), 1);
@@ -4457,27 +4501,30 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "heartbeat_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "heartbeat_owner_executor_task_type"), "heartbeat");
     ASSERT_STREQ(mapping_string(boundary_contract, "heartbeat_owner_executor_route"), "owner_executor");
-    ASSERT_STREQ(mapping_string(boundary_contract, "heartbeat_owner_executor_fallback_route"), "owner_main_queue");
+    ASSERT_STREQ(mapping_string(boundary_contract, "heartbeat_owner_executor_fallback_route"),
+                 "explicit_fallback_owner_main_queue");
     ASSERT_STREQ(mapping_string(boundary_contract, "heartbeat_owner_executor_policy"),
-                 "audit_enforced_owner_thread_else_main");
-    ASSERT_EQ(mapping_number(boundary_contract, "heartbeat_owner_executor_fallback_main_ready"), 1);
+                 "audit_enforced_owner_thread_normal_path");
+    ASSERT_EQ(mapping_number(boundary_contract, "heartbeat_owner_executor_fallback_main_ready"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "heartbeat_current_object_thread_local"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "callout_owner_executor_task_type"), "call_out");
     ASSERT_STREQ(mapping_string(boundary_contract, "callout_owner_executor_route"), "owner_executor");
-    ASSERT_STREQ(mapping_string(boundary_contract, "callout_owner_executor_fallback_route"), "owner_main_queue");
+    ASSERT_STREQ(mapping_string(boundary_contract, "callout_owner_executor_fallback_route"),
+                 "explicit_fallback_owner_main_queue");
     ASSERT_STREQ(mapping_string(boundary_contract, "callout_owner_executor_policy"),
-                 "audit_enforced_owner_thread_else_main");
+                 "audit_enforced_owner_thread_normal_path");
     ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_expired_handle_detach_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_drop_cleanup_ready"), 1);
-    ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_fallback_main_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_fallback_main_ready"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "async_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "async_owner_executor_task_type"), "async_callback");
     ASSERT_STREQ(mapping_string(boundary_contract, "async_owner_executor_route"), "owner_executor");
-    ASSERT_STREQ(mapping_string(boundary_contract, "async_owner_executor_fallback_route"), "owner_main_queue");
+    ASSERT_STREQ(mapping_string(boundary_contract, "async_owner_executor_fallback_route"),
+                 "explicit_fallback_owner_main_queue");
     ASSERT_STREQ(mapping_string(boundary_contract, "async_owner_executor_policy"),
-                 "audit_enforced_owner_thread_else_main");
+                 "audit_enforced_owner_thread_normal_path");
     ASSERT_STREQ(mapping_string(boundary_contract, "async_owner_executor_result_policy"),
                  "frozen_deep_copy_result");
     ASSERT_EQ(mapping_number(boundary_contract, "async_owner_executor_cleanup_main_ready"), 1);
@@ -4485,9 +4532,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "dns_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "dns_owner_executor_task_type"), "dns_callback");
     ASSERT_STREQ(mapping_string(boundary_contract, "dns_owner_executor_route"), "owner_executor");
-    ASSERT_STREQ(mapping_string(boundary_contract, "dns_owner_executor_fallback_route"), "owner_main_queue");
+    ASSERT_STREQ(mapping_string(boundary_contract, "dns_owner_executor_fallback_route"),
+                 "explicit_fallback_owner_main_queue");
     ASSERT_STREQ(mapping_string(boundary_contract, "dns_owner_executor_policy"),
-                 "audit_enforced_owner_thread_else_main");
+                 "audit_enforced_owner_thread_normal_path");
     ASSERT_STREQ(mapping_string(boundary_contract, "dns_owner_executor_result_policy"), "frozen_deep_copy_result");
     ASSERT_EQ(mapping_number(boundary_contract, "dns_owner_executor_owner_epoch_capture_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "dns_owner_executor_cleanup_main_ready"), 1);
@@ -4495,9 +4543,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "socket_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_task_type"), "socket_callback");
     ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_route"), "owner_executor");
-    ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_fallback_route"), "owner_main_queue");
+    ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_fallback_route"),
+                 "explicit_fallback_owner_main_queue");
     ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_policy"),
-                 "audit_enforced_owner_thread_else_main");
+                 "audit_enforced_owner_thread_normal_path");
     ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_result_policy"), "frozen_deep_copy_args");
     ASSERT_EQ(mapping_number(boundary_contract, "socket_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "socket_owner_executor_drop_cleanup_ready"), 1);
@@ -4511,9 +4560,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_execute_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "gateway_command_execute_task_type"), "gateway_command_execute");
     ASSERT_STREQ(mapping_string(boundary_contract, "gateway_command_execute_route"), "owner_executor");
-    ASSERT_STREQ(mapping_string(boundary_contract, "gateway_command_execute_fallback_route"), "owner_main_queue");
+    ASSERT_STREQ(mapping_string(boundary_contract, "gateway_command_execute_fallback_route"),
+                 "explicit_fallback_owner_main_queue");
     ASSERT_STREQ(mapping_string(boundary_contract, "gateway_command_execute_policy"),
-                 "audit_enforced_owner_thread_else_main");
+                 "audit_enforced_owner_thread_normal_path");
     ASSERT_STREQ(mapping_string(boundary_contract, "gateway_command_execute_payload_policy"),
                  "owner_private_command_snapshot");
     ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_execute_reply_queue_main_ready"), 1);
@@ -4525,6 +4575,17 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(boundary_contract, "ordinary_lpc_policy"),
                  "explicit_open_same_owner_only");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_surface_expanded"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "registered_owner_task_domains_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "target_owner_message_executor_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "normal_path_main_fallback_count"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "normal_path_main_fallback_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "service_shard_executor_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "domain_task_registry_mudlib_aligned"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "keyed_service_shard_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "hot_path_service_owner_single_point"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "target_owner_message_main_fallback"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "production_perfect_contract_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "facade_only_runtime_claims"), 0);
     ASSERT_STREQ(mapping_string(boundary_contract, "next_refactor_target"), "");
     assert_production_gate_contract(boundary_contract);
 
@@ -4572,9 +4633,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(gateway_contract, "gateway_command_execute_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "gateway_command_execute_task_type"), "gateway_command_execute");
     ASSERT_STREQ(mapping_string(gateway_contract, "gateway_command_execute_route"), "owner_executor");
-    ASSERT_STREQ(mapping_string(gateway_contract, "gateway_command_execute_fallback_route"), "owner_main_queue");
+    ASSERT_STREQ(mapping_string(gateway_contract, "gateway_command_execute_fallback_route"),
+                 "explicit_fallback_owner_main_queue");
     ASSERT_STREQ(mapping_string(gateway_contract, "gateway_command_execute_policy"),
-                 "audit_enforced_owner_thread_else_main");
+                 "audit_enforced_owner_thread_normal_path");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_consume_model"),
                  "owner_owned_snapshot_owner_executor_consume");
     ASSERT_EQ(mapping_number(gateway_contract, "command_consume_snapshot_ready"), 1);
@@ -4865,7 +4927,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_NE(contract, nullptr);
     auto* lpc_contracts = mapping_array(status, "executor_lpc_task_contracts");
     ASSERT_NE(lpc_contracts, nullptr);
-    ASSERT_EQ(lpc_contracts->size, 1);
+    ASSERT_EQ(lpc_contracts->size, 18);
     ASSERT_EQ(lpc_contracts->item[0].type, T_MAPPING);
     auto* readonly_contract = lpc_contracts->item[0].u.map;
     ASSERT_STREQ(mapping_string(readonly_contract, "method"), "owner_task_readonly");
@@ -4880,6 +4942,16 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(readonly_contract, "requires_owner_message_completion"), 1);
     ASSERT_EQ(mapping_number(readonly_contract, "frozen_result_required"), 1);
     ASSERT_EQ(mapping_number(readonly_contract, "direct_cross_owner_write"), 0);
+    bool found_top_level_player_domain = false;
+    bool found_top_level_economy_domain = false;
+    for (int i = 0; i < lpc_contracts->size; i++) {
+      ASSERT_EQ(lpc_contracts->item[i].type, T_MAPPING);
+      auto method = std::string(mapping_string(lpc_contracts->item[i].u.map, "method"));
+      found_top_level_player_domain = found_top_level_player_domain || method == "owner_task_player";
+      found_top_level_economy_domain = found_top_level_economy_domain || method == "owner_task_economy";
+    }
+    ASSERT_TRUE(found_top_level_player_domain);
+    ASSERT_TRUE(found_top_level_economy_domain);
 
     auto* dispatch_contracts = mapping_array(status, "executor_task_dispatch_contracts");
     ASSERT_NE(dispatch_contracts, nullptr);
@@ -4997,12 +5069,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(mailbox_message, "route"), "owner_executor");
 
     auto* target_message = mapping_entry(contract, "owner_message_target_handle");
-    ASSERT_STREQ(mapping_string(target_message, "executor_mode"), "main_required");
-    ASSERT_STREQ(mapping_string(target_message, "route"), "owner_main_queue");
-    ASSERT_EQ(mapping_number(target_message, "executor_safe"), 0);
-    ASSERT_EQ(mapping_number(target_message, "main_required"), 1);
-    ASSERT_EQ(mapping_number(target_message, "requires_owner_mailbox"), 0);
-    ASSERT_EQ(mapping_number(target_message, "requires_owner_main_queue"), 1);
+    ASSERT_STREQ(mapping_string(target_message, "executor_mode"), "executor_safe");
+    ASSERT_STREQ(mapping_string(target_message, "route"), "owner_executor");
+    ASSERT_EQ(mapping_number(target_message, "executor_safe"), 1);
+    ASSERT_EQ(mapping_number(target_message, "main_required"), 0);
+    ASSERT_EQ(mapping_number(target_message, "requires_owner_mailbox"), 1);
+    ASSERT_EQ(mapping_number(target_message, "requires_owner_main_queue"), 0);
     ASSERT_EQ(mapping_number(target_message, "rejected"), 0);
 
     auto* allowlist = mapping_entry(contract, "lpc_task_allowlist");
@@ -5011,9 +5083,19 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(allowlist, "rejected"), 0);
     auto* nested_lpc_contracts = mapping_array(allowlist, "contracts");
     ASSERT_NE(nested_lpc_contracts, nullptr);
-    ASSERT_EQ(nested_lpc_contracts->size, 1);
+    ASSERT_EQ(nested_lpc_contracts->size, 18);
     ASSERT_EQ(nested_lpc_contracts->item[0].type, T_MAPPING);
     ASSERT_STREQ(mapping_string(nested_lpc_contracts->item[0].u.map, "method"), "owner_task_readonly");
+    bool found_player_domain = false;
+    bool found_economy_domain = false;
+    for (int i = 0; i < nested_lpc_contracts->size; i++) {
+      ASSERT_EQ(nested_lpc_contracts->item[i].type, T_MAPPING);
+      auto method = std::string(mapping_string(nested_lpc_contracts->item[i].u.map, "method"));
+      found_player_domain = found_player_domain || method == "owner_task_player";
+      found_economy_domain = found_economy_domain || method == "owner_task_economy";
+    }
+    ASSERT_TRUE(found_player_domain);
+    ASSERT_TRUE(found_economy_domain);
 
     auto* ordinary_lpc = mapping_entry(contract, "ordinary_lpc");
     ASSERT_STREQ(mapping_string(ordinary_lpc, "executor_mode"), "executor_safe_explicit_open");
@@ -5745,23 +5827,67 @@ TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredReadonlyLpcTaskWithMultipleWor
   free_mapping(pending_future);
   auto* pending_runtime = vm_owner_runtime_status();
   ASSERT_GE(mapping_number(pending_runtime, "pending_futures"), 1);
-  ASSERT_EQ(mapping_number(pending_runtime, "lpc_task_allowlist_count"), 1);
+  ASSERT_EQ(mapping_number(pending_runtime, "lpc_task_allowlist_count"), 18);
   auto* runtime_allowlist = find_string_in_mapping(pending_runtime, "lpc_task_allowlist");
   ASSERT_NE(runtime_allowlist, nullptr);
   ASSERT_EQ(runtime_allowlist->type, T_ARRAY);
-  ASSERT_EQ(runtime_allowlist->u.arr->size, 1);
+  ASSERT_EQ(runtime_allowlist->u.arr->size, 18);
   ASSERT_EQ(runtime_allowlist->u.arr->item[0].type, T_STRING);
   ASSERT_STREQ(runtime_allowlist->u.arr->item[0].u.string, "owner_task_readonly");
+  bool runtime_has_player_domain = false;
+  bool runtime_has_economy_domain = false;
+  for (int i = 0; i < runtime_allowlist->u.arr->size; i++) {
+    ASSERT_EQ(runtime_allowlist->u.arr->item[i].type, T_STRING);
+    auto method = std::string(runtime_allowlist->u.arr->item[i].u.string);
+    runtime_has_player_domain = runtime_has_player_domain || method == "owner_task_player";
+    runtime_has_economy_domain = runtime_has_economy_domain || method == "owner_task_economy";
+  }
+  ASSERT_TRUE(runtime_has_player_domain);
+  ASSERT_TRUE(runtime_has_economy_domain);
+  ASSERT_EQ(mapping_number(pending_runtime, "registered_owner_task_domains_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_runtime, "registered_owner_task_domain_count"), 18);
+  ASSERT_EQ(mapping_number(pending_runtime, "target_owner_message_executor_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_runtime, "normal_path_main_fallback_count"), 0);
+  ASSERT_EQ(mapping_number(pending_runtime, "normal_path_main_fallback_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_runtime, "service_shard_executor_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_runtime, "domain_task_registry_mudlib_aligned"), 1);
+  ASSERT_EQ(mapping_number(pending_runtime, "keyed_service_shard_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_runtime, "hot_path_service_owner_single_point"), 0);
+  ASSERT_EQ(mapping_number(pending_runtime, "target_owner_message_main_fallback"), 0);
+  ASSERT_EQ(mapping_number(pending_runtime, "production_perfect_contract_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_runtime, "facade_only_runtime_claims"), 0);
   free_mapping(pending_runtime);
   auto* pending_thread_status = vm_owner_thread_status();
   ASSERT_GE(mapping_number(pending_thread_status, "pending_futures"), 1);
-  ASSERT_EQ(mapping_number(pending_thread_status, "lpc_task_allowlist_count"), 1);
+  ASSERT_EQ(mapping_number(pending_thread_status, "lpc_task_allowlist_count"), 18);
   auto* thread_allowlist = find_string_in_mapping(pending_thread_status, "lpc_task_allowlist");
   ASSERT_NE(thread_allowlist, nullptr);
   ASSERT_EQ(thread_allowlist->type, T_ARRAY);
-  ASSERT_EQ(thread_allowlist->u.arr->size, 1);
+  ASSERT_EQ(thread_allowlist->u.arr->size, 18);
   ASSERT_EQ(thread_allowlist->u.arr->item[0].type, T_STRING);
   ASSERT_STREQ(thread_allowlist->u.arr->item[0].u.string, "owner_task_readonly");
+  bool thread_has_player_domain = false;
+  bool thread_has_economy_domain = false;
+  for (int i = 0; i < thread_allowlist->u.arr->size; i++) {
+    ASSERT_EQ(thread_allowlist->u.arr->item[i].type, T_STRING);
+    auto method = std::string(thread_allowlist->u.arr->item[i].u.string);
+    thread_has_player_domain = thread_has_player_domain || method == "owner_task_player";
+    thread_has_economy_domain = thread_has_economy_domain || method == "owner_task_economy";
+  }
+  ASSERT_TRUE(thread_has_player_domain);
+  ASSERT_TRUE(thread_has_economy_domain);
+  ASSERT_EQ(mapping_number(pending_thread_status, "registered_owner_task_domains_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_thread_status, "registered_owner_task_domain_count"), 18);
+  ASSERT_EQ(mapping_number(pending_thread_status, "target_owner_message_executor_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_thread_status, "normal_path_main_fallback_count"), 0);
+  ASSERT_EQ(mapping_number(pending_thread_status, "normal_path_main_fallback_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_thread_status, "service_shard_executor_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_thread_status, "domain_task_registry_mudlib_aligned"), 1);
+  ASSERT_EQ(mapping_number(pending_thread_status, "keyed_service_shard_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_thread_status, "hot_path_service_owner_single_point"), 0);
+  ASSERT_EQ(mapping_number(pending_thread_status, "target_owner_message_main_fallback"), 0);
+  ASSERT_EQ(mapping_number(pending_thread_status, "production_perfect_contract_ready"), 1);
+  ASSERT_EQ(mapping_number(pending_thread_status, "facade_only_runtime_claims"), 0);
   free_mapping(pending_thread_status);
 
   auto other_task = vm_owner_enqueue_task(other_owner, "owner_state", "other-owner-state");
@@ -6205,7 +6331,7 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsUnregisteredLpcTask) {
   destruct_object(probe);
 }
 
-TEST_F(DriverTest, TestVmOwnerThreadRejectsRegisteredDomainLpcTasks) {
+TEST_F(DriverTest, TestVmOwnerThreadRunsRegisteredDomainLpcTasks) {
   const char* owner = "owner/test/thread/lpc-domain-task";
   const char* methods[] = {"owner_task_player",      "owner_task_room",     "owner_task_session",
                            "owner_task_item",        "owner_task_economy",  "owner_task_combat",
@@ -6249,6 +6375,7 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsRegisteredDomainLpcTasks) {
   free_mapping(before);
   auto* before_runtime = vm_owner_runtime_status();
   auto before_pending_futures = mapping_number(before_runtime, "pending_futures");
+  auto before_future_completions = mapping_number(before_runtime, "futures_completed");
   auto before_future_failures = mapping_number(before_runtime, "futures_failed");
   free_mapping(before_runtime);
 
@@ -6259,11 +6386,16 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsRegisteredDomainLpcTasks) {
     auto future_id = mapping_number(submitted, "future_id");
     ASSERT_EQ(mapping_number(submitted, "success"), 1);
     ASSERT_GT(future_id, 0);
-    ASSERT_EQ(mapping_number(submitted, "registered_task"), 0) << method;
-    ASSERT_STREQ(mapping_string(submitted, "executor_mode"), "rejected") << method;
-    ASSERT_STREQ(mapping_string(submitted, "contract_reason"), "ordinary LPC remains default closed") << method;
+    ASSERT_EQ(mapping_number(submitted, "registered_task"), 1) << method;
+    ASSERT_STREQ(mapping_string(submitted, "executor_mode"), "executor_safe_allowlist") << method;
+    ASSERT_STREQ(mapping_string(submitted, "route"), "owner_executor") << method;
+    ASSERT_NE(std::string(mapping_string(submitted, "contract_reason")).find("registered"), std::string::npos) << method;
     auto* task_contract = mapping_entry(submitted, "task_contract");
-    ASSERT_EQ(mapping_number(task_contract, "rejected"), 1) << method;
+    ASSERT_EQ(mapping_number(task_contract, "executor_safe"), 1) << method;
+    ASSERT_EQ(mapping_number(task_contract, "main_required"), 0) << method;
+    ASSERT_EQ(mapping_number(task_contract, "requires_owner_thread"), 1) << method;
+    ASSERT_EQ(mapping_number(task_contract, "frozen_result_required"), 1) << method;
+    ASSERT_EQ(mapping_number(task_contract, "rejected"), 0) << method;
     free_mapping(submitted);
     auto* pending_future = vm_owner_future_poll(static_cast<uint64_t>(future_id));
     ASSERT_EQ(mapping_number(pending_future, "success"), 1);
@@ -6279,10 +6411,10 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsRegisteredDomainLpcTasks) {
   vm_owner_thread_start(4);
   for (int i = 0; i < 200; i++) {
     auto* status = vm_owner_thread_status();
-    auto rejected = mapping_number(status, "thread_lpc_task_rejected");
+    auto succeeded = mapping_number(status, "thread_lpc_task_succeeded");
     auto active = mapping_number(status, "active_owners");
     free_mapping(status);
-    if (rejected >= before_rejected + method_count && active == 0) {
+    if (succeeded >= before_succeeded + method_count && active == 0) {
       break;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -6291,25 +6423,28 @@ TEST_F(DriverTest, TestVmOwnerThreadRejectsRegisteredDomainLpcTasks) {
   auto* running = vm_owner_thread_status();
   ASSERT_EQ(mapping_number(running, "enabled"), 1);
   ASSERT_EQ(mapping_number(running, "thread_count"), 4);
-  ASSERT_EQ(mapping_number(running, "thread_lpc_task_succeeded"), before_succeeded);
+  ASSERT_GE(mapping_number(running, "thread_lpc_task_succeeded"), before_succeeded + method_count);
   ASSERT_EQ(mapping_number(running, "thread_lpc_task_failed"), before_failed);
-  ASSERT_GE(mapping_number(running, "thread_lpc_task_rejected"), before_rejected + method_count);
+  ASSERT_EQ(mapping_number(running, "thread_lpc_task_rejected"), before_rejected);
   ASSERT_EQ(mapping_number(running, "active_owners"), 0);
   ASSERT_EQ(mapping_number(running, "executor_owner_claims"), before_claims + 1);
   ASSERT_EQ(mapping_number(running, "executor_owner_releases"), before_releases + 1);
   free_mapping(running);
-  for (auto future_id : future_ids) {
-    auto* failed_future = vm_owner_future_poll(static_cast<uint64_t>(future_id));
-    ASSERT_EQ(mapping_number(failed_future, "success"), 1);
-    ASSERT_STREQ(mapping_string(failed_future, "state"), "failed");
-    ASSERT_STREQ(mapping_string(failed_future, "error"), "owner lpc task rejected");
-    ASSERT_EQ(mapping_number(failed_future, "requires_owner_message_completion"), 0);
-    free_mapping(failed_future);
+  for (int i = 0; i < method_count; i++) {
+    auto* completed_future = vm_owner_future_poll(static_cast<uint64_t>(future_ids[i]));
+    ASSERT_EQ(mapping_number(completed_future, "success"), 1);
+    ASSERT_STREQ(mapping_string(completed_future, "state"), "completed") << methods[i];
+    ASSERT_STREQ(mapping_string(completed_future, "result_key"), methods[i]);
+    ASSERT_STREQ(mapping_string(completed_future, "error"), "");
+    ASSERT_EQ(mapping_number(completed_future, "requires_owner_message_completion"), 0);
+    ASSERT_EQ(mapping_number(completed_future, "frozen_result"), 1);
+    free_mapping(completed_future);
   }
-  auto* failed_runtime = vm_owner_runtime_status();
-  ASSERT_EQ(mapping_number(failed_runtime, "pending_futures"), before_pending_futures);
-  ASSERT_GE(mapping_number(failed_runtime, "futures_failed"), before_future_failures + method_count);
-  free_mapping(failed_runtime);
+  auto* completed_runtime = vm_owner_runtime_status();
+  ASSERT_EQ(mapping_number(completed_runtime, "pending_futures"), before_pending_futures);
+  ASSERT_GE(mapping_number(completed_runtime, "futures_completed"), before_future_completions + method_count);
+  ASSERT_EQ(mapping_number(completed_runtime, "futures_failed"), before_future_failures);
+  free_mapping(completed_runtime);
 
   vm_owner_thread_stop();
   destruct_object(probe);
@@ -6740,6 +6875,10 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageFailsStaleTargetHandle) {
   ASSERT_EQ(mapping_number(submitted, "has_target_handle"), 1);
   ASSERT_EQ(mapping_number(submitted, "target_handle_current"), 1);
   ASSERT_STREQ(mapping_string(submitted, "target_handle_status"), "current");
+  ASSERT_EQ(mapping_number(submitted, "requires_owner_mailbox"), 1);
+  ASSERT_EQ(mapping_number(submitted, "requires_owner_main_queue"), 0);
+  ASSERT_EQ(mapping_number(submitted, "main_required"), 0);
+  ASSERT_EQ(mapping_number(submitted, "queued_on_main"), 0);
   free_mapping(submitted);
 
   vm_owner_set_id(obj, new_owner);
@@ -6751,7 +6890,17 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageFailsStaleTargetHandle) {
   ASSERT_TRUE(stale_status.diagnosed_via_owner_local_cross_shard);
   ASSERT_FALSE(stale_status.owner_local_object_pointer_index_found);
   ASSERT_FALSE(stale_status.diagnosed_via_global_index);
-  ASSERT_EQ(vm_owner_drain_main_tasks(1), 1);
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 100; i++) {
+    auto* maybe_failed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+    auto failed_state = std::string(mapping_string(maybe_failed, "state"));
+    free_mapping(maybe_failed);
+    if (failed_state == "failed") {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  vm_owner_thread_stop();
 
   auto* failed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
   ASSERT_EQ(mapping_number(failed, "success"), 1);
@@ -6777,16 +6926,17 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageFailsStaleTargetHandle) {
   auto* message_event = message_events->u.arr->item[0].u.map;
   ASSERT_EQ(mapping_number(message_event, "target_task_id"), target_task_id);
   ASSERT_STREQ(mapping_string(message_event, "state"), "failed");
-  ASSERT_STREQ(mapping_string(message_event, "route"), "owner_main_queue");
+  ASSERT_STREQ(mapping_string(message_event, "route"), "owner_mailbox");
   ASSERT_STREQ(mapping_string(message_event, "error"), "stale target: owner_mismatch");
   ASSERT_STREQ(mapping_string(message_event, "target_handle_status"), "owner_mismatch");
   ASSERT_EQ(mapping_number(message_event, "failed"), 1);
   ASSERT_EQ(mapping_number(message_event, "terminal"), 1);
   ASSERT_EQ(mapping_number(message_event, "has_target_handle"), 1);
   ASSERT_EQ(mapping_number(message_event, "target_handle_current"), 0);
-  ASSERT_EQ(mapping_number(message_event, "requires_owner_mailbox"), 0);
-  ASSERT_EQ(mapping_number(message_event, "requires_owner_main_queue"), 1);
-  ASSERT_EQ(mapping_number(message_event, "queued_on_main"), 1);
+  ASSERT_EQ(mapping_number(message_event, "requires_owner_mailbox"), 1);
+  ASSERT_EQ(mapping_number(message_event, "requires_owner_main_queue"), 0);
+  ASSERT_EQ(mapping_number(message_event, "main_required"), 0);
+  ASSERT_EQ(mapping_number(message_event, "queued_on_main"), 0);
   ASSERT_EQ(mapping_number(message_event, "frozen_result"), 0);
   free_mapping(message_trace);
 
@@ -6832,7 +6982,7 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageRejectsStaleTargetHandleAtSubmit) {
   ASSERT_STREQ(mapping_string(submitted, "target_handle_status"), "owner_mismatch");
   ASSERT_EQ(mapping_number(submitted, "requires_owner_mailbox"), 0);
   ASSERT_EQ(mapping_number(submitted, "requires_owner_main_queue"), 0);
-  ASSERT_EQ(mapping_number(submitted, "main_required"), 1);
+  ASSERT_EQ(mapping_number(submitted, "main_required"), 0);
   ASSERT_EQ(mapping_number(submitted, "queued_on_main"), 0);
   free_mapping(submitted);
 
@@ -6861,7 +7011,7 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageRejectsStaleTargetHandleAtSubmit) {
   auto* message_event = message_events->u.arr->item[0].u.map;
   ASSERT_EQ(mapping_number(message_event, "target_task_id"), target_task_id);
   ASSERT_STREQ(mapping_string(message_event, "state"), "failed");
-  ASSERT_STREQ(mapping_string(message_event, "route"), "owner_main_queue");
+  ASSERT_STREQ(mapping_string(message_event, "route"), "owner_mailbox");
   ASSERT_STREQ(mapping_string(message_event, "error"), "stale target: owner_mismatch");
   ASSERT_STREQ(mapping_string(message_event, "target_handle_status"), "owner_mismatch");
   ASSERT_EQ(mapping_number(message_event, "failed"), 1);
@@ -6907,6 +7057,10 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageReportsDestructedTargetHandle) {
   ASSERT_EQ(mapping_number(submitted, "has_target_handle"), 1);
   ASSERT_EQ(mapping_number(submitted, "target_handle_current"), 1);
   ASSERT_STREQ(mapping_string(submitted, "target_handle_status"), "current");
+  ASSERT_EQ(mapping_number(submitted, "requires_owner_mailbox"), 1);
+  ASSERT_EQ(mapping_number(submitted, "requires_owner_main_queue"), 0);
+  ASSERT_EQ(mapping_number(submitted, "main_required"), 0);
+  ASSERT_EQ(mapping_number(submitted, "queued_on_main"), 0);
   free_mapping(submitted);
 
   destruct_object(obj);
@@ -6918,7 +7072,17 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageReportsDestructedTargetHandle) {
   ASSERT_FALSE(stale_status.diagnosed_via_owner_local_cross_shard);
   ASSERT_FALSE(stale_status.owner_local_object_pointer_index_found);
   ASSERT_FALSE(stale_status.diagnosed_via_global_index);
-  ASSERT_EQ(vm_owner_drain_main_tasks(1), 1);
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 100; i++) {
+    auto* maybe_failed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+    auto failed_state = std::string(mapping_string(maybe_failed, "state"));
+    free_mapping(maybe_failed);
+    if (failed_state == "failed") {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  vm_owner_thread_stop();
 
   auto* failed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
   ASSERT_EQ(mapping_number(failed, "success"), 1);
@@ -6943,14 +7107,17 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageReportsDestructedTargetHandle) {
   auto* message_event = message_events->u.arr->item[0].u.map;
   ASSERT_EQ(mapping_number(message_event, "target_task_id"), target_task_id);
   ASSERT_STREQ(mapping_string(message_event, "state"), "failed");
-  ASSERT_STREQ(mapping_string(message_event, "route"), "owner_main_queue");
+  ASSERT_STREQ(mapping_string(message_event, "route"), "owner_mailbox");
   ASSERT_STREQ(mapping_string(message_event, "error"), "stale target: record_destructed");
   ASSERT_STREQ(mapping_string(message_event, "target_handle_status"), "record_destructed");
   ASSERT_EQ(mapping_number(message_event, "failed"), 1);
   ASSERT_EQ(mapping_number(message_event, "terminal"), 1);
   ASSERT_EQ(mapping_number(message_event, "has_target_handle"), 1);
   ASSERT_EQ(mapping_number(message_event, "target_handle_current"), 0);
-  ASSERT_EQ(mapping_number(message_event, "queued_on_main"), 1);
+  ASSERT_EQ(mapping_number(message_event, "requires_owner_mailbox"), 1);
+  ASSERT_EQ(mapping_number(message_event, "requires_owner_main_queue"), 0);
+  ASSERT_EQ(mapping_number(message_event, "main_required"), 0);
+  ASSERT_EQ(mapping_number(message_event, "queued_on_main"), 0);
   ASSERT_EQ(mapping_number(message_event, "frozen_result"), 0);
   free_mapping(message_trace);
 }
@@ -10028,8 +10195,10 @@ TEST_F(DriverTest, TestGatewayCommandExecutesThroughOwnerExecutor) {
   ASSERT_EQ(mapping_number(after, "gateway_command_execute_ready"), 1);
   ASSERT_STREQ(mapping_string(after, "gateway_command_execute_task_type"), "gateway_command_execute");
   ASSERT_STREQ(mapping_string(after, "gateway_command_execute_route"), "owner_executor");
-  ASSERT_STREQ(mapping_string(after, "gateway_command_execute_fallback_route"), "owner_main_queue");
-  ASSERT_STREQ(mapping_string(after, "gateway_command_execute_policy"), "audit_enforced_owner_thread_else_main");
+  ASSERT_STREQ(mapping_string(after, "gateway_command_execute_fallback_route"),
+               "explicit_fallback_owner_main_queue");
+  ASSERT_STREQ(mapping_string(after, "gateway_command_execute_policy"),
+               "audit_enforced_owner_thread_normal_path");
   ASSERT_EQ(mapping_number(after, "gateway_command_execute_reply_queue_main_ready"), 1);
   ASSERT_EQ(mapping_number(after, "gateway_command_execute_stale_drop_ready"), 1);
   ASSERT_EQ(mapping_number(after, "gateway_command_execute_context_cleanup_ready"), 1);

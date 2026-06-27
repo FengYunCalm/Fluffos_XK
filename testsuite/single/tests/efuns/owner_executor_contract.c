@@ -366,8 +366,8 @@ void assert_gateway_owner_task_contract(mapping contract) {
     ASSERT_EQ(1, contract["gateway_command_execute_ready"]);
     ASSERT_EQ("gateway_command_execute", contract["gateway_command_execute_task_type"]);
     ASSERT_EQ("owner_executor", contract["gateway_command_execute_route"]);
-    ASSERT_EQ("owner_main_queue", contract["gateway_command_execute_fallback_route"]);
-    ASSERT_EQ("audit_enforced_owner_thread_else_main", contract["gateway_command_execute_policy"]);
+    ASSERT_EQ("explicit_fallback_owner_main_queue", contract["gateway_command_execute_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_normal_path", contract["gateway_command_execute_policy"]);
     ASSERT_EQ("owner_owned_snapshot_owner_executor_consume",
               contract["command_consume_model"]);
     ASSERT_EQ(1, contract["command_consume_snapshot_ready"]);
@@ -619,6 +619,8 @@ void assert_owner_executor_contract(mapping status) {
     mixed *callback_task_contracts;
     mixed *nested_callback_contracts;
     int i;
+    int found_player_domain;
+    int found_economy_domain;
 
     ASSERT(mapp(contract));
     ASSERT(mapp(vm_context_contract));
@@ -662,7 +664,8 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["dispatch_manifest_boundary_ready"]);
     ASSERT_EQ(1, boundary_contract["same_owner_serial_required"]);
     ASSERT_EQ(1, boundary_contract["main_required_tasks_excluded"]);
-    ASSERT_EQ(1, boundary_contract["target_handle_messages_main_required"]);
+    ASSERT_EQ(0, boundary_contract["target_handle_messages_main_required"]);
+    ASSERT_EQ(1, boundary_contract["target_handle_messages_executor_safe"]);
     ASSERT_EQ(1, boundary_contract["compute_result_executor_safe"]);
     ASSERT_EQ(1, boundary_contract["executor_callback_task_boundary_ready"]);
     ASSERT_EQ(1, boundary_contract["executor_callback_allowlist_ready"]);
@@ -672,32 +675,32 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["heartbeat_owner_executor_ready"]);
     ASSERT_EQ("heartbeat", boundary_contract["heartbeat_owner_executor_task_type"]);
     ASSERT_EQ("owner_executor", boundary_contract["heartbeat_owner_executor_route"]);
-    ASSERT_EQ("owner_main_queue", boundary_contract["heartbeat_owner_executor_fallback_route"]);
-    ASSERT_EQ("audit_enforced_owner_thread_else_main", boundary_contract["heartbeat_owner_executor_policy"]);
-    ASSERT_EQ(1, boundary_contract["heartbeat_owner_executor_fallback_main_ready"]);
+    ASSERT_EQ("explicit_fallback_owner_main_queue", boundary_contract["heartbeat_owner_executor_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_normal_path", boundary_contract["heartbeat_owner_executor_policy"]);
+    ASSERT_EQ(0, boundary_contract["heartbeat_owner_executor_fallback_main_ready"]);
     ASSERT_EQ(1, boundary_contract["heartbeat_current_object_thread_local"]);
     ASSERT_EQ(1, boundary_contract["callout_owner_executor_ready"]);
     ASSERT_EQ("call_out", boundary_contract["callout_owner_executor_task_type"]);
     ASSERT_EQ("owner_executor", boundary_contract["callout_owner_executor_route"]);
-    ASSERT_EQ("owner_main_queue", boundary_contract["callout_owner_executor_fallback_route"]);
-    ASSERT_EQ("audit_enforced_owner_thread_else_main", boundary_contract["callout_owner_executor_policy"]);
+    ASSERT_EQ("explicit_fallback_owner_main_queue", boundary_contract["callout_owner_executor_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_normal_path", boundary_contract["callout_owner_executor_policy"]);
     ASSERT_EQ(1, boundary_contract["callout_owner_executor_expired_handle_detach_ready"]);
     ASSERT_EQ(1, boundary_contract["callout_owner_executor_cleanup_main_ready"]);
     ASSERT_EQ(1, boundary_contract["callout_owner_executor_drop_cleanup_ready"]);
-    ASSERT_EQ(1, boundary_contract["callout_owner_executor_fallback_main_ready"]);
+    ASSERT_EQ(0, boundary_contract["callout_owner_executor_fallback_main_ready"]);
     ASSERT_EQ(1, boundary_contract["async_owner_executor_ready"]);
     ASSERT_EQ("async_callback", boundary_contract["async_owner_executor_task_type"]);
     ASSERT_EQ("owner_executor", boundary_contract["async_owner_executor_route"]);
-    ASSERT_EQ("owner_main_queue", boundary_contract["async_owner_executor_fallback_route"]);
-    ASSERT_EQ("audit_enforced_owner_thread_else_main", boundary_contract["async_owner_executor_policy"]);
+    ASSERT_EQ("explicit_fallback_owner_main_queue", boundary_contract["async_owner_executor_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_normal_path", boundary_contract["async_owner_executor_policy"]);
     ASSERT_EQ("frozen_deep_copy_result", boundary_contract["async_owner_executor_result_policy"]);
     ASSERT_EQ(1, boundary_contract["async_owner_executor_cleanup_main_ready"]);
     ASSERT_EQ(1, boundary_contract["async_owner_executor_drop_cleanup_ready"]);
     ASSERT_EQ(1, boundary_contract["dns_owner_executor_ready"]);
     ASSERT_EQ("dns_callback", boundary_contract["dns_owner_executor_task_type"]);
     ASSERT_EQ("owner_executor", boundary_contract["dns_owner_executor_route"]);
-    ASSERT_EQ("owner_main_queue", boundary_contract["dns_owner_executor_fallback_route"]);
-    ASSERT_EQ("audit_enforced_owner_thread_else_main", boundary_contract["dns_owner_executor_policy"]);
+    ASSERT_EQ("explicit_fallback_owner_main_queue", boundary_contract["dns_owner_executor_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_normal_path", boundary_contract["dns_owner_executor_policy"]);
     ASSERT_EQ("frozen_deep_copy_result", boundary_contract["dns_owner_executor_result_policy"]);
     ASSERT_EQ(1, boundary_contract["dns_owner_executor_owner_epoch_capture_ready"]);
     ASSERT_EQ(1, boundary_contract["dns_owner_executor_cleanup_main_ready"]);
@@ -705,8 +708,8 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["socket_owner_executor_ready"]);
     ASSERT_EQ("socket_callback", boundary_contract["socket_owner_executor_task_type"]);
     ASSERT_EQ("owner_executor", boundary_contract["socket_owner_executor_route"]);
-    ASSERT_EQ("owner_main_queue", boundary_contract["socket_owner_executor_fallback_route"]);
-    ASSERT_EQ("audit_enforced_owner_thread_else_main", boundary_contract["socket_owner_executor_policy"]);
+    ASSERT_EQ("explicit_fallback_owner_main_queue", boundary_contract["socket_owner_executor_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_normal_path", boundary_contract["socket_owner_executor_policy"]);
     ASSERT_EQ("frozen_deep_copy_args", boundary_contract["socket_owner_executor_result_policy"]);
     ASSERT_EQ(1, boundary_contract["socket_owner_executor_cleanup_main_ready"]);
     ASSERT_EQ(1, boundary_contract["socket_owner_executor_drop_cleanup_ready"]);
@@ -720,8 +723,8 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["gateway_command_execute_ready"]);
     ASSERT_EQ("gateway_command_execute", boundary_contract["gateway_command_execute_task_type"]);
     ASSERT_EQ("owner_executor", boundary_contract["gateway_command_execute_route"]);
-    ASSERT_EQ("owner_main_queue", boundary_contract["gateway_command_execute_fallback_route"]);
-    ASSERT_EQ("audit_enforced_owner_thread_else_main", boundary_contract["gateway_command_execute_policy"]);
+    ASSERT_EQ("explicit_fallback_owner_main_queue", boundary_contract["gateway_command_execute_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_normal_path", boundary_contract["gateway_command_execute_policy"]);
     ASSERT_EQ("owner_private_command_snapshot", boundary_contract["gateway_command_execute_payload_policy"]);
     ASSERT_EQ(1, boundary_contract["gateway_command_execute_reply_queue_main_ready"]);
     ASSERT_EQ(1, boundary_contract["gateway_command_execute_stale_drop_ready"]);
@@ -731,6 +734,17 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["ordinary_lpc_explicit_open_required"]);
     ASSERT_EQ("explicit_open_same_owner_only", boundary_contract["ordinary_lpc_policy"]);
     ASSERT_EQ(0, boundary_contract["lpc_surface_expanded"]);
+    ASSERT_EQ(1, boundary_contract["registered_owner_task_domains_ready"]);
+    ASSERT_EQ(1, boundary_contract["target_owner_message_executor_ready"]);
+    ASSERT_EQ(0, boundary_contract["normal_path_main_fallback_count"]);
+    ASSERT_EQ(1, boundary_contract["normal_path_main_fallback_ready"]);
+    ASSERT_EQ(1, boundary_contract["service_shard_executor_ready"]);
+    ASSERT_EQ(1, boundary_contract["domain_task_registry_mudlib_aligned"]);
+    ASSERT_EQ(1, boundary_contract["keyed_service_shard_ready"]);
+    ASSERT_EQ(0, boundary_contract["hot_path_service_owner_single_point"]);
+    ASSERT_EQ(0, boundary_contract["target_owner_message_main_fallback"]);
+    ASSERT_EQ(1, boundary_contract["production_perfect_contract_ready"]);
+    ASSERT_EQ(0, boundary_contract["facade_only_runtime_claims"]);
     ASSERT_EQ("", boundary_contract["next_refactor_target"]);
     assert_production_gate_contract(boundary_contract);
     ASSERT(mapp(fairness));
@@ -777,32 +791,32 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["heartbeat_owner_executor_ready"]);
     ASSERT_EQ("heartbeat", status["heartbeat_owner_executor_task_type"]);
     ASSERT_EQ("owner_executor", status["heartbeat_owner_executor_route"]);
-    ASSERT_EQ("owner_main_queue", status["heartbeat_owner_executor_fallback_route"]);
-    ASSERT_EQ("audit_enforced_owner_thread_else_main", status["heartbeat_owner_executor_policy"]);
-    ASSERT_EQ(1, status["heartbeat_owner_executor_fallback_main_ready"]);
+    ASSERT_EQ("explicit_fallback_owner_main_queue", status["heartbeat_owner_executor_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_normal_path", status["heartbeat_owner_executor_policy"]);
+    ASSERT_EQ(0, status["heartbeat_owner_executor_fallback_main_ready"]);
     ASSERT_EQ(1, status["heartbeat_current_object_thread_local"]);
     ASSERT_EQ(1, status["callout_owner_executor_ready"]);
     ASSERT_EQ("call_out", status["callout_owner_executor_task_type"]);
     ASSERT_EQ("owner_executor", status["callout_owner_executor_route"]);
-    ASSERT_EQ("owner_main_queue", status["callout_owner_executor_fallback_route"]);
-    ASSERT_EQ("audit_enforced_owner_thread_else_main", status["callout_owner_executor_policy"]);
+    ASSERT_EQ("explicit_fallback_owner_main_queue", status["callout_owner_executor_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_normal_path", status["callout_owner_executor_policy"]);
     ASSERT_EQ(1, status["callout_owner_executor_expired_handle_detach_ready"]);
     ASSERT_EQ(1, status["callout_owner_executor_cleanup_main_ready"]);
     ASSERT_EQ(1, status["callout_owner_executor_drop_cleanup_ready"]);
-    ASSERT_EQ(1, status["callout_owner_executor_fallback_main_ready"]);
+    ASSERT_EQ(0, status["callout_owner_executor_fallback_main_ready"]);
     ASSERT_EQ(1, status["async_owner_executor_ready"]);
     ASSERT_EQ("async_callback", status["async_owner_executor_task_type"]);
     ASSERT_EQ("owner_executor", status["async_owner_executor_route"]);
-    ASSERT_EQ("owner_main_queue", status["async_owner_executor_fallback_route"]);
-    ASSERT_EQ("audit_enforced_owner_thread_else_main", status["async_owner_executor_policy"]);
+    ASSERT_EQ("explicit_fallback_owner_main_queue", status["async_owner_executor_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_normal_path", status["async_owner_executor_policy"]);
     ASSERT_EQ("frozen_deep_copy_result", status["async_owner_executor_result_policy"]);
     ASSERT_EQ(1, status["async_owner_executor_cleanup_main_ready"]);
     ASSERT_EQ(1, status["async_owner_executor_drop_cleanup_ready"]);
     ASSERT_EQ(1, status["dns_owner_executor_ready"]);
     ASSERT_EQ("dns_callback", status["dns_owner_executor_task_type"]);
     ASSERT_EQ("owner_executor", status["dns_owner_executor_route"]);
-    ASSERT_EQ("owner_main_queue", status["dns_owner_executor_fallback_route"]);
-    ASSERT_EQ("audit_enforced_owner_thread_else_main", status["dns_owner_executor_policy"]);
+    ASSERT_EQ("explicit_fallback_owner_main_queue", status["dns_owner_executor_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_normal_path", status["dns_owner_executor_policy"]);
     ASSERT_EQ("frozen_deep_copy_result", status["dns_owner_executor_result_policy"]);
     ASSERT_EQ(1, status["dns_owner_executor_owner_epoch_capture_ready"]);
     ASSERT_EQ(1, status["dns_owner_executor_cleanup_main_ready"]);
@@ -810,8 +824,8 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["socket_owner_executor_ready"]);
     ASSERT_EQ("socket_callback", status["socket_owner_executor_task_type"]);
     ASSERT_EQ("owner_executor", status["socket_owner_executor_route"]);
-    ASSERT_EQ("owner_main_queue", status["socket_owner_executor_fallback_route"]);
-    ASSERT_EQ("audit_enforced_owner_thread_else_main", status["socket_owner_executor_policy"]);
+    ASSERT_EQ("explicit_fallback_owner_main_queue", status["socket_owner_executor_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_normal_path", status["socket_owner_executor_policy"]);
     ASSERT_EQ("frozen_deep_copy_args", status["socket_owner_executor_result_policy"]);
     ASSERT_EQ(1, status["socket_owner_executor_cleanup_main_ready"]);
     ASSERT_EQ(1, status["socket_owner_executor_drop_cleanup_ready"]);
@@ -823,18 +837,30 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["gateway_command_execute_ready"]);
     ASSERT_EQ("gateway_command_execute", status["gateway_command_execute_task_type"]);
     ASSERT_EQ("owner_executor", status["gateway_command_execute_route"]);
-    ASSERT_EQ("owner_main_queue", status["gateway_command_execute_fallback_route"]);
-    ASSERT_EQ("audit_enforced_owner_thread_else_main", status["gateway_command_execute_policy"]);
+    ASSERT_EQ("explicit_fallback_owner_main_queue", status["gateway_command_execute_fallback_route"]);
+    ASSERT_EQ("audit_enforced_owner_thread_normal_path", status["gateway_command_execute_policy"]);
     ASSERT_EQ("owner_private_command_snapshot", status["gateway_command_execute_payload_policy"]);
     ASSERT_EQ(1, status["gateway_command_execute_reply_queue_main_ready"]);
     ASSERT_EQ(1, status["gateway_command_execute_stale_drop_ready"]);
     ASSERT_EQ(1, status["gateway_command_execute_context_cleanup_ready"]);
     ASSERT_EQ(1, status["gateway_command_execute_session_revalidate_ready"]);
+    ASSERT_EQ(1, status["registered_owner_task_domains_ready"]);
+    ASSERT_EQ(18, status["registered_owner_task_domain_count"]);
+    ASSERT_EQ(1, status["target_owner_message_executor_ready"]);
+    ASSERT_EQ(0, status["normal_path_main_fallback_count"]);
+    ASSERT_EQ(1, status["normal_path_main_fallback_ready"]);
+    ASSERT_EQ(1, status["service_shard_executor_ready"]);
+    ASSERT_EQ(1, status["domain_task_registry_mudlib_aligned"]);
+    ASSERT_EQ(1, status["keyed_service_shard_ready"]);
+    ASSERT_EQ(0, status["hot_path_service_owner_single_point"]);
+    ASSERT_EQ(0, status["target_owner_message_main_fallback"]);
+    ASSERT_EQ(1, status["production_perfect_contract_ready"]);
+    ASSERT_EQ(0, status["facade_only_runtime_claims"]);
     callback_task_contracts = status["executor_callback_task_contracts"];
     ASSERT(arrayp(callback_task_contracts));
     ASSERT_EQ(6, sizeof(callback_task_contracts));
     ASSERT(arrayp(lpc_contracts));
-    ASSERT_EQ(1, sizeof(lpc_contracts));
+    ASSERT_EQ(18, sizeof(lpc_contracts));
     readonly_contract = lpc_contracts[0];
     ASSERT(mapp(readonly_contract));
     ASSERT_EQ("owner_task_readonly", readonly_contract["method"]);
@@ -850,6 +876,15 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, readonly_contract["frozen_result_required"]);
     ASSERT_EQ(0, readonly_contract["direct_cross_owner_write"]);
     ASSERT(stringp(readonly_contract["reason"]));
+    found_player_domain = 0;
+    found_economy_domain = 0;
+    for (i = 0; i < sizeof(lpc_contracts); i++) {
+        ASSERT(mapp(lpc_contracts[i]));
+        found_player_domain = found_player_domain || lpc_contracts[i]["method"] == "owner_task_player";
+        found_economy_domain = found_economy_domain || lpc_contracts[i]["method"] == "owner_task_economy";
+    }
+    ASSERT(found_player_domain);
+    ASSERT(found_economy_domain);
     ASSERT(arrayp(dispatch_contracts));
     ASSERT_EQ(18, sizeof(dispatch_contracts));
     for (i = 0; i < sizeof(dispatch_contracts); i++) {
@@ -972,15 +1007,24 @@ void assert_owner_executor_contract(mapping status) {
     assert_contract_entry(contract, "owner_message_mailbox", "executor_safe",
                           "owner_executor", 1, 0, 0);
     assert_owner_message_route_contract(contract, "owner_message_mailbox", 1, 0);
-    assert_contract_entry(contract, "owner_message_target_handle", "main_required",
-                          "owner_main_queue", 0, 1, 0);
-    assert_owner_message_route_contract(contract, "owner_message_target_handle", 0, 1);
+    assert_contract_entry(contract, "owner_message_target_handle", "executor_safe",
+                          "owner_executor", 1, 0, 0);
+    assert_owner_message_route_contract(contract, "owner_message_target_handle", 1, 0);
     assert_contract_entry(contract, "lpc_task_allowlist", "executor_safe_allowlist",
                           "owner_executor", 1, 0, 0);
     nested_lpc_contracts = contract["lpc_task_allowlist"]["contracts"];
     ASSERT(arrayp(nested_lpc_contracts));
-    ASSERT_EQ(1, sizeof(nested_lpc_contracts));
+    ASSERT_EQ(18, sizeof(nested_lpc_contracts));
     ASSERT_EQ("owner_task_readonly", nested_lpc_contracts[0]["method"]);
+    found_player_domain = 0;
+    found_economy_domain = 0;
+    for (i = 0; i < sizeof(nested_lpc_contracts); i++) {
+        ASSERT(mapp(nested_lpc_contracts[i]));
+        found_player_domain = found_player_domain || nested_lpc_contracts[i]["method"] == "owner_task_player";
+        found_economy_domain = found_economy_domain || nested_lpc_contracts[i]["method"] == "owner_task_economy";
+    }
+    ASSERT(found_player_domain);
+    ASSERT(found_economy_domain);
     assert_contract_entry(contract, "ordinary_lpc", "executor_safe_explicit_open",
                           "owner_executor", 1, 0, 0);
     ASSERT_EQ("generic_owner_lpc_dispatch", contract["ordinary_lpc"]["dispatch_model"]);

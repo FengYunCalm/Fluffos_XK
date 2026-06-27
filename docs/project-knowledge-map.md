@@ -263,16 +263,16 @@ object_id 方向的 global record fallback 已显式命名为 `global_object_rec
 - `lpc_probe`：验证 off-main context、object store isolation、owner binding。
 - `lpc_canary`：只允许 `owner_lpc_canary`。
 - `owner_state`：guarded 状态任务。
-- `owner_message`：无 target handle 的 message 可在线程侧完成；有 target handle 的 object message 会进入主线程 owner queue bridge 执行，并完成 future。
+- `owner_message`：无 target handle 的 message 在线程侧完成；有 target handle 的 object message 通过 target owner mailbox/executor 执行，执行前校验 ObjectHandle current、owner epoch 和 destructed 状态，并完成或失败对应 future。
 - `compute_result`：完成 worker future 结果投递。
-- `lpc_task`：只开放 `owner_task_readonly` 这一受控只读 allowlist 样例；提交会返回 `future_id`，成功执行后 future 进入 `completed` 并携带 frozen result，拒绝、失败、purge 或被非 owner-thread 路径消费时 future 进入 `failed`。
+- `lpc_task`：开放生产 owner domain allowlist：`owner_task_readonly`、`owner_task_player`、`owner_task_room`、`owner_task_session`、`owner_task_item`、`owner_task_economy`、`owner_task_combat`、`owner_task_mail`、`owner_task_reward`、`owner_task_world`、`owner_task_persistence`、`owner_task_team`、`owner_task_guild`、`owner_task_sect`、`owner_task_quest`、`owner_task_rank`、`owner_task_crafting` 和 `owner_task_life_skill`。提交会返回 `future_id`，成功执行后 future 进入 `completed` 并携带 frozen result，拒绝、失败、purge 或被非 owner-thread 路径消费时 future 进入 `failed`。
 
 当前明确关闭：
 
 - 普通 `lpc` 默认 rejected。
-- 未注册 `lpc_task` 和预留 owner domain task 默认 rejected。
+- 未注册 `lpc_task`、未进入生产 allowlist 的 owner domain task 和普通 legacy LPC 默认 rejected。
 
-这说明 owner thread 还是实验/验证基础设施，不能作为任意 LPC 并行执行入口。
+这说明 owner thread 已是受控生产执行入口，但不能作为任意 LPC 并行执行入口；安全边界仍是显式 allowlist、same-owner/owner-domain、frozen payload、ObjectHandle 和 owner future。
 
 ## VM worker
 
@@ -333,9 +333,9 @@ payload 约束：
 - object/function/buffer/class 等不允许作为 payload。
 - `frozen_payload_contract` 将 `owner_send`、`owner_call_async`、`owner_publish_snapshot`、`worker_snapshot` 和 `domain_task` 的 input/result policy 暴露给 C++ 与 LPC 合同测试；`domain_task` 目前是正式执行器前的协议边界，要求 top-level mapping 输入和 frozen owner future result。
 
-`owner_call_async()` 会使用 target `ObjectHandle`，future polling 会报告 target handle 是否仍 current。target handle stale 时 future 应失败。
+`owner_call_async()` 会使用 target `ObjectHandle`，future polling 会报告 target handle 是否仍 current。target handle stale、owner epoch mismatch 或目标已 destruct 时 future 应失败。
 
-当前边界：有 target handle 的 owner async LPC call 仍通过 main drain 执行 `safe_apply()`，并不是后台线程直接执行对象方法；LPC 层用 `vm_owner_drain_main(int)` 显式触发这条 main-required route。若提交后目标 owner 发生迁移，future 必须失败并暴露 `target_handle_status=owner_mismatch`。
+当前边界：有 target handle 的 owner async LPC call 正常路径通过 target owner mailbox/executor 执行，提交和执行前都保留 ObjectHandle stale guard。若提交后目标 owner 发生迁移，future 必须失败并暴露 `target_handle_status=owner_mismatch`；stale-at-submit 不入 owner mailbox，current-at-submit 后变 stale/destructed 会在 owner executor drain 时失败。
 
 ## snapshot API
 
@@ -363,12 +363,12 @@ payload 约束：
 
 当前 gateway/session 已纳入 owner runtime 迁移：
 
-- gateway 命令 callback 在 `audit`/`enforced` 且 owner thread 可用时使用 `gateway_command_execute` owner executor callback；`off` 或 executor unavailable 时回退 `vm_owner_enqueue_main_task_with_payload()`。
+- gateway 命令 callback 在生产正常路径使用 `gateway_command_execute` owner executor callback；`off`、owner executor unavailable 或 rollback/failure 场景只能走显式 `vm_owner_enqueue_main_task_with_payload()` fallback，不计入正常业务热路径。
 - gateway send/create/destroy 路径使用 `VMOwnerScope`。
 - `/adm/daemons/gateway_d` system message 入口使用 daemon owner/epoch 绑定 `VMOwnerScope` 并记录 `receive_system_message` trace，C++ 回归验证 daemon 在玩家 owner scope 内仍归 `legacy/main`。
 - gateway `exec()` 路径通过 `gateway_session_exec_update()` 迁移 session lookup；`gateway_session_info()` 暴露 live object 的 `object_name`、`owner_id`、`owner_epoch`，C++ 回归验证 disconnect/remove interactive 不改写新 user owner/epoch。
 - 普通 interactive `exec()` 路径已有 C++ 回归，验证 interactive 指针和 command giver 迁移后，新旧对象 owner/epoch 均保持原值。
-- socket read/write/close callbacks 已在 `audit`/`enforced` 且 owner thread 可用时投递 owner executor，`off` 或 executor unavailable 时回退 owner main queue；`socket_release` 仍保持 efun 同步返回语义，但 release 时捕获目标 owner epoch，`socket_acquire()` 时校验同一 owner epoch，成功、拒绝、stale 和 owner mismatch 都记录 owner trace。
+- socket read/write/close callbacks 生产正常路径投递 owner executor；`off` 或 executor unavailable 只作为显式兼容 fallback。`socket_release` 仍保持 efun 同步返回语义，但 release 时捕获目标 owner epoch，`socket_acquire()` 时校验同一 owner epoch，成功、拒绝、stale 和 owner mismatch 都记录 owner trace。
 
 ## 测试体系
 
@@ -390,7 +390,7 @@ payload 约束：
 - cross-owner access trace 和 enforced blocking。
 - `present`、parser、`move_object`、`destruct`、`call_other` 边界。
 - owner payload frozen mapping traversal。
-- owner executor 合同版本 `owner_executor_v1`、dispatch contract、executor trace，以及 target-handle owner async 的 main-required drain 和 stale owner 失败路径。
+- owner executor 合同版本 `owner_executor_v1`、dispatch contract、executor trace，以及 target-handle owner async 的 owner executor route 和 stale owner 失败路径。
 - stale owner object message 和 future 状态。
 - worker task/future 联动。
 
@@ -429,7 +429,7 @@ payload 约束：
 - command singleton、std database/http/present_clone/telnet shared service、simul_efun 继承的 std helper、`single/simul_efun` 关键 singleton 以及 `/adm/daemons/gateway_d` daemon singleton 在玩家 owner scope 下保持默认 owner 的入口合同。
 - master virtual object 在玩家 owner scope 下保持默认 owner，且 virtual rename 后 object store directory path 同步。
 - `owner_executor_boundary_contract` 已在 runtime/thread status 暴露 OwnerExecutor 边界合同：`implementation_state=compilation_unit_active`、`class_extracted=1`、`module_extracted=1`、`compilation_unit_extracted=1`，说明 `OwnerExecutor` 已抽成内部模块文件和独立编译单元并由 `owner_thread_loop()` 使用。合同固定 scheduler/mailbox/task dispatch/VMContext/counter/future completion 依赖、same-owner serial、普通 LPC default-closed/explicit-open、driver callback allowlist、callback cleanup main-required 和 production gate 状态。heartbeat、callout、async/db/file completion、DNS callback、socket read/write/close callback 和 gateway command execute 已具备 owner executor 路径；`socket_release_main_required=0`、`socket_release_owner_safe_handshake_ready=1`、`socket_release_owner_epoch_guard_ready=1` 表示 release/acquire 同步握手已收口为 owner-safe 合同。
-- gateway receive、ED/main-required cleanup 和 network reply 仍以主线程 owner queue 作为兼容入口；gateway `process_user_command`、heartbeat、callout、async/db/file completion、DNS callback 和 socket read/write/close callback 已在 `audit`/`enforced` 且 owner thread 可用时投递 owner executor，`off` 或 executor unavailable 时回退 owner main queue；callout、async、DNS、socket callback 和 gateway command stale/drop/destructed 清理都经主线程 cleanup 释放 LPC 引用。`socket_release` 保留 efun 同步返回语义，但 release/acquire 已由 owner epoch guard 收口：`socket_release_main_required=0`、`socket_release_owner_safe_handshake_ready=1`、`socket_release_owner_epoch_guard_ready=1`。`gateway_owner_task_contract` 与 `executor_task_dispatch_contracts` 固定 `gateway_command_execute`、`heartbeat`、`call_out`、`async_callback`、`dns_callback`、`socket_callback` 六类 driver callback allowlist；普通 LPC 显式开放路径仍是 explicit-open-only，不开放任意 legacy LPC 默认后台执行。
+- gateway receive、ED/main-required cleanup 和 network reply 仍以主线程 owner queue 作为 IO/cleanup adapter；gateway `process_user_command`、heartbeat、callout、async/db/file completion、DNS callback、socket read/write/close callback 和 target-handle owner message 的生产正常路径投递 owner executor，`off` 或 executor unavailable 只作为显式兼容 fallback。callout、async、DNS、socket callback 和 gateway command stale/drop/destructed 清理都经主线程 cleanup 释放 LPC 引用。`socket_release` 保留 efun 同步返回语义，但 release/acquire 已由 owner epoch guard 收口：`socket_release_main_required=0`、`socket_release_owner_safe_handshake_ready=1`、`socket_release_owner_epoch_guard_ready=1`。`gateway_owner_task_contract` 与 `executor_task_dispatch_contracts` 固定 `gateway_command_execute`、`heartbeat`、`call_out`、`async_callback`、`dns_callback`、`socket_callback` 六类 driver callback allowlist；生产 owner domain task allowlist 固定 18 类 mudlib/domain 任务；普通 LPC 显式开放路径仍是 explicit-open-only，不开放任意 legacy LPC 默认后台执行。
 - process_input/add_action parser frame 已收敛为 `owner_command_parser_context_v1`：gateway contract/payload 暴露 `process_input_add_action_parser_frame_ready=1`、`process_input_add_action_parser_frame_executor_ready=1` 和 `process_input_add_action_parser_blocker=""`，baseline gateway 命令 trace 可见 `interactive_command_parser/safe_parse_command/frame_entered`；这把 parser frame 子边界收敛进 owner command frame，`process_input_add_action_parser` gate 已满足。
 - process_input apply 已收敛为 `owner_command_frame_process_input_apply`：gateway contract/payload 暴露 `process_input_apply_frame_ready=1`、`process_input_apply_frame_executor_ready=1`，baseline gateway 命令 trace 可见 `interactive_command_parser/process_input_apply/frame_entered`；这把 `APPLY_PROCESS_INPUT` 子边界收敛进 owner command frame，`process_input_add_action_parser` gate 已满足。
 - input_to/get_char mode flag 清理已收敛为 `owner_command_frame_input_callback_mode_delta`：gateway contract/payload 暴露 `command_input_callback_mode_delta_ready=1`、`command_input_callback_mode_delta_executor_ready=1`，active get_char trace 可见 `interactive_input_callback_mode/input_to_get_char_mode_flags/frame_detached`；这把 `NOESC`、`SINGLE_CHAR`、`NOECHO` 清理子边界收敛进 owner command frame，`input_to_get_char_state` gate 已满足。
@@ -440,7 +440,7 @@ payload 约束：
 - prompt write_prompt apply 已收敛为 `owner_command_frame_write_prompt_apply`：gateway contract/payload 暴露 `command_reply_write_prompt_apply_frame_ready=1`、`command_reply_write_prompt_apply_frame_executor_ready=0`，baseline gateway 命令 trace 可见 `command_reply/write_prompt_apply/frame_entered`；这只是 prompt reply side-effect 子边界，reply queue 仍保持 main-required。
 - cross-owner audit 和 enforced 阻断核心危险路径。
 - snapshot API 和 owner async/future API。
-- 普通 off-main LPC 仍默认关闭；`owner_task_readonly` 受控只读 allowlist 已可在线程侧执行，`vm_owner_ordinary_lpc_task()` 也已支持显式开放的 same-owner generic LPC dispatch，并通过 owner future 暴露 pending/completed/failed 与 frozen result。
+- 普通 off-main LPC 仍默认关闭；18 类生产 owner domain allowlist 已可在线程侧执行，`vm_owner_ordinary_lpc_task()` 也已支持显式开放的 same-owner generic LPC dispatch，并通过 owner future 暴露 pending/completed/failed 与 frozen result。
 
 ## 当前生产边界
 
@@ -448,6 +448,7 @@ payload 约束：
 - 高频同步返回路径的生产口径是 snapshot、owner message 或 owner future；新增同步 cross-owner 写路径必须先进入 audit 并迁移后才能进入 enforced。
 - array、mapping、object ref 的完整跨线程内存模型仍不允许绕过 frozen payload/ObjectHandle 边界。
 - `owner_lpc_task_allowed()` 仍是显式开放合同，不开放任意 legacy LPC 默认后台执行。
+- `normal_path_main_fallback_count` 必须保持为 0；main 线程只保留 IO adapter、cleanup adapter、显式 fallback 和 documented main-required compatibility surface。
 - gateway command、heartbeat、callout、async/db/file completion、DNS callback 和 socket read/write/close callback 已有 owner executor 入口，并已按当前接受的 10 用户 30 分钟 audit 压测口径验收。
 - 10 用户 30 分钟 audit 压测、真实 XiaKeXing mudlib final audit 和 `socket_release` owner-safe release/acquire handshake 均已收口，`production_gate_ready` 可以为 1。
 - production rollout 策略、回滚指标和发布阻断条件以 `docs/multicore-production-gate.md` 为准；任何证据失效都必须回退对应 ready 字段并重跑验收。
@@ -460,7 +461,7 @@ payload 约束：
 - 先 audit，再 enforced。
 - 先 handle，再 shard。
 - 先 message/future，再禁止跨 owner 同步调用。
-- 先主线程 owner queue 固定语义，再迁移到后台 owner executor。
+- 正常业务热路径保持 owner executor；新增 main fallback 必须显式标注为 off/rollback/failure/compatibility，并有计数和合同测试。
 
 ## 风险清单
 
