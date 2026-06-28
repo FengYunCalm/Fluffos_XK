@@ -751,6 +751,17 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["owner_callback_allowlist_complete"]);
     ASSERT_EQ("heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback",
               boundary_contract["owner_callback_supported_kinds"]);
+    ASSERT_EQ(1, boundary_contract["owner_callback_payload_strict_diagnostics_ready"]);
+    ASSERT_EQ("owner_callback_payload_policy_v1", boundary_contract["owner_callback_payload_policy_schema"]);
+    ASSERT_EQ("frozen_payload_or_owner_handle_only", boundary_contract["owner_callback_payload_policy"]);
+    ASSERT_EQ("owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,owner_epoch_mismatch,"
+              "target_destructed,target_stale,admission_rejected,task_dropped",
+              boundary_contract["owner_callback_failure_codes"]);
+    ASSERT_EQ("none,owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,"
+              "owner_epoch_mismatch,target_destructed,target_stale,admission_rejected,task_dropped",
+              boundary_contract["owner_callback_drop_reasons"]);
+    ASSERT_EQ(1, boundary_contract["owner_callback_human_reason_ready"]);
+    ASSERT_EQ("owner_callback_failure_reason_v1", boundary_contract["owner_callback_failure_reason_schema"]);
     ASSERT_EQ(1, boundary_contract["executor_callback_cleanup_main_required"]);
     ASSERT_EQ(7, boundary_contract["executor_callback_allowlist_count"]);
     ASSERT_EQ("heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback",
@@ -1047,6 +1058,17 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["gateway_io_adapter_only_ready"]);
     ASSERT_EQ("main_thread_io_adapter", status["gateway_io_boundary"]);
     ASSERT_EQ(1, status["callback_payload_strict_ready"]);
+    ASSERT_EQ(1, status["owner_callback_payload_strict_diagnostics_ready"]);
+    ASSERT_EQ("owner_callback_payload_policy_v1", status["owner_callback_payload_policy_schema"]);
+    ASSERT_EQ("frozen_payload_or_owner_handle_only", status["owner_callback_payload_policy"]);
+    ASSERT_EQ("owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,owner_epoch_mismatch,"
+              "target_destructed,target_stale,admission_rejected,task_dropped",
+              status["owner_callback_failure_codes"]);
+    ASSERT_EQ("none,owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,"
+              "owner_epoch_mismatch,target_destructed,target_stale,admission_rejected,task_dropped",
+              status["owner_callback_drop_reasons"]);
+    ASSERT_EQ(1, status["owner_callback_human_reason_ready"]);
+    ASSERT_EQ("owner_callback_failure_reason_v1", status["owner_callback_failure_reason_schema"]);
     ASSERT_EQ(1, status["service_shard_executor_ready"]);
     ASSERT_EQ(1, status["domain_task_registry_mudlib_aligned"]);
     ASSERT_EQ(1, status["keyed_service_shard_ready"]);

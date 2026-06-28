@@ -43,10 +43,29 @@ constexpr const char *kOwnerRuntimeStressEntry = "tools/owner-runtime-v4-stress.
 constexpr const char *kOwnerCallbackDiagnosticsSchemaV1 = "owner_callback_diagnostics_v1";
 constexpr const char *kOwnerCallbackFailureCodeSchemaV1 = "owner_callback_failure_code_v1";
 constexpr const char *kOwnerCallbackDropReasonSchemaV1 = "owner_callback_drop_reason_v1";
+constexpr const char *kOwnerCallbackPayloadPolicySchemaV1 = "owner_callback_payload_policy_v1";
+constexpr const char *kOwnerCallbackFailureReasonSchemaV1 = "owner_callback_failure_reason_v1";
+constexpr const char *kOwnerCallbackPayloadPolicyStrictV1 = "frozen_payload_or_owner_handle_only";
+constexpr const char *kOwnerCallbackFailureCodesV1 =
+    "owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,owner_epoch_mismatch,"
+    "target_destructed,target_stale,admission_rejected,task_dropped";
+constexpr const char *kOwnerCallbackDropReasonsV1 =
+    "none,owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,owner_epoch_mismatch,"
+    "target_destructed,target_stale,admission_rejected,task_dropped";
 constexpr const char *kOwnerCallbackSupportedKinds =
     "heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback";
 
 constexpr const char *kGatewayCommandExecutorActivationBlocker = "";
+
+void add_owner_callback_diagnostic_contract_fields(mapping_t *map) {
+  add_mapping_pair(map, "owner_callback_payload_strict_diagnostics_ready", 1);
+  add_mapping_string(map, "owner_callback_payload_policy_schema", kOwnerCallbackPayloadPolicySchemaV1);
+  add_mapping_string(map, "owner_callback_payload_policy", kOwnerCallbackPayloadPolicyStrictV1);
+  add_mapping_string(map, "owner_callback_failure_codes", kOwnerCallbackFailureCodesV1);
+  add_mapping_string(map, "owner_callback_drop_reasons", kOwnerCallbackDropReasonsV1);
+  add_mapping_pair(map, "owner_callback_human_reason_ready", 1);
+  add_mapping_string(map, "owner_callback_failure_reason_schema", kOwnerCallbackFailureReasonSchemaV1);
+}
 
 struct VMContextReadinessGate {
   const char *gate;
@@ -433,6 +452,7 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_string(map, "owner_callback_drop_reason_schema", kOwnerCallbackDropReasonSchemaV1);
   add_mapping_pair(map, "owner_callback_allowlist_complete", 1);
   add_mapping_string(map, "owner_callback_supported_kinds", kOwnerCallbackSupportedKinds);
+  add_owner_callback_diagnostic_contract_fields(map);
   add_mapping_pair(map, "executor_callback_allowlist_count", owner_executor_callback_allowlist_count());
   add_mapping_string(map, "owner_executor_admission_policy", kOwnerTaskAdmissionPolicyV2);
   add_mapping_pair(map, "owner_executor_admission_accepted",
@@ -1383,6 +1403,7 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "owner_callback_drop_reason_schema", kOwnerCallbackDropReasonSchemaV1);
   add_mapping_pair(contract, "owner_callback_allowlist_complete", 1);
   add_mapping_string(contract, "owner_callback_supported_kinds", kOwnerCallbackSupportedKinds);
+  add_owner_callback_diagnostic_contract_fields(contract);
   add_mapping_pair(contract, "executor_callback_cleanup_main_required", 1);
   add_mapping_pair(contract, "executor_callback_allowlist_count", owner_executor_callback_allowlist_count());
   add_mapping_string(contract, "executor_callback_allowlist", kOwnerCallbackSupportedKinds);
@@ -1549,7 +1570,7 @@ const OwnerTaskRouteContract &owner_task_route_contract(const OwnerMailboxTask &
 }
 
 mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
-  auto *map = allocate_mapping(46);
+  auto *map = allocate_mapping(48);
   const auto &descriptor = owner_executor_task_descriptor(task);
   const auto target_message = task.task_type == "owner_message" && task.has_target_handle;
   const auto &message_route_contract = owner_task_route_contract(task);
@@ -1598,6 +1619,9 @@ mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
   add_mapping_string(map, "failure_code", owner_task_failure_code("", task.admission_state));
   add_mapping_string(map, "failure_reason", owner_task_failure_reason("", task.admission_state));
   add_mapping_string(map, "drop_reason", owner_task_drop_reason("", task.admission_state));
+  add_mapping_string(map, "payload_policy_code", task.payload_policy.c_str());
+  add_mapping_pair(map, "callback_payload_strict_required",
+                   descriptor.dispatch_kind == OwnerExecutorDispatchKind::ExecutorCallback ? 1 : 0);
   add_mapping_pair(map, "deadline_ms", static_cast<long>(task.deadline_ms));
   add_mapping_string(map, "task_contract_key", contract_key);
   add_mapping_string(map, "dispatch_kind", owner_executor_dispatch_kind_name(descriptor.dispatch_kind));
@@ -1617,7 +1641,7 @@ mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
 mapping_t *owner_task_trace_mapping(const OwnerTaskTrace &trace) {
   auto target_status = trace.has_target_handle ? vm_object_handle_resolve_status(trace.target_handle).status
                                                : VMObjectHandleResolveStatus::kInvalidHandle;
-  auto *map = allocate_mapping(59);
+  auto *map = allocate_mapping(61);
   add_mapping_pair(map, "trace_id", static_cast<long>(trace.trace_id));
   add_mapping_string(map, "trace_model", "owner_task_lifecycle_event");
   add_mapping_pair(map, "task_id", static_cast<long>(trace.task_id));
@@ -1650,6 +1674,9 @@ mapping_t *owner_task_trace_mapping(const OwnerTaskTrace &trace) {
   add_mapping_string(map, "failure_code", owner_task_failure_code(trace.state, trace.admission_state));
   add_mapping_string(map, "failure_reason", owner_task_failure_reason(trace.state, trace.admission_state));
   add_mapping_string(map, "drop_reason", owner_task_drop_reason(trace.state, trace.admission_state));
+  add_mapping_string(map, "payload_policy_code", trace.payload_policy.c_str());
+  add_mapping_pair(map, "callback_payload_strict_required",
+                   trace.task_kind == owner_executor_dispatch_kind_name(OwnerExecutorDispatchKind::ExecutorCallback) ? 1 : 0);
   add_mapping_pair(map, "has_target_handle", trace.has_target_handle ? 1 : 0);
   add_mapping_pair(map, "target_handle_current",
                    target_status == VMObjectHandleResolveStatus::kCurrent ? 1 : 0);
@@ -4692,6 +4719,7 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_string(map, "owner_callback_drop_reason_schema", kOwnerCallbackDropReasonSchemaV1);
   add_mapping_pair(map, "owner_callback_allowlist_complete", 1);
   add_mapping_string(map, "owner_callback_supported_kinds", kOwnerCallbackSupportedKinds);
+  add_owner_callback_diagnostic_contract_fields(map);
   add_mapping_string(map, "executor_callback_payload_policy", "frozen_payload_or_owner_handle_only");
   add_mapping_pair(map, "heartbeat_owner_executor_ready", 1);
   add_mapping_string(map, "heartbeat_owner_executor_task_type", "heartbeat");
@@ -4902,6 +4930,7 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_string(map, "owner_callback_drop_reason_schema", kOwnerCallbackDropReasonSchemaV1);
   add_mapping_pair(map, "owner_callback_allowlist_complete", 1);
   add_mapping_string(map, "owner_callback_supported_kinds", kOwnerCallbackSupportedKinds);
+  add_owner_callback_diagnostic_contract_fields(map);
   add_mapping_string(map, "executor_callback_payload_policy", "frozen_payload_or_owner_handle_only");
   add_mapping_pair(map, "heartbeat_owner_executor_ready", 1);
   add_mapping_string(map, "heartbeat_owner_executor_task_type", "heartbeat");

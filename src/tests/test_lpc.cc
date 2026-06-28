@@ -4474,6 +4474,20 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "gateway_io_adapter_only_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "gateway_io_boundary"), "main_thread_io_adapter");
     ASSERT_EQ(mapping_number(status, "callback_payload_strict_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_callback_payload_strict_diagnostics_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_callback_payload_policy_schema"),
+                 "owner_callback_payload_policy_v1");
+    ASSERT_STREQ(mapping_string(status, "owner_callback_payload_policy"),
+                 "frozen_payload_or_owner_handle_only");
+    ASSERT_STREQ(mapping_string(status, "owner_callback_failure_codes"),
+                 "owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,"
+                 "owner_epoch_mismatch,target_destructed,target_stale,admission_rejected,task_dropped");
+    ASSERT_STREQ(mapping_string(status, "owner_callback_drop_reasons"),
+                 "none,owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,"
+                 "owner_epoch_mismatch,target_destructed,target_stale,admission_rejected,task_dropped");
+    ASSERT_EQ(mapping_number(status, "owner_callback_human_reason_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_callback_failure_reason_schema"),
+                 "owner_callback_failure_reason_v1");
     ASSERT_EQ(mapping_number(status, "service_shard_executor_ready"), 1);
     ASSERT_EQ(mapping_number(status, "domain_task_registry_mudlib_aligned"), 1);
     ASSERT_EQ(mapping_number(status, "keyed_service_shard_ready"), 1);
@@ -4988,6 +5002,20 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "gateway_io_adapter_only_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "gateway_io_boundary"), "main_thread_io_adapter");
     ASSERT_EQ(mapping_number(boundary_contract, "callback_payload_strict_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_callback_payload_strict_diagnostics_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_payload_policy_schema"),
+                 "owner_callback_payload_policy_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_payload_policy"),
+                 "frozen_payload_or_owner_handle_only");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_failure_codes"),
+                 "owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,"
+                 "owner_epoch_mismatch,target_destructed,target_stale,admission_rejected,task_dropped");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_drop_reasons"),
+                 "none,owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,"
+                 "owner_epoch_mismatch,target_destructed,target_stale,admission_rejected,task_dropped");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_callback_human_reason_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_failure_reason_schema"),
+                 "owner_callback_failure_reason_v1");
     ASSERT_EQ(mapping_number(boundary_contract, "service_shard_executor_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "domain_task_registry_mudlib_aligned"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "keyed_service_shard_ready"), 1);
