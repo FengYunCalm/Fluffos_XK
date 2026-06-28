@@ -157,6 +157,7 @@ void f_refs() {
 
 #ifdef F_DESTRUCTED_OBJECTS
 void f_destructed_objects() {
+#ifdef DEBUG
   int i;
   array_t *ret;
   object_t *ob;
@@ -177,6 +178,9 @@ void f_destructed_objects() {
   }
 
   push_refed_array(ret);
+#else
+  push_refed_array(allocate_empty_array(0));
+#endif
 }
 #endif
 
@@ -245,6 +249,25 @@ void f_set_malloc_mask() { set_malloc_mask((sp--)->u.number); }
 
 #ifdef F_CHECK_MEMORY
 void f_check_memory() { check_all_blocks((sp--)->u.number); }
+#endif
+#else
+#ifdef F_DEBUGMALLOC
+void f_debugmalloc() {
+  free_string_svalue(--sp);
+  sp->subtype = STRING_CONSTANT;
+  sp->u.string = "DEBUGMALLOC is disabled";
+}
+#endif
+
+#ifdef F_SET_MALLOC_MASK
+void f_set_malloc_mask() { sp--; }
+#endif
+
+#ifdef F_CHECK_MEMORY
+void f_check_memory() {
+  sp--;
+  push_constant_string("DEBUGMALLOC is disabled");
+}
 #endif
 #endif /* (defined(DEBUGMALLOC) && \
         * defined(DEBUGMALLOC_EXTENSIONS)) */
