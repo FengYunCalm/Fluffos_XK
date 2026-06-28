@@ -5498,6 +5498,270 @@ TEST_F(DriverTest, TestVmOwnerExecutorRunsDifferentOwnersInParallel) {
   vm_owner_thread_stop();
 }
 
+TEST_F(DriverTest, TestVmOwnerRuntimePerformanceProbesRecordDiagnostics) {
+  const char* same_owner = "owner/test/runtime-v3/probe/same";
+  const char* owner_a = "owner/test/runtime-v3/probe/a";
+  const char* owner_b = "owner/test/runtime-v3/probe/b";
+  const char* callback_owner = "owner/test/runtime-v3/probe/callback";
+  const char* moved_owner = "owner/test/runtime-v3/probe/callback/moved";
+  const long same_owner_tasks = 16;
+  const long different_owner_tasks = 12;
+  const long object_resolve_iterations = 64;
+
+  struct RuntimeProbeGuard {
+    object_t* callback_probe{nullptr};
+    object_t* resolve_probe{nullptr};
+    ~RuntimeProbeGuard() {
+      vm_owner_thread_stop();
+      unsetenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
+      if (callback_probe) {
+        vm_owner_clear_id(callback_probe);
+        destruct_object(callback_probe);
+      }
+      if (resolve_probe) {
+        vm_owner_clear_id(resolve_probe);
+        destruct_object(resolve_probe);
+      }
+    }
+  } guard;
+
+  vm_owner_thread_stop();
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+  auto wait_for_owner_probe = [&](const char* owner, long expected_probe_count) {
+    for (int i = 0; i < 200; i++) {
+      auto* mailbox = vm_owner_mailbox_status(owner);
+      auto depth = mapping_number(mailbox, "owner_queue_depth");
+      free_mapping(mailbox);
+      auto* status = vm_owner_thread_status();
+      auto probe_done = mapping_number(status, "executor_probe_executed");
+      free_mapping(status);
+      if (depth == 0 && probe_done >= expected_probe_count) {
+        return;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+  };
+
+  auto* before = vm_owner_thread_status();
+  auto before_probe = mapping_number(before, "executor_probe_executed");
+  auto before_claims = mapping_number(before, "executor_owner_claims");
+  auto before_releases = mapping_number(before, "executor_owner_releases");
+  auto before_conflicts = mapping_number(before, "executor_same_owner_claim_conflicts");
+  auto before_max_parallel = mapping_number(before, "executor_max_parallel_owners");
+  free_mapping(before);
+
+  auto* before_runtime = vm_owner_runtime_status();
+  auto before_normal_fallback = mapping_number(before_runtime, "normal_path_main_fallback_count");
+  auto before_future_cancelled = mapping_number(before_runtime, "owner_executor_future_cancelled");
+  auto before_future_timeout = mapping_number(before_runtime, "owner_executor_future_timeout");
+  auto before_admission_accepted = mapping_number(before_runtime, "owner_executor_admission_accepted");
+  auto before_admission_rejected = mapping_number(before_runtime, "owner_executor_admission_rejected");
+  auto before_admission_dropped = mapping_number(before_runtime, "owner_executor_admission_dropped");
+  ASSERT_EQ(mapping_number(before_runtime, "owner_executor_context_cleanup_leaks"), 0);
+  ASSERT_EQ(before_normal_fallback, 0);
+  free_mapping(before_runtime);
+
+  auto same_start = std::chrono::steady_clock::now();
+  for (long i = 0; i < same_owner_tasks; i++) {
+    auto task_id = vm_owner_enqueue_task(same_owner, "executor_probe", "runtime-v3-same-owner");
+    ASSERT_GT(task_id, 0u);
+  }
+  auto* same_queued = vm_owner_mailbox_status(same_owner);
+  ASSERT_EQ(mapping_number(same_queued, "owner_queue_depth"), same_owner_tasks);
+  ASSERT_EQ(mapping_number(same_queued, "owner_executor_safe_queue_depth"), same_owner_tasks);
+  RecordProperty("same_owner_queue_depth", mapping_number(same_queued, "owner_queue_depth"));
+  free_mapping(same_queued);
+
+  vm_owner_thread_start(1);
+  wait_for_owner_probe(same_owner, before_probe + same_owner_tasks);
+  vm_owner_thread_stop();
+  auto same_elapsed_us =
+      std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - same_start).count();
+
+  auto* after_same = vm_owner_thread_status();
+  ASSERT_GE(mapping_number(after_same, "executor_probe_executed"), before_probe + same_owner_tasks);
+  ASSERT_EQ(mapping_number(after_same, "executor_same_owner_claim_conflicts"), before_conflicts);
+  ASSERT_EQ(mapping_number(after_same, "active_owners"), 0);
+  ASSERT_EQ(mapping_number(after_same, "claimed_owners"), 0);
+  RecordProperty("same_owner_tasks", same_owner_tasks);
+  RecordProperty("same_owner_completed",
+                 mapping_number(after_same, "executor_probe_executed") - before_probe);
+  RecordProperty("same_owner_elapsed_us", static_cast<long>(same_elapsed_us));
+  free_mapping(after_same);
+
+  auto* before_parallel = vm_owner_thread_status();
+  auto before_parallel_probe = mapping_number(before_parallel, "executor_probe_executed");
+  auto before_parallel_claims = mapping_number(before_parallel, "executor_owner_claims");
+  auto before_parallel_releases = mapping_number(before_parallel, "executor_owner_releases");
+  free_mapping(before_parallel);
+
+  setenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "20", 1);
+  auto parallel_start = std::chrono::steady_clock::now();
+  for (long i = 0; i < different_owner_tasks; i++) {
+    ASSERT_GT(vm_owner_enqueue_task(owner_a, "executor_probe", "runtime-v3-owner-a"), 0u);
+    ASSERT_GT(vm_owner_enqueue_task(owner_b, "executor_probe", "runtime-v3-owner-b"), 0u);
+  }
+  vm_owner_thread_start(2);
+  wait_for_owner_probe(owner_a, before_parallel_probe + different_owner_tasks * 2);
+  wait_for_owner_probe(owner_b, before_parallel_probe + different_owner_tasks * 2);
+  vm_owner_thread_stop();
+  unsetenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
+  auto parallel_elapsed_us =
+      std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - parallel_start).count();
+
+  auto* after_parallel = vm_owner_thread_status();
+  auto parallel_completed = mapping_number(after_parallel, "executor_probe_executed") - before_parallel_probe;
+  ASSERT_GE(parallel_completed, different_owner_tasks * 2);
+  ASSERT_EQ(mapping_number(after_parallel, "executor_owner_claims") - before_parallel_claims,
+            mapping_number(after_parallel, "executor_owner_releases") - before_parallel_releases);
+  ASSERT_EQ(mapping_number(after_parallel, "executor_same_owner_claim_conflicts"), before_conflicts);
+  ASSERT_EQ(mapping_number(after_parallel, "active_owners"), 0);
+  ASSERT_EQ(mapping_number(after_parallel, "claimed_owners"), 0);
+  ASSERT_GE(mapping_number(after_parallel, "executor_max_parallel_owners"), std::max<long>(2, before_max_parallel));
+  ASSERT_LE(mapping_number(after_parallel, "executor_max_owner_parallel"), 1);
+  RecordProperty("different_owner_tasks", different_owner_tasks * 2);
+  RecordProperty("different_owner_completed", parallel_completed);
+  RecordProperty("different_owner_elapsed_us", static_cast<long>(parallel_elapsed_us));
+  RecordProperty("different_owner_max_parallel", mapping_number(after_parallel, "executor_max_parallel_owners"));
+  RecordProperty("owner_claim_delta", mapping_number(after_parallel, "executor_owner_claims") - before_claims);
+  RecordProperty("owner_release_delta", mapping_number(after_parallel, "executor_owner_releases") - before_releases);
+  free_mapping(after_parallel);
+
+  auto cancel_future_id =
+      vm_owner_register_compute_future("owner/test/runtime-v3/future-cancel", 9201, "runtime_v3_cancel",
+                                       "probe_cancel");
+  auto timeout_future_id =
+      vm_owner_register_compute_future("owner/test/runtime-v3/future-timeout", 9202, "runtime_v3_timeout",
+                                       "probe_timeout");
+  ASSERT_GT(cancel_future_id, 0u);
+  ASSERT_GT(timeout_future_id, 0u);
+  auto* pending_future = vm_owner_future_poll(cancel_future_id);
+  ASSERT_STREQ(mapping_string(pending_future, "state"), "pending");
+  free_mapping(pending_future);
+  auto* cancelled = vm_owner_future_cancel(cancel_future_id, "runtime v3 probe cancel");
+  ASSERT_STREQ(mapping_string(cancelled, "state"), "failed");
+  ASSERT_EQ(mapping_number(cancelled, "cancelled"), 1);
+  free_mapping(cancelled);
+  auto* timed_out = vm_owner_future_timeout(timeout_future_id, "runtime v3 probe timeout");
+  ASSERT_STREQ(mapping_string(timed_out, "state"), "failed");
+  ASSERT_EQ(mapping_number(timed_out, "timed_out"), 1);
+  free_mapping(timed_out);
+
+  guard.resolve_probe = clone_object("single/void", 0);
+  ASSERT_NE(guard.resolve_probe, nullptr);
+  vm_owner_set_id(guard.resolve_probe, "owner/test/runtime-v3/resolve");
+  vm_object_store_register(guard.resolve_probe);
+  auto handle = vm_object_handle(guard.resolve_probe);
+  auto resolve_start = std::chrono::steady_clock::now();
+  for (long i = 0; i < object_resolve_iterations; i++) {
+    auto handle_resolve = vm_object_handle_resolve_status(handle);
+    ASSERT_EQ(handle_resolve.object, guard.resolve_probe);
+    ASSERT_STREQ(vm_object_handle_resolve_status_name(handle_resolve.status), "current");
+    ASSERT_TRUE(handle_resolve.owner_local_fast_path_used);
+    ASSERT_TRUE(handle_resolve.resolved_via_owner_local_store);
+    ASSERT_FALSE(handle_resolve.resolved_via_global_index);
+  }
+  auto resolve_elapsed_us =
+      std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - resolve_start).count();
+  RecordProperty("object_resolve_iterations", object_resolve_iterations);
+  RecordProperty("object_resolve_elapsed_us", static_cast<long>(resolve_elapsed_us));
+
+  guard.callback_probe = load_object_for_test("single/void");
+  ASSERT_NE(guard.callback_probe, nullptr);
+  vm_owner_set_id(guard.callback_probe, callback_owner);
+  ASSERT_FALSE(vm_owner_executor_available());
+  ASSERT_EQ(vm_owner_enqueue_executor_task(guard.callback_probe, "ordinary_lpc", "runtime-v3-rejected", [] {}), 0u);
+
+  std::atomic<int> blocker_started{0};
+  std::atomic<int> release_blocker{0};
+  std::atomic<int> stale_ran{0};
+  std::atomic<int> stale_drop_cleanup{0};
+  vm_owner_thread_start(1);
+  ASSERT_TRUE(vm_owner_executor_available());
+  ASSERT_EQ(vm_owner_enqueue_executor_task(guard.callback_probe, "legacy_lpc", "runtime-v3-legacy-rejected", [] {}),
+            0u);
+  auto blocker = vm_owner_enqueue_executor_task(guard.callback_probe, "heartbeat", "runtime-v3-blocker", [&] {
+    blocker_started.store(1, std::memory_order_release);
+    for (int i = 0; i < 200 && release_blocker.load(std::memory_order_acquire) == 0; i++) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  });
+  ASSERT_GT(blocker, 0u);
+  for (int i = 0; i < 100 && blocker_started.load(std::memory_order_acquire) == 0; i++) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  auto stale_task = vm_owner_enqueue_executor_task(
+      guard.callback_probe, "call_out", "runtime-v3-stale", [&] {
+        stale_ran.store(1, std::memory_order_release);
+      },
+      [&] {
+        stale_drop_cleanup.store(vm_context_is_main_thread() ? 1 : -1, std::memory_order_release);
+      });
+  ASSERT_GT(stale_task, blocker);
+  vm_owner_set_id(guard.callback_probe, moved_owner);
+  release_blocker.store(1, std::memory_order_release);
+
+  for (int i = 0; i < 100; i++) {
+    auto* status = vm_owner_thread_status();
+    auto dropped = mapping_number(status, "owner_executor_admission_dropped");
+    free_mapping(status);
+    if (dropped >= before_admission_dropped + 1) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_EQ(vm_owner_drain_main_tasks(16), 1);
+  ASSERT_EQ(stale_ran.load(std::memory_order_acquire), 0);
+  ASSERT_EQ(stale_drop_cleanup.load(std::memory_order_acquire), 1);
+  vm_owner_thread_stop();
+
+  auto* final_runtime = vm_owner_runtime_status();
+  ASSERT_EQ(mapping_number(final_runtime, "normal_path_main_fallback_count"), before_normal_fallback);
+  ASSERT_EQ(mapping_number(final_runtime, "normal_path_main_fallback_count"), 0);
+  ASSERT_EQ(mapping_number(final_runtime, "owner_executor_context_cleanup_leaks"), 0);
+  ASSERT_GE(mapping_number(final_runtime, "owner_executor_future_cancelled"), before_future_cancelled + 1);
+  ASSERT_GE(mapping_number(final_runtime, "owner_executor_future_timeout"), before_future_timeout + 1);
+  ASSERT_GE(mapping_number(final_runtime, "owner_executor_admission_accepted"), before_admission_accepted + 2);
+  ASSERT_GE(mapping_number(final_runtime, "owner_executor_admission_rejected"), before_admission_rejected + 1);
+  ASSERT_GE(mapping_number(final_runtime, "owner_executor_admission_dropped"), before_admission_dropped + 1);
+  RecordProperty("future_cancel_delta",
+                 mapping_number(final_runtime, "owner_executor_future_cancelled") - before_future_cancelled);
+  RecordProperty("future_timeout_delta",
+                 mapping_number(final_runtime, "owner_executor_future_timeout") - before_future_timeout);
+  RecordProperty("admission_accept_delta",
+                 mapping_number(final_runtime, "owner_executor_admission_accepted") - before_admission_accepted);
+  RecordProperty("admission_reject_delta",
+                 mapping_number(final_runtime, "owner_executor_admission_rejected") - before_admission_rejected);
+  RecordProperty("admission_drop_delta",
+                 mapping_number(final_runtime, "owner_executor_admission_dropped") - before_admission_dropped);
+  RecordProperty("normal_path_main_fallback_count",
+                 mapping_number(final_runtime, "normal_path_main_fallback_count"));
+  free_mapping(final_runtime);
+
+  auto* final_thread = vm_owner_thread_status();
+  ASSERT_EQ(mapping_number(final_thread, "executor_same_owner_claim_conflicts"), before_conflicts);
+  ASSERT_EQ(mapping_number(final_thread, "active_owners"), 0);
+  ASSERT_EQ(mapping_number(final_thread, "claimed_owners"), 0);
+  RecordProperty("same_owner_claim_conflicts",
+                 mapping_number(final_thread, "executor_same_owner_claim_conflicts"));
+  RecordProperty("executor_context_cleanup_leaks",
+                 mapping_number(final_thread, "owner_executor_context_cleanup_leaks"));
+  free_mapping(final_thread);
+}
+
 TEST_F(DriverTest, TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs) {
   const char* owner = "owner/test/thread/safe-experiment";
 
