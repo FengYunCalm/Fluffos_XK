@@ -40,6 +40,8 @@ constexpr long kOwnerSchedulerBackpressureHighWatermark = kOwnerSchedulerMaxOwne
 constexpr const char *kOwnerExecutorContractVersion = "owner_executor_v2";
 constexpr const char *kOwnerRuntimeBenchmarkSchemaV1 = "owner_runtime_bench_v1";
 constexpr const char *kOwnerRuntimeStressEntry = "tools/owner-runtime-v4-stress.sh";
+constexpr const char *kObjectStoreBenchmarkSchemaV1 = "object_store_bench_v1";
+constexpr const char *kLpcModernRuntimeStressEntry = "tools/lpc-modern-runtime-stress.sh";
 constexpr const char *kOwnerCallbackDiagnosticsSchemaV1 = "owner_callback_diagnostics_v1";
 constexpr const char *kOwnerCallbackFailureCodeSchemaV1 = "owner_callback_failure_code_v1";
 constexpr const char *kOwnerCallbackDropReasonSchemaV1 = "owner_callback_drop_reason_v1";
@@ -399,6 +401,8 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_string(map, "owner_runtime_benchmark_schema", kOwnerRuntimeBenchmarkSchemaV1);
   add_mapping_pair(map, "owner_runtime_stress_profile_ready", 1);
   add_mapping_string(map, "owner_runtime_stress_entry", kOwnerRuntimeStressEntry);
+  add_mapping_pair(map, "lpc_modern_runtime_stress_ready", 1);
+  add_mapping_string(map, "lpc_modern_runtime_stress_entry", kLpcModernRuntimeStressEntry);
   add_mapping_pair(map, "owner_runtime_layering_guard_ready", 1);
   add_mapping_pair(map, "owner_runtime_coordinator_module_ready", 1);
   add_mapping_pair(map, "lpc_modern_profile_ready", 1);
@@ -408,6 +412,8 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_string(map, "lpc_vm_profile_schema", kLpcVmProfileSchemaV1);
   add_mapping_pair(map, "lpc_vm_benchmark_smoke_ready", 1);
   add_mapping_string(map, "lpc_vm_benchmark_schema", kLpcVmBenchSchemaV1);
+  add_mapping_pair(map, "object_store_benchmark_smoke_ready", 1);
+  add_mapping_string(map, "object_store_benchmark_schema", kObjectStoreBenchmarkSchemaV1);
   add_mapping_pair(map, "lpc_apply_dispatch_cache_probe_ready", 1);
   add_mapping_pair(map, "lpc_dispatch_cache_ready", 1);
   add_mapping_string(map, "lpc_dispatch_cache_model", "apply_dispatch_thread_local_direct_cache_v1");
@@ -1306,6 +1312,8 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "owner_runtime_benchmark_schema", kOwnerRuntimeBenchmarkSchemaV1);
   add_mapping_pair(contract, "owner_runtime_stress_profile_ready", 1);
   add_mapping_string(contract, "owner_runtime_stress_entry", kOwnerRuntimeStressEntry);
+  add_mapping_pair(contract, "lpc_modern_runtime_stress_ready", 1);
+  add_mapping_string(contract, "lpc_modern_runtime_stress_entry", kLpcModernRuntimeStressEntry);
   add_mapping_pair(contract, "owner_runtime_layering_guard_ready", 1);
   add_mapping_pair(contract, "owner_runtime_coordinator_module_ready", 1);
   add_mapping_string(contract, "owner_runtime_coordinator_file", "vm/internal/owner_runtime_coordinator.cc");
@@ -1318,6 +1326,8 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "lpc_vm_profile_schema", kLpcVmProfileSchemaV1);
   add_mapping_pair(contract, "lpc_vm_benchmark_smoke_ready", 1);
   add_mapping_string(contract, "lpc_vm_benchmark_schema", kLpcVmBenchSchemaV1);
+  add_mapping_pair(contract, "object_store_benchmark_smoke_ready", 1);
+  add_mapping_string(contract, "object_store_benchmark_schema", kObjectStoreBenchmarkSchemaV1);
   add_mapping_pair(contract, "lpc_apply_dispatch_cache_probe_ready", 1);
   add_mapping_pair(contract, "lpc_dispatch_cache_ready", 1);
   add_mapping_string(contract, "lpc_dispatch_cache_model", "apply_dispatch_thread_local_direct_cache_v1");

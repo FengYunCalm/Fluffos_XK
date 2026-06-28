@@ -4353,6 +4353,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(status, "owner_runtime_benchmark_schema"), "owner_runtime_bench_v1");
     ASSERT_EQ(mapping_number(status, "owner_runtime_stress_profile_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_runtime_stress_entry"), "tools/owner-runtime-v4-stress.sh");
+    ASSERT_EQ(mapping_number(status, "lpc_modern_runtime_stress_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_modern_runtime_stress_entry"),
+                 "tools/lpc-modern-runtime-stress.sh");
     ASSERT_EQ(mapping_number(status, "owner_runtime_layering_guard_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_runtime_coordinator_module_ready"), 1);
     ASSERT_EQ(mapping_number(status, "lpc_modern_profile_ready"), 1);
@@ -4362,6 +4365,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(status, "lpc_vm_profile_schema"), "lpc_vm_profile_v1");
     ASSERT_EQ(mapping_number(status, "lpc_vm_benchmark_smoke_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "lpc_vm_benchmark_schema"), "lpc_vm_bench_v1");
+    ASSERT_EQ(mapping_number(status, "object_store_benchmark_smoke_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "object_store_benchmark_schema"), "object_store_bench_v1");
     ASSERT_EQ(mapping_number(status, "lpc_apply_dispatch_cache_probe_ready"), 1);
     ASSERT_EQ(mapping_number(status, "lpc_dispatch_cache_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "lpc_dispatch_cache_model"),
@@ -4774,6 +4779,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_stress_profile_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_stress_entry"),
                  "tools/owner-runtime-v4-stress.sh");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_modern_runtime_stress_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_runtime_stress_entry"),
+                 "tools/lpc-modern-runtime-stress.sh");
     ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_layering_guard_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_coordinator_module_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_coordinator_file"),
@@ -4788,6 +4796,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_profile_schema"), "lpc_vm_profile_v1");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_vm_benchmark_smoke_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_benchmark_schema"), "lpc_vm_bench_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "object_store_benchmark_smoke_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "object_store_benchmark_schema"), "object_store_bench_v1");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_apply_dispatch_cache_probe_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_dispatch_cache_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_dispatch_cache_model"),
