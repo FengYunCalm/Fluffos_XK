@@ -658,6 +658,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["owner_metrics_store_ready"]);
     ASSERT_EQ("vm/internal/owner_runtime_metrics.cc", boundary_contract["owner_metrics_store_file"]);
     ASSERT_EQ(1, boundary_contract["object_store_owner_fast_path_ready"]);
+    ASSERT_EQ(0, boundary_contract["object_store_global_fallback_on_owner_fast_path"]);
     ASSERT_EQ(1, boundary_contract["dependency_manifest_ready"]);
     ASSERT_EQ(1, boundary_contract["runtime_dependency_contract_version"]);
     ASSERT_EQ("owner_scheduler_state,owner_task_manifest,owner_trace_store,owner_future_store,"
@@ -791,6 +792,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["owner_scheduler_state_ready"]);
     ASSERT_EQ(1, status["owner_metrics_store_ready"]);
     ASSERT_EQ(1, status["object_store_owner_fast_path_ready"]);
+    ASSERT_EQ(0, status["object_store_global_fallback_on_owner_fast_path"]);
     ASSERT_EQ(1, status["owner_task_manifest_v2_ready"]);
     ASSERT_EQ("owner_task_manifest_v2", status["owner_task_manifest_schema"]);
     ASSERT_EQ(1, status["owner_executor_admission_gate_ready"]);

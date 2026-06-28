@@ -914,6 +914,7 @@ TEST_F(DriverTest, TestVirtualObjectUsesDefaultOwnerAndUpdatesStorePath) {
   ASSERT_EQ(mapping_number(handle_status, "owner_local_fast_path_used"), 1);
   ASSERT_STREQ(mapping_string(handle_status, "owner_local_fast_path_lock_model"),
                "shared_mutex_read_lock");
+  ASSERT_EQ(mapping_number(handle_status, "owner_local_fast_path_global_fallback"), 0);
   ASSERT_EQ(mapping_number(handle_status, "diagnosed_via_owner_local_store"), 0);
   ASSERT_EQ(mapping_number(handle_status, "diagnosed_via_owner_local_path_index"), 0);
   ASSERT_EQ(mapping_number(handle_status, "owner_local_object_pointer_index_found"), 1);
@@ -4201,6 +4202,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "owner_scheduler_state_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_metrics_store_ready"), 1);
     ASSERT_EQ(mapping_number(status, "object_store_owner_fast_path_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "object_store_global_fallback_on_owner_fast_path"), 0);
     ASSERT_EQ(mapping_number(status, "owner_task_manifest_v2_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_task_manifest_schema"), "owner_task_manifest_v2");
     ASSERT_EQ(mapping_number(status, "owner_executor_admission_gate_ready"), 1);
@@ -4536,6 +4538,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_metrics_store_file"),
                  "vm/internal/owner_runtime_metrics.cc");
     ASSERT_EQ(mapping_number(boundary_contract, "object_store_owner_fast_path_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "object_store_global_fallback_on_owner_fast_path"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "dependency_manifest_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "runtime_dependency_contract_version"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "dependency_domains"),
@@ -7925,6 +7928,8 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
   ASSERT_STREQ(mapping_string(status, "status_model"), "object_store_status");
   ASSERT_STREQ(mapping_string(status, "directory_model"), "owner_local_object_directory");
   ASSERT_STREQ(mapping_string(status, "storage_model"), "owner_local_store");
+  ASSERT_EQ(mapping_number(status, "object_store_global_fallback_on_owner_fast_path"), 0);
+  ASSERT_STREQ(mapping_string(status, "object_store_owner_fast_path_scope"), "same_owner_handle_resolve");
   ASSERT_EQ(mapping_number(status, "owner_local_global_bridge_consistent"), 1);
   ASSERT_EQ(mapping_number(status, "owner_local_to_global_bridge_consistent"), 1);
   ASSERT_EQ(mapping_number(status, "global_to_owner_local_bridge_consistent"), 1);

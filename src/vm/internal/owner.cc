@@ -364,6 +364,7 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "owner_scheduler_state_ready", 1);
   add_mapping_pair(map, "owner_metrics_store_ready", 1);
   add_mapping_pair(map, "object_store_owner_fast_path_ready", 1);
+  add_mapping_pair(map, "object_store_global_fallback_on_owner_fast_path", 0);
   add_mapping_pair(map, "owner_task_manifest_v2_ready", 1);
   add_mapping_string(map, "owner_task_manifest_schema", kOwnerTaskManifestSchemaV2);
   add_mapping_pair(map, "owner_executor_admission_gate_ready", 1);
@@ -1120,6 +1121,7 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "owner_metrics_store_ready", 1);
   add_mapping_string(contract, "owner_metrics_store_file", "vm/internal/owner_runtime_metrics.cc");
   add_mapping_pair(contract, "object_store_owner_fast_path_ready", 1);
+  add_mapping_pair(contract, "object_store_global_fallback_on_owner_fast_path", 0);
   add_mapping_pair(contract, "dependency_manifest_ready", 1);
   add_mapping_pair(contract, "runtime_dependency_contract_version", 1);
   add_mapping_string(contract, "dependency_domains",
