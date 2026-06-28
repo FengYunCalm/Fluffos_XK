@@ -662,6 +662,15 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("lpcc_owner_audit_v1", boundary_contract["lpcc_owner_audit_schema"]);
     ASSERT_EQ(1, boundary_contract["legacy_lpc_default_closed"]);
     ASSERT_EQ("compiler/internal/lpc_modern_profile.cc", boundary_contract["lpc_modern_profile_module_file"]);
+    ASSERT_EQ(1, boundary_contract["owner_safe_future_api_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_async_api_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_await_poll_adapter_ready"]);
+    ASSERT_EQ(0, boundary_contract["owner_await_coroutine_runtime_ready"]);
+    ASSERT_EQ(1, boundary_contract["freeze_snapshot_api_ready"]);
+    ASSERT_EQ("validated_deep_copy", boundary_contract["freeze_snapshot_model"]);
+    ASSERT_EQ(1, boundary_contract["owner_commit_api_ready"]);
+    ASSERT_EQ("owner_commit_boundary_record", boundary_contract["owner_commit_model"]);
+    ASSERT_EQ("packages/core/vm_owner.cc", boundary_contract["lpc_modern_api_file"]);
     ASSERT_EQ(1, boundary_contract["owner_task_manifest_module_ready"]);
     ASSERT_EQ("vm/internal/owner_task_manifest.cc", boundary_contract["owner_task_manifest_module_file"]);
     ASSERT_EQ(1, boundary_contract["owner_trace_store_ready"]);
@@ -828,6 +837,14 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["lpcc_owner_audit_ready"]);
     ASSERT_EQ("lpcc_owner_audit_v1", status["lpcc_owner_audit_schema"]);
     ASSERT_EQ(1, status["legacy_lpc_default_closed"]);
+    ASSERT_EQ(1, status["owner_safe_future_api_ready"]);
+    ASSERT_EQ(1, status["owner_async_api_ready"]);
+    ASSERT_EQ(1, status["owner_await_poll_adapter_ready"]);
+    ASSERT_EQ(0, status["owner_await_coroutine_runtime_ready"]);
+    ASSERT_EQ(1, status["freeze_snapshot_api_ready"]);
+    ASSERT_EQ("validated_deep_copy", status["freeze_snapshot_model"]);
+    ASSERT_EQ(1, status["owner_commit_api_ready"]);
+    ASSERT_EQ("owner_commit_boundary_record", status["owner_commit_model"]);
     ASSERT_EQ(1, status["owner_task_manifest_module_ready"]);
     ASSERT_EQ(1, status["owner_trace_store_ready"]);
     ASSERT_EQ(1, status["owner_future_store_ready"]);
@@ -1249,9 +1266,86 @@ void assert_owner_trace_models() {
     vm_owner_purge(target_owner);
 }
 
+void assert_lpc_modern_runtime_apis() {
+    string source_owner = "owner/test/lpc/modern/source";
+    string target_owner = "owner/test/lpc/modern/target";
+    mapping frozen;
+    mapping frozen_value;
+    mapping snapshot_value;
+    mapping rejected;
+    mapping async_result;
+    mapping await_result;
+    mapping commit;
+    mixed *numbers;
+
+    frozen = freeze(([
+        "name": "modern",
+        "numbers": ({ 1, 2, 3 }),
+    ]));
+    ASSERT_EQ(1, frozen["success"]);
+    ASSERT_EQ(1, frozen["modern_lpc_api"]);
+    ASSERT_EQ(1, frozen["frozen_payload"]);
+    ASSERT_EQ(1, frozen["deep_copy"]);
+    ASSERT_EQ(0, frozen["immutable_runtime_type"]);
+    ASSERT_EQ("validated_deep_copy", frozen["immutability_model"]);
+    ASSERT(mapp(frozen["value"]));
+    frozen_value = frozen["value"];
+    ASSERT_EQ("modern", frozen_value["name"]);
+    numbers = frozen_value["numbers"];
+    ASSERT(arrayp(numbers));
+    ASSERT_EQ(3, sizeof(numbers));
+    ASSERT_EQ(2, numbers[1]);
+
+    rejected = freeze(([ "object": this_object() ]));
+    ASSERT_EQ(0, rejected["success"]);
+    ASSERT_EQ("invalid_frozen_payload", rejected["code"]);
+
+    snapshot_value = snapshot(([ "snapshot": "safe" ]));
+    ASSERT_EQ(1, snapshot_value["success"]);
+    ASSERT_EQ("snapshot", snapshot_value["api"]);
+    ASSERT_EQ(1, snapshot_value["snapshot_only"]);
+    ASSERT(mapp(snapshot_value["value"]));
+    ASSERT_EQ("safe", snapshot_value["value"]["snapshot"]);
+
+    rejected = owner_async(this_object(), ([ "payload_key": "missing-method" ]));
+    ASSERT_EQ(0, rejected["success"]);
+    ASSERT_EQ("missing_method", rejected["code"]);
+
+    async_result = owner_async(target_owner, ([
+        "type": "modern_contract",
+        "payload_key": "payload/v1",
+    ]));
+    ASSERT_EQ(1, async_result["success"]);
+    ASSERT_EQ(1, async_result["modern_lpc_api"]);
+    ASSERT_EQ("owner_async", async_result["api"]);
+    ASSERT(async_result["future_id"] > 0);
+
+    await_result = owner_await(async_result["future_id"]);
+    ASSERT_EQ(1, await_result["modern_lpc_api"]);
+    ASSERT_EQ("owner_await", await_result["api"]);
+    ASSERT_EQ("poll_adapter_until_coroutine_runtime", await_result["await_model"]);
+    ASSERT_EQ(0, await_result["coroutine_runtime_ready"]);
+
+    commit = owner_commit(([
+        "source_owner": source_owner,
+        "target_owner": target_owner,
+        "operation": "modern_commit",
+        "message_id": async_result["message_id"],
+        "state": "prepared",
+    ]));
+    ASSERT_EQ(1, commit["success"]);
+    ASSERT_EQ(1, commit["modern_lpc_api"]);
+    ASSERT_EQ("owner_commit", commit["api"]);
+    ASSERT_EQ(1, commit["commit_proposal"]);
+    ASSERT_EQ("owner_commit_boundary_record", commit["commit_model"]);
+
+    vm_owner_purge(target_owner);
+}
+
 void do_tests() {
     assert_owner_executor_contract(vm_owner_runtime_status());
     assert_owner_executor_contract(vm_owner_thread_status());
     assert_owner_executor_trace(vm_owner_executor_trace(8));
     assert_owner_trace_models();
+    assert_lpc_modern_runtime_apis();
 }

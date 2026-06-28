@@ -4293,6 +4293,14 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "lpcc_owner_audit_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "lpcc_owner_audit_schema"), "lpcc_owner_audit_v1");
     ASSERT_EQ(mapping_number(status, "legacy_lpc_default_closed"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_safe_future_api_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_async_api_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_await_poll_adapter_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_await_coroutine_runtime_ready"), 0);
+    ASSERT_EQ(mapping_number(status, "freeze_snapshot_api_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "freeze_snapshot_model"), "validated_deep_copy");
+    ASSERT_EQ(mapping_number(status, "owner_commit_api_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_commit_model"), "owner_commit_boundary_record");
     ASSERT_EQ(mapping_number(status, "owner_task_manifest_module_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_trace_store_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_future_store_ready"), 1);
@@ -4653,6 +4661,15 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "legacy_lpc_default_closed"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_profile_module_file"),
                  "compiler/internal/lpc_modern_profile.cc");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_safe_future_api_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_async_api_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_await_poll_adapter_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_await_coroutine_runtime_ready"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "freeze_snapshot_api_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "freeze_snapshot_model"), "validated_deep_copy");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_commit_api_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_commit_model"), "owner_commit_boundary_record");
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_api_file"), "packages/core/vm_owner.cc");
     ASSERT_EQ(mapping_number(boundary_contract, "owner_task_manifest_module_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_task_manifest_module_file"),
                  "vm/internal/owner_task_manifest.cc");

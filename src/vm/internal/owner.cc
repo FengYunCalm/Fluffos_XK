@@ -389,6 +389,14 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "lpcc_owner_audit_ready", 1);
   add_mapping_string(map, "lpcc_owner_audit_schema", kLpcOwnerAuditSchemaV1);
   add_mapping_pair(map, "legacy_lpc_default_closed", 1);
+  add_mapping_pair(map, "owner_safe_future_api_ready", 1);
+  add_mapping_pair(map, "owner_async_api_ready", 1);
+  add_mapping_pair(map, "owner_await_poll_adapter_ready", 1);
+  add_mapping_pair(map, "owner_await_coroutine_runtime_ready", 0);
+  add_mapping_pair(map, "freeze_snapshot_api_ready", 1);
+  add_mapping_string(map, "freeze_snapshot_model", "validated_deep_copy");
+  add_mapping_pair(map, "owner_commit_api_ready", 1);
+  add_mapping_string(map, "owner_commit_model", "owner_commit_boundary_record");
   add_mapping_pair(map, "owner_task_manifest_module_ready", 1);
   add_mapping_pair(map, "owner_trace_store_ready", 1);
   add_mapping_pair(map, "owner_future_store_ready", 1);
@@ -1208,7 +1216,7 @@ mapping_t *vm_context_contract_mapping() {
 }
 
 mapping_t *owner_executor_boundary_contract_mapping() {
-  auto *contract = allocate_mapping(128);
+  auto *contract = allocate_mapping(138);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "boundary_model", "owner_executor_boundary_v1");
   add_mapping_string(contract, "implementation_state", "compilation_unit_active");
@@ -1241,6 +1249,15 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "lpcc_owner_audit_schema", kLpcOwnerAuditSchemaV1);
   add_mapping_pair(contract, "legacy_lpc_default_closed", 1);
   add_mapping_string(contract, "lpc_modern_profile_module_file", "compiler/internal/lpc_modern_profile.cc");
+  add_mapping_pair(contract, "owner_safe_future_api_ready", 1);
+  add_mapping_pair(contract, "owner_async_api_ready", 1);
+  add_mapping_pair(contract, "owner_await_poll_adapter_ready", 1);
+  add_mapping_pair(contract, "owner_await_coroutine_runtime_ready", 0);
+  add_mapping_pair(contract, "freeze_snapshot_api_ready", 1);
+  add_mapping_string(contract, "freeze_snapshot_model", "validated_deep_copy");
+  add_mapping_pair(contract, "owner_commit_api_ready", 1);
+  add_mapping_string(contract, "owner_commit_model", "owner_commit_boundary_record");
+  add_mapping_string(contract, "lpc_modern_api_file", "packages/core/vm_owner.cc");
   add_mapping_pair(contract, "owner_task_manifest_module_ready", 1);
   add_mapping_string(contract, "owner_task_manifest_module_file", "vm/internal/owner_task_manifest.cc");
   add_mapping_pair(contract, "owner_trace_store_ready", 1);
@@ -4469,7 +4486,7 @@ void vm_owner_thread_stop() {
 
 mapping_t *vm_owner_thread_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(170);
+  auto *map = allocate_mapping(180);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
   add_mapping_pair(map, "thread_count", static_cast<long>(owner_threads.size()));
@@ -4721,7 +4738,7 @@ mapping_t *vm_owner_thread_status() {
 
 mapping_t *vm_owner_runtime_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(160);
+  auto *map = allocate_mapping(170);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
   add_mapping_string(map, "multicore_mode_name", vm_multicore_mode_name(vm_multicore_mode()));
