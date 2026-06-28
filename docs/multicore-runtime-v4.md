@@ -29,6 +29,8 @@ Required status fields:
 - `owner_runtime_benchmark_schema=owner_runtime_bench_v1`
 - `owner_runtime_stress_profile_ready=1`
 - `owner_runtime_stress_entry=tools/owner-runtime-v4-stress.sh`
+- `lpc_modern_runtime_stress_ready=1`
+- `lpc_modern_runtime_stress_entry=tools/lpc-modern-runtime-stress.sh`
 - `owner_runtime_layering_guard_ready=1`
 - `owner_runtime_coordinator_module_ready=1`
 - `owner_task_manifest_module_ready=1`
@@ -50,6 +52,11 @@ diagnostic fields in task mappings and trace mappings:
 - `failure_code`
 - `failure_reason`
 - `drop_reason`
+- `owner_callback_payload_strict_diagnostics_ready=1`
+- `owner_callback_payload_policy_schema=owner_callback_payload_policy_v1`
+- `owner_callback_payload_policy=frozen_payload_or_owner_handle_only`
+- `owner_callback_human_reason_ready=1`
+- `owner_callback_failure_reason_schema=owner_callback_failure_reason_v1`
 
 Current executor callback allowlist:
 
@@ -79,6 +86,17 @@ global directory fallback. Runtime v4 keeps:
 The benchmark report also emits `object_resolve_global_fallback_count`; CI and
 stress smoke require it to stay `0`.
 
+The dedicated object-store benchmark is:
+
+```bash
+cmake --build build --target object_store_bench -j2
+build/src/tests/object_store_bench --json build/reports/object_store_bench.json
+```
+
+Its JSON uses `schema=object_store_bench_v1` and records owner-local resolve
+latency, owner id lookup latency, owner path lookup latency, owner-local fast
+path count, and global fallback count.
+
 ## Scheduler And Backpressure
 
 Owner scheduler backpressure is observable through:
@@ -98,23 +116,36 @@ parallel when owner executor threads are available.
 
 ## Benchmark And Stress Entry Points
 
-Build and run the benchmark directly:
+Build and run the owner runtime benchmark directly:
 
 ```bash
 cmake --build build --target owner_runtime_bench -j2
 build/src/tests/owner_runtime_bench --json build/reports/owner_runtime_bench.json
 ```
 
-Run the Runtime v4 gate used by CI:
+Build and run the LPC VM benchmark directly:
+
+```bash
+cmake --build build --target lpc_vm_bench -j2
+build/src/tests/lpc_vm_bench --json build/reports/lpc_vm_bench.json
+```
+
+Run the Runtime v4 owner-only gate:
 
 ```bash
 tools/owner-runtime-v4-stress.sh smoke
 ```
 
+Run the full LPC Modern Runtime gate used by CI:
+
+```bash
+tools/lpc-modern-runtime-stress.sh smoke
+```
+
 Run a repeated local storm profile:
 
 ```bash
-PROFILE=storm REPEAT=10 tools/owner-runtime-v4-stress.sh
+PROFILE=storm REPEAT=10 tools/lpc-modern-runtime-stress.sh
 ```
 
 The benchmark JSON uses `schema=owner_runtime_bench_v1` and records:
@@ -136,11 +167,12 @@ The stress script fails if these regression counters are non-zero:
 
 ## CI Gate
 
-The GitHub Actions CI runs the Runtime v4 smoke gate on the Ubuntu/GCC/Debug
-matrix entry. The gate builds `lpc_tests`, `driver`, and `owner_runtime_bench`,
-runs targeted owner runtime tests, runs the benchmark smoke, validates the JSON
-regression counters, runs the LPC `owner_executor_contract`, and uploads the
-benchmark JSON as an artifact.
+The GitHub Actions CI runs the LPC Modern Runtime smoke gate on the
+Ubuntu/GCC/Debug matrix entry. The gate builds `lpc_tests`, `driver`,
+`owner_runtime_bench`, `lpc_vm_bench`, and `object_store_bench`; runs targeted
+owner runtime and LPC Modern tests; runs all three benchmark smoke reports;
+validates JSON schemas and regression counters; runs the LPC
+`owner_executor_contract`; and uploads all benchmark JSON files as one artifact.
 
 The wider CI matrix still runs the existing unit tests and full LPC testsuite.
 
@@ -154,6 +186,8 @@ Mudlibs should use owner runtime APIs through explicit owner-safe contracts:
   message/future/commit flows;
 - callback payloads must be frozen data, snapshots, or ObjectHandle-routed
   references;
+- session output must pass through the gateway session FIFO before the main IO
+  adapter writes to the network;
 - main thread work is limited to IO adapters, cleanup adapters, and explicit
   compatibility fallback.
 
