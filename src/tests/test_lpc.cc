@@ -86,6 +86,23 @@ TEST_F(DriverTest, TestLpcModernProfilePragmasAndAuditRules) {
   ASSERT_STREQ(rules[1].code, "bare_object_payload");
   ASSERT_STREQ(rules[2].code, "unfrozen_callback_payload");
   ASSERT_STREQ(rules[3].code, "direct_save_object_hot_path");
+
+  auto report = lpc_owner_audit_source(
+      "#pragma modern_lpc\n"
+      "#pragma strict_owner\n"
+      "void f(object ob) {\n"
+      "  call_other(ob, \"mutate\");\n"
+      "  owner_async(\"owner/x\", ([ \"object\": this_object() ]));\n"
+      "  call_out(\"tick\", 1, this_object());\n"
+      "  save_object(\"/tmp/x\");\n"
+      "}\n");
+  ASSERT_TRUE(report.modern_lpc);
+  ASSERT_TRUE(report.strict_owner);
+  ASSERT_EQ(report.findings.size(), 4);
+  ASSERT_EQ(report.findings[0].code, "cross_owner_mutable_write");
+  ASSERT_EQ(report.findings[1].code, "bare_object_payload");
+  ASSERT_EQ(report.findings[2].code, "unfrozen_callback_payload");
+  ASSERT_EQ(report.findings[3].code, "direct_save_object_hot_path");
 }
 
 namespace {
@@ -4292,6 +4309,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(status, "strict_owner_policy"), "strict_owner_owner_safe_payloads_v1");
     ASSERT_EQ(mapping_number(status, "lpcc_owner_audit_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "lpcc_owner_audit_schema"), "lpcc_owner_audit_v1");
+    ASSERT_EQ(mapping_number(status, "lpcc_owner_audit_cli_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpcc_owner_audit_cli"), "lpcc --owner-audit --format=json");
+    ASSERT_EQ(mapping_number(status, "lpcc_owner_audit_static_scanner_ready"), 1);
     ASSERT_EQ(mapping_number(status, "legacy_lpc_default_closed"), 1);
     ASSERT_EQ(mapping_number(status, "owner_safe_future_api_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_async_api_ready"), 1);
@@ -4658,6 +4678,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(boundary_contract, "strict_owner_policy"), "strict_owner_owner_safe_payloads_v1");
     ASSERT_EQ(mapping_number(boundary_contract, "lpcc_owner_audit_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpcc_owner_audit_schema"), "lpcc_owner_audit_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpcc_owner_audit_cli_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpcc_owner_audit_cli"), "lpcc --owner-audit --format=json");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpcc_owner_audit_static_scanner_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "legacy_lpc_default_closed"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_profile_module_file"),
                  "compiler/internal/lpc_modern_profile.cc");

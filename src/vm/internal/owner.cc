@@ -388,6 +388,9 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_string(map, "strict_owner_policy", kLpcStrictOwnerPolicyV1);
   add_mapping_pair(map, "lpcc_owner_audit_ready", 1);
   add_mapping_string(map, "lpcc_owner_audit_schema", kLpcOwnerAuditSchemaV1);
+  add_mapping_pair(map, "lpcc_owner_audit_cli_ready", 1);
+  add_mapping_string(map, "lpcc_owner_audit_cli", "lpcc --owner-audit --format=json");
+  add_mapping_pair(map, "lpcc_owner_audit_static_scanner_ready", 1);
   add_mapping_pair(map, "legacy_lpc_default_closed", 1);
   add_mapping_pair(map, "owner_safe_future_api_ready", 1);
   add_mapping_pair(map, "owner_async_api_ready", 1);
@@ -1216,7 +1219,7 @@ mapping_t *vm_context_contract_mapping() {
 }
 
 mapping_t *owner_executor_boundary_contract_mapping() {
-  auto *contract = allocate_mapping(138);
+  auto *contract = allocate_mapping(142);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "boundary_model", "owner_executor_boundary_v1");
   add_mapping_string(contract, "implementation_state", "compilation_unit_active");
@@ -1247,6 +1250,9 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "strict_owner_policy", kLpcStrictOwnerPolicyV1);
   add_mapping_pair(contract, "lpcc_owner_audit_ready", 1);
   add_mapping_string(contract, "lpcc_owner_audit_schema", kLpcOwnerAuditSchemaV1);
+  add_mapping_pair(contract, "lpcc_owner_audit_cli_ready", 1);
+  add_mapping_string(contract, "lpcc_owner_audit_cli", "lpcc --owner-audit --format=json");
+  add_mapping_pair(contract, "lpcc_owner_audit_static_scanner_ready", 1);
   add_mapping_pair(contract, "legacy_lpc_default_closed", 1);
   add_mapping_string(contract, "lpc_modern_profile_module_file", "compiler/internal/lpc_modern_profile.cc");
   add_mapping_pair(contract, "owner_safe_future_api_ready", 1);
@@ -4486,7 +4492,7 @@ void vm_owner_thread_stop() {
 
 mapping_t *vm_owner_thread_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(180);
+  auto *map = allocate_mapping(184);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
   add_mapping_pair(map, "thread_count", static_cast<long>(owner_threads.size()));
@@ -4738,7 +4744,7 @@ mapping_t *vm_owner_thread_status() {
 
 mapping_t *vm_owner_runtime_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(170);
+  auto *map = allocate_mapping(174);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
   add_mapping_string(map, "multicore_mode_name", vm_multicore_mode_name(vm_multicore_mode()));
