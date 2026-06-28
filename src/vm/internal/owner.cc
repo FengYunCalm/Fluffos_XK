@@ -492,6 +492,10 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "off_mode_main_fallback_count", static_cast<long>(metrics.owner_off_mode_main_fallback_count));
   add_mapping_pair(map, "main_io_adapter_count", static_cast<long>(metrics.owner_main_io_adapter_count));
   add_mapping_pair(map, "main_cleanup_adapter_count", static_cast<long>(metrics.owner_main_cleanup_adapter_count));
+  add_mapping_pair(map, "session_fifo_contract_ready", 1);
+  add_mapping_pair(map, "gateway_io_adapter_only_ready", 1);
+  add_mapping_string(map, "gateway_io_boundary", "main_thread_io_adapter");
+  add_mapping_pair(map, "callback_payload_strict_ready", 1);
   add_mapping_pair(map, "service_shard_executor_ready", 1);
   add_mapping_pair(map, "domain_task_registry_mudlib_aligned", 1);
   add_mapping_pair(map, "keyed_service_shard_ready", 1);
@@ -1467,6 +1471,10 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "normal_path_main_fallback_ready", 1);
   add_mapping_pair(contract, "main_fallback_policy_ready", 1);
   add_mapping_string(contract, "main_fallback_classification", "explicit_policy");
+  add_mapping_pair(contract, "session_fifo_contract_ready", 1);
+  add_mapping_pair(contract, "gateway_io_adapter_only_ready", 1);
+  add_mapping_string(contract, "gateway_io_boundary", "main_thread_io_adapter");
+  add_mapping_pair(contract, "callback_payload_strict_ready", 1);
   add_mapping_pair(contract, "service_shard_executor_ready", 1);
   add_mapping_pair(contract, "domain_task_registry_mudlib_aligned", 1);
   add_mapping_pair(contract, "keyed_service_shard_ready", 1);

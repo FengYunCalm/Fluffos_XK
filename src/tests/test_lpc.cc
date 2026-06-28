@@ -134,6 +134,31 @@ TEST_F(DriverTest, TestLpcVmProfileRecordsApplyCacheLookups) {
   destruct_object(obj);
 }
 
+TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    svalue_t* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr) << key;
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER) << key;
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    svalue_t* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr) << key;
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING) << key;
+    return (value && value->type == T_STRING) ? value->u.string : "";
+  };
+
+  mapping_t* status = gateway_status_internal();
+  ASSERT_NE(status, nullptr);
+  ASSERT_EQ(mapping_number(status, "session_fifo_contract_ready"), 1);
+  ASSERT_GE(mapping_number(status, "session_fifo_depth"), 0);
+  ASSERT_GE(mapping_number(status, "session_fifo_enqueued"), 0);
+  ASSERT_GE(mapping_number(status, "session_fifo_flushed"), 0);
+  ASSERT_GE(mapping_number(status, "session_fifo_rejected"), 0);
+  ASSERT_STREQ(mapping_string(status, "gateway_io_boundary"), "main_thread_io_adapter");
+  free_mapping(status);
+}
+
 namespace {
 std::string read_source_file_for_test(const char* path) {
   std::ifstream file(path);
@@ -4445,6 +4470,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "normal_path_main_fallback_ready"), 1);
     ASSERT_EQ(mapping_number(status, "main_fallback_policy_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "main_fallback_classification"), "explicit_policy");
+    ASSERT_EQ(mapping_number(status, "session_fifo_contract_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "gateway_io_adapter_only_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "gateway_io_boundary"), "main_thread_io_adapter");
+    ASSERT_EQ(mapping_number(status, "callback_payload_strict_ready"), 1);
     ASSERT_EQ(mapping_number(status, "service_shard_executor_ready"), 1);
     ASSERT_EQ(mapping_number(status, "domain_task_registry_mudlib_aligned"), 1);
     ASSERT_EQ(mapping_number(status, "keyed_service_shard_ready"), 1);
@@ -4955,6 +4984,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "normal_path_main_fallback_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "main_fallback_policy_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "main_fallback_classification"), "explicit_policy");
+    ASSERT_EQ(mapping_number(boundary_contract, "session_fifo_contract_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "gateway_io_adapter_only_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "gateway_io_boundary"), "main_thread_io_adapter");
+    ASSERT_EQ(mapping_number(boundary_contract, "callback_payload_strict_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "service_shard_executor_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "domain_task_registry_mudlib_aligned"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "keyed_service_shard_ready"), 1);

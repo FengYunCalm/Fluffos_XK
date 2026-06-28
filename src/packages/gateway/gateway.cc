@@ -745,11 +745,17 @@ mapping_t *gateway_status_internal() {
   int uptime;
 
   uptime = g_gateway_started_at ? static_cast<int>(get_current_time() - g_gateway_started_at) : 0;
-  map = allocate_mapping(12);
+  map = allocate_mapping(18);
   add_mapping_pair(map, "listening", g_gateway_listener ? 1 : 0);
   add_mapping_pair(map, "port", g_gateway_listen_port);
   add_mapping_pair(map, "masters", static_cast<int>(g_gateway_masters.size()));
   add_mapping_pair(map, "sessions", gateway_get_session_count());
+  add_mapping_pair(map, "session_fifo_contract_ready", 1);
+  add_mapping_pair(map, "session_fifo_depth", gateway_session_fifo_depth_total());
+  add_mapping_pair(map, "session_fifo_enqueued", static_cast<long>(gateway_session_fifo_enqueued_total()));
+  add_mapping_pair(map, "session_fifo_flushed", static_cast<long>(gateway_session_fifo_flushed_total()));
+  add_mapping_pair(map, "session_fifo_rejected", static_cast<long>(gateway_session_fifo_rejected_total()));
+  add_mapping_string(map, "gateway_io_boundary", "main_thread_io_adapter");
   add_mapping_pair(map, "debug", g_gateway_debug);
   add_mapping_pair(map, "max_packet_size", static_cast<LPC_INT>(g_gateway_max_packet_size));
   add_mapping_pair(map, "max_masters", g_gateway_max_masters);

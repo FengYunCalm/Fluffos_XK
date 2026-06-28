@@ -843,6 +843,10 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["normal_path_main_fallback_ready"]);
     ASSERT_EQ(1, boundary_contract["main_fallback_policy_ready"]);
     ASSERT_EQ("explicit_policy", boundary_contract["main_fallback_classification"]);
+    ASSERT_EQ(1, boundary_contract["session_fifo_contract_ready"]);
+    ASSERT_EQ(1, boundary_contract["gateway_io_adapter_only_ready"]);
+    ASSERT_EQ("main_thread_io_adapter", boundary_contract["gateway_io_boundary"]);
+    ASSERT_EQ(1, boundary_contract["callback_payload_strict_ready"]);
     ASSERT_EQ(1, boundary_contract["service_shard_executor_ready"]);
     ASSERT_EQ(1, boundary_contract["domain_task_registry_mudlib_aligned"]);
     ASSERT_EQ(1, boundary_contract["keyed_service_shard_ready"]);
@@ -1039,6 +1043,10 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["normal_path_main_fallback_ready"]);
     ASSERT_EQ(1, status["main_fallback_policy_ready"]);
     ASSERT_EQ("explicit_policy", status["main_fallback_classification"]);
+    ASSERT_EQ(1, status["session_fifo_contract_ready"]);
+    ASSERT_EQ(1, status["gateway_io_adapter_only_ready"]);
+    ASSERT_EQ("main_thread_io_adapter", status["gateway_io_boundary"]);
+    ASSERT_EQ(1, status["callback_payload_strict_ready"]);
     ASSERT_EQ(1, status["service_shard_executor_ready"]);
     ASSERT_EQ(1, status["domain_task_registry_mudlib_aligned"]);
     ASSERT_EQ(1, status["keyed_service_shard_ready"]);
