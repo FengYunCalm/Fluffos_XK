@@ -1351,7 +1351,8 @@ static void dispatch_socket_queued_callback(object_t *owner, SocketQueuedCallbac
     return;
   }
 
-  if (vm_owner_executor_available()) {
+  auto executor_available = vm_owner_executor_available();
+  if (executor_available) {
     auto task_id = vm_owner_enqueue_executor_task(
         owner, "socket_callback", task_key, [task] { execute_socket_queued_callback(task, true); },
         [task] { cleanup_socket_queued_callback(task, true); });
@@ -1362,7 +1363,9 @@ static void dispatch_socket_queued_callback(object_t *owner, SocketQueuedCallbac
 
   auto task_id = vm_owner_enqueue_main_task(
       owner, "socket_callback", task_key, [task] { execute_socket_queued_callback(task); },
-      [task] { free_socket_queued_callback(task); });
+      [task] { free_socket_queued_callback(task); },
+      executor_available ? VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK
+                         : VM_OWNER_MAIN_TASK_OFF_MODE_FALLBACK);
   if (task_id == 0) {
     execute_socket_queued_callback(task);
     return;

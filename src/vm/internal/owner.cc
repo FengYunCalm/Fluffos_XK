@@ -389,7 +389,12 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "target_owner_message_executor_ready", 1);
   add_mapping_pair(map, "normal_path_main_fallback_count", normal_path_main_fallbacks);
   add_mapping_pair(map, "normal_path_main_fallback_ready", normal_path_main_fallbacks == 0 ? 1 : 0);
+  add_mapping_pair(map, "main_fallback_policy_ready", 1);
+  add_mapping_string(map, "main_fallback_classification", "explicit_policy");
   add_mapping_pair(map, "explicit_fallback_count", static_cast<long>(metrics.owner_explicit_main_fallback_count));
+  add_mapping_pair(map, "off_mode_main_fallback_count", static_cast<long>(metrics.owner_off_mode_main_fallback_count));
+  add_mapping_pair(map, "main_io_adapter_count", static_cast<long>(metrics.owner_main_io_adapter_count));
+  add_mapping_pair(map, "main_cleanup_adapter_count", static_cast<long>(metrics.owner_main_cleanup_adapter_count));
   add_mapping_pair(map, "service_shard_executor_ready", 1);
   add_mapping_pair(map, "domain_task_registry_mudlib_aligned", 1);
   add_mapping_pair(map, "keyed_service_shard_ready", 1);
@@ -1075,7 +1080,7 @@ mapping_t *vm_context_contract_mapping() {
 }
 
 mapping_t *owner_executor_boundary_contract_mapping() {
-  auto *contract = allocate_mapping(78);
+  auto *contract = allocate_mapping(80);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "boundary_model", "owner_executor_boundary_v1");
   add_mapping_string(contract, "implementation_state", "compilation_unit_active");
@@ -1185,6 +1190,8 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "target_owner_message_executor_ready", 1);
   add_mapping_pair(contract, "normal_path_main_fallback_count", 0);
   add_mapping_pair(contract, "normal_path_main_fallback_ready", 1);
+  add_mapping_pair(contract, "main_fallback_policy_ready", 1);
+  add_mapping_string(contract, "main_fallback_classification", "explicit_policy");
   add_mapping_pair(contract, "service_shard_executor_ready", 1);
   add_mapping_pair(contract, "domain_task_registry_mudlib_aligned", 1);
   add_mapping_pair(contract, "keyed_service_shard_ready", 1);
@@ -1315,7 +1322,7 @@ mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
 mapping_t *owner_task_trace_mapping(const OwnerTaskTrace &trace) {
   auto target_status = trace.has_target_handle ? vm_object_handle_resolve_status(trace.target_handle).status
                                                : VMObjectHandleResolveStatus::kInvalidHandle;
-  auto *map = allocate_mapping(46);
+  auto *map = allocate_mapping(47);
   add_mapping_pair(map, "trace_id", static_cast<long>(trace.trace_id));
   add_mapping_string(map, "trace_model", "owner_task_lifecycle_event");
   add_mapping_pair(map, "task_id", static_cast<long>(trace.task_id));
@@ -1364,6 +1371,7 @@ mapping_t *owner_task_trace_mapping(const OwnerTaskTrace &trace) {
   add_mapping_pair(map, "execution_frame_requires_command_giver",
                    trace.execution_frame_requires_command_giver ? 1 : 0);
   add_mapping_pair(map, "execution_frame_executor_ready", trace.execution_frame_executor_ready ? 1 : 0);
+  add_mapping_string(map, "main_task_policy", trace.main_task_policy.c_str());
   add_mapping_pair(map, "payload_frozen", trace.payload ? 1 : 0);
   if (trace.payload) {
     add_mapping_svalue(map, "payload", &trace.payload->value);
@@ -1654,6 +1662,22 @@ uint64_t append_owner_task_trace(const OwnerMailboxTask &task, const char *state
   return owner_trace_store.append_task(std::move(trace));
 }
 
+const char *owner_main_task_policy_name(VMOwnerMainTaskPolicy policy) {
+  switch (policy) {
+    case VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK:
+      return "explicit_fallback";
+    case VM_OWNER_MAIN_TASK_OFF_MODE_FALLBACK:
+      return "off_mode_fallback";
+    case VM_OWNER_MAIN_TASK_IO_ADAPTER:
+      return "io_adapter";
+    case VM_OWNER_MAIN_TASK_CLEANUP_ADAPTER:
+      return "cleanup_adapter";
+    case VM_OWNER_MAIN_TASK_NORMAL_PATH_FALLBACK:
+      return "normal_path_fallback";
+  }
+  return "explicit_fallback";
+}
+
 uint64_t append_owner_task_trace(const OwnerMainTask &task, const char *state) {
   OwnerTaskTrace trace;
   trace.task_id = task.task_id;
@@ -1681,6 +1705,7 @@ uint64_t append_owner_task_trace(const OwnerMainTask &task, const char *state) {
   trace.execution_frame_requires_command_giver = task.execution_frame_requires_command_giver;
   trace.execution_frame_executor_ready = task.execution_frame_executor_ready;
   trace.execution_frame_restore_ready = task.execution_frame_restore_ready;
+  trace.main_task_policy = owner_main_task_policy_name(task.main_task_policy);
   trace.has_target_handle = task.has_target_handle;
   return owner_trace_store.append_task(std::move(trace));
 }
@@ -3323,22 +3348,23 @@ uint64_t vm_owner_record_task_trace(const char *owner_id, const char *task_type,
                                   normalize_task_text(task_type, "generic"), normalize_task_text(task_key, ""), state);
 }
 
-bool owner_main_task_is_executor_normal_path_fallback(const OwnerMainTask &task) {
-  if (task.task_type == "owner_message" && task.has_target_handle) {
-    return true;
-  }
-  if (task.task_type == "gateway" || task.task_type == "input") {
-    return task.task_key == "process_user_command";
-  }
-  return task.task_type == "heartbeat" || task.task_type == "call_out" ||
-         task.task_type == "async_callback" || task.task_type == "dns_callback" ||
-         task.task_type == "socket_callback" || task.task_type == "gateway_command_execute";
-}
-
 void record_owner_main_queue_fallback(const OwnerMainTask &task) {
-  if (owner_main_task_is_executor_normal_path_fallback(task) && vm_owner_executor_available()) {
-    owner_normal_path_main_fallback_count.fetch_add(1, std::memory_order_relaxed);
-    return;
+  switch (task.main_task_policy) {
+    case VM_OWNER_MAIN_TASK_NORMAL_PATH_FALLBACK:
+      owner_normal_path_main_fallback_count.fetch_add(1, std::memory_order_relaxed);
+      return;
+    case VM_OWNER_MAIN_TASK_OFF_MODE_FALLBACK:
+      owner_off_mode_main_fallback_count.fetch_add(1, std::memory_order_relaxed);
+      return;
+    case VM_OWNER_MAIN_TASK_IO_ADAPTER:
+      owner_main_io_adapter_count.fetch_add(1, std::memory_order_relaxed);
+      return;
+    case VM_OWNER_MAIN_TASK_CLEANUP_ADAPTER:
+      owner_main_cleanup_adapter_count.fetch_add(1, std::memory_order_relaxed);
+      return;
+    case VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK:
+      owner_explicit_main_fallback_count.fetch_add(1, std::memory_order_relaxed);
+      return;
   }
   owner_explicit_main_fallback_count.fetch_add(1, std::memory_order_relaxed);
 }
@@ -3354,7 +3380,8 @@ uint64_t enqueue_owner_main_task(object_t *target, const char *task_type, const 
                                  const char *execution_frame_restore_policy,
                                  const char *execution_frame_restore_blocker,
                                  const char *command_text_snapshot,
-                                 size_t command_text_snapshot_length) {
+                                 size_t command_text_snapshot_length,
+                                 VMOwnerMainTaskPolicy policy) {
   if (!target || !callback) {
     return 0;
   }
@@ -3386,6 +3413,7 @@ uint64_t enqueue_owner_main_task(object_t *target, const char *task_type, const 
   task.execution_frame_restore_ready = !task.execution_frame_restore_policy.empty() &&
                                        task.execution_frame_restore_blocker.empty();
   task.execution_frame_executor_ready = task.execution_frame_restore_ready;
+  task.main_task_policy = policy;
   task.payload = std::move(payload);
   if (capture_target_handle) {
     task.has_target_handle = true;
@@ -3411,10 +3439,11 @@ uint64_t enqueue_owner_main_task(object_t *target, const char *task_type, const 
 }
 
 uint64_t vm_owner_enqueue_main_task(object_t *target, const char *task_type, const char *task_key,
-                                    std::function<void()> callback, std::function<void()> drop_callback) {
+                                    std::function<void()> callback, std::function<void()> drop_callback,
+                                    VMOwnerMainTaskPolicy policy) {
   return enqueue_owner_main_task(target, task_type, task_key, std::move(callback), std::move(drop_callback),
                                  nullptr, nullptr, false, nullptr, nullptr, nullptr, nullptr, false, false, nullptr,
-                                 nullptr, nullptr, 0);
+                                 nullptr, nullptr, 0, policy);
 }
 
 uint64_t vm_owner_enqueue_main_task_with_payload(object_t *target, const char *task_type,
@@ -3430,7 +3459,8 @@ uint64_t vm_owner_enqueue_main_task_with_payload(object_t *target, const char *t
                                                  const char *execution_frame_restore_policy,
                                                  const char *execution_frame_restore_blocker,
                                                  const char *command_text_snapshot,
-                                                 size_t command_text_snapshot_length) {
+                                                 size_t command_text_snapshot_length,
+                                                 VMOwnerMainTaskPolicy policy) {
   auto frozen_payload = payload ? vm_clone_frozen_value(payload) : nullptr;
   if (payload && !frozen_payload) {
     return 0;
@@ -3440,7 +3470,7 @@ uint64_t vm_owner_enqueue_main_task_with_payload(object_t *target, const char *t
                                  command_consume_blocker, execution_frame_model, execution_frame_policy,
                                  execution_frame_requires_current_interactive, execution_frame_requires_command_giver,
                                  execution_frame_restore_policy, execution_frame_restore_blocker, command_text_snapshot,
-                                 command_text_snapshot_length);
+                                 command_text_snapshot_length, policy);
 }
 
 uint64_t enqueue_owner_message_main_task_locked(const OwnerMailboxTask &mailbox_task, object_t *target) {
@@ -4179,7 +4209,7 @@ void vm_owner_thread_stop() {
 
 mapping_t *vm_owner_thread_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(134);
+  auto *map = allocate_mapping(139);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
   add_mapping_pair(map, "thread_count", static_cast<long>(owner_threads.size()));
@@ -4425,7 +4455,7 @@ mapping_t *vm_owner_thread_status() {
 
 mapping_t *vm_owner_runtime_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(126);
+  auto *map = allocate_mapping(131);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
   add_mapping_string(map, "multicore_mode_name", vm_multicore_mode_name(vm_multicore_mode()));

@@ -81,7 +81,7 @@ void gateway_apply_receive(object_t *user, svalue_t *data_sv) {
           safe_apply("gateway_receive", user, 1, ORIGIN_DRIVER);
         }
         restore_command_giver();
-      }) != 0) {
+      }, nullptr, VM_OWNER_MAIN_TASK_IO_ADAPTER) != 0) {
     vm_owner_drain_main_tasks(64);
   }
 }

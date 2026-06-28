@@ -150,14 +150,17 @@ void call_heart_beat() {
       vm_owner_record_task_trace(curr_hb->owner_id.c_str(), "heartbeat", "heart_beat", curr_hb->owner_epoch, "stale");
       continue;
     }
-    if (vm_owner_executor_available()) {
+    auto executor_available = vm_owner_executor_available();
+    if (executor_available) {
       auto task_id = vm_owner_enqueue_executor_task(ob, "heartbeat", "heart_beat", [ob] { execute_heart_beat(ob); });
       if (task_id != 0) {
         curr_hb = nullptr;
         continue;
       }
     }
-    vm_owner_enqueue_main_task(ob, "heartbeat", "heart_beat", [ob] { execute_heart_beat(ob); });
+    vm_owner_enqueue_main_task(ob, "heartbeat", "heart_beat", [ob] { execute_heart_beat(ob); }, nullptr,
+                               executor_available ? VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK
+                                                  : VM_OWNER_MAIN_TASK_OFF_MODE_FALLBACK);
     curr_hb = nullptr;
   }
   vm_owner_drain_main_tasks(1024);

@@ -1293,6 +1293,10 @@ TEST_F(DriverTest, TestVmOwnerMainQueueDispatchesWithOwnerScope) {
   auto before_claims = mapping_number(before, "main_owner_claims");
   auto before_releases = mapping_number(before, "main_owner_releases");
   free_mapping(before);
+  auto* before_runtime = vm_owner_runtime_status();
+  auto before_normal_fallback = mapping_number(before_runtime, "normal_path_main_fallback_count");
+  auto before_io_adapter = mapping_number(before_runtime, "main_io_adapter_count");
+  free_mapping(before_runtime);
 
   auto task_id = vm_owner_enqueue_main_task(obj, "unit_main", "dispatch", [&] {
     ran = true;
@@ -1300,7 +1304,7 @@ TEST_F(DriverTest, TestVmOwnerMainQueueDispatchesWithOwnerScope) {
     auto* running = vm_owner_thread_status();
     active_owners_during_callback = mapping_number(running, "main_active_owners");
     free_mapping(running);
-  });
+  }, nullptr, VM_OWNER_MAIN_TASK_IO_ADAPTER);
   ASSERT_GT(task_id, 0u);
   ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
   ASSERT_TRUE(ran);
@@ -1312,6 +1316,11 @@ TEST_F(DriverTest, TestVmOwnerMainQueueDispatchesWithOwnerScope) {
   ASSERT_EQ(mapping_number(after, "main_owner_claims"), before_claims + 1);
   ASSERT_EQ(mapping_number(after, "main_owner_releases"), before_releases + 1);
   free_mapping(after);
+  auto* after_runtime = vm_owner_runtime_status();
+  ASSERT_EQ(mapping_number(after_runtime, "normal_path_main_fallback_count"), before_normal_fallback);
+  ASSERT_EQ(mapping_number(after_runtime, "main_io_adapter_count"), before_io_adapter + 1);
+  ASSERT_EQ(mapping_number(after_runtime, "main_fallback_policy_ready"), 1);
+  free_mapping(after_runtime);
 
   auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
     auto* value = find_string_in_mapping(map, key);
@@ -1325,7 +1334,9 @@ TEST_F(DriverTest, TestVmOwnerMainQueueDispatchesWithOwnerScope) {
   ASSERT_EQ(events->type, T_ARRAY);
   ASSERT_EQ(events->u.arr->size, 2);
   ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "state"), "main_queued");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "main_task_policy"), "io_adapter");
   ASSERT_STREQ(mapping_string(events->u.arr->item[1].u.map, "state"), "main_dispatched");
+  ASSERT_STREQ(mapping_string(events->u.arr->item[1].u.map, "main_task_policy"), "io_adapter");
   free_mapping(trace);
 
   vm_owner_clear_id(obj);
@@ -4191,6 +4202,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "target_owner_message_executor_ready"), 1);
     ASSERT_EQ(mapping_number(status, "normal_path_main_fallback_count"), 0);
     ASSERT_EQ(mapping_number(status, "normal_path_main_fallback_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "main_fallback_policy_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "main_fallback_classification"), "explicit_policy");
     ASSERT_EQ(mapping_number(status, "service_shard_executor_ready"), 1);
     ASSERT_EQ(mapping_number(status, "domain_task_registry_mudlib_aligned"), 1);
     ASSERT_EQ(mapping_number(status, "keyed_service_shard_ready"), 1);
@@ -4585,6 +4598,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "target_owner_message_executor_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "normal_path_main_fallback_count"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "normal_path_main_fallback_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "main_fallback_policy_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "main_fallback_classification"), "explicit_policy");
     ASSERT_EQ(mapping_number(boundary_contract, "service_shard_executor_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "domain_task_registry_mudlib_aligned"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "keyed_service_shard_ready"), 1);

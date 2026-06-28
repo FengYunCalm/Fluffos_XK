@@ -541,7 +541,8 @@ void dispatch_finished_request(Request *req, enum atypes type) {
     return;
   }
 
-  if (vm_owner_executor_available()) {
+  auto executor_available = vm_owner_executor_available();
+  if (executor_available) {
     auto task_id = vm_owner_enqueue_executor_task(
         owner, "async_callback", operation.c_str(),
         [req, type, operation] {
@@ -560,7 +561,9 @@ void dispatch_finished_request(Request *req, enum atypes type) {
         handle_finished_request(req, type);
         free_async_request(req);
       },
-      [req] { free_async_request(req); });
+      [req] { free_async_request(req); },
+      executor_available ? VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK
+                         : VM_OWNER_MAIN_TASK_OFF_MODE_FALLBACK);
   if (task_id == 0) {
     handle_finished_request(req, type);
     free_async_request(req);

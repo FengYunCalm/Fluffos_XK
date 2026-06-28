@@ -21,6 +21,14 @@ constexpr int VM_MULTICORE_MODE_OFF = 0;
 constexpr int VM_MULTICORE_MODE_AUDIT = 1;
 constexpr int VM_MULTICORE_MODE_ENFORCED = 2;
 
+enum VMOwnerMainTaskPolicy {
+  VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK = 0,
+  VM_OWNER_MAIN_TASK_OFF_MODE_FALLBACK = 1,
+  VM_OWNER_MAIN_TASK_IO_ADAPTER = 2,
+  VM_OWNER_MAIN_TASK_CLEANUP_ADAPTER = 3,
+  VM_OWNER_MAIN_TASK_NORMAL_PATH_FALLBACK = 4,
+};
+
 const char *vm_owner_default_id();
 int vm_multicore_mode();
 const char *vm_multicore_mode_name(int mode);
@@ -47,7 +55,8 @@ uint64_t vm_owner_record_task_trace(const char *owner_id, const char *task_type,
                                      uint64_t owner_epoch, const char *state);
 uint64_t vm_owner_enqueue_main_task(object_t *target, const char *task_type, const char *task_key,
                                     std::function<void()> callback,
-                                    std::function<void()> drop_callback = nullptr);
+                                    std::function<void()> drop_callback = nullptr,
+                                    VMOwnerMainTaskPolicy policy = VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK);
 bool vm_owner_executor_available();
 uint64_t vm_owner_enqueue_executor_task(object_t *target, const char *task_type, const char *task_key,
                                         std::function<void()> callback,
@@ -68,7 +77,8 @@ uint64_t vm_owner_enqueue_main_task_with_payload(object_t *target, const char *t
                                                  const char *execution_frame_restore_policy = nullptr,
                                                  const char *execution_frame_restore_blocker = nullptr,
                                                  const char *command_text_snapshot = nullptr,
-                                                 size_t command_text_snapshot_length = 0);
+                                                 size_t command_text_snapshot_length = 0,
+                                                 VMOwnerMainTaskPolicy policy = VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK);
 int vm_owner_drain_main_tasks(int limit);
 uint64_t vm_owner_record_access(object_t *source, object_t *target, const char *operation);
 uint64_t vm_owner_record_cross_owner_access(object_t *source, object_t *target, const char *operation);

@@ -89,6 +89,9 @@
   X(owner_main_budget_yields, 0)                                  \
   X(owner_normal_path_main_fallback_count, 0)                     \
   X(owner_explicit_main_fallback_count, 0)                        \
+  X(owner_off_mode_main_fallback_count, 0)                        \
+  X(owner_main_io_adapter_count, 0)                               \
+  X(owner_main_cleanup_adapter_count, 0)                          \
   X(owner_main_owner_claims, 0)                                   \
   X(owner_main_owner_releases, 0)
 

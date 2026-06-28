@@ -41,6 +41,7 @@ struct OwnerTaskTrace {
   std::string execution_frame_policy;
   std::string execution_frame_restore_policy;
   std::string execution_frame_restore_blocker;
+  std::string main_task_policy;
   bool has_target_handle{false};
   bool command_text_snapshot_ready{false};
   bool command_consume_snapshot_ready{false};

@@ -2,6 +2,7 @@
 
 #include "vm/frozen_value.h"
 #include "vm/object_handle.h"
+#include "vm/owner.h"
 
 #include <cstdint>
 #include <deque>
@@ -79,6 +80,7 @@ struct OwnerMainTask {
   bool execution_frame_requires_command_giver{false};
   bool execution_frame_executor_ready{false};
   bool execution_frame_restore_ready{false};
+  VMOwnerMainTaskPolicy main_task_policy{VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK};
   VMObjectHandle target_handle;
   std::shared_ptr<VMFrozenValue> payload;
   std::function<void()> callback;

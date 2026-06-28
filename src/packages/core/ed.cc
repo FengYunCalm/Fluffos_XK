@@ -659,7 +659,8 @@ static void enqueue_ed_callback(object_t *owner, const char *function, array_t *
   task->args = args;
   auto task_id = vm_owner_enqueue_main_task(owner, "ed_callback", function,
                                            [task] { execute_ed_queued_callback(task); },
-                                           [task] { free_ed_queued_callback(task); });
+                                           [task] { free_ed_queued_callback(task); },
+                                           VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK);
   if (task_id == 0) {
     execute_ed_queued_callback(task);
     return;
