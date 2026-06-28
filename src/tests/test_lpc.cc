@@ -21,6 +21,7 @@
 #include "user.h"
 
 #include "compiler/internal/compiler.h"
+#include "compiler/internal/lpc_modern_profile.h"
 #include "packages/core/call_out.h"
 #include "packages/core/heartbeat.h"
 #include "packages/gateway/gateway.h"
@@ -64,6 +65,28 @@ class DriverTest : public ::testing::Test {
     clear_state();
   }
 };
+
+TEST_F(DriverTest, TestLpcModernProfilePragmasAndAuditRules) {
+  int flag = 0;
+  ASSERT_TRUE(lpc_modern_pragma_name("modern_lpc", &flag));
+  ASSERT_EQ(flag, LPC_MODERN_PRAGMA_MODERN_LPC);
+  ASSERT_STREQ(lpc_modern_pragma_name_for_flag(flag), "modern_lpc");
+
+  ASSERT_TRUE(lpc_modern_pragma_name("strict_owner", &flag));
+  ASSERT_EQ(flag, LPC_MODERN_PRAGMA_STRICT_OWNER);
+  ASSERT_STREQ(lpc_modern_pragma_name_for_flag(flag), "strict_owner");
+
+  ASSERT_FALSE(lpc_modern_pragma_name("strict_types", &flag));
+  ASSERT_STREQ(kLpcModernProfileSchemaV1, "lpc_modern_profile_v1");
+  ASSERT_STREQ(kLpcOwnerAuditSchemaV1, "lpcc_owner_audit_v1");
+
+  const auto &rules = lpc_owner_audit_rules();
+  ASSERT_EQ(rules.size(), 4);
+  ASSERT_STREQ(rules[0].code, "cross_owner_mutable_write");
+  ASSERT_STREQ(rules[1].code, "bare_object_payload");
+  ASSERT_STREQ(rules[2].code, "unfrozen_callback_payload");
+  ASSERT_STREQ(rules[3].code, "direct_save_object_hot_path");
+}
 
 namespace {
 std::string read_source_file_for_test(const char* path) {
@@ -4261,6 +4284,15 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(status, "owner_runtime_stress_entry"), "tools/owner-runtime-v4-stress.sh");
     ASSERT_EQ(mapping_number(status, "owner_runtime_layering_guard_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_runtime_coordinator_module_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_modern_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_modern_profile_schema"), "lpc_modern_profile_v1");
+    ASSERT_STREQ(mapping_string(status, "lpc_modern_profile_mode"), "opt_in_pragma");
+    ASSERT_EQ(mapping_number(status, "modern_lpc_pragma_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "strict_owner_pragma_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "strict_owner_policy"), "strict_owner_owner_safe_payloads_v1");
+    ASSERT_EQ(mapping_number(status, "lpcc_owner_audit_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpcc_owner_audit_schema"), "lpcc_owner_audit_v1");
+    ASSERT_EQ(mapping_number(status, "legacy_lpc_default_closed"), 1);
     ASSERT_EQ(mapping_number(status, "owner_task_manifest_module_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_trace_store_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_future_store_ready"), 1);
@@ -4610,6 +4642,17 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_store_owner"), "OwnerRuntimeCoordinator");
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_cc_runtime_role"),
                  "runtime_status_facade_and_legacy_glue");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_modern_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_profile_schema"), "lpc_modern_profile_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_profile_mode"), "opt_in_pragma");
+    ASSERT_EQ(mapping_number(boundary_contract, "modern_lpc_pragma_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "strict_owner_pragma_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "strict_owner_policy"), "strict_owner_owner_safe_payloads_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpcc_owner_audit_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpcc_owner_audit_schema"), "lpcc_owner_audit_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "legacy_lpc_default_closed"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_profile_module_file"),
+                 "compiler/internal/lpc_modern_profile.cc");
     ASSERT_EQ(mapping_number(boundary_contract, "owner_task_manifest_module_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_task_manifest_module_file"),
                  "vm/internal/owner_task_manifest.cc");

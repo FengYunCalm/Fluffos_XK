@@ -397,6 +397,7 @@ set(SRC
   "compiler/internal/generate.cc"
   "compiler/internal/icode.cc"
   "compiler/internal/lex.cc"
+  "compiler/internal/lpc_modern_profile.cc"
   "compiler/internal/scratchpad.cc"
   "compiler/internal/trees.cc"
   "vm/internal/base/apply_cache.cc"
