@@ -155,6 +155,10 @@ void run_apply_cache_bench(Report &report) {
   report.add("apply_cache_table_builds", static_cast<long long>(snapshot.apply_cache_table_build_count));
   report.add("apply_cache_table_items", static_cast<long long>(snapshot.apply_cache_table_item_count));
   report.add("apply_cache_table_build_ns", static_cast<long long>(snapshot.apply_cache_table_build_ns));
+  report.add("apply_dispatch_cache_lookups", static_cast<long long>(snapshot.apply_dispatch_cache_lookup_count));
+  report.add("apply_dispatch_cache_hits", static_cast<long long>(snapshot.apply_dispatch_cache_hit_count));
+  report.add("apply_dispatch_cache_epoch_invalidations",
+             static_cast<long long>(snapshot.apply_dispatch_cache_epoch_invalidation_count));
   report.add("apply_cache_hit_latency_p50_ns", percentile(hit_samples, 0.50));
   report.add("apply_cache_hit_latency_p95_ns", percentile(hit_samples, 0.95));
   report.add("apply_cache_hit_latency_p99_ns", percentile(hit_samples, 0.99));

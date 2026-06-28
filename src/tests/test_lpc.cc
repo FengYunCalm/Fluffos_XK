@@ -117,15 +117,19 @@ TEST_F(DriverTest, TestLpcVmProfileRecordsApplyCacheLookups) {
 
   auto hit = apply_cache_lookup("dummy", obj->prog);
   ASSERT_NE(hit.funp, nullptr);
+  auto direct_hit = apply_cache_lookup("dummy", obj->prog);
+  ASSERT_EQ(direct_hit.funp, hit.funp);
   auto miss = apply_cache_lookup("__missing_lpc_vm_profile_probe__", obj->prog);
   ASSERT_EQ(miss.funp, nullptr);
 
   auto snapshot = lpc_vm_profile_snapshot();
-  ASSERT_GE(snapshot.apply_cache_lookup_count, 2);
-  ASSERT_GE(snapshot.apply_cache_hit_count, 1);
+  ASSERT_GE(snapshot.apply_cache_lookup_count, 3);
+  ASSERT_GE(snapshot.apply_cache_hit_count, 2);
   ASSERT_GE(snapshot.apply_cache_miss_count, 1);
   ASSERT_GE(snapshot.apply_cache_table_build_count, 1);
   ASSERT_GT(snapshot.apply_cache_table_item_count, 0);
+  ASSERT_GE(snapshot.apply_dispatch_cache_lookup_count, 3);
+  ASSERT_GE(snapshot.apply_dispatch_cache_hit_count, 1);
 
   destruct_object(obj);
 }
@@ -4334,6 +4338,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "lpc_vm_benchmark_smoke_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "lpc_vm_benchmark_schema"), "lpc_vm_bench_v1");
     ASSERT_EQ(mapping_number(status, "lpc_apply_dispatch_cache_probe_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_dispatch_cache_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_dispatch_cache_model"),
+                 "apply_dispatch_thread_local_direct_cache_v1");
     ASSERT_EQ(mapping_number(status, "lpc_jit_experiment_default_off"), 1);
     ASSERT_EQ(mapping_number(status, "modern_lpc_pragma_ready"), 1);
     ASSERT_EQ(mapping_number(status, "strict_owner_pragma_ready"), 1);
@@ -4709,6 +4716,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_vm_benchmark_smoke_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_benchmark_schema"), "lpc_vm_bench_v1");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_apply_dispatch_cache_probe_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_dispatch_cache_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_dispatch_cache_model"),
+                 "apply_dispatch_thread_local_direct_cache_v1");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_jit_experiment_default_off"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "modern_lpc_pragma_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "strict_owner_pragma_ready"), 1);

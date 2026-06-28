@@ -14,11 +14,16 @@ struct LpcVmProfileSnapshot {
   uint64_t apply_cache_table_build_count{0};
   uint64_t apply_cache_table_item_count{0};
   uint64_t apply_cache_table_build_ns{0};
+  uint64_t apply_dispatch_cache_lookup_count{0};
+  uint64_t apply_dispatch_cache_hit_count{0};
+  uint64_t apply_dispatch_cache_epoch_invalidation_count{0};
 };
 
 void lpc_vm_profile_reset();
 void lpc_vm_profile_record_apply_cache_lookup(bool hit);
 void lpc_vm_profile_record_apply_cache_table_build(std::size_t items, uint64_t elapsed_ns);
+void lpc_vm_profile_record_apply_dispatch_cache_lookup(bool hit);
+void lpc_vm_profile_record_apply_dispatch_cache_epoch_invalidation();
 LpcVmProfileSnapshot lpc_vm_profile_snapshot();
 
 #endif /* LPC_VM_PROFILE_H_ */

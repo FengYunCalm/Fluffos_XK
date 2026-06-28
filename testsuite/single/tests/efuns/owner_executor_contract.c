@@ -660,6 +660,8 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["lpc_vm_benchmark_smoke_ready"]);
     ASSERT_EQ("lpc_vm_bench_v1", boundary_contract["lpc_vm_benchmark_schema"]);
     ASSERT_EQ(1, boundary_contract["lpc_apply_dispatch_cache_probe_ready"]);
+    ASSERT_EQ(1, boundary_contract["lpc_dispatch_cache_ready"]);
+    ASSERT_EQ("apply_dispatch_thread_local_direct_cache_v1", boundary_contract["lpc_dispatch_cache_model"]);
     ASSERT_EQ(1, boundary_contract["lpc_jit_experiment_default_off"]);
     ASSERT_EQ(1, boundary_contract["modern_lpc_pragma_ready"]);
     ASSERT_EQ(1, boundary_contract["strict_owner_pragma_ready"]);
@@ -845,6 +847,8 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["lpc_vm_benchmark_smoke_ready"]);
     ASSERT_EQ("lpc_vm_bench_v1", status["lpc_vm_benchmark_schema"]);
     ASSERT_EQ(1, status["lpc_apply_dispatch_cache_probe_ready"]);
+    ASSERT_EQ(1, status["lpc_dispatch_cache_ready"]);
+    ASSERT_EQ("apply_dispatch_thread_local_direct_cache_v1", status["lpc_dispatch_cache_model"]);
     ASSERT_EQ(1, status["lpc_jit_experiment_default_off"]);
     ASSERT_EQ(1, status["modern_lpc_pragma_ready"]);
     ASSERT_EQ(1, status["strict_owner_pragma_ready"]);

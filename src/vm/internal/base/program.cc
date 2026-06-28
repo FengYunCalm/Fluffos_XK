@@ -1,6 +1,7 @@
 #include "base/std.h"
 
 #include "vm/internal/base/machine.h"
+#include "vm/internal/base/apply_cache.h"
 
 void reference_prog(program_t *progp, const char *from) {
   progp->ref++;
@@ -11,6 +12,7 @@ void deallocate_program(program_t *progp) {
   int i;
 
   debug(d_flag, "free_prog: /%s\n", progp->filename);
+  apply_cache_invalidate_program(progp);
 
   total_prog_block_size -= progp->total_size;
   total_num_prog_blocks -= 1;
