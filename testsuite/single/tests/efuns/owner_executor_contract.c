@@ -639,10 +639,26 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("vm/internal/owner_executor.h", boundary_contract["module_file"]);
     ASSERT_EQ(1, boundary_contract["compilation_unit_extracted"]);
     ASSERT_EQ("vm/internal/owner_executor.cc", boundary_contract["compilation_unit_file"]);
-    ASSERT_EQ(1, boundary_contract["depends_on_owner_cc_internal_state"]);
+    ASSERT_EQ(0, boundary_contract["depends_on_owner_cc_internal_state"]);
+    ASSERT_EQ(1, boundary_contract["owner_runtime_split_ready"]);
+    ASSERT_EQ("runtime_v3_modules_with_owner_cc_coordinator", boundary_contract["owner_runtime_split_model"]);
+    ASSERT_EQ("vm/internal/owner.cc", boundary_contract["owner_runtime_coordinator_file"]);
+    ASSERT_EQ("runtime_coordinator_facade", boundary_contract["owner_cc_runtime_role"]);
+    ASSERT_EQ(1, boundary_contract["owner_task_manifest_module_ready"]);
+    ASSERT_EQ("vm/internal/owner_task_manifest.cc", boundary_contract["owner_task_manifest_module_file"]);
+    ASSERT_EQ(1, boundary_contract["owner_trace_store_ready"]);
+    ASSERT_EQ("vm/internal/owner_trace_store.cc", boundary_contract["owner_trace_store_file"]);
+    ASSERT_EQ(1, boundary_contract["owner_future_store_ready"]);
+    ASSERT_EQ("vm/internal/owner_future_store.cc", boundary_contract["owner_future_store_file"]);
+    ASSERT_EQ(1, boundary_contract["owner_scheduler_state_ready"]);
+    ASSERT_EQ("vm/internal/owner_scheduler_state.cc", boundary_contract["owner_scheduler_state_file"]);
+    ASSERT_EQ(1, boundary_contract["owner_metrics_store_ready"]);
+    ASSERT_EQ("vm/internal/owner_runtime_metrics.cc", boundary_contract["owner_metrics_store_file"]);
+    ASSERT_EQ(1, boundary_contract["object_store_owner_fast_path_ready"]);
     ASSERT_EQ(1, boundary_contract["dependency_manifest_ready"]);
     ASSERT_EQ(1, boundary_contract["runtime_dependency_contract_version"]);
-    ASSERT_EQ("scheduler_state,mailbox_state,task_dispatch,vm_context,metric_counters,future_completion",
+    ASSERT_EQ("owner_scheduler_state,owner_task_manifest,owner_trace_store,owner_future_store,"
+              "owner_runtime_metrics,task_dispatch,vm_context",
               boundary_contract["dependency_domains"]);
     ASSERT_EQ(1, boundary_contract["scheduler_state_dependency"]);
     ASSERT_EQ(1, boundary_contract["mailbox_state_dependency"]);
@@ -657,7 +673,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("scheduler_state,mailbox_state,future_completion", boundary_contract["owner_runtime_facade_domains"]);
     ASSERT_EQ(1, boundary_contract["owner_runtime_facade_scheduler_ready"]);
     ASSERT_EQ(1, boundary_contract["owner_runtime_facade_future_completion_ready"]);
-    ASSERT_EQ("owner_cc_anonymous_runtime_state", boundary_contract["compilation_unit_blocker"]);
+    ASSERT_EQ("", boundary_contract["compilation_unit_blocker"]);
     ASSERT_EQ(1, boundary_contract["claim_release_boundary_ready"]);
     ASSERT_EQ(1, boundary_contract["budget_boundary_ready"]);
     ASSERT_EQ(1, boundary_contract["thread_context_boundary_ready"]);
@@ -762,6 +778,14 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["ordinary_lpc_explicit_open_required"]);
     ASSERT_EQ("default_closed_explicit_open", status["ordinary_lpc_activation_policy"]);
     ASSERT_EQ("", status["ordinary_lpc_next_blocker"]);
+    ASSERT_EQ(1, status["owner_runtime_split_ready"]);
+    ASSERT_EQ("runtime_v3_modules_with_owner_cc_coordinator", status["owner_runtime_split_model"]);
+    ASSERT_EQ(1, status["owner_task_manifest_module_ready"]);
+    ASSERT_EQ(1, status["owner_trace_store_ready"]);
+    ASSERT_EQ(1, status["owner_future_store_ready"]);
+    ASSERT_EQ(1, status["owner_scheduler_state_ready"]);
+    ASSERT_EQ(1, status["owner_metrics_store_ready"]);
+    ASSERT_EQ(1, status["object_store_owner_fast_path_ready"]);
     ASSERT_EQ(1, status["owner_task_manifest_v2_ready"]);
     ASSERT_EQ("owner_task_manifest_v2", status["owner_task_manifest_schema"]);
     ASSERT_EQ(1, status["owner_executor_admission_gate_ready"]);

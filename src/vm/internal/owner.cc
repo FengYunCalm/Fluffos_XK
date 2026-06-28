@@ -353,6 +353,14 @@ long owner_main_required_queue_depth();
 void add_owner_runtime_v2_status_fields(mapping_t *map) {
   auto metrics = owner_runtime_metrics.snapshot();
   auto normal_path_main_fallbacks = static_cast<long>(metrics.owner_normal_path_main_fallback_count);
+  add_mapping_pair(map, "owner_runtime_split_ready", 1);
+  add_mapping_string(map, "owner_runtime_split_model", "runtime_v3_modules_with_owner_cc_coordinator");
+  add_mapping_pair(map, "owner_task_manifest_module_ready", 1);
+  add_mapping_pair(map, "owner_trace_store_ready", 1);
+  add_mapping_pair(map, "owner_future_store_ready", 1);
+  add_mapping_pair(map, "owner_scheduler_state_ready", 1);
+  add_mapping_pair(map, "owner_metrics_store_ready", 1);
+  add_mapping_pair(map, "object_store_owner_fast_path_ready", 1);
   add_mapping_pair(map, "owner_task_manifest_v2_ready", 1);
   add_mapping_string(map, "owner_task_manifest_schema", kOwnerTaskManifestSchemaV2);
   add_mapping_pair(map, "owner_executor_admission_gate_ready", 1);
@@ -1080,7 +1088,7 @@ mapping_t *vm_context_contract_mapping() {
 }
 
 mapping_t *owner_executor_boundary_contract_mapping() {
-  auto *contract = allocate_mapping(80);
+  auto *contract = allocate_mapping(100);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "boundary_model", "owner_executor_boundary_v1");
   add_mapping_string(contract, "implementation_state", "compilation_unit_active");
@@ -1090,11 +1098,27 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "module_file", "vm/internal/owner_executor.h");
   add_mapping_pair(contract, "compilation_unit_extracted", 1);
   add_mapping_string(contract, "compilation_unit_file", "vm/internal/owner_executor.cc");
-  add_mapping_pair(contract, "depends_on_owner_cc_internal_state", 1);
+  add_mapping_pair(contract, "depends_on_owner_cc_internal_state", 0);
+  add_mapping_pair(contract, "owner_runtime_split_ready", 1);
+  add_mapping_string(contract, "owner_runtime_split_model", "runtime_v3_modules_with_owner_cc_coordinator");
+  add_mapping_string(contract, "owner_runtime_coordinator_file", "vm/internal/owner.cc");
+  add_mapping_string(contract, "owner_cc_runtime_role", "runtime_coordinator_facade");
+  add_mapping_pair(contract, "owner_task_manifest_module_ready", 1);
+  add_mapping_string(contract, "owner_task_manifest_module_file", "vm/internal/owner_task_manifest.cc");
+  add_mapping_pair(contract, "owner_trace_store_ready", 1);
+  add_mapping_string(contract, "owner_trace_store_file", "vm/internal/owner_trace_store.cc");
+  add_mapping_pair(contract, "owner_future_store_ready", 1);
+  add_mapping_string(contract, "owner_future_store_file", "vm/internal/owner_future_store.cc");
+  add_mapping_pair(contract, "owner_scheduler_state_ready", 1);
+  add_mapping_string(contract, "owner_scheduler_state_file", "vm/internal/owner_scheduler_state.cc");
+  add_mapping_pair(contract, "owner_metrics_store_ready", 1);
+  add_mapping_string(contract, "owner_metrics_store_file", "vm/internal/owner_runtime_metrics.cc");
+  add_mapping_pair(contract, "object_store_owner_fast_path_ready", 1);
   add_mapping_pair(contract, "dependency_manifest_ready", 1);
   add_mapping_pair(contract, "runtime_dependency_contract_version", 1);
   add_mapping_string(contract, "dependency_domains",
-                     "scheduler_state,mailbox_state,task_dispatch,vm_context,metric_counters,future_completion");
+                     "owner_scheduler_state,owner_task_manifest,owner_trace_store,owner_future_store,"
+                     "owner_runtime_metrics,task_dispatch,vm_context");
   add_mapping_pair(contract, "scheduler_state_dependency", 1);
   add_mapping_pair(contract, "mailbox_state_dependency", 1);
   add_mapping_pair(contract, "task_dispatch_dependency", 1);
@@ -1108,7 +1132,7 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "owner_runtime_facade_domains", "scheduler_state,mailbox_state,future_completion");
   add_mapping_pair(contract, "owner_runtime_facade_scheduler_ready", 1);
   add_mapping_pair(contract, "owner_runtime_facade_future_completion_ready", 1);
-  add_mapping_string(contract, "compilation_unit_blocker", "owner_cc_anonymous_runtime_state");
+  add_mapping_string(contract, "compilation_unit_blocker", "");
   add_mapping_pair(contract, "claim_release_boundary_ready", 1);
   add_mapping_pair(contract, "budget_boundary_ready", 1);
   add_mapping_pair(contract, "thread_context_boundary_ready", 1);

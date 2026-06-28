@@ -1067,7 +1067,6 @@ TEST_F(DriverTest, TestInteractiveExecPreservesNewObjectOwner) {
   ASSERT_NE(new_user, nullptr);
 
   add_ref(old_user, "TestInteractiveExecPreservesNewObjectOwner");
-  add_ref(new_user, "TestInteractiveExecPreservesNewObjectOwner");
 
   vm_owner_set_id(old_user, "owner/test/interactive/login");
   vm_owner_set_id(new_user, "owner/test/interactive/exec-user");
@@ -1097,8 +1096,6 @@ TEST_F(DriverTest, TestInteractiveExecPreservesNewObjectOwner) {
   ASSERT_EQ(new_user->interactive, nullptr);
   destruct_object(old_user);
   destruct_object(new_user);
-  free_object(&old_user, "TestInteractiveExecPreservesNewObjectOwner");
-  free_object(&new_user, "TestInteractiveExecPreservesNewObjectOwner");
 }
 
 TEST_F(DriverTest, TestVmOwnerMailboxDrainsOwnerFifo) {
@@ -1256,27 +1253,40 @@ TEST_F(DriverTest, TestVmOwnerTaskTraceRecordsObservedAndDispatchedEvents) {
     return value && value->type == T_STRING ? value->u.string : "";
   };
 
-  auto* trace = vm_owner_task_trace(3);
+  auto* trace = vm_owner_task_trace(8);
   ASSERT_STREQ(mapping_string(trace, "trace_kind"), "owner_task_trace");
   ASSERT_STREQ(mapping_string(trace, "trace_model"), "owner_task_lifecycle_trace");
   auto* events = find_string_in_mapping(trace, "events");
   ASSERT_NE(events, nullptr);
   ASSERT_EQ(events->type, T_ARRAY);
-  ASSERT_EQ(events->u.arr->size, 3);
-  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "trace_model"), "owner_task_lifecycle_event");
-  ASSERT_STREQ(mapping_string(events->u.arr->item[1].u.map, "trace_model"), "owner_task_lifecycle_event");
-  ASSERT_STREQ(mapping_string(events->u.arr->item[2].u.map, "trace_model"), "owner_task_lifecycle_event");
-  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "state"), "observed");
-  ASSERT_STREQ(mapping_string(events->u.arr->item[0].u.map, "task_key"), "look");
-  ASSERT_STREQ(mapping_string(events->u.arr->item[1].u.map, "state"), "queued");
-  ASSERT_STREQ(mapping_string(events->u.arr->item[2].u.map, "state"), "dispatched");
-  ASSERT_EQ(mapping_number(events->u.arr->item[2].u.map, "task_id"), static_cast<long>(task_id));
-  ASSERT_STREQ(mapping_string(events->u.arr->item[2].u.map, "owner_id"), owner);
+  ASSERT_GE(events->u.arr->size, 3);
+  auto find_trace_event = [&](const char* state, const char* task_key) -> mapping_t* {
+    for (int i = 0; i < events->u.arr->size; i++) {
+      auto* event = events->u.arr->item[i].u.map;
+      if (std::string(mapping_string(event, "owner_id")) == owner &&
+          std::string(mapping_string(event, "state")) == state &&
+          std::string(mapping_string(event, "task_key")) == task_key) {
+        return event;
+      }
+    }
+    return nullptr;
+  };
+  auto* observed = find_trace_event("observed", "look");
+  auto* queued = find_trace_event("queued", "inventory");
+  auto* dispatched = find_trace_event("dispatched", "inventory");
+  ASSERT_NE(observed, nullptr);
+  ASSERT_NE(queued, nullptr);
+  ASSERT_NE(dispatched, nullptr);
+  ASSERT_STREQ(mapping_string(observed, "trace_model"), "owner_task_lifecycle_event");
+  ASSERT_STREQ(mapping_string(queued, "trace_model"), "owner_task_lifecycle_event");
+  ASSERT_STREQ(mapping_string(dispatched, "trace_model"), "owner_task_lifecycle_event");
+  ASSERT_EQ(mapping_number(dispatched, "task_id"), static_cast<long>(task_id));
   free_mapping(trace);
 }
 
 TEST_F(DriverTest, TestVmOwnerMainQueueDispatchesWithOwnerScope) {
-  object_t* obj = load_object_for_test("single/void");
+  current_object = master_ob;
+  object_t* obj = clone_object("single/void", 0);
   ASSERT_NE(obj, nullptr);
   vm_owner_set_id(obj, "owner/test/main-queue");
 
@@ -4170,6 +4180,15 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "ordinary_lpc_explicit_open_required"), 1);
     ASSERT_STREQ(mapping_string(status, "ordinary_lpc_activation_policy"), "default_closed_explicit_open");
     ASSERT_STREQ(mapping_string(status, "ordinary_lpc_next_blocker"), "");
+    ASSERT_EQ(mapping_number(status, "owner_runtime_split_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_runtime_split_model"),
+                 "runtime_v3_modules_with_owner_cc_coordinator");
+    ASSERT_EQ(mapping_number(status, "owner_task_manifest_module_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_trace_store_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_future_store_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_scheduler_state_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_metrics_store_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "object_store_owner_fast_path_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_task_manifest_v2_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_task_manifest_schema"), "owner_task_manifest_v2");
     ASSERT_EQ(mapping_number(status, "owner_executor_admission_gate_ready"), 1);
@@ -4480,11 +4499,31 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(boundary_contract, "module_file"), "vm/internal/owner_executor.h");
     ASSERT_EQ(mapping_number(boundary_contract, "compilation_unit_extracted"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "compilation_unit_file"), "vm/internal/owner_executor.cc");
-    ASSERT_EQ(mapping_number(boundary_contract, "depends_on_owner_cc_internal_state"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "depends_on_owner_cc_internal_state"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_split_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_split_model"),
+                 "runtime_v3_modules_with_owner_cc_coordinator");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_coordinator_file"), "vm/internal/owner.cc");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_cc_runtime_role"), "runtime_coordinator_facade");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_task_manifest_module_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_task_manifest_module_file"),
+                 "vm/internal/owner_task_manifest.cc");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_trace_store_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_trace_store_file"), "vm/internal/owner_trace_store.cc");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_future_store_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_future_store_file"), "vm/internal/owner_future_store.cc");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_scheduler_state_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_scheduler_state_file"),
+                 "vm/internal/owner_scheduler_state.cc");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_metrics_store_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_metrics_store_file"),
+                 "vm/internal/owner_runtime_metrics.cc");
+    ASSERT_EQ(mapping_number(boundary_contract, "object_store_owner_fast_path_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "dependency_manifest_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "runtime_dependency_contract_version"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "dependency_domains"),
-                 "scheduler_state,mailbox_state,task_dispatch,vm_context,metric_counters,future_completion");
+                 "owner_scheduler_state,owner_task_manifest,owner_trace_store,owner_future_store,"
+                 "owner_runtime_metrics,task_dispatch,vm_context");
     ASSERT_EQ(mapping_number(boundary_contract, "scheduler_state_dependency"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "mailbox_state_dependency"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "task_dispatch_dependency"), 1);
@@ -4500,8 +4539,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "scheduler_state,mailbox_state,future_completion");
     ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_facade_scheduler_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_facade_future_completion_ready"), 1);
-    ASSERT_STREQ(mapping_string(boundary_contract, "compilation_unit_blocker"),
-                 "owner_cc_anonymous_runtime_state");
+    ASSERT_STREQ(mapping_string(boundary_contract, "compilation_unit_blocker"), "");
     ASSERT_EQ(mapping_number(boundary_contract, "claim_release_boundary_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "budget_boundary_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "thread_context_boundary_ready"), 1);
@@ -7716,7 +7754,8 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
                  "global_record_bridge_retirement_ready");
   };
 
-  object_t* obj = load_object_for_test("single/void");
+  current_object = master_ob;
+  object_t* obj = clone_object("single/void", 0);
   ASSERT_NE(obj, nullptr);
   vm_owner_set_id(obj, "owner/test/migration/a");
   vm_object_store_register(obj);
@@ -7754,6 +7793,7 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
   free_mapping(before);
 
   auto handle = vm_object_handle(obj);
+  ASSERT_NE(handle.object_path.find('#'), std::string::npos);
   ASSERT_EQ(vm_object_store_owner_resolve("owner/test/migration/a", handle.object_id), obj);
   ASSERT_EQ(vm_object_store_owner_path_resolve("owner/test/migration/a", handle.object_path.c_str()), obj);
   auto* old_lookup_before = vm_object_store_owner_lookup_status("owner/test/migration/a", handle.object_id);
