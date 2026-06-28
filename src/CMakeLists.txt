@@ -415,6 +415,7 @@ set(SRC
   "vm/internal/context.cc"
   "vm/internal/eval_limit.cc"
   "vm/internal/frozen_value.cc"
+  "vm/internal/lpc_vm_profile.cc"
   "vm/internal/object_store.cc"
   "vm/internal/owner.cc"
   "vm/internal/owner_executor.cc"

@@ -1,0 +1,222 @@
+#include "base/package_api.h"
+
+#include "mainlib.h"
+#include "vm/internal/base/apply_cache.h"
+#include "vm/internal/base/object.h"
+#include "vm/internal/lpc_vm_profile.h"
+
+#include <algorithm>
+#include <cerrno>
+#include <chrono>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+#include <unistd.h>
+
+namespace {
+using Clock = std::chrono::steady_clock;
+
+struct Metric {
+  std::string name;
+  long long value{0};
+};
+
+struct StringMetric {
+  std::string name;
+  std::string value;
+};
+
+struct Report {
+  std::vector<Metric> metrics;
+  std::vector<StringMetric> strings;
+
+  void add(const std::string &name, long long value) { metrics.push_back({name, value}); }
+  void add_string(const std::string &name, std::string value) { strings.push_back({name, std::move(value)}); }
+};
+
+long long elapsed_ns(Clock::time_point start) {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
+}
+
+long long percentile(std::vector<long long> samples, double rank) {
+  if (samples.empty()) {
+    return 0;
+  }
+  std::sort(samples.begin(), samples.end());
+  const auto index = static_cast<size_t>((samples.size() - 1) * rank);
+  return samples[index];
+}
+
+void require(bool condition, const std::string &message) {
+  if (!condition) {
+    throw std::runtime_error(message);
+  }
+}
+
+std::string json_escape(const std::string &value) {
+  std::ostringstream out;
+  for (char ch : value) {
+    switch (ch) {
+      case '\\':
+        out << "\\\\";
+        break;
+      case '"':
+        out << "\\\"";
+        break;
+      case '\n':
+        out << "\\n";
+        break;
+      case '\r':
+        out << "\\r";
+        break;
+      case '\t':
+        out << "\\t";
+        break;
+      default:
+        out << ch;
+        break;
+    }
+  }
+  return out.str();
+}
+
+std::string report_json(const Report &report) {
+  std::ostringstream json;
+  json << "{\n";
+  json << "  \"schema\": \"" << kLpcVmBenchSchemaV1 << "\",\n";
+  json << "  \"runtime\": {\n";
+  for (size_t i = 0; i < report.strings.size(); i++) {
+    json << "    \"" << json_escape(report.strings[i].name) << "\": \""
+         << json_escape(report.strings[i].value) << "\"";
+    json << (i + 1 == report.strings.size() ? "\n" : ",\n");
+  }
+  json << "  },\n";
+  json << "  \"metrics\": {\n";
+  for (size_t i = 0; i < report.metrics.size(); i++) {
+    json << "    \"" << json_escape(report.metrics[i].name) << "\": " << report.metrics[i].value;
+    json << (i + 1 == report.metrics.size() ? "\n" : ",\n");
+  }
+  json << "  }\n";
+  json << "}\n";
+  return json.str();
+}
+
+void write_json_report(const std::string &path, const std::string &json) {
+  if (path.empty()) {
+    return;
+  }
+  auto output_path = std::filesystem::path(path);
+  if (output_path.has_parent_path()) {
+    std::filesystem::create_directories(output_path.parent_path());
+  }
+  std::ofstream output(output_path);
+  if (!output.is_open()) {
+    throw std::runtime_error("failed to open benchmark json output: " + path);
+  }
+  output << json;
+}
+
+void run_apply_cache_bench(Report &report) {
+  const long iterations = 512;
+  lpc_vm_profile_reset();
+
+  object_t *probe = clone_object("single/void", 0);
+  require(probe != nullptr, "failed to clone VM profile probe object");
+
+  std::vector<long long> hit_samples;
+  std::vector<long long> miss_samples;
+  auto start = Clock::now();
+  auto warm = apply_cache_lookup("dummy", probe->prog);
+  require(warm.funp != nullptr, "warm apply cache lookup did not find dummy()");
+
+  for (long i = 0; i < iterations; i++) {
+    auto hit_start = Clock::now();
+    auto hit = apply_cache_lookup("dummy", probe->prog);
+    hit_samples.push_back(elapsed_ns(hit_start));
+    require(hit.funp != nullptr, "apply cache hit lookup failed");
+
+    auto miss_start = Clock::now();
+    auto miss = apply_cache_lookup("__missing_lpc_vm_profile_probe__", probe->prog);
+    miss_samples.push_back(elapsed_ns(miss_start));
+    require(miss.funp == nullptr, "apply cache miss lookup unexpectedly resolved");
+  }
+
+  auto snapshot = lpc_vm_profile_snapshot();
+  report.add("apply_cache_iterations", iterations);
+  report.add("apply_cache_elapsed_ns", elapsed_ns(start));
+  report.add("apply_cache_profile_lookups", static_cast<long long>(snapshot.apply_cache_lookup_count));
+  report.add("apply_cache_profile_hits", static_cast<long long>(snapshot.apply_cache_hit_count));
+  report.add("apply_cache_profile_misses", static_cast<long long>(snapshot.apply_cache_miss_count));
+  report.add("apply_cache_table_builds", static_cast<long long>(snapshot.apply_cache_table_build_count));
+  report.add("apply_cache_table_items", static_cast<long long>(snapshot.apply_cache_table_item_count));
+  report.add("apply_cache_table_build_ns", static_cast<long long>(snapshot.apply_cache_table_build_ns));
+  report.add("apply_cache_hit_latency_p50_ns", percentile(hit_samples, 0.50));
+  report.add("apply_cache_hit_latency_p95_ns", percentile(hit_samples, 0.95));
+  report.add("apply_cache_hit_latency_p99_ns", percentile(hit_samples, 0.99));
+  report.add("apply_cache_miss_latency_p50_ns", percentile(miss_samples, 0.50));
+  report.add("apply_cache_miss_latency_p95_ns", percentile(miss_samples, 0.95));
+  report.add("apply_cache_miss_latency_p99_ns", percentile(miss_samples, 0.99));
+
+  destruct_object(probe);
+}
+
+void print_text_report(const Report &report, const std::string &json_path) {
+  std::cout << "lpc_vm_bench: schema=" << kLpcVmBenchSchemaV1 << "\n";
+  for (const auto &metric : report.metrics) {
+    std::cout << metric.name << "=" << metric.value << "\n";
+  }
+  if (!json_path.empty()) {
+    std::cout << "json_report=" << json_path << "\n";
+  }
+}
+}  // namespace
+
+int main(int argc, char **argv) {
+  std::string json_path;
+  for (int i = 1; i < argc; i++) {
+    std::string arg = argv[i];
+    if (arg == "--json" && i + 1 < argc) {
+      json_path = argv[++i];
+    } else if (arg == "--help") {
+      std::cout << "usage: lpc_vm_bench [--json path]\n";
+      return 0;
+    } else {
+      std::cerr << "unknown argument: " << arg << "\n";
+      return 2;
+    }
+  }
+
+  try {
+    if (!json_path.empty()) {
+      json_path = std::filesystem::absolute(json_path).string();
+    }
+    if (chdir(TESTSUITE_DIR) != 0) {
+      std::ostringstream error;
+      error << "failed to chdir to " << TESTSUITE_DIR << ": " << strerror(errno);
+      throw std::runtime_error(error.str());
+    }
+    init_main("etc/config.test");
+    vm_start();
+
+    Report report;
+    report.add_string("mode", "diagnostic");
+    report.add_string("profile_schema", kLpcVmProfileSchemaV1);
+    report.add_string("dispatch_cache_probe", "apply_cache_lookup_v1");
+
+    run_apply_cache_bench(report);
+
+    auto json = report_json(report);
+    write_json_report(json_path, json);
+    print_text_report(report, json_path);
+    std::cout << json;
+    return 0;
+  } catch (const std::exception &error) {
+    std::cerr << "lpc_vm_bench failed: " << error.what() << "\n";
+    return 1;
+  }
+}

@@ -19,3 +19,7 @@ endif()
 add_executable(owner_runtime_bench owner_runtime_bench.cc)
 target_link_libraries(owner_runtime_bench PRIVATE ${FLUFFOS_LINK})
 target_compile_definitions(owner_runtime_bench PRIVATE -DTESTSUITE_DIR="${CMAKE_SOURCE_DIR}/testsuite")
+
+add_executable(lpc_vm_bench lpc_vm_bench.cc)
+target_link_libraries(lpc_vm_bench PRIVATE ${FLUFFOS_LINK})
+target_compile_definitions(lpc_vm_bench PRIVATE -DTESTSUITE_DIR="${CMAKE_SOURCE_DIR}/testsuite")

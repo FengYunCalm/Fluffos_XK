@@ -26,9 +26,11 @@
 #include "packages/core/heartbeat.h"
 #include "packages/gateway/gateway.h"
 #include "vm/context.h"
+#include "vm/internal/base/apply_cache.h"
 #include "vm/internal/base/array.h"
 #include "vm/internal/base/mapping.h"
 #include "vm/internal/base/object.h"
+#include "vm/internal/lpc_vm_profile.h"
 #include "vm/internal/otable.h"
 #include "vm/internal/simulate.h"
 #include "vm/object_handle.h"
@@ -103,6 +105,29 @@ TEST_F(DriverTest, TestLpcModernProfilePragmasAndAuditRules) {
   ASSERT_EQ(report.findings[1].code, "bare_object_payload");
   ASSERT_EQ(report.findings[2].code, "unfrozen_callback_payload");
   ASSERT_EQ(report.findings[3].code, "direct_save_object_hot_path");
+}
+
+TEST_F(DriverTest, TestLpcVmProfileRecordsApplyCacheLookups) {
+  ASSERT_STREQ(kLpcVmProfileSchemaV1, "lpc_vm_profile_v1");
+  ASSERT_STREQ(kLpcVmBenchSchemaV1, "lpc_vm_bench_v1");
+
+  lpc_vm_profile_reset();
+  object_t *obj = clone_object("single/void", 0);
+  ASSERT_NE(obj, nullptr);
+
+  auto hit = apply_cache_lookup("dummy", obj->prog);
+  ASSERT_NE(hit.funp, nullptr);
+  auto miss = apply_cache_lookup("__missing_lpc_vm_profile_probe__", obj->prog);
+  ASSERT_EQ(miss.funp, nullptr);
+
+  auto snapshot = lpc_vm_profile_snapshot();
+  ASSERT_GE(snapshot.apply_cache_lookup_count, 2);
+  ASSERT_GE(snapshot.apply_cache_hit_count, 1);
+  ASSERT_GE(snapshot.apply_cache_miss_count, 1);
+  ASSERT_GE(snapshot.apply_cache_table_build_count, 1);
+  ASSERT_GT(snapshot.apply_cache_table_item_count, 0);
+
+  destruct_object(obj);
 }
 
 namespace {
@@ -4304,6 +4329,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "lpc_modern_profile_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "lpc_modern_profile_schema"), "lpc_modern_profile_v1");
     ASSERT_STREQ(mapping_string(status, "lpc_modern_profile_mode"), "opt_in_pragma");
+    ASSERT_EQ(mapping_number(status, "lpc_vm_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_vm_profile_schema"), "lpc_vm_profile_v1");
+    ASSERT_EQ(mapping_number(status, "lpc_vm_benchmark_smoke_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_vm_benchmark_schema"), "lpc_vm_bench_v1");
+    ASSERT_EQ(mapping_number(status, "lpc_apply_dispatch_cache_probe_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_jit_experiment_default_off"), 1);
     ASSERT_EQ(mapping_number(status, "modern_lpc_pragma_ready"), 1);
     ASSERT_EQ(mapping_number(status, "strict_owner_pragma_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "strict_owner_policy"), "strict_owner_owner_safe_payloads_v1");
@@ -4673,6 +4704,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_modern_profile_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_profile_schema"), "lpc_modern_profile_v1");
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_profile_mode"), "opt_in_pragma");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_vm_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_profile_schema"), "lpc_vm_profile_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_vm_benchmark_smoke_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_benchmark_schema"), "lpc_vm_bench_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_apply_dispatch_cache_probe_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_jit_experiment_default_off"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "modern_lpc_pragma_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "strict_owner_pragma_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "strict_owner_policy"), "strict_owner_owner_safe_payloads_v1");
