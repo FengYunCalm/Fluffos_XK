@@ -17,5 +17,9 @@ char *__crypt_r(const char *key, const char *salt, struct crypt_data *data)
 		if (salt[1] == '6' && salt[2] == '$')
 			return __crypt_sha512(key, salt, output);
 	}
+#ifdef FLUFFOS_ENABLE_LEGACY_DES_CRYPT
 	return __crypt_des(key, salt, output);
+#else
+	return 0;
+#endif
 }

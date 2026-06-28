@@ -3403,6 +3403,13 @@ static const char uri_chars[256] = {
 #define CHAR_IS_UNRESERVED(c)			\
 	(uri_chars[(unsigned char)(c)])
 
+static int
+evhttp_pointer_add_overflows_(const void *ptr, size_t len)
+{
+	uintptr_t base = (uintptr_t)ptr;
+	return len > (size_t)(UINTPTR_MAX - base);
+}
+
 /*
  * Helper functions to encode/decode a string for inclusion in a URI.
  * The returned string must be freed by the caller.
@@ -3419,7 +3426,7 @@ evhttp_uriencode(const char *uri, ev_ssize_t len, int space_as_plus)
 	}
 
 	if (len >= 0) {
-		if (uri + len < uri) {
+		if (evhttp_pointer_add_overflows_(uri, (size_t)len)) {
 			goto out;
 		}
 
@@ -3432,7 +3439,7 @@ evhttp_uriencode(const char *uri, ev_ssize_t len, int space_as_plus)
 			goto out;
 		}
 
-		if (uri + slen < uri) {
+		if (evhttp_pointer_add_overflows_(uri, slen)) {
 			goto out;
 		}
 
