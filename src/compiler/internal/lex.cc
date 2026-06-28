@@ -783,7 +783,7 @@ static void merge(char *name, char *dest) {
 }
 
 static void lexerror(const char *s) {
-  yyerror(s);
+  yyerror("%s", s);
   lex_fatal++;
 }
 
@@ -975,7 +975,7 @@ static void include_error(const char *msg, int global) {
     lexerror(msg);
     pragmas = saved_pragmas;
   } else {
-    yyerror(msg);
+    yyerror("%s", msg);
   }
 
   current_line++;
@@ -1045,7 +1045,7 @@ static void handle_include(char *name, int global) {
     current_stream = std::make_unique<FileLexStream>(f);
     refill_buffer();
   } else {
-    sprintf(buf, "Cannot #include %s", name);
+    snprintf(buf, sizeof(buf), "Cannot #include %s", name);
     include_error(buf, global);
   }
   pop_stack();
@@ -2649,11 +2649,7 @@ int yylex() {
   }
 badlex: {
 #ifdef DEBUG
-  char buff[100];
-
-  sprintf(buff, "Illegal character (hex %02x) '%c'", static_cast<unsigned>(c),
-          static_cast<char>(c));
-  yyerror(buff);
+  yyerror("Illegal character (hex %02x) '%c'", static_cast<unsigned>(c), static_cast<char>(c));
 #endif
   return ' ';
 }

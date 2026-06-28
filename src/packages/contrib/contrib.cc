@@ -1,6 +1,8 @@
 #include "base/package_api.h"
 
 #include <sys/stat.h>  // for struct stat
+#include <string>
+#include <vector>
 
 #include "packages/core/heartbeat.h"
 #include "packages/core/add_action.h"
@@ -547,7 +549,7 @@ void f_terminal_colour() {
   LPC_INT wrap = 0;
   LPC_INT indent = 0;
   int fillout = 0;
-  char *rep;
+  const char *rep;
   int repused;
 
   if (st_num_arg >= 3) {
@@ -698,14 +700,17 @@ void f_terminal_colour() {
   space = 0;
   maybe_at_end = 0;
   buflen = max_buflen = space_buflen = 0;
+  std::vector<std::string> replacement_storage;
+  replacement_storage.reserve(num);
   for (j = i = 0, k = sp->u.map->table_size; i < num; i++) {
     // Look it up in the mapping.
     repused = 0;
+    rep = nullptr;
     copy_and_push_string(parts[i]);
     svalue_t *reptmp = apply(APPLY_TERMINAL_COLOUR_REPLACE, current_object, 1, ORIGIN_EFUN);
     if (reptmp && reptmp->type == T_STRING) {
-      rep = reinterpret_cast<char *>(alloca(SVALUE_STRLEN(reptmp) + 1));
-      strcpy(rep, reptmp->u.string);
+      replacement_storage.emplace_back(reptmp->u.string, SVALUE_STRLEN(reptmp));
+      rep = replacement_storage.back().c_str();
       repused = 1;
     }
 
