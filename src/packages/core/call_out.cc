@@ -362,7 +362,8 @@ void call_out(pending_call_t *cop) {
   }
 
   auto task_key = std::string(callout_task_key(cop));
-  if (vm_owner_executor_available()) {
+  auto executor_available = vm_owner_executor_available();
+  if (executor_available) {
     detach_due_callout_handle(cop);
     release_callout_tick_event(cop);
     auto task_id = vm_owner_enqueue_executor_task(
@@ -372,13 +373,15 @@ void call_out(pending_call_t *cop) {
       return;
     }
     vm_owner_enqueue_main_task(ob, "call_out", task_key.c_str(), [cop] { execute_call_out(cop, true, false); },
-                               [cop] { cleanup_callout(cop, false, false); });
+                               [cop] { cleanup_callout(cop, false, false); },
+                               VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK);
     vm_owner_drain_main_tasks(64);
     return;
   }
 
   vm_owner_enqueue_main_task(ob, "call_out", task_key.c_str(), [cop] { execute_call_out(cop); },
-                             [cop] { cleanup_callout(cop, false, false); });
+                             [cop] { cleanup_callout(cop, false, false); },
+                             VM_OWNER_MAIN_TASK_OFF_MODE_FALLBACK);
   vm_owner_drain_main_tasks(64);
 }
 

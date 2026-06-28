@@ -116,7 +116,7 @@ void enqueue_user_localecho_restore(interactive_t *ip, object_t *reply_command_g
   auto task_id = vm_owner_enqueue_main_task(reply_command_giver, "command_reply", "localecho_restore",
                                             [ip, reply_command_giver] {
                                               run_user_localecho_restore(ip, reply_command_giver);
-                                            });
+                                            }, nullptr, VM_OWNER_MAIN_TASK_IO_ADAPTER);
   if (task_id == 0) {
     run_user_localecho_restore(ip, reply_command_giver);
     return;
@@ -166,7 +166,7 @@ void enqueue_user_terminal_mode_delta(interactive_t *ip, object_t *reply_command
   auto task_id = vm_owner_enqueue_main_task(reply_command_giver, "command_mode_delta", task_key,
                                             [ip, reply_command_giver, mode_delta] {
                                               run_user_terminal_mode_delta(ip, reply_command_giver, mode_delta);
-                                            });
+                                            }, nullptr, VM_OWNER_MAIN_TASK_IO_ADAPTER);
   if (task_id == 0) {
     run_user_terminal_mode_delta(ip, reply_command_giver, mode_delta);
     return;
@@ -203,7 +203,8 @@ void enqueue_user_command_reply_side_effects(interactive_t *ip, object_t *reply_
 
   auto task_id = vm_owner_enqueue_main_task(
       reply_command_giver, "command_reply", "prompt_telnet_reschedule_io",
-      [ip, reply_command_giver] { run_user_command_reply_side_effects(ip, reply_command_giver); });
+      [ip, reply_command_giver] { run_user_command_reply_side_effects(ip, reply_command_giver); }, nullptr,
+      VM_OWNER_MAIN_TASK_IO_ADAPTER);
   if (task_id == 0) {
     run_user_command_reply_side_effects(ip, reply_command_giver);
     return;
@@ -229,7 +230,7 @@ void on_user_command(evutil_socket_t fd, short what, void *arg) {
 
       /* Has to be cleared if we jumped out of process_user_command() */
       vm_context_set_current_interactive(vm_context(), nullptr);
-    });
+    }, nullptr, VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK);
     vm_owner_drain_main_tasks(64);
   } else {
     set_eval(max_eval_cost);
@@ -715,7 +716,7 @@ void add_message(object_t *who, const char *data, int len) {
       auto payload = std::string(data, len);
       vm_owner_enqueue_main_task(who, "gateway", "gateway_output", [session_id, payload] {
         gateway_send_to_session(session_id.c_str(), payload.data(), payload.size());
-      });
+      }, nullptr, VM_OWNER_MAIN_TASK_IO_ADAPTER);
     }
 #ifdef SHADOW_CATCH_MESSAGE
     if (shadow_catch_message(who, data)) {

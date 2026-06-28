@@ -241,7 +241,8 @@ void enqueue_addr_by_name_callback(AddrNumberQuery *query) {
     free_addr_number_query(query);
     return;
   }
-  if (vm_owner_executor_available()) {
+  auto executor_available = vm_owner_executor_available();
+  if (executor_available) {
     auto task_id = vm_owner_enqueue_executor_task(
         owner, "dns_callback", task_key, [query] { on_query_addr_by_name_finish(query, true); },
         [query] { cleanup_addr_number_query(query, dns_query_task_key(query), true); });
@@ -251,7 +252,9 @@ void enqueue_addr_by_name_callback(AddrNumberQuery *query) {
   }
   auto task_id = vm_owner_enqueue_main_task(
       owner, "dns_callback", task_key, [query] { on_query_addr_by_name_finish(query); },
-      [query] { free_addr_number_query(query); });
+      [query] { free_addr_number_query(query); },
+      executor_available ? VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK
+                         : VM_OWNER_MAIN_TASK_OFF_MODE_FALLBACK);
   if (task_id == 0) {
     on_query_addr_by_name_finish(query);
   }

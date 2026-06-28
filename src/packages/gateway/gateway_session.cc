@@ -372,7 +372,8 @@ uint64_t gateway_enqueue_pending_command_internal(object_t *user) {
   auto command_snapshot = gateway_pending_command_snapshot(ip);
   auto snapshot_ready = (ip->iflags & CMD_IN_BUF) != 0;
   auto payload = gateway_command_task_payload(ip, snapshot_ready, command_snapshot.size());
-  if (snapshot_ready && vm_owner_executor_available()) {
+  auto executor_available = snapshot_ready && vm_owner_executor_available();
+  if (executor_available) {
     auto task_id = vm_owner_enqueue_executor_task(
         user, "gateway_command_execute", "process_user_command", [user, ip, command_snapshot] {
           if (!gateway_executor_session_current(user, ip)) {
@@ -397,6 +398,9 @@ uint64_t gateway_enqueue_pending_command_internal(object_t *user) {
       return task_id;
     }
   }
+  auto main_task_policy = snapshot_ready ? (executor_available ? VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK
+                                                               : VM_OWNER_MAIN_TASK_OFF_MODE_FALLBACK)
+                                         : VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK;
   auto task_id = vm_owner_enqueue_main_task_with_payload(
       user, "gateway", "process_user_command", "gateway_command_input", &payload, [ip, command_snapshot] {
         set_eval(max_eval_cost);
@@ -404,7 +408,8 @@ uint64_t gateway_enqueue_pending_command_internal(object_t *user) {
         vm_context_set_current_interactive(vm_context(), nullptr);
       }, nullptr, "gateway_command_execution_frame_v1", "owner_scope_current_interactive_command_giver",
       "owner_owned_snapshot_main_thread_consume", "", true, true, "owner_executor_vmcontext_restore", "",
-      snapshot_ready ? command_snapshot.c_str() : nullptr, command_snapshot.size());
+      snapshot_ready ? command_snapshot.c_str() : nullptr, command_snapshot.size(),
+      main_task_policy);
   free_svalue(&payload, "gateway_command_task_payload");
   return task_id;
 }

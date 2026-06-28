@@ -7,8 +7,9 @@
 #include "vm/owner.h"
 
 #include <atomic>
-#include <mutex>
 #include <deque>
+#include <mutex>
+#include <shared_mutex>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -166,12 +167,15 @@ struct GlobalRecordByPathBridgeResult {
   bool record_scan_bridge_found{false};
 };
 
-std::mutex object_store_mutex;
+std::shared_mutex object_store_directory_mutex;
 std::atomic<uint64_t> next_object_id{1};
 std::atomic<uint64_t> next_migration_id{1};
 std::unordered_map<object_t *, ObjectRecord> object_records;
 std::unordered_map<std::string, VMObjectShard> owner_shards;
 std::deque<ObjectMigrationRecord> object_migration_traces;
+
+using ObjectStoreReadLock = std::shared_lock<std::shared_mutex>;
+using ObjectStoreWriteLock = std::unique_lock<std::shared_mutex>;
 
 const char *safe_owner_id(const char *owner_id) {
   return owner_id && owner_id[0] != '\0' ? owner_id : vm_owner_default_id();
@@ -418,6 +422,22 @@ object_t *shard_resolve_live_path_locked(const VMObjectShard &shard, const std::
   return shard_resolve_live_object_locked(shard, path->second);
 }
 
+object_t *owner_local_resolve_object_fast_path_locked(const char *owner_id, uint64_t object_id) {
+  auto shard_it = owner_shards.find(safe_owner_id(owner_id));
+  if (shard_it == owner_shards.end()) {
+    return nullptr;
+  }
+  return shard_resolve_live_object_locked(shard_it->second, object_id);
+}
+
+object_t *owner_local_resolve_path_fast_path_locked(const char *owner_id, const char *object_path) {
+  auto shard_it = owner_shards.find(safe_owner_id(owner_id));
+  if (shard_it == owner_shards.end()) {
+    return nullptr;
+  }
+  return shard_resolve_live_path_locked(shard_it->second, object_path ? object_path : "");
+}
+
 bool shard_has_local_object_ref_locked(const VMObjectShard &shard, uint64_t object_id) {
   auto object_it = shard.local_objects.find(object_id);
   return object_it != shard.local_objects.end() && object_it->second != nullptr;
@@ -540,6 +560,7 @@ bool resolve_handle_from_owner_local_shard_locked(const VMObjectHandle &handle,
   result.object = object;
   result.status = VMObjectHandleResolveStatus::kCurrent;
   result.resolved_via_owner_local_store = true;
+  result.owner_local_fast_path_used = true;
   result.owner_local_object_pointer_index_found = true;
   return true;
 }
@@ -1228,59 +1249,58 @@ mapping_t *vm_object_shard_contract_mapping(const VMObjectShard &shard, const Ow
 void append_migration_trace_locked(const ObjectRecord &record, const std::string &from_owner_id,
                                    const std::string &to_owner_id);
 
-ObjectRecord &register_locked(object_t *object) {
-  auto &record = object_records[object];
-  auto live_destructed = object && (object->flags & O_DESTRUCTED) != 0;
-  auto record_reused_by_live_object = record.destructed && !live_destructed && !object_is_pending_destruct(object);
-  if (record.object_id == 0 || record_reused_by_live_object) {
-    if (record.object_id != 0) {
-      auto old_it = owner_shards.find(record.owner_id);
-      if (old_it != owner_shards.end()) {
-        shard_remove_object(old_it->second, record.object_id);
-      }
-    }
-    record.object_id = next_object_id.fetch_add(1, std::memory_order_relaxed);
-    record.owner_id = safe_owner_id(vm_owner_id(object));
-    record.owner_epoch = vm_owner_epoch(object);
-    record.object_path = safe_object_path(object);
-    record.destructed = live_destructed;
-    auto &shard = shard_for_owner(record.owner_id);
-    if (!record.destructed) {
-      shard_add_live_object(shard, record, object);
-    } else {
-      shard_mark_destructed_object(shard, record);
-    }
-    shard.status.registered++;
+ObjectRecord &write_owner_local_lifecycle_record_locked(object_t *object, bool force_destructed = false,
+                                                        bool *was_destructed_out = nullptr) {
+  auto &compat_record = object_records[object];
+  auto previous_record = compat_record;
+  auto had_previous_record = previous_record.object_id != 0;
+  auto object_already_destructed = object && (object->flags & O_DESTRUCTED) != 0;
+  auto object_pending_destruct = object_is_pending_destruct(object);
+  auto live_destructed =
+      object_already_destructed || force_destructed ||
+      (had_previous_record && previous_record.destructed && object_pending_destruct);
+  auto record_reused_by_live_object =
+      had_previous_record && previous_record.destructed && !live_destructed && !object_pending_destruct;
+  auto current_owner_explicit = vm_owner_has_explicit_id(object);
+  auto preserve_destructed_snapshot =
+      had_previous_record && previous_record.destructed && live_destructed && !current_owner_explicit;
+  if (was_destructed_out) {
+    *was_destructed_out = had_previous_record ? previous_record.destructed && !record_reused_by_live_object
+                                              : object_already_destructed;
   }
-  return record;
-}
 
-void move_record_owner_locked(ObjectRecord &record, const std::string &new_owner_id, object_t *object) {
-  if (record.owner_id == new_owner_id) {
-    return;
+  ObjectRecord record;
+  record.object_id = (!had_previous_record || record_reused_by_live_object)
+                         ? next_object_id.fetch_add(1, std::memory_order_relaxed)
+                         : previous_record.object_id;
+  record.owner_id = preserve_destructed_snapshot ? previous_record.owner_id : safe_owner_id(vm_owner_id(object));
+  record.owner_epoch = preserve_destructed_snapshot ? previous_record.owner_epoch : vm_owner_epoch(object);
+  record.object_path = preserve_destructed_snapshot ? previous_record.object_path : safe_object_path(object);
+  record.destructed = live_destructed;
+
+  if (had_previous_record &&
+      (record_reused_by_live_object || previous_record.owner_id != record.owner_id)) {
+    auto old_it = owner_shards.find(previous_record.owner_id);
+    if (old_it != owner_shards.end()) {
+      shard_remove_object(old_it->second, previous_record.object_id);
+    }
   }
-  auto old_owner_id = record.owner_id;
-  auto old_it = owner_shards.find(record.owner_id);
-  if (old_it != owner_shards.end()) {
-    shard_remove_object(old_it->second, record.object_id);
-  }
-  record.owner_id = new_owner_id;
+
   auto &new_shard = shard_for_owner(record.owner_id);
   if (record.destructed) {
     shard_mark_destructed_object(new_shard, record);
   } else {
     shard_add_live_object(new_shard, record, object);
   }
-  append_migration_trace_locked(record, old_owner_id, new_owner_id);
-}
-
-void sync_record_activity_locked(const ObjectRecord &record, object_t *object) {
-  auto &shard = shard_for_owner(record.owner_id);
-  if (record.destructed) {
-    shard_mark_destructed_object(shard, record);
-  } else {
-    shard_add_live_object(shard, record, object);
+  if (!had_previous_record || record_reused_by_live_object) {
+    new_shard.status.registered++;
   }
+  if (had_previous_record && !record_reused_by_live_object && previous_record.owner_id != record.owner_id) {
+    append_migration_trace_locked(record, previous_record.owner_id, record.owner_id);
+  }
+
+  compat_record = record;
+  return compat_record;
 }
 
 void append_migration_trace_locked(const ObjectRecord &record, const std::string &from_owner_id,
@@ -1460,13 +1480,8 @@ VMObjectHandle vm_object_handle(object_t *object) {
   if (!object) {
     return handle;
   }
-  std::lock_guard<std::mutex> lock(object_store_mutex);
-  auto &record = register_locked(object);
-  record.owner_epoch = vm_owner_epoch(object);
-  record.object_path = safe_object_path(object);
-  record.destructed = (object->flags & O_DESTRUCTED) != 0;
-  move_record_owner_locked(record, safe_owner_id(vm_owner_id(object)), object);
-  sync_record_activity_locked(record, object);
+  ObjectStoreWriteLock lock(object_store_directory_mutex);
+  auto &record = write_owner_local_lifecycle_record_locked(object);
   handle.object_id = record.object_id;
   handle.owner_id = record.owner_id;
   handle.owner_epoch = record.owner_epoch;
@@ -1492,19 +1507,19 @@ VMObjectHandleResolveResult vm_object_handle_resolve_status(const VMObjectHandle
   }
 
   {
-    std::lock_guard<std::mutex> lock(object_store_mutex);
-    auto bridge_summary = owner_local_bridge_summary_locked();
-    result.global_record_bridge_retirement_ready = bridge_summary.global_record_bridge_retirement_ready;
-    result.global_live_object_bridge_retirement_ready = bridge_summary.global_live_object_bridge_retirement_ready;
+    ObjectStoreReadLock lock(object_store_directory_mutex);
     if (resolve_handle_from_owner_local_shard_locked(handle, result)) {
       return result;
     }
+    auto bridge_summary = owner_local_bridge_summary_locked();
+    result.global_record_bridge_retirement_ready = bridge_summary.global_record_bridge_retirement_ready;
+    result.global_live_object_bridge_retirement_ready = bridge_summary.global_live_object_bridge_retirement_ready;
     if (diagnose_handle_from_owner_local_store_locked(handle, result)) {
       return result;
     }
   }
 
-  std::lock_guard<std::mutex> lock(object_store_mutex);
+  ObjectStoreReadLock lock(object_store_directory_mutex);
   auto bridge_summary = owner_local_bridge_summary_locked();
   result.global_record_bridge_retirement_ready = bridge_summary.global_record_bridge_retirement_ready;
   result.global_live_object_bridge_retirement_ready = bridge_summary.global_live_object_bridge_retirement_ready;
@@ -1635,19 +1650,14 @@ void vm_object_store_register(object_t *object) {
   if (!object) {
     return;
   }
-  std::lock_guard<std::mutex> lock(object_store_mutex);
-  auto &record = register_locked(object);
-  record.owner_epoch = vm_owner_epoch(object);
-  record.object_path = safe_object_path(object);
-  record.destructed = (object->flags & O_DESTRUCTED) != 0;
-  move_record_owner_locked(record, safe_owner_id(vm_owner_id(object)), object);
-  sync_record_activity_locked(record, object);
+  ObjectStoreWriteLock lock(object_store_directory_mutex);
+  write_owner_local_lifecycle_record_locked(object);
 }
 
 // C++ regression hook for bridge-readiness tests; not part of the LPC/runtime API.
 bool vm_object_store_test_support_remove_live_object_ref_for_bridge_readiness(const char *owner_id,
                                                                               uint64_t object_id) {
-  std::lock_guard<std::mutex> lock(object_store_mutex);
+  ObjectStoreWriteLock lock(object_store_directory_mutex);
   auto shard_it = owner_shards.find(safe_owner_id(owner_id));
   if (shard_it == owner_shards.end()) {
     return false;
@@ -1670,7 +1680,7 @@ bool vm_object_store_test_support_remove_live_object_ref_for_bridge_readiness(co
 mapping_t *vm_object_handle_status(object_t *object) {
   auto handle = vm_object_handle(object);
   auto status = vm_object_handle_resolve_status(handle);
-  auto *map = allocate_mapping(34);
+  auto *map = allocate_mapping(36);
   add_mapping_pair(map, "success", handle.valid ? 1 : 0);
   add_mapping_pair(map, "object_id", static_cast<long>(handle.object_id));
   add_mapping_string(map, "owner_id", handle.owner_id.c_str());
@@ -1680,6 +1690,9 @@ mapping_t *vm_object_handle_status(object_t *object) {
   add_mapping_pair(map, "current", status.status == VMObjectHandleResolveStatus::kCurrent ? 1 : 0);
   add_mapping_string(map, "resolve_status", vm_object_handle_resolve_status_name(status.status));
   add_mapping_pair(map, "resolved_via_owner_local_store", status.resolved_via_owner_local_store ? 1 : 0);
+  add_mapping_pair(map, "owner_local_fast_path_used", status.owner_local_fast_path_used ? 1 : 0);
+  add_mapping_string(map, "owner_local_fast_path_lock_model",
+                     status.owner_local_fast_path_used ? "shared_mutex_read_lock" : "");
   add_mapping_pair(map, "diagnosed_via_owner_local_store", status.diagnosed_via_owner_local_store ? 1 : 0);
   add_mapping_pair(map, "diagnosed_via_owner_local_path_index",
                    status.diagnosed_via_owner_local_path_index ? 1 : 0);
@@ -1745,28 +1758,18 @@ void vm_object_store_update_owner(object_t *object) {
   if (!object) {
     return;
   }
-  std::lock_guard<std::mutex> lock(object_store_mutex);
-  auto &record = register_locked(object);
-  record.owner_epoch = vm_owner_epoch(object);
-  record.object_path = safe_object_path(object);
-  record.destructed = (object->flags & O_DESTRUCTED) != 0;
-  move_record_owner_locked(record, safe_owner_id(vm_owner_id(object)), object);
-  sync_record_activity_locked(record, object);
+  ObjectStoreWriteLock lock(object_store_directory_mutex);
+  write_owner_local_lifecycle_record_locked(object);
 }
 
 void vm_object_store_mark_destructed(object_t *object) {
   if (!object) {
     return;
   }
-  std::lock_guard<std::mutex> lock(object_store_mutex);
-  auto &record = register_locked(object);
-  auto was_destructed = record.destructed;
-  record.owner_epoch = vm_owner_epoch(object);
-  record.object_path = safe_object_path(object);
-  move_record_owner_locked(record, safe_owner_id(vm_owner_id(object)), object);
-  record.destructed = true;
+  ObjectStoreWriteLock lock(object_store_directory_mutex);
+  bool was_destructed = false;
+  auto &record = write_owner_local_lifecycle_record_locked(object, true, &was_destructed);
   auto &shard = shard_for_owner(record.owner_id);
-  shard_mark_destructed_object(shard, record);
   shard.execution.active_heartbeats.erase(record.object_id);
   if (!was_destructed) {
     shard.status.destructed++;
@@ -1777,8 +1780,8 @@ void vm_object_store_record_callout(object_t *object, uint64_t callout_id) {
   if (!object) {
     return;
   }
-  std::lock_guard<std::mutex> lock(object_store_mutex);
-  auto &record = register_locked(object);
+  ObjectStoreWriteLock lock(object_store_directory_mutex);
+  auto &record = write_owner_local_lifecycle_record_locked(object);
   auto &shard = shard_for_owner(record.owner_id);
   shard.status.callouts++;
   if (callout_id != 0) {
@@ -1790,7 +1793,7 @@ void vm_object_store_remove_callout(const char *owner_id, uint64_t callout_id) {
   if (callout_id == 0) {
     return;
   }
-  std::lock_guard<std::mutex> lock(object_store_mutex);
+  ObjectStoreWriteLock lock(object_store_directory_mutex);
   shard_for_owner(safe_owner_id(owner_id)).execution.pending_callouts.erase(callout_id);
 }
 
@@ -1798,8 +1801,8 @@ void vm_object_store_record_heartbeat(object_t *object) {
   if (!object) {
     return;
   }
-  std::lock_guard<std::mutex> lock(object_store_mutex);
-  auto &record = register_locked(object);
+  ObjectStoreWriteLock lock(object_store_directory_mutex);
+  auto &record = write_owner_local_lifecycle_record_locked(object);
   auto &shard = shard_for_owner(record.owner_id);
   shard.status.heartbeats++;
   if (!record.destructed) {
@@ -1811,13 +1814,13 @@ void vm_object_store_remove_heartbeat(object_t *object) {
   if (!object) {
     return;
   }
-  std::lock_guard<std::mutex> lock(object_store_mutex);
-  auto &record = register_locked(object);
+  ObjectStoreWriteLock lock(object_store_directory_mutex);
+  auto &record = write_owner_local_lifecycle_record_locked(object);
   shard_for_owner(record.owner_id).execution.active_heartbeats.erase(record.object_id);
 }
 
 void vm_object_store_record_message(const char *owner_id, uint64_t task_id) {
-  std::lock_guard<std::mutex> lock(object_store_mutex);
+  ObjectStoreWriteLock lock(object_store_directory_mutex);
   auto &shard = shard_for_owner(safe_owner_id(owner_id));
   shard.status.messages++;
   if (task_id != 0) {
@@ -1829,12 +1832,12 @@ void vm_object_store_remove_message(const char *owner_id, uint64_t task_id) {
   if (task_id == 0) {
     return;
   }
-  std::lock_guard<std::mutex> lock(object_store_mutex);
+  ObjectStoreWriteLock lock(object_store_directory_mutex);
   shard_for_owner(safe_owner_id(owner_id)).execution.pending_messages.erase(task_id);
 }
 
 mapping_t *vm_object_store_status() {
-  std::lock_guard<std::mutex> lock(object_store_mutex);
+  ObjectStoreReadLock lock(object_store_directory_mutex);
   auto owner_local_bridge = owner_local_bridge_summary_locked();
   auto *shards = allocate_array(static_cast<int>(owner_shards.size()));
   bool owner_local_store_ready = true;
@@ -1858,12 +1861,19 @@ mapping_t *vm_object_store_status() {
     migrations->item[migration_index].u.map = migration_trace_mapping(trace);
     migration_index++;
   }
-  auto *map = allocate_mapping(43);
+  auto *map = allocate_mapping(49);
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "store_kind", "vm_object_store");
   add_mapping_string(map, "status_model", "object_store_status");
   add_mapping_string(map, "directory_model", "owner_local_object_directory");
   add_mapping_string(map, "storage_model", owner_local_store_complete ? "owner_local_store" : "global_index_bridge");
+  add_mapping_pair(map, "object_store_owner_fast_path_ready", 1);
+  add_mapping_pair(map, "owner_local_fast_path_ready", 1);
+  add_mapping_string(map, "owner_local_fast_path_lock_model", "shared_mutex_read_lock");
+  add_mapping_string(map, "owner_local_lifecycle_write_model",
+                     "owner_shard_canonical_with_global_compat_mirror");
+  add_mapping_string(map, "global_record_write_model", "compatibility_mirror");
+  add_mapping_pair(map, "global_record_canonical_write", 0);
   add_mapping_pair(map, "registered_objects", static_cast<long>(object_records.size()));
   add_mapping_pair(map, "global_record_total", static_cast<long>(owner_local_bridge.global_records));
   add_mapping_pair(map, "global_live_record_total", static_cast<long>(owner_local_bridge.global_live_records));
@@ -1933,7 +1943,7 @@ mapping_t *vm_object_store_status() {
 }
 
 mapping_t *vm_object_store_owner_status(const char *owner_id) {
-  std::lock_guard<std::mutex> lock(object_store_mutex);
+  ObjectStoreReadLock lock(object_store_directory_mutex);
   auto normalized = safe_owner_id(owner_id);
   auto owner_local_bridge = owner_local_bridge_summary_locked();
   auto it = owner_shards.find(normalized);
@@ -1997,19 +2007,17 @@ mapping_t *vm_object_store_owner_status(const char *owner_id) {
 }
 
 object_t *vm_object_store_owner_resolve(const char *owner_id, uint64_t object_id) {
-  std::lock_guard<std::mutex> lock(object_store_mutex);
-  auto result = owner_local_lookup_by_object_locked(owner_id, object_id);
-  return result.found ? result.resolved_object : nullptr;
+  ObjectStoreReadLock lock(object_store_directory_mutex);
+  return owner_local_resolve_object_fast_path_locked(owner_id, object_id);
 }
 
 object_t *vm_object_store_owner_path_resolve(const char *owner_id, const char *object_path) {
-  std::lock_guard<std::mutex> lock(object_store_mutex);
-  auto result = owner_local_lookup_by_path_locked(owner_id, object_path);
-  return result.found ? result.resolved_object : nullptr;
+  ObjectStoreReadLock lock(object_store_directory_mutex);
+  return owner_local_resolve_path_fast_path_locked(owner_id, object_path);
 }
 
 mapping_t *vm_object_store_owner_lookup_status(const char *owner_id, uint64_t object_id) {
-  std::lock_guard<std::mutex> lock(object_store_mutex);
+  ObjectStoreReadLock lock(object_store_directory_mutex);
   auto result = owner_local_lookup_by_object_locked(owner_id, object_id);
 
   auto *map = allocate_mapping(62);
@@ -2132,7 +2140,7 @@ mapping_t *vm_object_store_owner_lookup_status(const char *owner_id, uint64_t ob
 }
 
 mapping_t *vm_object_store_owner_path_lookup_status(const char *owner_id, const char *object_path) {
-  std::lock_guard<std::mutex> lock(object_store_mutex);
+  ObjectStoreReadLock lock(object_store_directory_mutex);
   auto result = owner_local_lookup_by_path_locked(owner_id, object_path);
 
   auto *map = allocate_mapping(62);
