@@ -4041,6 +4041,11 @@ TEST_F(DriverTest, TestVmOwnerExecutorDrainsTargetMessagesWithoutMainFallback) {
   ASSERT_EQ(mapping_number(queued_fairness, "mixed_backlog_owner_count"), 0);
   ASSERT_GE(mapping_number(queued_fairness, "max_executor_safe_backlog"), 2);
   ASSERT_EQ(mapping_number(queued_fairness, "max_main_required_backlog"), 0);
+  ASSERT_EQ(mapping_number(queued_fairness, "owner_scheduler_backpressure_ready"), 1);
+  ASSERT_GT(mapping_number(queued_fairness, "owner_scheduler_max_owner_queue_depth"), 0);
+  ASSERT_GE(mapping_number(queued_fairness, "owner_scheduler_max_owner_backlog"), 2);
+  ASSERT_EQ(mapping_number(queued_fairness, "owner_scheduler_backpressure_over_limit"), 0);
+  ASSERT_EQ(mapping_number(queued_fairness, "owner_scheduler_fairness_guard_ready"), 1);
   free_mapping(queued_thread);
 
   vm_owner_thread_start(1);
@@ -4110,6 +4115,46 @@ TEST_F(DriverTest, TestVmOwnerExecutorDrainsTargetMessagesWithoutMainFallback) {
   ASSERT_EQ(mapping_number(purged_fairness, "max_main_required_backlog"), 0);
   free_mapping(purged_status);
   vm_owner_thread_stop();
+}
+
+TEST_F(DriverTest, TestOwnerSchedulerBackpressureRejectsOverLimit) {
+  const char* owner = "owner/test/scheduler/backpressure";
+
+  vm_owner_thread_stop();
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+
+  auto* before = vm_owner_runtime_status();
+  auto max_depth = mapping_number(before, "owner_scheduler_max_owner_queue_depth");
+  auto before_rejected = mapping_number(before, "owner_executor_backpressure_rejected");
+  free_mapping(before);
+  ASSERT_GT(max_depth, 0);
+
+  for (long i = 0; i < max_depth; i++) {
+    auto task_id = vm_owner_enqueue_task(owner, "executor_probe", "backpressure-fill");
+    ASSERT_GT(task_id, 0u);
+  }
+
+  auto rejected = vm_owner_enqueue_task(owner, "executor_probe", "backpressure-over-limit");
+  ASSERT_EQ(rejected, 0u);
+
+  auto* mailbox = vm_owner_mailbox_status(owner);
+  ASSERT_EQ(mapping_number(mailbox, "owner_queue_depth"), max_depth);
+  free_mapping(mailbox);
+
+  auto* after = vm_owner_runtime_status();
+  ASSERT_EQ(mapping_number(after, "owner_scheduler_backpressure_ready"), 1);
+  ASSERT_EQ(mapping_number(after, "owner_scheduler_max_owner_backlog"), max_depth);
+  ASSERT_EQ(mapping_number(after, "owner_scheduler_backpressure_over_limit"), 0);
+  ASSERT_EQ(mapping_number(after, "owner_scheduler_backpressure_high_watermark_exceeded"), 1);
+  ASSERT_GT(mapping_number(after, "owner_executor_backpressure_rejected"), before_rejected);
+  free_mapping(after);
+
+  free_mapping(vm_owner_drain_mailbox(owner, 0));
 }
 
 TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
@@ -4203,6 +4248,14 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "owner_metrics_store_ready"), 1);
     ASSERT_EQ(mapping_number(status, "object_store_owner_fast_path_ready"), 1);
     ASSERT_EQ(mapping_number(status, "object_store_global_fallback_on_owner_fast_path"), 0);
+    ASSERT_EQ(mapping_number(status, "owner_scheduler_backpressure_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_scheduler_backpressure_strategy"),
+                 "observe_then_reject_new_tasks");
+    ASSERT_GT(mapping_number(status, "owner_scheduler_max_owner_queue_depth"), 0);
+    ASSERT_GE(mapping_number(status, "owner_scheduler_max_owner_backlog"), 0);
+    ASSERT_EQ(mapping_number(status, "owner_scheduler_backpressure_over_limit"), 0);
+    ASSERT_EQ(mapping_number(status, "owner_scheduler_fairness_guard_ready"), 1);
+    ASSERT_GE(mapping_number(status, "owner_executor_backpressure_rejected"), 0);
     ASSERT_EQ(mapping_number(status, "owner_task_manifest_v2_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_task_manifest_schema"), "owner_task_manifest_v2");
     ASSERT_EQ(mapping_number(status, "owner_executor_admission_gate_ready"), 1);
@@ -4539,6 +4592,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "vm/internal/owner_runtime_metrics.cc");
     ASSERT_EQ(mapping_number(boundary_contract, "object_store_owner_fast_path_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "object_store_global_fallback_on_owner_fast_path"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_scheduler_backpressure_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_scheduler_backpressure_strategy"),
+                 "observe_then_reject_new_tasks");
+    ASSERT_GT(mapping_number(boundary_contract, "owner_scheduler_max_owner_queue_depth"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_scheduler_fairness_guard_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_future_timeout_cancel_drop_cleanup_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "dependency_manifest_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "runtime_dependency_contract_version"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "dependency_domains"),

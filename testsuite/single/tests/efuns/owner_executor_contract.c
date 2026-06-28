@@ -659,6 +659,11 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("vm/internal/owner_runtime_metrics.cc", boundary_contract["owner_metrics_store_file"]);
     ASSERT_EQ(1, boundary_contract["object_store_owner_fast_path_ready"]);
     ASSERT_EQ(0, boundary_contract["object_store_global_fallback_on_owner_fast_path"]);
+    ASSERT_EQ(1, boundary_contract["owner_scheduler_backpressure_ready"]);
+    ASSERT_EQ("observe_then_reject_new_tasks", boundary_contract["owner_scheduler_backpressure_strategy"]);
+    ASSERT_EQ(4096, boundary_contract["owner_scheduler_max_owner_queue_depth"]);
+    ASSERT_EQ(1, boundary_contract["owner_scheduler_fairness_guard_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_future_timeout_cancel_drop_cleanup_ready"]);
     ASSERT_EQ(1, boundary_contract["dependency_manifest_ready"]);
     ASSERT_EQ(1, boundary_contract["runtime_dependency_contract_version"]);
     ASSERT_EQ("owner_scheduler_state,owner_task_manifest,owner_trace_store,owner_future_store,"
@@ -793,6 +798,13 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["owner_metrics_store_ready"]);
     ASSERT_EQ(1, status["object_store_owner_fast_path_ready"]);
     ASSERT_EQ(0, status["object_store_global_fallback_on_owner_fast_path"]);
+    ASSERT_EQ(1, status["owner_scheduler_backpressure_ready"]);
+    ASSERT_EQ("observe_then_reject_new_tasks", status["owner_scheduler_backpressure_strategy"]);
+    ASSERT_EQ(4096, status["owner_scheduler_max_owner_queue_depth"]);
+    ASSERT(intp(status["owner_scheduler_max_owner_backlog"]));
+    ASSERT_EQ(0, status["owner_scheduler_backpressure_over_limit"]);
+    ASSERT_EQ(1, status["owner_scheduler_fairness_guard_ready"]);
+    ASSERT(intp(status["owner_executor_backpressure_rejected"]));
     ASSERT_EQ(1, status["owner_task_manifest_v2_ready"]);
     ASSERT_EQ("owner_task_manifest_v2", status["owner_task_manifest_schema"]);
     ASSERT_EQ(1, status["owner_executor_admission_gate_ready"]);
@@ -1020,6 +1032,14 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT(intp(fairness["owner_main_queue_owner_count"]));
     ASSERT(intp(fairness["main_ready_owner_count"]));
     ASSERT(intp(fairness["main_claim_blocked_owner_count"]));
+    ASSERT_EQ(1, fairness["owner_scheduler_backpressure_ready"]);
+    ASSERT_EQ("observe_then_reject_new_tasks", fairness["owner_scheduler_backpressure_strategy"]);
+    ASSERT_EQ(4096, fairness["owner_scheduler_max_owner_queue_depth"]);
+    ASSERT_EQ(3276, fairness["owner_scheduler_backpressure_high_watermark"]);
+    ASSERT(intp(fairness["owner_scheduler_max_owner_backlog"]));
+    ASSERT(intp(fairness["owner_scheduler_backpressure_over_limit"]));
+    ASSERT(intp(fairness["owner_scheduler_backpressure_high_watermark_exceeded"]));
+    ASSERT_EQ(1, fairness["owner_scheduler_fairness_guard_ready"]);
     ASSERT(intp(fairness["max_owner_main_queue_depth"]));
     assert_contract_entry(contract, "executor_probe", "executor_safe",
                           "owner_executor", 1, 0, 0);
