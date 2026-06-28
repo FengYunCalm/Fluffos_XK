@@ -1043,7 +1043,7 @@ void
 lws_cancel_service(struct lws_context *context)
 {
 	struct lws_context_per_thread *pt = &context->pt[0];
-	short m;
+	unsigned int m;
 
 	if (context->service_no_longer_possible)
 		return;
