@@ -35,6 +35,11 @@ constexpr int kOwnerExecutorTaskBudget = 32;
 constexpr long kOwnerSchedulerMaxOwnerQueueDepth = 4096;
 constexpr long kOwnerSchedulerBackpressureHighWatermark = kOwnerSchedulerMaxOwnerQueueDepth * 8 / 10;
 constexpr const char *kOwnerExecutorContractVersion = "owner_executor_v2";
+constexpr const char *kOwnerCallbackDiagnosticsSchemaV1 = "owner_callback_diagnostics_v1";
+constexpr const char *kOwnerCallbackFailureCodeSchemaV1 = "owner_callback_failure_code_v1";
+constexpr const char *kOwnerCallbackDropReasonSchemaV1 = "owner_callback_drop_reason_v1";
+constexpr const char *kOwnerCallbackSupportedKinds =
+    "heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback";
 
 constexpr const char *kGatewayCommandExecutorActivationBlocker = "";
 
@@ -352,6 +357,7 @@ long owner_pending_future_count() {
 long owner_executor_runnable_queue_depth();
 long owner_executor_safe_queue_depth();
 long owner_main_required_queue_depth();
+long owner_executor_callback_allowlist_count();
 bool owner_task_executor_runnable(const OwnerMailboxTask &task);
 bool owner_task_executor_safe(const OwnerMailboxTask &task);
 bool owner_task_requires_main_drain(const OwnerMailboxTask &task);
@@ -377,6 +383,13 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_string(map, "owner_task_manifest_schema", kOwnerTaskManifestSchemaV2);
   add_mapping_pair(map, "owner_executor_admission_gate_ready", 1);
   add_mapping_pair(map, "owner_callback_admission_unified", 1);
+  add_mapping_pair(map, "owner_callback_diagnostics_ready", 1);
+  add_mapping_string(map, "owner_callback_diagnostics_schema", kOwnerCallbackDiagnosticsSchemaV1);
+  add_mapping_string(map, "owner_callback_failure_code_schema", kOwnerCallbackFailureCodeSchemaV1);
+  add_mapping_string(map, "owner_callback_drop_reason_schema", kOwnerCallbackDropReasonSchemaV1);
+  add_mapping_pair(map, "owner_callback_allowlist_complete", 1);
+  add_mapping_string(map, "owner_callback_supported_kinds", kOwnerCallbackSupportedKinds);
+  add_mapping_pair(map, "executor_callback_allowlist_count", owner_executor_callback_allowlist_count());
   add_mapping_string(map, "owner_executor_admission_policy", kOwnerTaskAdmissionPolicyV2);
   add_mapping_pair(map, "owner_executor_admission_accepted",
                    static_cast<long>(metrics.owner_executor_admission_accepted));
@@ -623,6 +636,81 @@ array_t *owner_executor_callback_contracts_array() {
     index++;
   }
   return contracts;
+}
+
+long owner_executor_callback_allowlist_count() {
+  long callback_count = 0;
+  for (const auto &descriptor : owner_executor_task_descriptors()) {
+    if (descriptor.dispatch_kind == OwnerExecutorDispatchKind::ExecutorCallback) {
+      callback_count++;
+    }
+  }
+  return callback_count;
+}
+
+const char *owner_task_failure_code(const std::string &state, const std::string &admission_state) {
+  if (admission_state == "rejected_backpressure" || state == "backpressure_rejected") {
+    return "owner_scheduler_backpressure";
+  }
+  if (admission_state == "rejected_callback_not_allowlisted") {
+    return "callback_not_allowlisted";
+  }
+  if (admission_state == "dropped_callback_invalid_target") {
+    return "callback_invalid_target";
+  }
+  if (state.find("epoch_mismatch") != std::string::npos) {
+    return "owner_epoch_mismatch";
+  }
+  if (state.find("destructed") != std::string::npos) {
+    return "target_destructed";
+  }
+  if (state.find("stale") != std::string::npos) {
+    return "target_stale";
+  }
+  if (state.find("rejected") != std::string::npos || admission_state.find("rejected") != std::string::npos) {
+    return "admission_rejected";
+  }
+  if (state.find("dropped") != std::string::npos || admission_state.find("dropped") != std::string::npos) {
+    return "task_dropped";
+  }
+  return "";
+}
+
+const char *owner_task_failure_reason(const std::string &state, const std::string &admission_state) {
+  const auto *code = owner_task_failure_code(state, admission_state);
+  if (code[0] == '\0') {
+    return "";
+  }
+  if (std::string(code) == "owner_scheduler_backpressure") {
+    return "owner queue depth reached the scheduler backpressure limit";
+  }
+  if (std::string(code) == "callback_not_allowlisted") {
+    return "callback task kind is not registered in the owner executor allowlist";
+  }
+  if (std::string(code) == "callback_invalid_target") {
+    return "callback target handle could not be resolved before executor admission";
+  }
+  if (std::string(code) == "owner_epoch_mismatch") {
+    return "target owner epoch no longer matches the captured callback handle";
+  }
+  if (std::string(code) == "target_destructed") {
+    return "target object was destructed before callback dispatch";
+  }
+  if (std::string(code) == "target_stale") {
+    return "target handle became stale before callback dispatch";
+  }
+  if (std::string(code) == "admission_rejected") {
+    return "owner executor admission rejected the task";
+  }
+  if (std::string(code) == "task_dropped") {
+    return "owner executor dropped the task before callback dispatch";
+  }
+  return "owner executor callback failed";
+}
+
+const char *owner_task_drop_reason(const std::string &state, const std::string &admission_state) {
+  auto *failure_code = owner_task_failure_code(state, admission_state);
+  return failure_code[0] == '\0' ? "none" : failure_code;
 }
 
 void add_mapping_owned_mapping(mapping_t *map, const char *key, mapping_t *value) {
@@ -1103,7 +1191,7 @@ mapping_t *vm_context_contract_mapping() {
 }
 
 mapping_t *owner_executor_boundary_contract_mapping() {
-  auto *contract = allocate_mapping(100);
+  auto *contract = allocate_mapping(112);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "boundary_model", "owner_executor_boundary_v1");
   add_mapping_string(contract, "implementation_state", "compilation_unit_active");
@@ -1169,9 +1257,15 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "executor_callback_task_boundary_ready", 1);
   add_mapping_pair(contract, "executor_callback_allowlist_ready", 1);
   add_mapping_pair(contract, "owner_callback_admission_unified", 1);
+  add_mapping_pair(contract, "owner_callback_diagnostics_ready", 1);
+  add_mapping_string(contract, "owner_callback_diagnostics_schema", kOwnerCallbackDiagnosticsSchemaV1);
+  add_mapping_string(contract, "owner_callback_failure_code_schema", kOwnerCallbackFailureCodeSchemaV1);
+  add_mapping_string(contract, "owner_callback_drop_reason_schema", kOwnerCallbackDropReasonSchemaV1);
+  add_mapping_pair(contract, "owner_callback_allowlist_complete", 1);
+  add_mapping_string(contract, "owner_callback_supported_kinds", kOwnerCallbackSupportedKinds);
   add_mapping_pair(contract, "executor_callback_cleanup_main_required", 1);
-  add_mapping_string(contract, "executor_callback_allowlist",
-                     "heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute");
+  add_mapping_pair(contract, "executor_callback_allowlist_count", owner_executor_callback_allowlist_count());
+  add_mapping_string(contract, "executor_callback_allowlist", kOwnerCallbackSupportedKinds);
   add_mapping_pair(contract, "heartbeat_owner_executor_ready", 1);
   add_mapping_string(contract, "heartbeat_owner_executor_task_type", "heartbeat");
   add_mapping_string(contract, "heartbeat_owner_executor_route", "owner_executor");
@@ -1314,7 +1408,7 @@ const OwnerTaskRouteContract &owner_task_route_contract(const OwnerMailboxTask &
 }
 
 mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
-  auto *map = allocate_mapping(34);
+  auto *map = allocate_mapping(41);
   const auto &descriptor = owner_executor_task_descriptor(task);
   const auto target_message = task.task_type == "owner_message" && task.has_target_handle;
   const auto &message_route_contract = owner_task_route_contract(task);
@@ -1351,6 +1445,13 @@ mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
   add_mapping_string(map, "admission_policy", task.admission_policy.c_str());
   add_mapping_string(map, "admission_state", task.admission_state.c_str());
   add_mapping_string(map, "trace_schema", task.trace_schema.c_str());
+  add_mapping_pair(map, "trace_schema_version", 2);
+  add_mapping_string(map, "diagnostic_schema", kOwnerCallbackDiagnosticsSchemaV1);
+  add_mapping_string(map, "failure_code_schema", kOwnerCallbackFailureCodeSchemaV1);
+  add_mapping_string(map, "drop_reason_schema", kOwnerCallbackDropReasonSchemaV1);
+  add_mapping_string(map, "failure_code", owner_task_failure_code("", task.admission_state));
+  add_mapping_string(map, "failure_reason", owner_task_failure_reason("", task.admission_state));
+  add_mapping_string(map, "drop_reason", owner_task_drop_reason("", task.admission_state));
   add_mapping_pair(map, "deadline_ms", static_cast<long>(task.deadline_ms));
   add_mapping_string(map, "task_contract_key", contract_key);
   add_mapping_string(map, "dispatch_kind", owner_executor_dispatch_kind_name(descriptor.dispatch_kind));
@@ -1370,7 +1471,7 @@ mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
 mapping_t *owner_task_trace_mapping(const OwnerTaskTrace &trace) {
   auto target_status = trace.has_target_handle ? vm_object_handle_resolve_status(trace.target_handle).status
                                                : VMObjectHandleResolveStatus::kInvalidHandle;
-  auto *map = allocate_mapping(47);
+  auto *map = allocate_mapping(54);
   add_mapping_pair(map, "trace_id", static_cast<long>(trace.trace_id));
   add_mapping_string(map, "trace_model", "owner_task_lifecycle_event");
   add_mapping_pair(map, "task_id", static_cast<long>(trace.task_id));
@@ -1391,6 +1492,13 @@ mapping_t *owner_task_trace_mapping(const OwnerTaskTrace &trace) {
   add_mapping_string(map, "admission_policy", trace.admission_policy.c_str());
   add_mapping_string(map, "admission_state", trace.admission_state.c_str());
   add_mapping_string(map, "trace_schema", trace.trace_schema.c_str());
+  add_mapping_pair(map, "trace_schema_version", 2);
+  add_mapping_string(map, "diagnostic_schema", kOwnerCallbackDiagnosticsSchemaV1);
+  add_mapping_string(map, "failure_code_schema", kOwnerCallbackFailureCodeSchemaV1);
+  add_mapping_string(map, "drop_reason_schema", kOwnerCallbackDropReasonSchemaV1);
+  add_mapping_string(map, "failure_code", owner_task_failure_code(trace.state, trace.admission_state));
+  add_mapping_string(map, "failure_reason", owner_task_failure_reason(trace.state, trace.admission_state));
+  add_mapping_string(map, "drop_reason", owner_task_drop_reason(trace.state, trace.admission_state));
   add_mapping_pair(map, "has_target_handle", trace.has_target_handle ? 1 : 0);
   add_mapping_pair(map, "target_handle_current",
                    target_status == VMObjectHandleResolveStatus::kCurrent ? 1 : 0);
@@ -4329,7 +4437,7 @@ void vm_owner_thread_stop() {
 
 mapping_t *vm_owner_thread_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(139);
+  auto *map = allocate_mapping(148);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
   add_mapping_pair(map, "thread_count", static_cast<long>(owner_threads.size()));
@@ -4421,7 +4529,13 @@ mapping_t *vm_owner_thread_status() {
                    static_cast<long>(owner_thread_compute_result_completed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_task_boundary_ready", 1);
   add_mapping_pair(map, "executor_callback_allowlist_ready", 1);
-  add_mapping_pair(map, "executor_callback_allowlist_count", 6);
+  add_mapping_pair(map, "executor_callback_allowlist_count", owner_executor_callback_allowlist_count());
+  add_mapping_pair(map, "owner_callback_diagnostics_ready", 1);
+  add_mapping_string(map, "owner_callback_diagnostics_schema", kOwnerCallbackDiagnosticsSchemaV1);
+  add_mapping_string(map, "owner_callback_failure_code_schema", kOwnerCallbackFailureCodeSchemaV1);
+  add_mapping_string(map, "owner_callback_drop_reason_schema", kOwnerCallbackDropReasonSchemaV1);
+  add_mapping_pair(map, "owner_callback_allowlist_complete", 1);
+  add_mapping_string(map, "owner_callback_supported_kinds", kOwnerCallbackSupportedKinds);
   add_mapping_string(map, "executor_callback_payload_policy", "frozen_payload_or_owner_handle_only");
   add_mapping_pair(map, "heartbeat_owner_executor_ready", 1);
   add_mapping_string(map, "heartbeat_owner_executor_task_type", "heartbeat");
@@ -4575,7 +4689,7 @@ mapping_t *vm_owner_thread_status() {
 
 mapping_t *vm_owner_runtime_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(131);
+  auto *map = allocate_mapping(140);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
   add_mapping_string(map, "multicore_mode_name", vm_multicore_mode_name(vm_multicore_mode()));
@@ -4625,7 +4739,13 @@ mapping_t *vm_owner_runtime_status() {
                    static_cast<long>(owner_thread_compute_result_completed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_task_boundary_ready", 1);
   add_mapping_pair(map, "executor_callback_allowlist_ready", 1);
-  add_mapping_pair(map, "executor_callback_allowlist_count", 6);
+  add_mapping_pair(map, "executor_callback_allowlist_count", owner_executor_callback_allowlist_count());
+  add_mapping_pair(map, "owner_callback_diagnostics_ready", 1);
+  add_mapping_string(map, "owner_callback_diagnostics_schema", kOwnerCallbackDiagnosticsSchemaV1);
+  add_mapping_string(map, "owner_callback_failure_code_schema", kOwnerCallbackFailureCodeSchemaV1);
+  add_mapping_string(map, "owner_callback_drop_reason_schema", kOwnerCallbackDropReasonSchemaV1);
+  add_mapping_pair(map, "owner_callback_allowlist_complete", 1);
+  add_mapping_string(map, "owner_callback_supported_kinds", kOwnerCallbackSupportedKinds);
   add_mapping_string(map, "executor_callback_payload_policy", "frozen_payload_or_owner_handle_only");
   add_mapping_pair(map, "heartbeat_owner_executor_ready", 1);
   add_mapping_string(map, "heartbeat_owner_executor_task_type", "heartbeat");

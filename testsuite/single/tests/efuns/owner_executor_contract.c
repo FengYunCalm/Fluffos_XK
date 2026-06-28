@@ -695,8 +695,16 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["executor_callback_task_boundary_ready"]);
     ASSERT_EQ(1, boundary_contract["executor_callback_allowlist_ready"]);
     ASSERT_EQ(1, boundary_contract["owner_callback_admission_unified"]);
+    ASSERT_EQ(1, boundary_contract["owner_callback_diagnostics_ready"]);
+    ASSERT_EQ("owner_callback_diagnostics_v1", boundary_contract["owner_callback_diagnostics_schema"]);
+    ASSERT_EQ("owner_callback_failure_code_v1", boundary_contract["owner_callback_failure_code_schema"]);
+    ASSERT_EQ("owner_callback_drop_reason_v1", boundary_contract["owner_callback_drop_reason_schema"]);
+    ASSERT_EQ(1, boundary_contract["owner_callback_allowlist_complete"]);
+    ASSERT_EQ("heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback",
+              boundary_contract["owner_callback_supported_kinds"]);
     ASSERT_EQ(1, boundary_contract["executor_callback_cleanup_main_required"]);
-    ASSERT_EQ("heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute",
+    ASSERT_EQ(7, boundary_contract["executor_callback_allowlist_count"]);
+    ASSERT_EQ("heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback",
               boundary_contract["executor_callback_allowlist"]);
     ASSERT_EQ(1, boundary_contract["heartbeat_owner_executor_ready"]);
     ASSERT_EQ("heartbeat", boundary_contract["heartbeat_owner_executor_task_type"]);
@@ -833,7 +841,14 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["owner_executor_socket_release_trace_ready"]);
     ASSERT_EQ(1, status["executor_callback_task_boundary_ready"]);
     ASSERT_EQ(1, status["executor_callback_allowlist_ready"]);
-    ASSERT_EQ(6, status["executor_callback_allowlist_count"]);
+    ASSERT_EQ(7, status["executor_callback_allowlist_count"]);
+    ASSERT_EQ(1, status["owner_callback_diagnostics_ready"]);
+    ASSERT_EQ("owner_callback_diagnostics_v1", status["owner_callback_diagnostics_schema"]);
+    ASSERT_EQ("owner_callback_failure_code_v1", status["owner_callback_failure_code_schema"]);
+    ASSERT_EQ("owner_callback_drop_reason_v1", status["owner_callback_drop_reason_schema"]);
+    ASSERT_EQ(1, status["owner_callback_allowlist_complete"]);
+    ASSERT_EQ("heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback",
+              status["owner_callback_supported_kinds"]);
     ASSERT_EQ("frozen_payload_or_owner_handle_only", status["executor_callback_payload_policy"]);
     ASSERT_EQ(1, status["heartbeat_owner_executor_ready"]);
     ASSERT_EQ("heartbeat", status["heartbeat_owner_executor_task_type"]);
@@ -907,7 +922,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(0, status["facade_only_runtime_claims"]);
     callback_task_contracts = status["executor_callback_task_contracts"];
     ASSERT(arrayp(callback_task_contracts));
-    ASSERT_EQ(6, sizeof(callback_task_contracts));
+    ASSERT_EQ(7, sizeof(callback_task_contracts));
     ASSERT(arrayp(lpc_contracts));
     ASSERT_EQ(18, sizeof(lpc_contracts));
     readonly_contract = lpc_contracts[0];
@@ -935,7 +950,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT(found_player_domain);
     ASSERT(found_economy_domain);
     ASSERT(arrayp(dispatch_contracts));
-    ASSERT_EQ(18, sizeof(dispatch_contracts));
+    ASSERT_EQ(19, sizeof(dispatch_contracts));
     for (i = 0; i < sizeof(dispatch_contracts); i++) {
         mapping entry = dispatch_contracts[i];
 
@@ -1060,7 +1075,7 @@ void assert_owner_executor_contract(mapping status) {
                           "owner_executor", 1, 0, 0);
     nested_callback_contracts = contract["owner_executor_callback_allowlist"]["contracts"];
     ASSERT(arrayp(nested_callback_contracts));
-    ASSERT_EQ(6, sizeof(nested_callback_contracts));
+    ASSERT_EQ(7, sizeof(nested_callback_contracts));
     assert_contract_entry(contract, "owner_message_mailbox", "executor_safe",
                           "owner_executor", 1, 0, 0);
     assert_owner_message_route_contract(contract, "owner_message_mailbox", 1, 0);

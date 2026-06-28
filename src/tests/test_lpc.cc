@@ -3801,7 +3801,14 @@ TEST_F(DriverTest, TestVmOwnerExecutorCallbackTaskBoundaryDispatchesAndDropsStal
   ASSERT_GE(mapping_number(after, "executor_callback_main_cleanup_dispatched"), before_cleanup + 1);
   ASSERT_EQ(mapping_number(after, "executor_callback_task_boundary_ready"), 1);
   ASSERT_EQ(mapping_number(after, "executor_callback_allowlist_ready"), 1);
-  ASSERT_EQ(mapping_number(after, "executor_callback_allowlist_count"), 6);
+  ASSERT_EQ(mapping_number(after, "executor_callback_allowlist_count"), 7);
+  ASSERT_EQ(mapping_number(after, "owner_callback_diagnostics_ready"), 1);
+  ASSERT_STREQ(mapping_string(after, "owner_callback_diagnostics_schema"), "owner_callback_diagnostics_v1");
+  ASSERT_STREQ(mapping_string(after, "owner_callback_failure_code_schema"), "owner_callback_failure_code_v1");
+  ASSERT_STREQ(mapping_string(after, "owner_callback_drop_reason_schema"), "owner_callback_drop_reason_v1");
+  ASSERT_EQ(mapping_number(after, "owner_callback_allowlist_complete"), 1);
+  ASSERT_STREQ(mapping_string(after, "owner_callback_supported_kinds"),
+               "heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback");
   ASSERT_STREQ(mapping_string(after, "executor_callback_payload_policy"), "frozen_payload_or_owner_handle_only");
   free_mapping(after);
 
@@ -3820,6 +3827,8 @@ TEST_F(DriverTest, TestVmOwnerExecutorCallbackTaskBoundaryDispatchesAndDropsStal
       first_dispatched = true;
       ASSERT_STREQ(mapping_string(event, "task_type"), "heartbeat");
       ASSERT_STREQ(mapping_string(event, "owner_id"), owner);
+      ASSERT_EQ(mapping_number(event, "trace_schema_version"), 2);
+      ASSERT_STREQ(mapping_string(event, "drop_reason"), "none");
     }
     if (mapping_number(event, "task_id") == static_cast<long>(stale_task) &&
         state == "thread_executor_callback_stale") {
@@ -3827,6 +3836,12 @@ TEST_F(DriverTest, TestVmOwnerExecutorCallbackTaskBoundaryDispatchesAndDropsStal
       ASSERT_STREQ(mapping_string(event, "task_type"), "call_out");
       ASSERT_STREQ(mapping_string(event, "owner_id"), owner);
       ASSERT_EQ(mapping_number(event, "target_handle_current"), 0);
+      ASSERT_EQ(mapping_number(event, "trace_schema_version"), 2);
+      ASSERT_STREQ(mapping_string(event, "diagnostic_schema"), "owner_callback_diagnostics_v1");
+      ASSERT_STREQ(mapping_string(event, "failure_code_schema"), "owner_callback_failure_code_v1");
+      ASSERT_STREQ(mapping_string(event, "drop_reason_schema"), "owner_callback_drop_reason_v1");
+      ASSERT_STREQ(mapping_string(event, "failure_code"), "target_stale");
+      ASSERT_STREQ(mapping_string(event, "drop_reason"), "target_stale");
     }
     if (mapping_number(event, "task_id") == static_cast<long>(stale_task) &&
         state == "executor_callback_main_cleanup_dispatched") {
@@ -4260,6 +4275,13 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(status, "owner_task_manifest_schema"), "owner_task_manifest_v2");
     ASSERT_EQ(mapping_number(status, "owner_executor_admission_gate_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_callback_admission_unified"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_callback_diagnostics_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_callback_diagnostics_schema"), "owner_callback_diagnostics_v1");
+    ASSERT_STREQ(mapping_string(status, "owner_callback_failure_code_schema"), "owner_callback_failure_code_v1");
+    ASSERT_STREQ(mapping_string(status, "owner_callback_drop_reason_schema"), "owner_callback_drop_reason_v1");
+    ASSERT_EQ(mapping_number(status, "owner_callback_allowlist_complete"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_callback_supported_kinds"),
+                 "heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback");
     ASSERT_STREQ(mapping_string(status, "owner_executor_admission_policy"),
                  "owner_epoch_payload_allowlist_deadline_guard");
     ASSERT_GE(mapping_number(status, "owner_executor_admission_accepted"), 0);
@@ -4299,7 +4321,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "facade_only_runtime_claims"), 0);
     ASSERT_EQ(mapping_number(status, "executor_callback_task_boundary_ready"), 1);
     ASSERT_EQ(mapping_number(status, "executor_callback_allowlist_ready"), 1);
-    ASSERT_EQ(mapping_number(status, "executor_callback_allowlist_count"), 6);
+    ASSERT_EQ(mapping_number(status, "executor_callback_allowlist_count"), 7);
     ASSERT_STREQ(mapping_string(status, "executor_callback_payload_policy"), "frozen_payload_or_owner_handle_only");
     ASSERT_EQ(mapping_number(status, "heartbeat_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "heartbeat_owner_executor_task_type"), "heartbeat");
@@ -4370,7 +4392,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_GE(mapping_number(status, "executor_callback_main_cleanup_queued"), 0);
     auto* callback_task_contracts = mapping_array(status, "executor_callback_task_contracts");
     ASSERT_NE(callback_task_contracts, nullptr);
-    ASSERT_EQ(callback_task_contracts->size, 6);
+    ASSERT_EQ(callback_task_contracts->size, 7);
     auto* vm_context_contract = mapping_entry(status, "vm_context_contract");
     ASSERT_NE(vm_context_contract, nullptr);
     ASSERT_EQ(mapping_number(vm_context_contract, "contract_version"), 1);
@@ -4631,9 +4653,20 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "executor_callback_task_boundary_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "executor_callback_allowlist_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "owner_callback_admission_unified"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_callback_diagnostics_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_diagnostics_schema"),
+                 "owner_callback_diagnostics_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_failure_code_schema"),
+                 "owner_callback_failure_code_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_drop_reason_schema"),
+                 "owner_callback_drop_reason_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_callback_allowlist_complete"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_supported_kinds"),
+                 "heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback");
     ASSERT_EQ(mapping_number(boundary_contract, "executor_callback_cleanup_main_required"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "executor_callback_allowlist_count"), 7);
     ASSERT_STREQ(mapping_string(boundary_contract, "executor_callback_allowlist"),
-                 "heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute");
+                 "heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback");
     ASSERT_EQ(mapping_number(boundary_contract, "heartbeat_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "heartbeat_owner_executor_task_type"), "heartbeat");
     ASSERT_STREQ(mapping_string(boundary_contract, "heartbeat_owner_executor_route"), "owner_executor");
@@ -5093,7 +5126,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
 
     auto* dispatch_contracts = mapping_array(status, "executor_task_dispatch_contracts");
     ASSERT_NE(dispatch_contracts, nullptr);
-    ASSERT_EQ(dispatch_contracts->size, 18);
+    ASSERT_EQ(dispatch_contracts->size, 19);
     std::unordered_map<std::string, mapping_t*> dispatch_by_type;
     for (int i = 0; i < dispatch_contracts->size; i++) {
       ASSERT_EQ(dispatch_contracts->item[i].type, T_MAPPING);
@@ -5152,6 +5185,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                     0);
     assert_dispatch("gateway_command_execute", "owner_executor_callback", "executor_callback",
                     "executor_safe_callback", 1, 1, 0);
+    assert_dispatch("ed_callback", "owner_executor_callback", "executor_callback", "executor_safe_callback", 1, 1, 0);
     assert_dispatch("compute_result", "compute_result", "compute_result", "executor_safe", 1, 1, 0);
     assert_dispatch("lpc", "lpc", "reject_lpc", "rejected", 1, 0, 1);
     assert_dispatch("owner_state", "owner_state", "guard_owner_state", "rejected", 1, 0, 1);
@@ -5197,7 +5231,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(callback_allowlist, "rejected"), 0);
     auto* callback_contracts = mapping_array(callback_allowlist, "contracts");
     ASSERT_NE(callback_contracts, nullptr);
-    ASSERT_EQ(callback_contracts->size, 6);
+    ASSERT_EQ(callback_contracts->size, 7);
 
     auto* mailbox_message = mapping_entry(contract, "owner_message_mailbox");
     ASSERT_EQ(mapping_number(mailbox_message, "executor_safe"), 1);

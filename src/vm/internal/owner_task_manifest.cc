@@ -46,7 +46,7 @@ constexpr OwnerTaskRouteContract kOwnerTaskTargetHandleContract = {
     "executor_safe", "owner_executor", "object target handle runs on target owner executor with stale guard", 1, 0, 0,
     1, 0};
 
-constexpr std::array<OwnerExecutorTaskDescriptor, 18> kOwnerExecutorTaskDescriptors = {{
+constexpr std::array<OwnerExecutorTaskDescriptor, 19> kOwnerExecutorTaskDescriptors = {{
     {"executor_probe", "executor_probe", OwnerExecutorDispatchKind::ExecutorProbe, "executor_safe", "owner_executor",
      "diagnostic owner executor task", 1, 1, 0, 0, 1, 0},
     {"lpc_probe", "lpc_probe", OwnerExecutorDispatchKind::LpcProbe, "executor_safe", "owner_executor",
@@ -88,6 +88,9 @@ constexpr std::array<OwnerExecutorTaskDescriptor, 18> kOwnerExecutorTaskDescript
     {"gateway_command_execute", "owner_executor_callback", OwnerExecutorDispatchKind::ExecutorCallback,
      "executor_safe_callback", "owner_executor", "guarded gateway command execution callback closure", 1, 1, 0, 0,
      1, 0},
+    {"ed_callback", "owner_executor_callback", OwnerExecutorDispatchKind::ExecutorCallback,
+     "executor_safe_callback", "owner_executor", "ed callback closure with main-thread cleanup adapter", 1, 1, 0,
+     0, 1, 0},
     {"compute_result", "compute_result", OwnerExecutorDispatchKind::ComputeResult, "executor_safe",
      "owner_executor", "worker v2 result completion", 1, 1, 0, 0, 1, 0},
 }};
@@ -101,7 +104,7 @@ const std::array<OwnerLpcTaskDescriptor, 18> &owner_lpc_task_descriptors() {
   return kOwnerLpcTaskDescriptors;
 }
 
-const std::array<OwnerExecutorTaskDescriptor, 18> &owner_executor_task_descriptors() {
+const std::array<OwnerExecutorTaskDescriptor, 19> &owner_executor_task_descriptors() {
   return kOwnerExecutorTaskDescriptors;
 }
 
