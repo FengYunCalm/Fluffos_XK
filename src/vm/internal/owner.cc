@@ -9,6 +9,7 @@
 #include "vm/internal/owner_runtime_coordinator.h"
 #include "vm/internal/owner_runtime_metrics.h"
 #include "vm/internal/owner_scheduler_state.h"
+#include "vm/internal/owner_service_registry.h"
 #include "vm/internal/owner_task_manifest.h"
 #include "vm/internal/owner_trace_store.h"
 #include "vm/internal/lpc_vm_profile.h"
@@ -465,6 +466,17 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "owner_executor_socket_release_trace_ready", 1);
   add_mapping_pair(map, "registered_owner_task_domains_ready", 1);
   add_mapping_pair(map, "registered_owner_task_domain_count", static_cast<long>(owner_lpc_task_descriptors().size()));
+  add_mapping_pair(map, "owner_service_shard_registry_ready", 1);
+  add_mapping_string(map, "owner_service_shard_registry_schema", kOwnerServiceShardRegistrySchemaV1);
+  add_mapping_pair(map, "owner_service_shard_domain_count",
+                   static_cast<long>(owner_service_shard_descriptors().size()));
+  add_mapping_string(map, "owner_service_shard_domains", owner_service_shard_domain_list().c_str());
+  add_mapping_pair(map, "owner_service_registry_lpc_domain_alignment_ready",
+                   owner_service_registry_matches_lpc_domains() ? 1 : 0);
+  add_mapping_pair(map, "owner_tick_group_scheduler_ready", 1);
+  add_mapping_string(map, "owner_tick_group_scheduler_schema", kOwnerTickGroupSchedulerSchemaV1);
+  add_mapping_pair(map, "owner_tick_group_count", static_cast<long>(owner_tick_group_descriptors().size()));
+  add_mapping_string(map, "owner_tick_groups", owner_tick_group_name_list().c_str());
   add_mapping_pair(map, "target_owner_message_executor_ready", 1);
   add_mapping_pair(map, "normal_path_main_fallback_count", normal_path_main_fallbacks);
   add_mapping_pair(map, "normal_path_main_fallback_ready", normal_path_main_fallbacks == 0 ? 1 : 0);
@@ -1415,6 +1427,17 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "ordinary_lpc_policy", "explicit_open_same_owner_only");
   add_mapping_pair(contract, "lpc_surface_expanded", 0);
   add_mapping_pair(contract, "registered_owner_task_domains_ready", 1);
+  add_mapping_pair(contract, "owner_service_shard_registry_ready", 1);
+  add_mapping_string(contract, "owner_service_shard_registry_schema", kOwnerServiceShardRegistrySchemaV1);
+  add_mapping_pair(contract, "owner_service_shard_domain_count",
+                   static_cast<long>(owner_service_shard_descriptors().size()));
+  add_mapping_string(contract, "owner_service_shard_domains", owner_service_shard_domain_list().c_str());
+  add_mapping_pair(contract, "owner_service_registry_lpc_domain_alignment_ready",
+                   owner_service_registry_matches_lpc_domains() ? 1 : 0);
+  add_mapping_pair(contract, "owner_tick_group_scheduler_ready", 1);
+  add_mapping_string(contract, "owner_tick_group_scheduler_schema", kOwnerTickGroupSchedulerSchemaV1);
+  add_mapping_pair(contract, "owner_tick_group_count", static_cast<long>(owner_tick_group_descriptors().size()));
+  add_mapping_string(contract, "owner_tick_groups", owner_tick_group_name_list().c_str());
   add_mapping_pair(contract, "target_owner_message_executor_ready", 1);
   add_mapping_pair(contract, "normal_path_main_fallback_count", 0);
   add_mapping_pair(contract, "normal_path_main_fallback_ready", 1);

@@ -4418,6 +4418,20 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "owner_executor_socket_release_trace_ready"), 1);
     ASSERT_EQ(mapping_number(status, "registered_owner_task_domains_ready"), 1);
     ASSERT_EQ(mapping_number(status, "registered_owner_task_domain_count"), 18);
+    ASSERT_EQ(mapping_number(status, "owner_service_shard_registry_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_service_shard_registry_schema"),
+                 "owner_service_shard_registry_v1");
+    ASSERT_EQ(mapping_number(status, "owner_service_shard_domain_count"), 18);
+    ASSERT_STREQ(mapping_string(status, "owner_service_shard_domains"),
+                 "readonly,player,room,session,item,economy,combat,mail,reward,world,persistence,"
+                 "team,guild,sect,quest,rank,crafting,life_skill");
+    ASSERT_EQ(mapping_number(status, "owner_service_registry_lpc_domain_alignment_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_tick_group_scheduler_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_tick_group_scheduler_schema"),
+                 "owner_tick_group_scheduler_v1");
+    ASSERT_EQ(mapping_number(status, "owner_tick_group_count"), 6);
+    ASSERT_STREQ(mapping_string(status, "owner_tick_groups"),
+                 "gateway_command,heartbeat,callout,socket_async,service_tick,diagnostic");
     ASSERT_EQ(mapping_number(status, "target_owner_message_executor_ready"), 1);
     ASSERT_EQ(mapping_number(status, "normal_path_main_fallback_count"), 0);
     ASSERT_EQ(mapping_number(status, "normal_path_main_fallback_ready"), 1);
@@ -4906,6 +4920,20 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "explicit_open_same_owner_only");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_surface_expanded"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "registered_owner_task_domains_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_service_shard_registry_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_service_shard_registry_schema"),
+                 "owner_service_shard_registry_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_service_shard_domain_count"), 18);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_service_shard_domains"),
+                 "readonly,player,room,session,item,economy,combat,mail,reward,world,persistence,"
+                 "team,guild,sect,quest,rank,crafting,life_skill");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_service_registry_lpc_domain_alignment_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_tick_group_scheduler_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_tick_group_scheduler_schema"),
+                 "owner_tick_group_scheduler_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_tick_group_count"), 6);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_tick_groups"),
+                 "gateway_command,heartbeat,callout,socket_async,service_tick,diagnostic");
     ASSERT_EQ(mapping_number(boundary_contract, "target_owner_message_executor_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "normal_path_main_fallback_count"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "normal_path_main_fallback_ready"), 1);
