@@ -6,6 +6,7 @@
 #include "vm/owner.h"
 #include "vm/internal/owner_executor.h"
 #include "vm/internal/owner_future_store.h"
+#include "vm/internal/owner_runtime_coordinator.h"
 #include "vm/internal/owner_runtime_metrics.h"
 #include "vm/internal/owner_scheduler_state.h"
 #include "vm/internal/owner_task_manifest.h"
@@ -194,7 +195,7 @@ constexpr std::array<VMContextReadinessGate, 13> kVMContextOrdinaryLpcReadinessG
      "keep_generic_dispatch_explicit_open_and_frozen_result_guarded", 1},
 }};
 
-OwnerRuntimeMetrics owner_runtime_metrics;
+OwnerRuntimeMetrics &owner_runtime_metrics = owner_runtime_metrics_instance();
 #define OWNER_RUNTIME_METRIC_ALIAS(name, initial) std::atomic<uint64_t> &name = owner_runtime_metrics.name;
 OWNER_RUNTIME_METRIC_FIELDS(OWNER_RUNTIME_METRIC_ALIAS)
 #undef OWNER_RUNTIME_METRIC_ALIAS
@@ -214,14 +215,14 @@ struct OwnerExecutorCallbackCleanup {
 
 std::deque<OwnerExecutorCallbackCleanup> owner_executor_callback_main_cleanups;
 std::vector<object_t *> owner_deferred_target_releases;
-OwnerFutureStore owner_future_store;
-OwnerSchedulerState owner_scheduler_state;
-OwnerTraceStore owner_trace_store;
-std::mutex owner_runtime_mutex;
-std::condition_variable owner_runtime_cv;
-bool owner_thread_stopping{false};
-bool owner_main_draining{false};
-std::vector<std::thread> owner_threads;
+OwnerFutureStore &owner_future_store = owner_future_store_instance();
+OwnerSchedulerState &owner_scheduler_state = owner_scheduler_state_instance();
+OwnerTraceStore &owner_trace_store = owner_trace_store_instance();
+std::mutex &owner_runtime_mutex = owner_runtime_mutex_instance();
+std::condition_variable &owner_runtime_cv = owner_runtime_cv_instance();
+bool &owner_thread_stopping = owner_thread_stopping_flag();
+bool &owner_main_draining = owner_main_draining_flag();
+std::vector<std::thread> &owner_threads = owner_threads_instance();
 
 uint64_t append_owner_task_trace(uint64_t task_id, uint64_t sequence, const std::string &owner_id,
                                  uint64_t owner_epoch, const std::string &task_type,
@@ -354,7 +355,9 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   auto metrics = owner_runtime_metrics.snapshot();
   auto normal_path_main_fallbacks = static_cast<long>(metrics.owner_normal_path_main_fallback_count);
   add_mapping_pair(map, "owner_runtime_split_ready", 1);
-  add_mapping_string(map, "owner_runtime_split_model", "runtime_v3_modules_with_owner_cc_coordinator");
+  add_mapping_string(map, "owner_runtime_split_model", "runtime_v4_modules_with_owner_runtime_coordinator");
+  add_mapping_pair(map, "owner_runtime_layering_guard_ready", 1);
+  add_mapping_pair(map, "owner_runtime_coordinator_module_ready", 1);
   add_mapping_pair(map, "owner_task_manifest_module_ready", 1);
   add_mapping_pair(map, "owner_trace_store_ready", 1);
   add_mapping_pair(map, "owner_future_store_ready", 1);
@@ -1100,9 +1103,12 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "compilation_unit_file", "vm/internal/owner_executor.cc");
   add_mapping_pair(contract, "depends_on_owner_cc_internal_state", 0);
   add_mapping_pair(contract, "owner_runtime_split_ready", 1);
-  add_mapping_string(contract, "owner_runtime_split_model", "runtime_v3_modules_with_owner_cc_coordinator");
-  add_mapping_string(contract, "owner_runtime_coordinator_file", "vm/internal/owner.cc");
-  add_mapping_string(contract, "owner_cc_runtime_role", "runtime_coordinator_facade");
+  add_mapping_string(contract, "owner_runtime_split_model", "runtime_v4_modules_with_owner_runtime_coordinator");
+  add_mapping_pair(contract, "owner_runtime_layering_guard_ready", 1);
+  add_mapping_pair(contract, "owner_runtime_coordinator_module_ready", 1);
+  add_mapping_string(contract, "owner_runtime_coordinator_file", "vm/internal/owner_runtime_coordinator.cc");
+  add_mapping_string(contract, "owner_runtime_store_owner", "OwnerRuntimeCoordinator");
+  add_mapping_string(contract, "owner_cc_runtime_role", "runtime_status_facade_and_legacy_glue");
   add_mapping_pair(contract, "owner_task_manifest_module_ready", 1);
   add_mapping_string(contract, "owner_task_manifest_module_file", "vm/internal/owner_task_manifest.cc");
   add_mapping_pair(contract, "owner_trace_store_ready", 1);

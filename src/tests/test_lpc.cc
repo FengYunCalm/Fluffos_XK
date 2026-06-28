@@ -4,7 +4,9 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -64,6 +66,14 @@ class DriverTest : public ::testing::Test {
 };
 
 namespace {
+std::string read_source_file_for_test(const char* path) {
+  std::ifstream file(path);
+  EXPECT_TRUE(file.is_open()) << "failed to open source file: " << path;
+  std::ostringstream contents;
+  contents << file.rdbuf();
+  return contents.str();
+}
+
 object_t* load_object_for_test(const char* path) {
   error_context_t econ{};
   object_t* object = nullptr;
@@ -4182,7 +4192,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(status, "ordinary_lpc_next_blocker"), "");
     ASSERT_EQ(mapping_number(status, "owner_runtime_split_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_runtime_split_model"),
-                 "runtime_v3_modules_with_owner_cc_coordinator");
+                 "runtime_v4_modules_with_owner_runtime_coordinator");
+    ASSERT_EQ(mapping_number(status, "owner_runtime_layering_guard_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_runtime_coordinator_module_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_task_manifest_module_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_trace_store_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_future_store_ready"), 1);
@@ -4502,9 +4514,14 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "depends_on_owner_cc_internal_state"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_split_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_split_model"),
-                 "runtime_v3_modules_with_owner_cc_coordinator");
-    ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_coordinator_file"), "vm/internal/owner.cc");
-    ASSERT_STREQ(mapping_string(boundary_contract, "owner_cc_runtime_role"), "runtime_coordinator_facade");
+                 "runtime_v4_modules_with_owner_runtime_coordinator");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_layering_guard_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_coordinator_module_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_coordinator_file"),
+                 "vm/internal/owner_runtime_coordinator.cc");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_store_owner"), "OwnerRuntimeCoordinator");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_cc_runtime_role"),
+                 "runtime_status_facade_and_legacy_glue");
     ASSERT_EQ(mapping_number(boundary_contract, "owner_task_manifest_module_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_task_manifest_module_file"),
                  "vm/internal/owner_task_manifest.cc");
@@ -5236,6 +5253,33 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
   ASSERT_EQ(mapping_number(after_future_status, "owner_executor_future_pending_backlog"),
             mapping_number(after_future_status, "pending_futures"));
   free_mapping(after_future_status);
+}
+
+TEST_F(DriverTest, TestOwnerRuntimeLayeringGuardKeepsStoresOutOfOwnerCc) {
+  const auto owner_cc = read_source_file_for_test("../src/vm/internal/owner.cc");
+  const auto coordinator_cc = read_source_file_for_test("../src/vm/internal/owner_runtime_coordinator.cc");
+  ASSERT_FALSE(owner_cc.empty());
+  ASSERT_FALSE(coordinator_cc.empty());
+
+  const std::vector<std::string> forbidden_owner_cc_storage = {
+      "OwnerRuntimeMetrics owner_runtime_metrics;",
+      "OwnerFutureStore owner_future_store;",
+      "OwnerSchedulerState owner_scheduler_state;",
+      "OwnerTraceStore owner_trace_store;",
+      "std::mutex owner_runtime_mutex;",
+      "std::condition_variable owner_runtime_cv;",
+      "std::vector<std::thread> owner_threads;",
+  };
+  for (const auto& declaration : forbidden_owner_cc_storage) {
+    ASSERT_EQ(owner_cc.find(declaration), std::string::npos) << "owner.cc must not own runtime store: "
+                                                             << declaration;
+  }
+
+  ASSERT_NE(coordinator_cc.find("OwnerRuntimeCoordinator &owner_runtime_coordinator()"), std::string::npos);
+  ASSERT_NE(coordinator_cc.find("OwnerRuntimeMetrics &owner_runtime_metrics_instance()"), std::string::npos);
+  ASSERT_NE(coordinator_cc.find("OwnerFutureStore &owner_future_store_instance()"), std::string::npos);
+  ASSERT_NE(coordinator_cc.find("OwnerSchedulerState &owner_scheduler_state_instance()"), std::string::npos);
+  ASSERT_NE(coordinator_cc.find("OwnerTraceStore &owner_trace_store_instance()"), std::string::npos);
 }
 
 TEST_F(DriverTest, TestVmOwnerExecutorBudgetYieldsAndRequeuesSameOwnerBacklog) {

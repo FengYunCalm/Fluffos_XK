@@ -641,9 +641,12 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("vm/internal/owner_executor.cc", boundary_contract["compilation_unit_file"]);
     ASSERT_EQ(0, boundary_contract["depends_on_owner_cc_internal_state"]);
     ASSERT_EQ(1, boundary_contract["owner_runtime_split_ready"]);
-    ASSERT_EQ("runtime_v3_modules_with_owner_cc_coordinator", boundary_contract["owner_runtime_split_model"]);
-    ASSERT_EQ("vm/internal/owner.cc", boundary_contract["owner_runtime_coordinator_file"]);
-    ASSERT_EQ("runtime_coordinator_facade", boundary_contract["owner_cc_runtime_role"]);
+    ASSERT_EQ("runtime_v4_modules_with_owner_runtime_coordinator", boundary_contract["owner_runtime_split_model"]);
+    ASSERT_EQ(1, boundary_contract["owner_runtime_layering_guard_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_runtime_coordinator_module_ready"]);
+    ASSERT_EQ("vm/internal/owner_runtime_coordinator.cc", boundary_contract["owner_runtime_coordinator_file"]);
+    ASSERT_EQ("OwnerRuntimeCoordinator", boundary_contract["owner_runtime_store_owner"]);
+    ASSERT_EQ("runtime_status_facade_and_legacy_glue", boundary_contract["owner_cc_runtime_role"]);
     ASSERT_EQ(1, boundary_contract["owner_task_manifest_module_ready"]);
     ASSERT_EQ("vm/internal/owner_task_manifest.cc", boundary_contract["owner_task_manifest_module_file"]);
     ASSERT_EQ(1, boundary_contract["owner_trace_store_ready"]);
@@ -779,7 +782,9 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("default_closed_explicit_open", status["ordinary_lpc_activation_policy"]);
     ASSERT_EQ("", status["ordinary_lpc_next_blocker"]);
     ASSERT_EQ(1, status["owner_runtime_split_ready"]);
-    ASSERT_EQ("runtime_v3_modules_with_owner_cc_coordinator", status["owner_runtime_split_model"]);
+    ASSERT_EQ("runtime_v4_modules_with_owner_runtime_coordinator", status["owner_runtime_split_model"]);
+    ASSERT_EQ(1, status["owner_runtime_layering_guard_ready"]);
+    ASSERT_EQ(1, status["owner_runtime_coordinator_module_ready"]);
     ASSERT_EQ(1, status["owner_task_manifest_module_ready"]);
     ASSERT_EQ(1, status["owner_trace_store_ready"]);
     ASSERT_EQ(1, status["owner_future_store_ready"]);
