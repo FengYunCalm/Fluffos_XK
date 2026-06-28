@@ -402,7 +402,7 @@ void f_vm_owner_runtime_status() {
 
 #ifdef F_VM_OBJECT_HANDLE
 void f_vm_object_handle() {
-  auto *result = vm_object_handle_status(sp->u.ob);
+  auto *result = vm_object_handle_status_with_intent(sp->u.ob, kVMObjectHandleDefaultPermissionIntent);
   free_object(&sp->u.ob, "f_vm_object_handle");
   sp->type = T_MAPPING;
   sp->subtype = 0;
@@ -457,7 +457,7 @@ void f_owner_call_async() {
     return;
   }
   auto payload_key = owner_mapping_string(payload->u.map, "payload_key", method->u.string);
-  auto handle = vm_object_handle(target->u.ob);
+  auto handle = vm_object_handle_with_intent(target->u.ob, "owner_call_async_message");
   auto *result = vm_owner_submit_object_message(current_owner_id_for_message(), handle, method->u.string,
                                                 payload_key.c_str(), payload);
   add_mapping_pair(result, "frozen_payload", 1);
@@ -481,7 +481,7 @@ void f_owner_future_poll() {
 
 #ifdef F_OWNER_SNAPSHOT
 void f_owner_snapshot() {
-  auto *result = vm_object_handle_status(sp->u.ob);
+  auto *result = vm_object_handle_status_with_intent(sp->u.ob, "owner_snapshot_payload");
   add_mapping_pair(result, "snapshot_only", 1);
   free_object(&sp->u.ob, "f_owner_snapshot");
   sp->type = T_MAPPING;
@@ -558,7 +558,7 @@ void f_owner_async() {
       return;
     }
     auto payload_key = owner_mapping_string(payload->u.map, "payload_key", method.c_str());
-    auto handle = vm_object_handle(target->u.ob);
+    auto handle = vm_object_handle_with_intent(target->u.ob, "owner_async_message");
     result = vm_owner_submit_object_message(current_owner_id_for_message(), handle, method.c_str(),
                                             payload_key.c_str(), payload);
     add_mapping_pair(result, "target_object_id", static_cast<long>(handle.object_id));
@@ -609,7 +609,7 @@ void f_freeze() {
 #ifdef F_SNAPSHOT
 void f_snapshot() {
   if (sp->type == T_OBJECT) {
-    auto *result = vm_object_handle_status(sp->u.ob);
+    auto *result = vm_object_handle_status_with_intent(sp->u.ob, "snapshot_payload");
     add_mapping_string(result, "api", "snapshot");
     add_mapping_pair(result, "modern_lpc_api", 1);
     add_mapping_pair(result, "snapshot_only", 1);

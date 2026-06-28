@@ -694,6 +694,10 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("vm/internal/owner_runtime_metrics.cc", boundary_contract["owner_metrics_store_file"]);
     ASSERT_EQ(1, boundary_contract["object_store_owner_fast_path_ready"]);
     ASSERT_EQ(0, boundary_contract["object_store_global_fallback_on_owner_fast_path"]);
+    ASSERT_EQ(1, boundary_contract["object_handle_capability_ready"]);
+    ASSERT_EQ("object_handle_capability_v1", boundary_contract["object_handle_capability_model"]);
+    ASSERT_EQ("vm/object_handle.h", boundary_contract["object_handle_capability_file"]);
+    ASSERT_EQ("owner_runtime", boundary_contract["object_handle_permission_intent_default"]);
     ASSERT_EQ(1, boundary_contract["owner_scheduler_backpressure_ready"]);
     ASSERT_EQ("observe_then_reject_new_tasks", boundary_contract["owner_scheduler_backpressure_strategy"]);
     ASSERT_EQ(4096, boundary_contract["owner_scheduler_max_owner_queue_depth"]);
@@ -873,6 +877,8 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["owner_scheduler_state_ready"]);
     ASSERT_EQ(1, status["owner_metrics_store_ready"]);
     ASSERT_EQ(1, status["object_store_owner_fast_path_ready"]);
+    ASSERT_EQ(1, status["object_handle_capability_ready"]);
+    ASSERT_EQ("object_handle_capability_v1", status["object_handle_capability_model"]);
     ASSERT_EQ(0, status["object_store_global_fallback_on_owner_fast_path"]);
     ASSERT_EQ(1, status["owner_scheduler_backpressure_ready"]);
     ASSERT_EQ("observe_then_reject_new_tasks", status["owner_scheduler_backpressure_strategy"]);

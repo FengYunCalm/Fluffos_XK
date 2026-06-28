@@ -416,6 +416,8 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "owner_metrics_store_ready", 1);
   add_mapping_pair(map, "object_store_owner_fast_path_ready", 1);
   add_mapping_pair(map, "object_store_global_fallback_on_owner_fast_path", 0);
+  add_mapping_pair(map, "object_handle_capability_ready", 1);
+  add_mapping_string(map, "object_handle_capability_model", kVMObjectHandleCapabilityModelV1);
   add_mapping_pair(map, "owner_task_manifest_v2_ready", 1);
   add_mapping_string(map, "owner_task_manifest_schema", kOwnerTaskManifestSchemaV2);
   add_mapping_pair(map, "owner_executor_admission_gate_ready", 1);
@@ -1228,7 +1230,7 @@ mapping_t *vm_context_contract_mapping() {
 }
 
 mapping_t *owner_executor_boundary_contract_mapping() {
-  auto *contract = allocate_mapping(150);
+  auto *contract = allocate_mapping(156);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "boundary_model", "owner_executor_boundary_v1");
   add_mapping_string(contract, "implementation_state", "compilation_unit_active");
@@ -1293,6 +1295,10 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "owner_metrics_store_file", "vm/internal/owner_runtime_metrics.cc");
   add_mapping_pair(contract, "object_store_owner_fast_path_ready", 1);
   add_mapping_pair(contract, "object_store_global_fallback_on_owner_fast_path", 0);
+  add_mapping_pair(contract, "object_handle_capability_ready", 1);
+  add_mapping_string(contract, "object_handle_capability_model", kVMObjectHandleCapabilityModelV1);
+  add_mapping_string(contract, "object_handle_capability_file", "vm/object_handle.h");
+  add_mapping_string(contract, "object_handle_permission_intent_default", kVMObjectHandleDefaultPermissionIntent);
   add_mapping_pair(contract, "owner_scheduler_backpressure_ready", 1);
   add_mapping_string(contract, "owner_scheduler_backpressure_strategy", "observe_then_reject_new_tasks");
   add_mapping_pair(contract, "owner_scheduler_max_owner_queue_depth", kOwnerSchedulerMaxOwnerQueueDepth);

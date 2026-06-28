@@ -4366,6 +4366,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "owner_metrics_store_ready"), 1);
     ASSERT_EQ(mapping_number(status, "object_store_owner_fast_path_ready"), 1);
     ASSERT_EQ(mapping_number(status, "object_store_global_fallback_on_owner_fast_path"), 0);
+    ASSERT_EQ(mapping_number(status, "object_handle_capability_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "object_handle_capability_model"),
+                 "object_handle_capability_v1");
     ASSERT_EQ(mapping_number(status, "owner_scheduler_backpressure_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_scheduler_backpressure_strategy"),
                  "observe_then_reject_new_tasks");
@@ -4755,6 +4758,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "vm/internal/owner_runtime_metrics.cc");
     ASSERT_EQ(mapping_number(boundary_contract, "object_store_owner_fast_path_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "object_store_global_fallback_on_owner_fast_path"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "object_handle_capability_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "object_handle_capability_model"),
+                 "object_handle_capability_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "object_handle_capability_file"), "vm/object_handle.h");
+    ASSERT_STREQ(mapping_string(boundary_contract, "object_handle_permission_intent_default"),
+                 "owner_runtime");
     ASSERT_EQ(mapping_number(boundary_contract, "owner_scheduler_backpressure_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_scheduler_backpressure_strategy"),
                  "observe_then_reject_new_tasks");
@@ -7767,6 +7776,51 @@ TEST_F(DriverTest, TestVmObjectHandleRejectsStaleOwnerEpoch) {
   ASSERT_FALSE(stale_status.owner_local_object_pointer_index_found);
   ASSERT_FALSE(stale_status.diagnosed_via_global_index);
   ASSERT_FALSE(vm_object_handle_is_current(handle));
+
+  vm_owner_clear_id(obj);
+  destruct_object(obj);
+}
+
+TEST_F(DriverTest, TestVmObjectHandleReportsCapabilityMetadata) {
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  object_t* obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+
+  vm_owner_set_id(obj, "owner/test/handle/capability");
+  auto default_handle = vm_object_handle(obj);
+  ASSERT_TRUE(default_handle.valid);
+  ASSERT_STREQ(default_handle.permission_intent.c_str(), kVMObjectHandleDefaultPermissionIntent);
+  ASSERT_GT(default_handle.snapshot_version, 0u);
+  ASSERT_EQ(default_handle.snapshot_version, default_handle.owner_epoch);
+
+  auto snapshot_handle = vm_object_handle_with_intent(obj, "snapshot_payload");
+  ASSERT_TRUE(snapshot_handle.valid);
+  ASSERT_STREQ(snapshot_handle.permission_intent.c_str(), "snapshot_payload");
+  ASSERT_EQ(snapshot_handle.snapshot_version, snapshot_handle.owner_epoch);
+  ASSERT_EQ(vm_object_handle_resolve(snapshot_handle), obj);
+
+  auto* status = vm_object_handle_status_with_intent(obj, "owner_async_message");
+  ASSERT_EQ(mapping_number(status, "success"), 1);
+  ASSERT_EQ(mapping_number(status, "object_handle_capability_ready"), 1);
+  ASSERT_STREQ(mapping_string(status, "capability_model"), kVMObjectHandleCapabilityModelV1);
+  ASSERT_STREQ(mapping_string(status, "permission_intent"), "owner_async_message");
+  ASSERT_EQ(mapping_number(status, "snapshot_version"), default_handle.owner_epoch);
+  ASSERT_EQ(mapping_number(status, "capability_epoch_guard"), 1);
+  ASSERT_EQ(mapping_number(status, "current"), 1);
+  ASSERT_STREQ(mapping_string(status, "resolve_status"), "current");
+  free_mapping(status);
 
   vm_owner_clear_id(obj);
   destruct_object(obj);
