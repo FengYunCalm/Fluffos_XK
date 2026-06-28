@@ -49,6 +49,11 @@ void assert_dispatch_entry(mapping dispatch_contract, string task_type,
     ASSERT(stringp(entry["payload_policy"]));
     ASSERT(stringp(entry["cleanup_policy"]));
     ASSERT(stringp(entry["reply_future_policy"]));
+    ASSERT(stringp(entry["tick_group"]));
+    ASSERT(entry["scheduler_priority"] > 0);
+    ASSERT(entry["scheduler_budget"] > 0);
+    ASSERT(entry["scheduler_max_queue_depth"] > 0);
+    ASSERT_EQ("observe_then_reject_new_tasks", entry["backpressure_policy"]);
 }
 
 void assert_production_gate_contract(mapping contract) {
@@ -827,6 +832,12 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(6, boundary_contract["owner_tick_group_count"]);
     ASSERT_EQ("gateway_command,heartbeat,callout,socket_async,service_tick,diagnostic",
               boundary_contract["owner_tick_groups"]);
+    ASSERT_EQ(1, boundary_contract["owner_scheduler_tuning_config_ready"]);
+    ASSERT_EQ("owner_scheduler_tuning_v1", boundary_contract["owner_scheduler_tuning_config_schema"]);
+    ASSERT_EQ("owner_service_registry", boundary_contract["owner_scheduler_tick_group_budget_source"]);
+    ASSERT_EQ(1, boundary_contract["owner_scheduler_priority_groups_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_scheduler_tick_group_backpressure_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_scheduler_starvation_guard_ready"]);
     ASSERT_EQ(1, boundary_contract["target_owner_message_executor_ready"]);
     ASSERT_EQ(0, boundary_contract["normal_path_main_fallback_count"]);
     ASSERT_EQ(1, boundary_contract["normal_path_main_fallback_ready"]);
@@ -1017,6 +1028,12 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(6, status["owner_tick_group_count"]);
     ASSERT_EQ("gateway_command,heartbeat,callout,socket_async,service_tick,diagnostic",
               status["owner_tick_groups"]);
+    ASSERT_EQ(1, status["owner_scheduler_tuning_config_ready"]);
+    ASSERT_EQ("owner_scheduler_tuning_v1", status["owner_scheduler_tuning_config_schema"]);
+    ASSERT_EQ("owner_service_registry", status["owner_scheduler_tick_group_budget_source"]);
+    ASSERT_EQ(1, status["owner_scheduler_priority_groups_ready"]);
+    ASSERT_EQ(1, status["owner_scheduler_tick_group_backpressure_ready"]);
+    ASSERT_EQ(1, status["owner_scheduler_starvation_guard_ready"]);
     ASSERT_EQ(1, status["target_owner_message_executor_ready"]);
     ASSERT_EQ(0, status["normal_path_main_fallback_count"]);
     ASSERT_EQ(1, status["normal_path_main_fallback_ready"]);

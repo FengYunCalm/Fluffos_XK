@@ -477,6 +477,12 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_string(map, "owner_tick_group_scheduler_schema", kOwnerTickGroupSchedulerSchemaV1);
   add_mapping_pair(map, "owner_tick_group_count", static_cast<long>(owner_tick_group_descriptors().size()));
   add_mapping_string(map, "owner_tick_groups", owner_tick_group_name_list().c_str());
+  add_mapping_pair(map, "owner_scheduler_tuning_config_ready", 1);
+  add_mapping_string(map, "owner_scheduler_tuning_config_schema", kOwnerSchedulerTuningConfigSchemaV1);
+  add_mapping_string(map, "owner_scheduler_tick_group_budget_source", "owner_service_registry");
+  add_mapping_pair(map, "owner_scheduler_priority_groups_ready", 1);
+  add_mapping_pair(map, "owner_scheduler_tick_group_backpressure_ready", 1);
+  add_mapping_pair(map, "owner_scheduler_starvation_guard_ready", 1);
   add_mapping_pair(map, "target_owner_message_executor_ready", 1);
   add_mapping_pair(map, "normal_path_main_fallback_count", normal_path_main_fallbacks);
   add_mapping_pair(map, "normal_path_main_fallback_ready", normal_path_main_fallbacks == 0 ? 1 : 0);
@@ -548,6 +554,12 @@ void apply_owner_task_manifest_v2(OwnerMailboxTask &task) {
   task.admission_policy = kOwnerTaskAdmissionPolicyV2;
   task.admission_state = descriptor.rejected ? "accepted_dispatch_rejected" : "accepted";
   task.trace_schema = kOwnerExecutorTraceSchemaV2;
+  const auto &tick_group = owner_tick_group_for_executor_task(task.task_type.c_str());
+  task.tick_group = tick_group.name;
+  task.scheduler_priority = tick_group.priority;
+  task.scheduler_budget = tick_group.budget;
+  task.scheduler_max_queue_depth = tick_group.max_queue_depth;
+  task.backpressure_policy = tick_group.backpressure_policy;
 }
 
 array_t *owner_lpc_task_allowlist_array() {
@@ -611,7 +623,8 @@ mapping_t *owner_ordinary_lpc_contract_entry(const OwnerExecutorTaskDescriptor &
 }
 
 mapping_t *owner_executor_task_contract_entry(const OwnerExecutorTaskDescriptor &descriptor) {
-  auto *map = allocate_mapping(22);
+  auto *map = allocate_mapping(28);
+  const auto &tick_group = owner_tick_group_for_executor_task(descriptor.task_type);
   add_mapping_string(map, "task_type", descriptor.task_type);
   add_mapping_string(map, "contract_key", descriptor.contract_key);
   add_mapping_string(map, "dispatch_kind", owner_executor_dispatch_kind_name(descriptor.dispatch_kind));
@@ -632,6 +645,11 @@ mapping_t *owner_executor_task_contract_entry(const OwnerExecutorTaskDescriptor 
   add_mapping_string(map, "cleanup_policy", owner_manifest_cleanup_policy(descriptor.dispatch_kind, false));
   add_mapping_string(map, "reply_future_policy", owner_manifest_reply_future_policy(descriptor.dispatch_kind));
   add_mapping_string(map, "trace_schema", kOwnerExecutorTraceSchemaV2);
+  add_mapping_string(map, "tick_group", tick_group.name);
+  add_mapping_pair(map, "scheduler_priority", tick_group.priority);
+  add_mapping_pair(map, "scheduler_budget", tick_group.budget);
+  add_mapping_pair(map, "scheduler_max_queue_depth", tick_group.max_queue_depth);
+  add_mapping_string(map, "backpressure_policy", tick_group.backpressure_policy);
   add_mapping_pair(map, "deadline_required", 0);
   add_mapping_pair(map, "ordinary_lpc_default_closed", 1);
   add_mapping_string(map, "reason", descriptor.reason);
@@ -1438,6 +1456,12 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "owner_tick_group_scheduler_schema", kOwnerTickGroupSchedulerSchemaV1);
   add_mapping_pair(contract, "owner_tick_group_count", static_cast<long>(owner_tick_group_descriptors().size()));
   add_mapping_string(contract, "owner_tick_groups", owner_tick_group_name_list().c_str());
+  add_mapping_pair(contract, "owner_scheduler_tuning_config_ready", 1);
+  add_mapping_string(contract, "owner_scheduler_tuning_config_schema", kOwnerSchedulerTuningConfigSchemaV1);
+  add_mapping_string(contract, "owner_scheduler_tick_group_budget_source", "owner_service_registry");
+  add_mapping_pair(contract, "owner_scheduler_priority_groups_ready", 1);
+  add_mapping_pair(contract, "owner_scheduler_tick_group_backpressure_ready", 1);
+  add_mapping_pair(contract, "owner_scheduler_starvation_guard_ready", 1);
   add_mapping_pair(contract, "target_owner_message_executor_ready", 1);
   add_mapping_pair(contract, "normal_path_main_fallback_count", 0);
   add_mapping_pair(contract, "normal_path_main_fallback_ready", 1);
@@ -1517,7 +1541,7 @@ const OwnerTaskRouteContract &owner_task_route_contract(const OwnerMailboxTask &
 }
 
 mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
-  auto *map = allocate_mapping(41);
+  auto *map = allocate_mapping(46);
   const auto &descriptor = owner_executor_task_descriptor(task);
   const auto target_message = task.task_type == "owner_message" && task.has_target_handle;
   const auto &message_route_contract = owner_task_route_contract(task);
@@ -1554,6 +1578,11 @@ mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
   add_mapping_string(map, "admission_policy", task.admission_policy.c_str());
   add_mapping_string(map, "admission_state", task.admission_state.c_str());
   add_mapping_string(map, "trace_schema", task.trace_schema.c_str());
+  add_mapping_string(map, "tick_group", task.tick_group.c_str());
+  add_mapping_pair(map, "scheduler_priority", task.scheduler_priority);
+  add_mapping_pair(map, "scheduler_budget", task.scheduler_budget);
+  add_mapping_pair(map, "scheduler_max_queue_depth", task.scheduler_max_queue_depth);
+  add_mapping_string(map, "backpressure_policy", task.backpressure_policy.c_str());
   add_mapping_pair(map, "trace_schema_version", 2);
   add_mapping_string(map, "diagnostic_schema", kOwnerCallbackDiagnosticsSchemaV1);
   add_mapping_string(map, "failure_code_schema", kOwnerCallbackFailureCodeSchemaV1);
@@ -1580,7 +1609,7 @@ mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
 mapping_t *owner_task_trace_mapping(const OwnerTaskTrace &trace) {
   auto target_status = trace.has_target_handle ? vm_object_handle_resolve_status(trace.target_handle).status
                                                : VMObjectHandleResolveStatus::kInvalidHandle;
-  auto *map = allocate_mapping(54);
+  auto *map = allocate_mapping(59);
   add_mapping_pair(map, "trace_id", static_cast<long>(trace.trace_id));
   add_mapping_string(map, "trace_model", "owner_task_lifecycle_event");
   add_mapping_pair(map, "task_id", static_cast<long>(trace.task_id));
@@ -1601,6 +1630,11 @@ mapping_t *owner_task_trace_mapping(const OwnerTaskTrace &trace) {
   add_mapping_string(map, "admission_policy", trace.admission_policy.c_str());
   add_mapping_string(map, "admission_state", trace.admission_state.c_str());
   add_mapping_string(map, "trace_schema", trace.trace_schema.c_str());
+  add_mapping_string(map, "tick_group", trace.tick_group.c_str());
+  add_mapping_pair(map, "scheduler_priority", trace.scheduler_priority);
+  add_mapping_pair(map, "scheduler_budget", trace.scheduler_budget);
+  add_mapping_pair(map, "scheduler_max_queue_depth", trace.scheduler_max_queue_depth);
+  add_mapping_string(map, "backpressure_policy", trace.backpressure_policy.c_str());
   add_mapping_pair(map, "trace_schema_version", 2);
   add_mapping_string(map, "diagnostic_schema", kOwnerCallbackDiagnosticsSchemaV1);
   add_mapping_string(map, "failure_code_schema", kOwnerCallbackFailureCodeSchemaV1);
@@ -1923,6 +1957,11 @@ uint64_t append_owner_task_trace(const OwnerMailboxTask &task, const char *state
   trace.admission_policy = task.admission_policy;
   trace.admission_state = task.admission_state;
   trace.trace_schema = task.trace_schema;
+  trace.tick_group = task.tick_group;
+  trace.scheduler_priority = task.scheduler_priority;
+  trace.scheduler_budget = task.scheduler_budget;
+  trace.scheduler_max_queue_depth = task.scheduler_max_queue_depth;
+  trace.backpressure_policy = task.backpressure_policy;
   trace.has_target_handle = task.has_target_handle;
   return owner_trace_store.append_task(std::move(trace));
 }

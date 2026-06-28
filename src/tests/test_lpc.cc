@@ -4432,6 +4432,14 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "owner_tick_group_count"), 6);
     ASSERT_STREQ(mapping_string(status, "owner_tick_groups"),
                  "gateway_command,heartbeat,callout,socket_async,service_tick,diagnostic");
+    ASSERT_EQ(mapping_number(status, "owner_scheduler_tuning_config_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_scheduler_tuning_config_schema"),
+                 "owner_scheduler_tuning_v1");
+    ASSERT_STREQ(mapping_string(status, "owner_scheduler_tick_group_budget_source"),
+                 "owner_service_registry");
+    ASSERT_EQ(mapping_number(status, "owner_scheduler_priority_groups_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_scheduler_tick_group_backpressure_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_scheduler_starvation_guard_ready"), 1);
     ASSERT_EQ(mapping_number(status, "target_owner_message_executor_ready"), 1);
     ASSERT_EQ(mapping_number(status, "normal_path_main_fallback_count"), 0);
     ASSERT_EQ(mapping_number(status, "normal_path_main_fallback_ready"), 1);
@@ -4934,6 +4942,14 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "owner_tick_group_count"), 6);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_tick_groups"),
                  "gateway_command,heartbeat,callout,socket_async,service_tick,diagnostic");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_scheduler_tuning_config_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_scheduler_tuning_config_schema"),
+                 "owner_scheduler_tuning_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_scheduler_tick_group_budget_source"),
+                 "owner_service_registry");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_scheduler_priority_groups_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_scheduler_tick_group_backpressure_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_scheduler_starvation_guard_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "target_owner_message_executor_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "normal_path_main_fallback_count"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "normal_path_main_fallback_ready"), 1);
@@ -5332,6 +5348,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
       ASSERT_NE(mapping_string(entry, "payload_policy"), nullptr);
       ASSERT_NE(mapping_string(entry, "cleanup_policy"), nullptr);
       ASSERT_NE(mapping_string(entry, "reply_future_policy"), nullptr);
+      ASSERT_NE(mapping_string(entry, "tick_group"), nullptr);
+      ASSERT_GT(mapping_number(entry, "scheduler_priority"), 0);
+      ASSERT_GT(mapping_number(entry, "scheduler_budget"), 0);
+      ASSERT_GT(mapping_number(entry, "scheduler_max_queue_depth"), 0);
+      ASSERT_STREQ(mapping_string(entry, "backpressure_policy"), "observe_then_reject_new_tasks");
     }
     auto dispatch_entry = [&](const char* task_type) -> mapping_t* {
       auto it = dispatch_by_type.find(task_type);
@@ -5378,6 +5399,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     assert_dispatch("compute_result", "compute_result", "compute_result", "executor_safe", 1, 1, 0);
     assert_dispatch("lpc", "lpc", "reject_lpc", "rejected", 1, 0, 1);
     assert_dispatch("owner_state", "owner_state", "guard_owner_state", "rejected", 1, 0, 1);
+    ASSERT_STREQ(mapping_string(dispatch_entry("gateway_command_execute"), "tick_group"), "gateway_command");
+    ASSERT_STREQ(mapping_string(dispatch_entry("heartbeat"), "tick_group"), "heartbeat");
+    ASSERT_STREQ(mapping_string(dispatch_entry("call_out"), "tick_group"), "callout");
+    ASSERT_STREQ(mapping_string(dispatch_entry("socket_callback"), "tick_group"), "socket_async");
+    ASSERT_STREQ(mapping_string(dispatch_entry("executor_probe"), "tick_group"), "diagnostic");
 
     auto* compute = mapping_entry(contract, "compute_result");
     ASSERT_STREQ(mapping_string(compute, "executor_mode"), "executor_safe");

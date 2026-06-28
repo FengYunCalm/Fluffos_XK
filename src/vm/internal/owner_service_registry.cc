@@ -82,6 +82,31 @@ const std::array<OwnerTickGroupDescriptor, 6> &owner_tick_group_descriptors() {
   return kOwnerTickGroupDescriptors;
 }
 
+const OwnerTickGroupDescriptor &owner_tick_group_for_executor_task(const char *task_type) {
+  std::string task_type_value = task_type ? task_type : "";
+  auto tick_group = "diagnostic";
+  if (task_type_value == "gateway_command" || task_type_value == "gateway_command_execute") {
+    tick_group = "gateway_command";
+  } else if (task_type_value == "heartbeat") {
+    tick_group = "heartbeat";
+  } else if (task_type_value == "call_out") {
+    tick_group = "callout";
+  } else if (task_type_value == "socket_callback" || task_type_value == "async_callback" ||
+             task_type_value == "dns_callback" || task_type_value == "ed_callback") {
+    tick_group = "socket_async";
+  } else if (task_type_value == "lpc_task" || task_type_value == "ordinary_lpc" ||
+             task_type_value == "owner_message" || task_type_value == "compute_result") {
+    tick_group = "service_tick";
+  }
+
+  for (const auto &descriptor : kOwnerTickGroupDescriptors) {
+    if (std::string(descriptor.name) == tick_group) {
+      return descriptor;
+    }
+  }
+  return kOwnerTickGroupDescriptors.back();
+}
+
 bool owner_service_registry_matches_lpc_domains() {
   const auto &lpc_descriptors = owner_lpc_task_descriptors();
   if (lpc_descriptors.size() != kOwnerServiceShardDescriptors.size()) {

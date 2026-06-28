@@ -34,6 +34,11 @@ struct OwnerTaskTrace {
   std::string admission_policy;
   std::string admission_state;
   std::string trace_schema;
+  std::string tick_group;
+  std::string backpressure_policy;
+  int scheduler_priority{0};
+  int scheduler_budget{0};
+  int scheduler_max_queue_depth{0};
   std::string command_text_snapshot;
   std::string command_consume_model;
   std::string command_consume_blocker;
