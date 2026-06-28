@@ -407,6 +407,10 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "owner_await_coroutine_runtime_ready", 0);
   add_mapping_pair(map, "freeze_snapshot_api_ready", 1);
   add_mapping_string(map, "freeze_snapshot_model", "validated_deep_copy");
+  add_mapping_pair(map, "owner_snapshot_persistence_ready", 1);
+  add_mapping_string(map, "owner_snapshot_persistence_model", "owner_snapshot_serialized_payload_v1");
+  add_mapping_string(map, "owner_snapshot_persistence_adapter", "main_thread_file_adapter");
+  add_mapping_pair(map, "owner_snapshot_direct_save_hot_path_audit_ready", 1);
   add_mapping_pair(map, "owner_commit_api_ready", 1);
   add_mapping_string(map, "owner_commit_model", "owner_commit_boundary_record");
   add_mapping_pair(map, "owner_task_manifest_module_ready", 1);
@@ -1280,6 +1284,10 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "owner_await_coroutine_runtime_ready", 0);
   add_mapping_pair(contract, "freeze_snapshot_api_ready", 1);
   add_mapping_string(contract, "freeze_snapshot_model", "validated_deep_copy");
+  add_mapping_pair(contract, "owner_snapshot_persistence_ready", 1);
+  add_mapping_string(contract, "owner_snapshot_persistence_model", "owner_snapshot_serialized_payload_v1");
+  add_mapping_string(contract, "owner_snapshot_persistence_adapter", "main_thread_file_adapter");
+  add_mapping_pair(contract, "owner_snapshot_direct_save_hot_path_audit_ready", 1);
   add_mapping_pair(contract, "owner_commit_api_ready", 1);
   add_mapping_string(contract, "owner_commit_model", "owner_commit_boundary_record");
   add_mapping_string(contract, "lpc_modern_api_file", "packages/core/vm_owner.cc");

@@ -4357,6 +4357,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "owner_await_coroutine_runtime_ready"), 0);
     ASSERT_EQ(mapping_number(status, "freeze_snapshot_api_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "freeze_snapshot_model"), "validated_deep_copy");
+    ASSERT_EQ(mapping_number(status, "owner_snapshot_persistence_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_snapshot_persistence_model"),
+                 "owner_snapshot_serialized_payload_v1");
+    ASSERT_STREQ(mapping_string(status, "owner_snapshot_persistence_adapter"), "main_thread_file_adapter");
+    ASSERT_EQ(mapping_number(status, "owner_snapshot_direct_save_hot_path_audit_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_commit_api_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_commit_model"), "owner_commit_boundary_record");
     ASSERT_EQ(mapping_number(status, "owner_task_manifest_module_ready"), 1);
@@ -4740,6 +4745,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "owner_await_coroutine_runtime_ready"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "freeze_snapshot_api_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "freeze_snapshot_model"), "validated_deep_copy");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_snapshot_persistence_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_snapshot_persistence_model"),
+                 "owner_snapshot_serialized_payload_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_snapshot_persistence_adapter"),
+                 "main_thread_file_adapter");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_snapshot_direct_save_hot_path_audit_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "owner_commit_api_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_commit_model"), "owner_commit_boundary_record");
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_api_file"), "packages/core/vm_owner.cc");

@@ -679,6 +679,11 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(0, boundary_contract["owner_await_coroutine_runtime_ready"]);
     ASSERT_EQ(1, boundary_contract["freeze_snapshot_api_ready"]);
     ASSERT_EQ("validated_deep_copy", boundary_contract["freeze_snapshot_model"]);
+    ASSERT_EQ(1, boundary_contract["owner_snapshot_persistence_ready"]);
+    ASSERT_EQ("owner_snapshot_serialized_payload_v1",
+              boundary_contract["owner_snapshot_persistence_model"]);
+    ASSERT_EQ("main_thread_file_adapter", boundary_contract["owner_snapshot_persistence_adapter"]);
+    ASSERT_EQ(1, boundary_contract["owner_snapshot_direct_save_hot_path_audit_ready"]);
     ASSERT_EQ(1, boundary_contract["owner_commit_api_ready"]);
     ASSERT_EQ("owner_commit_boundary_record", boundary_contract["owner_commit_model"]);
     ASSERT_EQ("packages/core/vm_owner.cc", boundary_contract["lpc_modern_api_file"]);
@@ -869,6 +874,10 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(0, status["owner_await_coroutine_runtime_ready"]);
     ASSERT_EQ(1, status["freeze_snapshot_api_ready"]);
     ASSERT_EQ("validated_deep_copy", status["freeze_snapshot_model"]);
+    ASSERT_EQ(1, status["owner_snapshot_persistence_ready"]);
+    ASSERT_EQ("owner_snapshot_serialized_payload_v1", status["owner_snapshot_persistence_model"]);
+    ASSERT_EQ("main_thread_file_adapter", status["owner_snapshot_persistence_adapter"]);
+    ASSERT_EQ(1, status["owner_snapshot_direct_save_hot_path_audit_ready"]);
     ASSERT_EQ(1, status["owner_commit_api_ready"]);
     ASSERT_EQ("owner_commit_boundary_record", status["owner_commit_model"]);
     ASSERT_EQ(1, status["owner_task_manifest_module_ready"]);
@@ -1300,6 +1309,7 @@ void assert_lpc_modern_runtime_apis() {
     mapping frozen;
     mapping frozen_value;
     mapping snapshot_value;
+    mapping persisted_snapshot;
     mapping rejected;
     mapping async_result;
     mapping await_result;
@@ -1334,6 +1344,24 @@ void assert_lpc_modern_runtime_apis() {
     ASSERT_EQ(1, snapshot_value["snapshot_only"]);
     ASSERT(mapp(snapshot_value["value"]));
     ASSERT_EQ("safe", snapshot_value["value"]["snapshot"]);
+
+    persisted_snapshot = owner_snapshot_persist(this_object(), ([ "save_zeros": 1 ]));
+    ASSERT_EQ(1, persisted_snapshot["success"]);
+    ASSERT_EQ("owner_snapshot_persist", persisted_snapshot["api"]);
+    ASSERT_EQ(1, persisted_snapshot["modern_lpc_api"]);
+    ASSERT_EQ(1, persisted_snapshot["owner_snapshot_persistence_ready"]);
+    ASSERT_EQ("owner_snapshot_serialized_payload_v1",
+              persisted_snapshot["snapshot_persistence_model"]);
+    ASSERT_EQ("main_thread_file_adapter", persisted_snapshot["file_adapter_boundary"]);
+    ASSERT_EQ(0, persisted_snapshot["direct_save_hot_path"]);
+    ASSERT_EQ(1, persisted_snapshot["frozen_options"]);
+    ASSERT_EQ(1, persisted_snapshot["snapshot_only"]);
+    ASSERT_EQ(1, persisted_snapshot["object_handle_capability_ready"]);
+    ASSERT_EQ("object_handle_capability_v1", persisted_snapshot["capability_model"]);
+    ASSERT_EQ("snapshot_persistence", persisted_snapshot["permission_intent"]);
+    ASSERT_EQ("current", persisted_snapshot["target_handle_status"]);
+    ASSERT(persisted_snapshot["serialized_bytes"] > 0);
+    ASSERT(stringp(persisted_snapshot["serialized"]));
 
     rejected = owner_async(this_object(), ([ "payload_key": "missing-method" ]));
     ASSERT_EQ(0, rejected["success"]);

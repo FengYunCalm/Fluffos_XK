@@ -2,10 +2,13 @@
 
 #include "vm/context.h"
 #include "vm/frozen_value.h"
+#include "vm/internal/base/object.h"
 #include "vm/object_handle.h"
 #include "vm/owner.h"
 
+#include <cstring>
 #include <string>
+#include <vector>
 
 namespace {
 bool owner_payload_mapping_safe(svalue_t *value, std::string *error) {
@@ -625,6 +628,83 @@ void f_snapshot() {
 
   auto *result = owner_frozen_value_result(sp, "snapshot");
   pop_stack();
+  push_refed_mapping(result);
+}
+#endif
+
+#ifdef F_OWNER_SNAPSHOT_PERSIST
+void f_owner_snapshot_persist() {
+  auto *options = sp;
+  auto *target = sp - 1;
+  std::string error_text;
+  if (!owner_payload_mapping_safe(options, &error_text)) {
+    pop_n_elems(2);
+    push_refed_mapping(owner_payload_error(error_text));
+    return;
+  }
+
+  auto handle = vm_object_handle_with_intent(target->u.ob, "snapshot_persistence");
+  auto source_owner = current_owner_id_for_message();
+  auto target_owner = handle.owner_id;
+  auto target_status = vm_object_handle_resolve_status(handle);
+  if (target_status.status != VMObjectHandleResolveStatus::kCurrent || !target_status.object) {
+    auto *error = owner_api_error("stale_snapshot_target", "owner_snapshot_persist target handle is not current");
+    add_mapping_string(error, "target_handle_status",
+                       vm_object_handle_resolve_status_name(target_status.status));
+    pop_n_elems(2);
+    push_refed_mapping(error);
+    return;
+  }
+  if (target_owner != source_owner) {
+    auto *error = owner_api_error("cross_owner_snapshot_persist_rejected",
+                                  "owner_snapshot_persist requires a same-owner target");
+    add_mapping_string(error, "source_owner", source_owner);
+    add_mapping_string(error, "target_owner", target_owner.c_str());
+    add_mapping_string(error, "target_handle_status",
+                       vm_object_handle_resolve_status_name(target_status.status));
+    pop_n_elems(2);
+    push_refed_mapping(error);
+    return;
+  }
+
+  const auto max_string_length = CONFIG_INT(__MAX_STRING_LENGTH__);
+  auto save_zeros = static_cast<int>(owner_mapping_number(options->u.map, "save_zeros", 0));
+  std::vector<char> serialized(static_cast<size_t>(max_string_length) + 1, '\0');
+  auto success = save_object_str(target_status.object, save_zeros, serialized.data(), max_string_length);
+  if (!success) {
+    auto *error = owner_api_error("snapshot_serialize_failed",
+                                  "owner_snapshot_persist failed to serialize target object");
+    add_mapping_string(error, "target_handle_status",
+                       vm_object_handle_resolve_status_name(target_status.status));
+    pop_n_elems(2);
+    push_refed_mapping(error);
+    return;
+  }
+
+  auto *result = allocate_mapping(22);
+  add_mapping_pair(result, "success", 1);
+  add_mapping_string(result, "api", "owner_snapshot_persist");
+  add_mapping_pair(result, "modern_lpc_api", 1);
+  add_mapping_pair(result, "owner_snapshot_persistence_ready", 1);
+  add_mapping_string(result, "snapshot_persistence_model", "owner_snapshot_serialized_payload_v1");
+  add_mapping_string(result, "file_adapter_boundary", "main_thread_file_adapter");
+  add_mapping_pair(result, "direct_save_hot_path", 0);
+  add_mapping_pair(result, "frozen_options", 1);
+  add_mapping_pair(result, "snapshot_only", 1);
+  add_mapping_pair(result, "object_handle_capability_ready", 1);
+  add_mapping_string(result, "capability_model", kVMObjectHandleCapabilityModelV1);
+  add_mapping_string(result, "permission_intent", handle.permission_intent.c_str());
+  add_mapping_pair(result, "target_object_id", static_cast<long>(handle.object_id));
+  add_mapping_string(result, "target_object_path", handle.object_path.c_str());
+  add_mapping_string(result, "owner_id", target_owner.c_str());
+  add_mapping_pair(result, "owner_epoch", static_cast<long>(handle.owner_epoch));
+  add_mapping_pair(result, "snapshot_version", static_cast<long>(handle.snapshot_version));
+  add_mapping_pair(result, "save_zeros", save_zeros);
+  add_mapping_pair(result, "serialized_bytes", static_cast<long>(strlen(serialized.data())));
+  add_mapping_string(result, "serialized", serialized.data());
+  add_mapping_string(result, "target_handle_status", vm_object_handle_resolve_status_name(target_status.status));
+  add_mapping_pair(result, "current", 1);
+  pop_n_elems(2);
   push_refed_mapping(result);
 }
 #endif

@@ -415,6 +415,7 @@ mapping owner_async(mixed, mapping);
 mapping owner_await(int);
 mapping freeze(mixed);
 mapping snapshot(mixed);
+mapping owner_snapshot_persist(object, mapping);
 mapping owner_commit(mapping);
 mapping vm_owner_lpc_probe(object, string, string);
 mapping vm_owner_lpc_canary(object, string, string);
