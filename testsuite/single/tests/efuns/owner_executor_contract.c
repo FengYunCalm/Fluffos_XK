@@ -641,9 +641,17 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("vm/internal/owner_executor.cc", boundary_contract["compilation_unit_file"]);
     ASSERT_EQ(0, boundary_contract["depends_on_owner_cc_internal_state"]);
     ASSERT_EQ(1, boundary_contract["owner_runtime_split_ready"]);
-    ASSERT_EQ("runtime_v3_modules_with_owner_cc_coordinator", boundary_contract["owner_runtime_split_model"]);
-    ASSERT_EQ("vm/internal/owner.cc", boundary_contract["owner_runtime_coordinator_file"]);
-    ASSERT_EQ("runtime_coordinator_facade", boundary_contract["owner_cc_runtime_role"]);
+    ASSERT_EQ("runtime_v4_modules_with_owner_runtime_coordinator", boundary_contract["owner_runtime_split_model"]);
+    ASSERT_EQ(1, boundary_contract["owner_runtime_v4_hardening_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_runtime_benchmark_smoke_ready"]);
+    ASSERT_EQ("owner_runtime_bench_v1", boundary_contract["owner_runtime_benchmark_schema"]);
+    ASSERT_EQ(1, boundary_contract["owner_runtime_stress_profile_ready"]);
+    ASSERT_EQ("tools/owner-runtime-v4-stress.sh", boundary_contract["owner_runtime_stress_entry"]);
+    ASSERT_EQ(1, boundary_contract["owner_runtime_layering_guard_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_runtime_coordinator_module_ready"]);
+    ASSERT_EQ("vm/internal/owner_runtime_coordinator.cc", boundary_contract["owner_runtime_coordinator_file"]);
+    ASSERT_EQ("OwnerRuntimeCoordinator", boundary_contract["owner_runtime_store_owner"]);
+    ASSERT_EQ("runtime_status_facade_and_legacy_glue", boundary_contract["owner_cc_runtime_role"]);
     ASSERT_EQ(1, boundary_contract["owner_task_manifest_module_ready"]);
     ASSERT_EQ("vm/internal/owner_task_manifest.cc", boundary_contract["owner_task_manifest_module_file"]);
     ASSERT_EQ(1, boundary_contract["owner_trace_store_ready"]);
@@ -655,6 +663,12 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["owner_metrics_store_ready"]);
     ASSERT_EQ("vm/internal/owner_runtime_metrics.cc", boundary_contract["owner_metrics_store_file"]);
     ASSERT_EQ(1, boundary_contract["object_store_owner_fast_path_ready"]);
+    ASSERT_EQ(0, boundary_contract["object_store_global_fallback_on_owner_fast_path"]);
+    ASSERT_EQ(1, boundary_contract["owner_scheduler_backpressure_ready"]);
+    ASSERT_EQ("observe_then_reject_new_tasks", boundary_contract["owner_scheduler_backpressure_strategy"]);
+    ASSERT_EQ(4096, boundary_contract["owner_scheduler_max_owner_queue_depth"]);
+    ASSERT_EQ(1, boundary_contract["owner_scheduler_fairness_guard_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_future_timeout_cancel_drop_cleanup_ready"]);
     ASSERT_EQ(1, boundary_contract["dependency_manifest_ready"]);
     ASSERT_EQ(1, boundary_contract["runtime_dependency_contract_version"]);
     ASSERT_EQ("owner_scheduler_state,owner_task_manifest,owner_trace_store,owner_future_store,"
@@ -686,8 +700,16 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["executor_callback_task_boundary_ready"]);
     ASSERT_EQ(1, boundary_contract["executor_callback_allowlist_ready"]);
     ASSERT_EQ(1, boundary_contract["owner_callback_admission_unified"]);
+    ASSERT_EQ(1, boundary_contract["owner_callback_diagnostics_ready"]);
+    ASSERT_EQ("owner_callback_diagnostics_v1", boundary_contract["owner_callback_diagnostics_schema"]);
+    ASSERT_EQ("owner_callback_failure_code_v1", boundary_contract["owner_callback_failure_code_schema"]);
+    ASSERT_EQ("owner_callback_drop_reason_v1", boundary_contract["owner_callback_drop_reason_schema"]);
+    ASSERT_EQ(1, boundary_contract["owner_callback_allowlist_complete"]);
+    ASSERT_EQ("heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback",
+              boundary_contract["owner_callback_supported_kinds"]);
     ASSERT_EQ(1, boundary_contract["executor_callback_cleanup_main_required"]);
-    ASSERT_EQ("heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute",
+    ASSERT_EQ(7, boundary_contract["executor_callback_allowlist_count"]);
+    ASSERT_EQ("heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback",
               boundary_contract["executor_callback_allowlist"]);
     ASSERT_EQ(1, boundary_contract["heartbeat_owner_executor_ready"]);
     ASSERT_EQ("heartbeat", boundary_contract["heartbeat_owner_executor_task_type"]);
@@ -779,13 +801,28 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("default_closed_explicit_open", status["ordinary_lpc_activation_policy"]);
     ASSERT_EQ("", status["ordinary_lpc_next_blocker"]);
     ASSERT_EQ(1, status["owner_runtime_split_ready"]);
-    ASSERT_EQ("runtime_v3_modules_with_owner_cc_coordinator", status["owner_runtime_split_model"]);
+    ASSERT_EQ("runtime_v4_modules_with_owner_runtime_coordinator", status["owner_runtime_split_model"]);
+    ASSERT_EQ(1, status["owner_runtime_v4_hardening_ready"]);
+    ASSERT_EQ(1, status["owner_runtime_benchmark_smoke_ready"]);
+    ASSERT_EQ("owner_runtime_bench_v1", status["owner_runtime_benchmark_schema"]);
+    ASSERT_EQ(1, status["owner_runtime_stress_profile_ready"]);
+    ASSERT_EQ("tools/owner-runtime-v4-stress.sh", status["owner_runtime_stress_entry"]);
+    ASSERT_EQ(1, status["owner_runtime_layering_guard_ready"]);
+    ASSERT_EQ(1, status["owner_runtime_coordinator_module_ready"]);
     ASSERT_EQ(1, status["owner_task_manifest_module_ready"]);
     ASSERT_EQ(1, status["owner_trace_store_ready"]);
     ASSERT_EQ(1, status["owner_future_store_ready"]);
     ASSERT_EQ(1, status["owner_scheduler_state_ready"]);
     ASSERT_EQ(1, status["owner_metrics_store_ready"]);
     ASSERT_EQ(1, status["object_store_owner_fast_path_ready"]);
+    ASSERT_EQ(0, status["object_store_global_fallback_on_owner_fast_path"]);
+    ASSERT_EQ(1, status["owner_scheduler_backpressure_ready"]);
+    ASSERT_EQ("observe_then_reject_new_tasks", status["owner_scheduler_backpressure_strategy"]);
+    ASSERT_EQ(4096, status["owner_scheduler_max_owner_queue_depth"]);
+    ASSERT(intp(status["owner_scheduler_max_owner_backlog"]));
+    ASSERT_EQ(0, status["owner_scheduler_backpressure_over_limit"]);
+    ASSERT_EQ(1, status["owner_scheduler_fairness_guard_ready"]);
+    ASSERT(intp(status["owner_executor_backpressure_rejected"]));
     ASSERT_EQ(1, status["owner_task_manifest_v2_ready"]);
     ASSERT_EQ("owner_task_manifest_v2", status["owner_task_manifest_schema"]);
     ASSERT_EQ(1, status["owner_executor_admission_gate_ready"]);
@@ -814,7 +851,14 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["owner_executor_socket_release_trace_ready"]);
     ASSERT_EQ(1, status["executor_callback_task_boundary_ready"]);
     ASSERT_EQ(1, status["executor_callback_allowlist_ready"]);
-    ASSERT_EQ(6, status["executor_callback_allowlist_count"]);
+    ASSERT_EQ(7, status["executor_callback_allowlist_count"]);
+    ASSERT_EQ(1, status["owner_callback_diagnostics_ready"]);
+    ASSERT_EQ("owner_callback_diagnostics_v1", status["owner_callback_diagnostics_schema"]);
+    ASSERT_EQ("owner_callback_failure_code_v1", status["owner_callback_failure_code_schema"]);
+    ASSERT_EQ("owner_callback_drop_reason_v1", status["owner_callback_drop_reason_schema"]);
+    ASSERT_EQ(1, status["owner_callback_allowlist_complete"]);
+    ASSERT_EQ("heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback",
+              status["owner_callback_supported_kinds"]);
     ASSERT_EQ("frozen_payload_or_owner_handle_only", status["executor_callback_payload_policy"]);
     ASSERT_EQ(1, status["heartbeat_owner_executor_ready"]);
     ASSERT_EQ("heartbeat", status["heartbeat_owner_executor_task_type"]);
@@ -888,7 +932,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(0, status["facade_only_runtime_claims"]);
     callback_task_contracts = status["executor_callback_task_contracts"];
     ASSERT(arrayp(callback_task_contracts));
-    ASSERT_EQ(6, sizeof(callback_task_contracts));
+    ASSERT_EQ(7, sizeof(callback_task_contracts));
     ASSERT(arrayp(lpc_contracts));
     ASSERT_EQ(18, sizeof(lpc_contracts));
     readonly_contract = lpc_contracts[0];
@@ -916,7 +960,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT(found_player_domain);
     ASSERT(found_economy_domain);
     ASSERT(arrayp(dispatch_contracts));
-    ASSERT_EQ(18, sizeof(dispatch_contracts));
+    ASSERT_EQ(19, sizeof(dispatch_contracts));
     for (i = 0; i < sizeof(dispatch_contracts); i++) {
         mapping entry = dispatch_contracts[i];
 
@@ -1013,6 +1057,14 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT(intp(fairness["owner_main_queue_owner_count"]));
     ASSERT(intp(fairness["main_ready_owner_count"]));
     ASSERT(intp(fairness["main_claim_blocked_owner_count"]));
+    ASSERT_EQ(1, fairness["owner_scheduler_backpressure_ready"]);
+    ASSERT_EQ("observe_then_reject_new_tasks", fairness["owner_scheduler_backpressure_strategy"]);
+    ASSERT_EQ(4096, fairness["owner_scheduler_max_owner_queue_depth"]);
+    ASSERT_EQ(3276, fairness["owner_scheduler_backpressure_high_watermark"]);
+    ASSERT(intp(fairness["owner_scheduler_max_owner_backlog"]));
+    ASSERT(intp(fairness["owner_scheduler_backpressure_over_limit"]));
+    ASSERT(intp(fairness["owner_scheduler_backpressure_high_watermark_exceeded"]));
+    ASSERT_EQ(1, fairness["owner_scheduler_fairness_guard_ready"]);
     ASSERT(intp(fairness["max_owner_main_queue_depth"]));
     assert_contract_entry(contract, "executor_probe", "executor_safe",
                           "owner_executor", 1, 0, 0);
@@ -1033,7 +1085,7 @@ void assert_owner_executor_contract(mapping status) {
                           "owner_executor", 1, 0, 0);
     nested_callback_contracts = contract["owner_executor_callback_allowlist"]["contracts"];
     ASSERT(arrayp(nested_callback_contracts));
-    ASSERT_EQ(6, sizeof(nested_callback_contracts));
+    ASSERT_EQ(7, sizeof(nested_callback_contracts));
     assert_contract_entry(contract, "owner_message_mailbox", "executor_safe",
                           "owner_executor", 1, 0, 0);
     assert_owner_message_route_contract(contract, "owner_message_mailbox", 1, 0);

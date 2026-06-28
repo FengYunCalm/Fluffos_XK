@@ -1680,7 +1680,7 @@ bool vm_object_store_test_support_remove_live_object_ref_for_bridge_readiness(co
 mapping_t *vm_object_handle_status(object_t *object) {
   auto handle = vm_object_handle(object);
   auto status = vm_object_handle_resolve_status(handle);
-  auto *map = allocate_mapping(36);
+  auto *map = allocate_mapping(37);
   add_mapping_pair(map, "success", handle.valid ? 1 : 0);
   add_mapping_pair(map, "object_id", static_cast<long>(handle.object_id));
   add_mapping_string(map, "owner_id", handle.owner_id.c_str());
@@ -1693,6 +1693,8 @@ mapping_t *vm_object_handle_status(object_t *object) {
   add_mapping_pair(map, "owner_local_fast_path_used", status.owner_local_fast_path_used ? 1 : 0);
   add_mapping_string(map, "owner_local_fast_path_lock_model",
                      status.owner_local_fast_path_used ? "shared_mutex_read_lock" : "");
+  add_mapping_pair(map, "owner_local_fast_path_global_fallback",
+                   status.owner_local_fast_path_used && status.resolved_via_global_index ? 1 : 0);
   add_mapping_pair(map, "diagnosed_via_owner_local_store", status.diagnosed_via_owner_local_store ? 1 : 0);
   add_mapping_pair(map, "diagnosed_via_owner_local_path_index",
                    status.diagnosed_via_owner_local_path_index ? 1 : 0);
@@ -1861,7 +1863,7 @@ mapping_t *vm_object_store_status() {
     migrations->item[migration_index].u.map = migration_trace_mapping(trace);
     migration_index++;
   }
-  auto *map = allocate_mapping(49);
+  auto *map = allocate_mapping(51);
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "store_kind", "vm_object_store");
   add_mapping_string(map, "status_model", "object_store_status");
@@ -1870,6 +1872,8 @@ mapping_t *vm_object_store_status() {
   add_mapping_pair(map, "object_store_owner_fast_path_ready", 1);
   add_mapping_pair(map, "owner_local_fast_path_ready", 1);
   add_mapping_string(map, "owner_local_fast_path_lock_model", "shared_mutex_read_lock");
+  add_mapping_pair(map, "object_store_global_fallback_on_owner_fast_path", 0);
+  add_mapping_string(map, "object_store_owner_fast_path_scope", "same_owner_handle_resolve");
   add_mapping_string(map, "owner_local_lifecycle_write_model",
                      "owner_shard_canonical_with_global_compat_mirror");
   add_mapping_string(map, "global_record_write_model", "compatibility_mirror");

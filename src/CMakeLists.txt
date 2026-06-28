@@ -418,6 +418,7 @@ set(SRC
   "vm/internal/owner.cc"
   "vm/internal/owner_executor.cc"
   "vm/internal/owner_future_store.cc"
+  "vm/internal/owner_runtime_coordinator.cc"
   "vm/internal/owner_runtime_metrics.cc"
   "vm/internal/owner_scheduler_state.cc"
   "vm/internal/owner_task_manifest.cc"

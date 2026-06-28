@@ -67,7 +67,7 @@ struct OwnerExecutorTaskDescriptor {
 };
 
 const std::array<OwnerLpcTaskDescriptor, 18> &owner_lpc_task_descriptors();
-const std::array<OwnerExecutorTaskDescriptor, 18> &owner_executor_task_descriptors();
+const std::array<OwnerExecutorTaskDescriptor, 19> &owner_executor_task_descriptors();
 const OwnerTaskRouteContract &owner_task_executor_safe_contract();
 const OwnerTaskRouteContract &owner_task_target_handle_contract();
 const OwnerExecutorTaskDescriptor &owner_generic_executor_task_descriptor();

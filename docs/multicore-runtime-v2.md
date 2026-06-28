@@ -2,6 +2,11 @@
 
 This document records the owner runtime v2 contract and the production-perfect extension layered on top of the production-ready multicore gate.
 
+Runtime v4 is the current hardening baseline for diagnostics, benchmark smoke,
+callback failure codes, scheduler backpressure, and CI gating. Runtime v2 remains
+the production contract foundation; see [Multicore Runtime v4 Hardening
+Baseline](./multicore-runtime-v4.md) for the current engineering gate.
+
 ## Baseline
 
 - Branch: `codex/multicore-production-perfect-engine`

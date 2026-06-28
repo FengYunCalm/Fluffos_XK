@@ -73,6 +73,7 @@
   X(owner_executor_epoch_mismatch_drop, 0)                        \
   X(owner_executor_future_timeout, 0)                             \
   X(owner_executor_future_cancelled, 0)                           \
+  X(owner_executor_backpressure_rejected, 0)                       \
   X(owner_executor_owner_claims, 0)                               \
   X(owner_executor_owner_releases, 0)                             \
   X(owner_executor_runnable_task_dispatched, 0)                   \
