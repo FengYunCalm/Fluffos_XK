@@ -13,6 +13,26 @@ title: cli / lpcc
 ./lpcc config_file lpc_file
 ```
 
+For LPC Modern Runtime migrations, `lpcc` also exposes a conservative owner
+audit scanner:
+
+```bash
+./lpcc --owner-audit --format=json config_file lpc_file
+```
+
+The JSON report uses `schema=lpcc_owner_audit_v1` and includes:
+
+- whether `#pragma modern_lpc` is present;
+- whether `#pragma strict_owner` is present;
+- static findings for cross-owner mutable writes;
+- static findings for bare object payloads;
+- static findings for unfrozen callback payloads;
+- static findings for direct hot-path `save_object` calls.
+
+The scanner is intentionally conservative. Treat findings as migration work
+items and confirm behavior with the runtime contract tests before enabling
+strict owner policy in a mudlib.
+
 ## Example output
 
 ```bash

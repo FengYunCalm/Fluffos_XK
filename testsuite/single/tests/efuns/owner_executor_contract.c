@@ -49,6 +49,11 @@ void assert_dispatch_entry(mapping dispatch_contract, string task_type,
     ASSERT(stringp(entry["payload_policy"]));
     ASSERT(stringp(entry["cleanup_policy"]));
     ASSERT(stringp(entry["reply_future_policy"]));
+    ASSERT(stringp(entry["tick_group"]));
+    ASSERT(entry["scheduler_priority"] > 0);
+    ASSERT(entry["scheduler_budget"] > 0);
+    ASSERT(entry["scheduler_max_queue_depth"] > 0);
+    ASSERT_EQ("observe_then_reject_new_tasks", entry["backpressure_policy"]);
 }
 
 void assert_production_gate_contract(mapping contract) {
@@ -647,11 +652,50 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("owner_runtime_bench_v1", boundary_contract["owner_runtime_benchmark_schema"]);
     ASSERT_EQ(1, boundary_contract["owner_runtime_stress_profile_ready"]);
     ASSERT_EQ("tools/owner-runtime-v4-stress.sh", boundary_contract["owner_runtime_stress_entry"]);
+    ASSERT_EQ(1, boundary_contract["lpc_modern_runtime_stress_ready"]);
+    ASSERT_EQ("tools/lpc-modern-runtime-stress.sh", boundary_contract["lpc_modern_runtime_stress_entry"]);
     ASSERT_EQ(1, boundary_contract["owner_runtime_layering_guard_ready"]);
     ASSERT_EQ(1, boundary_contract["owner_runtime_coordinator_module_ready"]);
     ASSERT_EQ("vm/internal/owner_runtime_coordinator.cc", boundary_contract["owner_runtime_coordinator_file"]);
     ASSERT_EQ("OwnerRuntimeCoordinator", boundary_contract["owner_runtime_store_owner"]);
     ASSERT_EQ("runtime_status_facade_and_legacy_glue", boundary_contract["owner_cc_runtime_role"]);
+    ASSERT_EQ(1, boundary_contract["lpc_modern_profile_ready"]);
+    ASSERT_EQ("lpc_modern_profile_v1", boundary_contract["lpc_modern_profile_schema"]);
+    ASSERT_EQ("opt_in_pragma", boundary_contract["lpc_modern_profile_mode"]);
+    ASSERT_EQ(1, boundary_contract["lpc_vm_profile_ready"]);
+    ASSERT_EQ("lpc_vm_profile_v1", boundary_contract["lpc_vm_profile_schema"]);
+    ASSERT_EQ(1, boundary_contract["lpc_vm_benchmark_smoke_ready"]);
+    ASSERT_EQ("lpc_vm_bench_v1", boundary_contract["lpc_vm_benchmark_schema"]);
+    ASSERT_EQ(1, boundary_contract["object_store_benchmark_smoke_ready"]);
+    ASSERT_EQ("object_store_bench_v1", boundary_contract["object_store_benchmark_schema"]);
+    ASSERT_EQ(1, boundary_contract["lpc_apply_dispatch_cache_probe_ready"]);
+    ASSERT_EQ(1, boundary_contract["lpc_dispatch_cache_ready"]);
+    ASSERT_EQ("apply_dispatch_thread_local_direct_cache_v1", boundary_contract["lpc_dispatch_cache_model"]);
+    ASSERT_EQ(1, boundary_contract["lpc_jit_experiment_default_off"]);
+    ASSERT_EQ(1, boundary_contract["modern_lpc_pragma_ready"]);
+    ASSERT_EQ(1, boundary_contract["strict_owner_pragma_ready"]);
+    ASSERT_EQ("strict_owner_owner_safe_payloads_v1", boundary_contract["strict_owner_policy"]);
+    ASSERT_EQ(1, boundary_contract["lpcc_owner_audit_ready"]);
+    ASSERT_EQ("lpcc_owner_audit_v1", boundary_contract["lpcc_owner_audit_schema"]);
+    ASSERT_EQ(1, boundary_contract["lpcc_owner_audit_cli_ready"]);
+    ASSERT_EQ("lpcc --owner-audit --format=json", boundary_contract["lpcc_owner_audit_cli"]);
+    ASSERT_EQ(1, boundary_contract["lpcc_owner_audit_static_scanner_ready"]);
+    ASSERT_EQ(1, boundary_contract["legacy_lpc_default_closed"]);
+    ASSERT_EQ("compiler/internal/lpc_modern_profile.cc", boundary_contract["lpc_modern_profile_module_file"]);
+    ASSERT_EQ(1, boundary_contract["owner_safe_future_api_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_async_api_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_await_poll_adapter_ready"]);
+    ASSERT_EQ(0, boundary_contract["owner_await_coroutine_runtime_ready"]);
+    ASSERT_EQ(1, boundary_contract["freeze_snapshot_api_ready"]);
+    ASSERT_EQ("validated_deep_copy", boundary_contract["freeze_snapshot_model"]);
+    ASSERT_EQ(1, boundary_contract["owner_snapshot_persistence_ready"]);
+    ASSERT_EQ("owner_snapshot_serialized_payload_v1",
+              boundary_contract["owner_snapshot_persistence_model"]);
+    ASSERT_EQ("main_thread_file_adapter", boundary_contract["owner_snapshot_persistence_adapter"]);
+    ASSERT_EQ(1, boundary_contract["owner_snapshot_direct_save_hot_path_audit_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_commit_api_ready"]);
+    ASSERT_EQ("owner_commit_boundary_record", boundary_contract["owner_commit_model"]);
+    ASSERT_EQ("packages/core/vm_owner.cc", boundary_contract["lpc_modern_api_file"]);
     ASSERT_EQ(1, boundary_contract["owner_task_manifest_module_ready"]);
     ASSERT_EQ("vm/internal/owner_task_manifest.cc", boundary_contract["owner_task_manifest_module_file"]);
     ASSERT_EQ(1, boundary_contract["owner_trace_store_ready"]);
@@ -664,6 +708,10 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("vm/internal/owner_runtime_metrics.cc", boundary_contract["owner_metrics_store_file"]);
     ASSERT_EQ(1, boundary_contract["object_store_owner_fast_path_ready"]);
     ASSERT_EQ(0, boundary_contract["object_store_global_fallback_on_owner_fast_path"]);
+    ASSERT_EQ(1, boundary_contract["object_handle_capability_ready"]);
+    ASSERT_EQ("object_handle_capability_v1", boundary_contract["object_handle_capability_model"]);
+    ASSERT_EQ("vm/object_handle.h", boundary_contract["object_handle_capability_file"]);
+    ASSERT_EQ("owner_runtime", boundary_contract["object_handle_permission_intent_default"]);
     ASSERT_EQ(1, boundary_contract["owner_scheduler_backpressure_ready"]);
     ASSERT_EQ("observe_then_reject_new_tasks", boundary_contract["owner_scheduler_backpressure_strategy"]);
     ASSERT_EQ(4096, boundary_contract["owner_scheduler_max_owner_queue_depth"]);
@@ -707,6 +755,17 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["owner_callback_allowlist_complete"]);
     ASSERT_EQ("heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback",
               boundary_contract["owner_callback_supported_kinds"]);
+    ASSERT_EQ(1, boundary_contract["owner_callback_payload_strict_diagnostics_ready"]);
+    ASSERT_EQ("owner_callback_payload_policy_v1", boundary_contract["owner_callback_payload_policy_schema"]);
+    ASSERT_EQ("frozen_payload_or_owner_handle_only", boundary_contract["owner_callback_payload_policy"]);
+    ASSERT_EQ("owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,owner_epoch_mismatch,"
+              "target_destructed,target_stale,admission_rejected,task_dropped",
+              boundary_contract["owner_callback_failure_codes"]);
+    ASSERT_EQ("none,owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,"
+              "owner_epoch_mismatch,target_destructed,target_stale,admission_rejected,task_dropped",
+              boundary_contract["owner_callback_drop_reasons"]);
+    ASSERT_EQ(1, boundary_contract["owner_callback_human_reason_ready"]);
+    ASSERT_EQ("owner_callback_failure_reason_v1", boundary_contract["owner_callback_failure_reason_schema"]);
     ASSERT_EQ(1, boundary_contract["executor_callback_cleanup_main_required"]);
     ASSERT_EQ(7, boundary_contract["executor_callback_allowlist_count"]);
     ASSERT_EQ("heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback",
@@ -774,11 +833,35 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("explicit_open_same_owner_only", boundary_contract["ordinary_lpc_policy"]);
     ASSERT_EQ(0, boundary_contract["lpc_surface_expanded"]);
     ASSERT_EQ(1, boundary_contract["registered_owner_task_domains_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_service_shard_registry_ready"]);
+    ASSERT_EQ("owner_service_shard_registry_v1",
+              boundary_contract["owner_service_shard_registry_schema"]);
+    ASSERT_EQ(18, boundary_contract["owner_service_shard_domain_count"]);
+    ASSERT_EQ("readonly,player,room,session,item,economy,combat,mail,reward,world,persistence,"
+              "team,guild,sect,quest,rank,crafting,life_skill",
+              boundary_contract["owner_service_shard_domains"]);
+    ASSERT_EQ(1, boundary_contract["owner_service_registry_lpc_domain_alignment_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_tick_group_scheduler_ready"]);
+    ASSERT_EQ("owner_tick_group_scheduler_v1",
+              boundary_contract["owner_tick_group_scheduler_schema"]);
+    ASSERT_EQ(6, boundary_contract["owner_tick_group_count"]);
+    ASSERT_EQ("gateway_command,heartbeat,callout,socket_async,service_tick,diagnostic",
+              boundary_contract["owner_tick_groups"]);
+    ASSERT_EQ(1, boundary_contract["owner_scheduler_tuning_config_ready"]);
+    ASSERT_EQ("owner_scheduler_tuning_v1", boundary_contract["owner_scheduler_tuning_config_schema"]);
+    ASSERT_EQ("owner_service_registry", boundary_contract["owner_scheduler_tick_group_budget_source"]);
+    ASSERT_EQ(1, boundary_contract["owner_scheduler_priority_groups_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_scheduler_tick_group_backpressure_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_scheduler_starvation_guard_ready"]);
     ASSERT_EQ(1, boundary_contract["target_owner_message_executor_ready"]);
     ASSERT_EQ(0, boundary_contract["normal_path_main_fallback_count"]);
     ASSERT_EQ(1, boundary_contract["normal_path_main_fallback_ready"]);
     ASSERT_EQ(1, boundary_contract["main_fallback_policy_ready"]);
     ASSERT_EQ("explicit_policy", boundary_contract["main_fallback_classification"]);
+    ASSERT_EQ(1, boundary_contract["session_fifo_contract_ready"]);
+    ASSERT_EQ(1, boundary_contract["gateway_io_adapter_only_ready"]);
+    ASSERT_EQ("main_thread_io_adapter", boundary_contract["gateway_io_boundary"]);
+    ASSERT_EQ(1, boundary_contract["callback_payload_strict_ready"]);
     ASSERT_EQ(1, boundary_contract["service_shard_executor_ready"]);
     ASSERT_EQ(1, boundary_contract["domain_task_registry_mudlib_aligned"]);
     ASSERT_EQ(1, boundary_contract["keyed_service_shard_ready"]);
@@ -805,16 +888,54 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["owner_runtime_v4_hardening_ready"]);
     ASSERT_EQ(1, status["owner_runtime_benchmark_smoke_ready"]);
     ASSERT_EQ("owner_runtime_bench_v1", status["owner_runtime_benchmark_schema"]);
+    ASSERT_EQ(1, status["lpc_modern_runtime_stress_ready"]);
+    ASSERT_EQ("tools/lpc-modern-runtime-stress.sh", status["lpc_modern_runtime_stress_entry"]);
     ASSERT_EQ(1, status["owner_runtime_stress_profile_ready"]);
     ASSERT_EQ("tools/owner-runtime-v4-stress.sh", status["owner_runtime_stress_entry"]);
     ASSERT_EQ(1, status["owner_runtime_layering_guard_ready"]);
     ASSERT_EQ(1, status["owner_runtime_coordinator_module_ready"]);
+    ASSERT_EQ(1, status["lpc_modern_profile_ready"]);
+    ASSERT_EQ("lpc_modern_profile_v1", status["lpc_modern_profile_schema"]);
+    ASSERT_EQ("opt_in_pragma", status["lpc_modern_profile_mode"]);
+    ASSERT_EQ(1, status["lpc_vm_profile_ready"]);
+    ASSERT_EQ("lpc_vm_profile_v1", status["lpc_vm_profile_schema"]);
+    ASSERT_EQ(1, status["lpc_vm_benchmark_smoke_ready"]);
+    ASSERT_EQ("lpc_vm_bench_v1", status["lpc_vm_benchmark_schema"]);
+    ASSERT_EQ(1, status["object_store_benchmark_smoke_ready"]);
+    ASSERT_EQ("object_store_bench_v1", status["object_store_benchmark_schema"]);
+    ASSERT_EQ(1, status["lpc_apply_dispatch_cache_probe_ready"]);
+    ASSERT_EQ(1, status["lpc_dispatch_cache_ready"]);
+    ASSERT_EQ("apply_dispatch_thread_local_direct_cache_v1", status["lpc_dispatch_cache_model"]);
+    ASSERT_EQ(1, status["lpc_jit_experiment_default_off"]);
+    ASSERT_EQ(1, status["modern_lpc_pragma_ready"]);
+    ASSERT_EQ(1, status["strict_owner_pragma_ready"]);
+    ASSERT_EQ("strict_owner_owner_safe_payloads_v1", status["strict_owner_policy"]);
+    ASSERT_EQ(1, status["lpcc_owner_audit_ready"]);
+    ASSERT_EQ("lpcc_owner_audit_v1", status["lpcc_owner_audit_schema"]);
+    ASSERT_EQ(1, status["lpcc_owner_audit_cli_ready"]);
+    ASSERT_EQ("lpcc --owner-audit --format=json", status["lpcc_owner_audit_cli"]);
+    ASSERT_EQ(1, status["lpcc_owner_audit_static_scanner_ready"]);
+    ASSERT_EQ(1, status["legacy_lpc_default_closed"]);
+    ASSERT_EQ(1, status["owner_safe_future_api_ready"]);
+    ASSERT_EQ(1, status["owner_async_api_ready"]);
+    ASSERT_EQ(1, status["owner_await_poll_adapter_ready"]);
+    ASSERT_EQ(0, status["owner_await_coroutine_runtime_ready"]);
+    ASSERT_EQ(1, status["freeze_snapshot_api_ready"]);
+    ASSERT_EQ("validated_deep_copy", status["freeze_snapshot_model"]);
+    ASSERT_EQ(1, status["owner_snapshot_persistence_ready"]);
+    ASSERT_EQ("owner_snapshot_serialized_payload_v1", status["owner_snapshot_persistence_model"]);
+    ASSERT_EQ("main_thread_file_adapter", status["owner_snapshot_persistence_adapter"]);
+    ASSERT_EQ(1, status["owner_snapshot_direct_save_hot_path_audit_ready"]);
+    ASSERT_EQ(1, status["owner_commit_api_ready"]);
+    ASSERT_EQ("owner_commit_boundary_record", status["owner_commit_model"]);
     ASSERT_EQ(1, status["owner_task_manifest_module_ready"]);
     ASSERT_EQ(1, status["owner_trace_store_ready"]);
     ASSERT_EQ(1, status["owner_future_store_ready"]);
     ASSERT_EQ(1, status["owner_scheduler_state_ready"]);
     ASSERT_EQ(1, status["owner_metrics_store_ready"]);
     ASSERT_EQ(1, status["object_store_owner_fast_path_ready"]);
+    ASSERT_EQ(1, status["object_handle_capability_ready"]);
+    ASSERT_EQ("object_handle_capability_v1", status["object_handle_capability_model"]);
     ASSERT_EQ(0, status["object_store_global_fallback_on_owner_fast_path"]);
     ASSERT_EQ(1, status["owner_scheduler_backpressure_ready"]);
     ASSERT_EQ("observe_then_reject_new_tasks", status["owner_scheduler_backpressure_strategy"]);
@@ -918,11 +1039,44 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["gateway_command_execute_session_revalidate_ready"]);
     ASSERT_EQ(1, status["registered_owner_task_domains_ready"]);
     ASSERT_EQ(18, status["registered_owner_task_domain_count"]);
+    ASSERT_EQ(1, status["owner_service_shard_registry_ready"]);
+    ASSERT_EQ("owner_service_shard_registry_v1", status["owner_service_shard_registry_schema"]);
+    ASSERT_EQ(18, status["owner_service_shard_domain_count"]);
+    ASSERT_EQ("readonly,player,room,session,item,economy,combat,mail,reward,world,persistence,"
+              "team,guild,sect,quest,rank,crafting,life_skill",
+              status["owner_service_shard_domains"]);
+    ASSERT_EQ(1, status["owner_service_registry_lpc_domain_alignment_ready"]);
+    ASSERT_EQ(1, status["owner_tick_group_scheduler_ready"]);
+    ASSERT_EQ("owner_tick_group_scheduler_v1", status["owner_tick_group_scheduler_schema"]);
+    ASSERT_EQ(6, status["owner_tick_group_count"]);
+    ASSERT_EQ("gateway_command,heartbeat,callout,socket_async,service_tick,diagnostic",
+              status["owner_tick_groups"]);
+    ASSERT_EQ(1, status["owner_scheduler_tuning_config_ready"]);
+    ASSERT_EQ("owner_scheduler_tuning_v1", status["owner_scheduler_tuning_config_schema"]);
+    ASSERT_EQ("owner_service_registry", status["owner_scheduler_tick_group_budget_source"]);
+    ASSERT_EQ(1, status["owner_scheduler_priority_groups_ready"]);
+    ASSERT_EQ(1, status["owner_scheduler_tick_group_backpressure_ready"]);
+    ASSERT_EQ(1, status["owner_scheduler_starvation_guard_ready"]);
     ASSERT_EQ(1, status["target_owner_message_executor_ready"]);
     ASSERT_EQ(0, status["normal_path_main_fallback_count"]);
     ASSERT_EQ(1, status["normal_path_main_fallback_ready"]);
     ASSERT_EQ(1, status["main_fallback_policy_ready"]);
     ASSERT_EQ("explicit_policy", status["main_fallback_classification"]);
+    ASSERT_EQ(1, status["session_fifo_contract_ready"]);
+    ASSERT_EQ(1, status["gateway_io_adapter_only_ready"]);
+    ASSERT_EQ("main_thread_io_adapter", status["gateway_io_boundary"]);
+    ASSERT_EQ(1, status["callback_payload_strict_ready"]);
+    ASSERT_EQ(1, status["owner_callback_payload_strict_diagnostics_ready"]);
+    ASSERT_EQ("owner_callback_payload_policy_v1", status["owner_callback_payload_policy_schema"]);
+    ASSERT_EQ("frozen_payload_or_owner_handle_only", status["owner_callback_payload_policy"]);
+    ASSERT_EQ("owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,owner_epoch_mismatch,"
+              "target_destructed,target_stale,admission_rejected,task_dropped",
+              status["owner_callback_failure_codes"]);
+    ASSERT_EQ("none,owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,"
+              "owner_epoch_mismatch,target_destructed,target_stale,admission_rejected,task_dropped",
+              status["owner_callback_drop_reasons"]);
+    ASSERT_EQ(1, status["owner_callback_human_reason_ready"]);
+    ASSERT_EQ("owner_callback_failure_reason_v1", status["owner_callback_failure_reason_schema"]);
     ASSERT_EQ(1, status["service_shard_executor_ready"]);
     ASSERT_EQ(1, status["domain_task_registry_mudlib_aligned"]);
     ASSERT_EQ(1, status["keyed_service_shard_ready"]);
@@ -1230,9 +1384,105 @@ void assert_owner_trace_models() {
     vm_owner_purge(target_owner);
 }
 
+void assert_lpc_modern_runtime_apis() {
+    string source_owner = "owner/test/lpc/modern/source";
+    string target_owner = "owner/test/lpc/modern/target";
+    mapping frozen;
+    mapping frozen_value;
+    mapping snapshot_value;
+    mapping persisted_snapshot;
+    mapping rejected;
+    mapping async_result;
+    mapping await_result;
+    mapping commit;
+    mixed *numbers;
+
+    frozen = freeze(([
+        "name": "modern",
+        "numbers": ({ 1, 2, 3 }),
+    ]));
+    ASSERT_EQ(1, frozen["success"]);
+    ASSERT_EQ(1, frozen["modern_lpc_api"]);
+    ASSERT_EQ(1, frozen["frozen_payload"]);
+    ASSERT_EQ(1, frozen["deep_copy"]);
+    ASSERT_EQ(0, frozen["immutable_runtime_type"]);
+    ASSERT_EQ("validated_deep_copy", frozen["immutability_model"]);
+    ASSERT(mapp(frozen["value"]));
+    frozen_value = frozen["value"];
+    ASSERT_EQ("modern", frozen_value["name"]);
+    numbers = frozen_value["numbers"];
+    ASSERT(arrayp(numbers));
+    ASSERT_EQ(3, sizeof(numbers));
+    ASSERT_EQ(2, numbers[1]);
+
+    rejected = freeze(([ "object": this_object() ]));
+    ASSERT_EQ(0, rejected["success"]);
+    ASSERT_EQ("invalid_frozen_payload", rejected["code"]);
+
+    snapshot_value = snapshot(([ "snapshot": "safe" ]));
+    ASSERT_EQ(1, snapshot_value["success"]);
+    ASSERT_EQ("snapshot", snapshot_value["api"]);
+    ASSERT_EQ(1, snapshot_value["snapshot_only"]);
+    ASSERT(mapp(snapshot_value["value"]));
+    ASSERT_EQ("safe", snapshot_value["value"]["snapshot"]);
+
+    persisted_snapshot = owner_snapshot_persist(this_object(), ([ "save_zeros": 1 ]));
+    ASSERT_EQ(1, persisted_snapshot["success"]);
+    ASSERT_EQ("owner_snapshot_persist", persisted_snapshot["api"]);
+    ASSERT_EQ(1, persisted_snapshot["modern_lpc_api"]);
+    ASSERT_EQ(1, persisted_snapshot["owner_snapshot_persistence_ready"]);
+    ASSERT_EQ("owner_snapshot_serialized_payload_v1",
+              persisted_snapshot["snapshot_persistence_model"]);
+    ASSERT_EQ("main_thread_file_adapter", persisted_snapshot["file_adapter_boundary"]);
+    ASSERT_EQ(0, persisted_snapshot["direct_save_hot_path"]);
+    ASSERT_EQ(1, persisted_snapshot["frozen_options"]);
+    ASSERT_EQ(1, persisted_snapshot["snapshot_only"]);
+    ASSERT_EQ(1, persisted_snapshot["object_handle_capability_ready"]);
+    ASSERT_EQ("object_handle_capability_v1", persisted_snapshot["capability_model"]);
+    ASSERT_EQ("snapshot_persistence", persisted_snapshot["permission_intent"]);
+    ASSERT_EQ("current", persisted_snapshot["target_handle_status"]);
+    ASSERT(persisted_snapshot["serialized_bytes"] > 0);
+    ASSERT(stringp(persisted_snapshot["serialized"]));
+
+    rejected = owner_async(this_object(), ([ "payload_key": "missing-method" ]));
+    ASSERT_EQ(0, rejected["success"]);
+    ASSERT_EQ("missing_method", rejected["code"]);
+
+    async_result = owner_async(target_owner, ([
+        "type": "modern_contract",
+        "payload_key": "payload/v1",
+    ]));
+    ASSERT_EQ(1, async_result["success"]);
+    ASSERT_EQ(1, async_result["modern_lpc_api"]);
+    ASSERT_EQ("owner_async", async_result["api"]);
+    ASSERT(async_result["future_id"] > 0);
+
+    await_result = owner_await(async_result["future_id"]);
+    ASSERT_EQ(1, await_result["modern_lpc_api"]);
+    ASSERT_EQ("owner_await", await_result["api"]);
+    ASSERT_EQ("poll_adapter_until_coroutine_runtime", await_result["await_model"]);
+    ASSERT_EQ(0, await_result["coroutine_runtime_ready"]);
+
+    commit = owner_commit(([
+        "source_owner": source_owner,
+        "target_owner": target_owner,
+        "operation": "modern_commit",
+        "message_id": async_result["message_id"],
+        "state": "prepared",
+    ]));
+    ASSERT_EQ(1, commit["success"]);
+    ASSERT_EQ(1, commit["modern_lpc_api"]);
+    ASSERT_EQ("owner_commit", commit["api"]);
+    ASSERT_EQ(1, commit["commit_proposal"]);
+    ASSERT_EQ("owner_commit_boundary_record", commit["commit_model"]);
+
+    vm_owner_purge(target_owner);
+}
+
 void do_tests() {
     assert_owner_executor_contract(vm_owner_runtime_status());
     assert_owner_executor_contract(vm_owner_thread_status());
     assert_owner_executor_trace(vm_owner_executor_trace(8));
     assert_owner_trace_models();
+    assert_lpc_modern_runtime_apis();
 }

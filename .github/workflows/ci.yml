@@ -164,16 +164,19 @@ jobs:
       - name: Run Unit Tests
         run: cd build && make test
 
-      - name: Run Owner Runtime v4 Gate
+      - name: Run LPC Modern Runtime Gate
         if: matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer
-        run: tools/owner-runtime-v4-stress.sh smoke
+        run: tools/lpc-modern-runtime-stress.sh smoke
 
-      - name: Upload Owner Runtime Benchmark Report
+      - name: Upload LPC Modern Runtime Benchmark Reports
         if: always() && matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer
         uses: actions/upload-artifact@v4
         with:
-          name: owner-runtime-bench-smoke
-          path: build/reports/owner_runtime_bench_smoke.json
+          name: lpc-modern-runtime-bench-smoke
+          path: |
+            build/reports/owner_runtime_bench_smoke.json
+            build/reports/lpc_vm_bench_smoke.json
+            build/reports/object_store_bench_smoke.json
           if-no-files-found: ignore
 
       - name: Run LPC Testsuite

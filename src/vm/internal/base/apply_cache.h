@@ -4,5 +4,6 @@
 #include "vm/internal/base/program.h"
 
 lookup_entry_s apply_cache_lookup(const char *funcname, struct program_t *prog);
+void apply_cache_invalidate_program(struct program_t *prog);
 
 #endif /* LPC_APPLY_CACHE_H_ */

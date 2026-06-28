@@ -19,6 +19,8 @@
 #define PRAGMA_OPTIMIZE 16
 #define PRAGMA_ERROR_CONTEXT 32
 #define PRAGMA_OPTIMIZE_HIGH 64
+#define PRAGMA_MODERN_LPC 128
+#define PRAGMA_STRICT_OWNER 256
 /* for find_or_add_ident */
 #define FOA_GLOBAL_SCOPE 0x1
 #define FOA_NEEDS_MALLOC 0x2

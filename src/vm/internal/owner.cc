@@ -9,8 +9,11 @@
 #include "vm/internal/owner_runtime_coordinator.h"
 #include "vm/internal/owner_runtime_metrics.h"
 #include "vm/internal/owner_scheduler_state.h"
+#include "vm/internal/owner_service_registry.h"
 #include "vm/internal/owner_task_manifest.h"
 #include "vm/internal/owner_trace_store.h"
+#include "vm/internal/lpc_vm_profile.h"
+#include "compiler/internal/lpc_modern_profile.h"
 
 #include <array>
 #include <atomic>
@@ -37,13 +40,34 @@ constexpr long kOwnerSchedulerBackpressureHighWatermark = kOwnerSchedulerMaxOwne
 constexpr const char *kOwnerExecutorContractVersion = "owner_executor_v2";
 constexpr const char *kOwnerRuntimeBenchmarkSchemaV1 = "owner_runtime_bench_v1";
 constexpr const char *kOwnerRuntimeStressEntry = "tools/owner-runtime-v4-stress.sh";
+constexpr const char *kObjectStoreBenchmarkSchemaV1 = "object_store_bench_v1";
+constexpr const char *kLpcModernRuntimeStressEntry = "tools/lpc-modern-runtime-stress.sh";
 constexpr const char *kOwnerCallbackDiagnosticsSchemaV1 = "owner_callback_diagnostics_v1";
 constexpr const char *kOwnerCallbackFailureCodeSchemaV1 = "owner_callback_failure_code_v1";
 constexpr const char *kOwnerCallbackDropReasonSchemaV1 = "owner_callback_drop_reason_v1";
+constexpr const char *kOwnerCallbackPayloadPolicySchemaV1 = "owner_callback_payload_policy_v1";
+constexpr const char *kOwnerCallbackFailureReasonSchemaV1 = "owner_callback_failure_reason_v1";
+constexpr const char *kOwnerCallbackPayloadPolicyStrictV1 = "frozen_payload_or_owner_handle_only";
+constexpr const char *kOwnerCallbackFailureCodesV1 =
+    "owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,owner_epoch_mismatch,"
+    "target_destructed,target_stale,admission_rejected,task_dropped";
+constexpr const char *kOwnerCallbackDropReasonsV1 =
+    "none,owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,owner_epoch_mismatch,"
+    "target_destructed,target_stale,admission_rejected,task_dropped";
 constexpr const char *kOwnerCallbackSupportedKinds =
     "heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback";
 
 constexpr const char *kGatewayCommandExecutorActivationBlocker = "";
+
+void add_owner_callback_diagnostic_contract_fields(mapping_t *map) {
+  add_mapping_pair(map, "owner_callback_payload_strict_diagnostics_ready", 1);
+  add_mapping_string(map, "owner_callback_payload_policy_schema", kOwnerCallbackPayloadPolicySchemaV1);
+  add_mapping_string(map, "owner_callback_payload_policy", kOwnerCallbackPayloadPolicyStrictV1);
+  add_mapping_string(map, "owner_callback_failure_codes", kOwnerCallbackFailureCodesV1);
+  add_mapping_string(map, "owner_callback_drop_reasons", kOwnerCallbackDropReasonsV1);
+  add_mapping_pair(map, "owner_callback_human_reason_ready", 1);
+  add_mapping_string(map, "owner_callback_failure_reason_schema", kOwnerCallbackFailureReasonSchemaV1);
+}
 
 struct VMContextReadinessGate {
   const char *gate;
@@ -377,8 +401,44 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_string(map, "owner_runtime_benchmark_schema", kOwnerRuntimeBenchmarkSchemaV1);
   add_mapping_pair(map, "owner_runtime_stress_profile_ready", 1);
   add_mapping_string(map, "owner_runtime_stress_entry", kOwnerRuntimeStressEntry);
+  add_mapping_pair(map, "lpc_modern_runtime_stress_ready", 1);
+  add_mapping_string(map, "lpc_modern_runtime_stress_entry", kLpcModernRuntimeStressEntry);
   add_mapping_pair(map, "owner_runtime_layering_guard_ready", 1);
   add_mapping_pair(map, "owner_runtime_coordinator_module_ready", 1);
+  add_mapping_pair(map, "lpc_modern_profile_ready", 1);
+  add_mapping_string(map, "lpc_modern_profile_schema", kLpcModernProfileSchemaV1);
+  add_mapping_string(map, "lpc_modern_profile_mode", kLpcModernProfileModeOptIn);
+  add_mapping_pair(map, "lpc_vm_profile_ready", 1);
+  add_mapping_string(map, "lpc_vm_profile_schema", kLpcVmProfileSchemaV1);
+  add_mapping_pair(map, "lpc_vm_benchmark_smoke_ready", 1);
+  add_mapping_string(map, "lpc_vm_benchmark_schema", kLpcVmBenchSchemaV1);
+  add_mapping_pair(map, "object_store_benchmark_smoke_ready", 1);
+  add_mapping_string(map, "object_store_benchmark_schema", kObjectStoreBenchmarkSchemaV1);
+  add_mapping_pair(map, "lpc_apply_dispatch_cache_probe_ready", 1);
+  add_mapping_pair(map, "lpc_dispatch_cache_ready", 1);
+  add_mapping_string(map, "lpc_dispatch_cache_model", "apply_dispatch_thread_local_direct_cache_v1");
+  add_mapping_pair(map, "lpc_jit_experiment_default_off", 1);
+  add_mapping_pair(map, "modern_lpc_pragma_ready", 1);
+  add_mapping_pair(map, "strict_owner_pragma_ready", 1);
+  add_mapping_string(map, "strict_owner_policy", kLpcStrictOwnerPolicyV1);
+  add_mapping_pair(map, "lpcc_owner_audit_ready", 1);
+  add_mapping_string(map, "lpcc_owner_audit_schema", kLpcOwnerAuditSchemaV1);
+  add_mapping_pair(map, "lpcc_owner_audit_cli_ready", 1);
+  add_mapping_string(map, "lpcc_owner_audit_cli", "lpcc --owner-audit --format=json");
+  add_mapping_pair(map, "lpcc_owner_audit_static_scanner_ready", 1);
+  add_mapping_pair(map, "legacy_lpc_default_closed", 1);
+  add_mapping_pair(map, "owner_safe_future_api_ready", 1);
+  add_mapping_pair(map, "owner_async_api_ready", 1);
+  add_mapping_pair(map, "owner_await_poll_adapter_ready", 1);
+  add_mapping_pair(map, "owner_await_coroutine_runtime_ready", 0);
+  add_mapping_pair(map, "freeze_snapshot_api_ready", 1);
+  add_mapping_string(map, "freeze_snapshot_model", "validated_deep_copy");
+  add_mapping_pair(map, "owner_snapshot_persistence_ready", 1);
+  add_mapping_string(map, "owner_snapshot_persistence_model", "owner_snapshot_serialized_payload_v1");
+  add_mapping_string(map, "owner_snapshot_persistence_adapter", "main_thread_file_adapter");
+  add_mapping_pair(map, "owner_snapshot_direct_save_hot_path_audit_ready", 1);
+  add_mapping_pair(map, "owner_commit_api_ready", 1);
+  add_mapping_string(map, "owner_commit_model", "owner_commit_boundary_record");
   add_mapping_pair(map, "owner_task_manifest_module_ready", 1);
   add_mapping_pair(map, "owner_trace_store_ready", 1);
   add_mapping_pair(map, "owner_future_store_ready", 1);
@@ -386,6 +446,8 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "owner_metrics_store_ready", 1);
   add_mapping_pair(map, "object_store_owner_fast_path_ready", 1);
   add_mapping_pair(map, "object_store_global_fallback_on_owner_fast_path", 0);
+  add_mapping_pair(map, "object_handle_capability_ready", 1);
+  add_mapping_string(map, "object_handle_capability_model", kVMObjectHandleCapabilityModelV1);
   add_mapping_pair(map, "owner_task_manifest_v2_ready", 1);
   add_mapping_string(map, "owner_task_manifest_schema", kOwnerTaskManifestSchemaV2);
   add_mapping_pair(map, "owner_executor_admission_gate_ready", 1);
@@ -396,6 +458,7 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_string(map, "owner_callback_drop_reason_schema", kOwnerCallbackDropReasonSchemaV1);
   add_mapping_pair(map, "owner_callback_allowlist_complete", 1);
   add_mapping_string(map, "owner_callback_supported_kinds", kOwnerCallbackSupportedKinds);
+  add_owner_callback_diagnostic_contract_fields(map);
   add_mapping_pair(map, "executor_callback_allowlist_count", owner_executor_callback_allowlist_count());
   add_mapping_string(map, "owner_executor_admission_policy", kOwnerTaskAdmissionPolicyV2);
   add_mapping_pair(map, "owner_executor_admission_accepted",
@@ -429,6 +492,23 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "owner_executor_socket_release_trace_ready", 1);
   add_mapping_pair(map, "registered_owner_task_domains_ready", 1);
   add_mapping_pair(map, "registered_owner_task_domain_count", static_cast<long>(owner_lpc_task_descriptors().size()));
+  add_mapping_pair(map, "owner_service_shard_registry_ready", 1);
+  add_mapping_string(map, "owner_service_shard_registry_schema", kOwnerServiceShardRegistrySchemaV1);
+  add_mapping_pair(map, "owner_service_shard_domain_count",
+                   static_cast<long>(owner_service_shard_descriptors().size()));
+  add_mapping_string(map, "owner_service_shard_domains", owner_service_shard_domain_list().c_str());
+  add_mapping_pair(map, "owner_service_registry_lpc_domain_alignment_ready",
+                   owner_service_registry_matches_lpc_domains() ? 1 : 0);
+  add_mapping_pair(map, "owner_tick_group_scheduler_ready", 1);
+  add_mapping_string(map, "owner_tick_group_scheduler_schema", kOwnerTickGroupSchedulerSchemaV1);
+  add_mapping_pair(map, "owner_tick_group_count", static_cast<long>(owner_tick_group_descriptors().size()));
+  add_mapping_string(map, "owner_tick_groups", owner_tick_group_name_list().c_str());
+  add_mapping_pair(map, "owner_scheduler_tuning_config_ready", 1);
+  add_mapping_string(map, "owner_scheduler_tuning_config_schema", kOwnerSchedulerTuningConfigSchemaV1);
+  add_mapping_string(map, "owner_scheduler_tick_group_budget_source", "owner_service_registry");
+  add_mapping_pair(map, "owner_scheduler_priority_groups_ready", 1);
+  add_mapping_pair(map, "owner_scheduler_tick_group_backpressure_ready", 1);
+  add_mapping_pair(map, "owner_scheduler_starvation_guard_ready", 1);
   add_mapping_pair(map, "target_owner_message_executor_ready", 1);
   add_mapping_pair(map, "normal_path_main_fallback_count", normal_path_main_fallbacks);
   add_mapping_pair(map, "normal_path_main_fallback_ready", normal_path_main_fallbacks == 0 ? 1 : 0);
@@ -438,6 +518,10 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "off_mode_main_fallback_count", static_cast<long>(metrics.owner_off_mode_main_fallback_count));
   add_mapping_pair(map, "main_io_adapter_count", static_cast<long>(metrics.owner_main_io_adapter_count));
   add_mapping_pair(map, "main_cleanup_adapter_count", static_cast<long>(metrics.owner_main_cleanup_adapter_count));
+  add_mapping_pair(map, "session_fifo_contract_ready", 1);
+  add_mapping_pair(map, "gateway_io_adapter_only_ready", 1);
+  add_mapping_string(map, "gateway_io_boundary", "main_thread_io_adapter");
+  add_mapping_pair(map, "callback_payload_strict_ready", 1);
   add_mapping_pair(map, "service_shard_executor_ready", 1);
   add_mapping_pair(map, "domain_task_registry_mudlib_aligned", 1);
   add_mapping_pair(map, "keyed_service_shard_ready", 1);
@@ -500,6 +584,12 @@ void apply_owner_task_manifest_v2(OwnerMailboxTask &task) {
   task.admission_policy = kOwnerTaskAdmissionPolicyV2;
   task.admission_state = descriptor.rejected ? "accepted_dispatch_rejected" : "accepted";
   task.trace_schema = kOwnerExecutorTraceSchemaV2;
+  const auto &tick_group = owner_tick_group_for_executor_task(task.task_type.c_str());
+  task.tick_group = tick_group.name;
+  task.scheduler_priority = tick_group.priority;
+  task.scheduler_budget = tick_group.budget;
+  task.scheduler_max_queue_depth = tick_group.max_queue_depth;
+  task.backpressure_policy = tick_group.backpressure_policy;
 }
 
 array_t *owner_lpc_task_allowlist_array() {
@@ -563,7 +653,8 @@ mapping_t *owner_ordinary_lpc_contract_entry(const OwnerExecutorTaskDescriptor &
 }
 
 mapping_t *owner_executor_task_contract_entry(const OwnerExecutorTaskDescriptor &descriptor) {
-  auto *map = allocate_mapping(22);
+  auto *map = allocate_mapping(28);
+  const auto &tick_group = owner_tick_group_for_executor_task(descriptor.task_type);
   add_mapping_string(map, "task_type", descriptor.task_type);
   add_mapping_string(map, "contract_key", descriptor.contract_key);
   add_mapping_string(map, "dispatch_kind", owner_executor_dispatch_kind_name(descriptor.dispatch_kind));
@@ -584,6 +675,11 @@ mapping_t *owner_executor_task_contract_entry(const OwnerExecutorTaskDescriptor 
   add_mapping_string(map, "cleanup_policy", owner_manifest_cleanup_policy(descriptor.dispatch_kind, false));
   add_mapping_string(map, "reply_future_policy", owner_manifest_reply_future_policy(descriptor.dispatch_kind));
   add_mapping_string(map, "trace_schema", kOwnerExecutorTraceSchemaV2);
+  add_mapping_string(map, "tick_group", tick_group.name);
+  add_mapping_pair(map, "scheduler_priority", tick_group.priority);
+  add_mapping_pair(map, "scheduler_budget", tick_group.budget);
+  add_mapping_pair(map, "scheduler_max_queue_depth", tick_group.max_queue_depth);
+  add_mapping_string(map, "backpressure_policy", tick_group.backpressure_policy);
   add_mapping_pair(map, "deadline_required", 0);
   add_mapping_pair(map, "ordinary_lpc_default_closed", 1);
   add_mapping_string(map, "reason", descriptor.reason);
@@ -1198,7 +1294,7 @@ mapping_t *vm_context_contract_mapping() {
 }
 
 mapping_t *owner_executor_boundary_contract_mapping() {
-  auto *contract = allocate_mapping(117);
+  auto *contract = allocate_mapping(156);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "boundary_model", "owner_executor_boundary_v1");
   add_mapping_string(contract, "implementation_state", "compilation_unit_active");
@@ -1216,11 +1312,49 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "owner_runtime_benchmark_schema", kOwnerRuntimeBenchmarkSchemaV1);
   add_mapping_pair(contract, "owner_runtime_stress_profile_ready", 1);
   add_mapping_string(contract, "owner_runtime_stress_entry", kOwnerRuntimeStressEntry);
+  add_mapping_pair(contract, "lpc_modern_runtime_stress_ready", 1);
+  add_mapping_string(contract, "lpc_modern_runtime_stress_entry", kLpcModernRuntimeStressEntry);
   add_mapping_pair(contract, "owner_runtime_layering_guard_ready", 1);
   add_mapping_pair(contract, "owner_runtime_coordinator_module_ready", 1);
   add_mapping_string(contract, "owner_runtime_coordinator_file", "vm/internal/owner_runtime_coordinator.cc");
   add_mapping_string(contract, "owner_runtime_store_owner", "OwnerRuntimeCoordinator");
   add_mapping_string(contract, "owner_cc_runtime_role", "runtime_status_facade_and_legacy_glue");
+  add_mapping_pair(contract, "lpc_modern_profile_ready", 1);
+  add_mapping_string(contract, "lpc_modern_profile_schema", kLpcModernProfileSchemaV1);
+  add_mapping_string(contract, "lpc_modern_profile_mode", kLpcModernProfileModeOptIn);
+  add_mapping_pair(contract, "lpc_vm_profile_ready", 1);
+  add_mapping_string(contract, "lpc_vm_profile_schema", kLpcVmProfileSchemaV1);
+  add_mapping_pair(contract, "lpc_vm_benchmark_smoke_ready", 1);
+  add_mapping_string(contract, "lpc_vm_benchmark_schema", kLpcVmBenchSchemaV1);
+  add_mapping_pair(contract, "object_store_benchmark_smoke_ready", 1);
+  add_mapping_string(contract, "object_store_benchmark_schema", kObjectStoreBenchmarkSchemaV1);
+  add_mapping_pair(contract, "lpc_apply_dispatch_cache_probe_ready", 1);
+  add_mapping_pair(contract, "lpc_dispatch_cache_ready", 1);
+  add_mapping_string(contract, "lpc_dispatch_cache_model", "apply_dispatch_thread_local_direct_cache_v1");
+  add_mapping_pair(contract, "lpc_jit_experiment_default_off", 1);
+  add_mapping_pair(contract, "modern_lpc_pragma_ready", 1);
+  add_mapping_pair(contract, "strict_owner_pragma_ready", 1);
+  add_mapping_string(contract, "strict_owner_policy", kLpcStrictOwnerPolicyV1);
+  add_mapping_pair(contract, "lpcc_owner_audit_ready", 1);
+  add_mapping_string(contract, "lpcc_owner_audit_schema", kLpcOwnerAuditSchemaV1);
+  add_mapping_pair(contract, "lpcc_owner_audit_cli_ready", 1);
+  add_mapping_string(contract, "lpcc_owner_audit_cli", "lpcc --owner-audit --format=json");
+  add_mapping_pair(contract, "lpcc_owner_audit_static_scanner_ready", 1);
+  add_mapping_pair(contract, "legacy_lpc_default_closed", 1);
+  add_mapping_string(contract, "lpc_modern_profile_module_file", "compiler/internal/lpc_modern_profile.cc");
+  add_mapping_pair(contract, "owner_safe_future_api_ready", 1);
+  add_mapping_pair(contract, "owner_async_api_ready", 1);
+  add_mapping_pair(contract, "owner_await_poll_adapter_ready", 1);
+  add_mapping_pair(contract, "owner_await_coroutine_runtime_ready", 0);
+  add_mapping_pair(contract, "freeze_snapshot_api_ready", 1);
+  add_mapping_string(contract, "freeze_snapshot_model", "validated_deep_copy");
+  add_mapping_pair(contract, "owner_snapshot_persistence_ready", 1);
+  add_mapping_string(contract, "owner_snapshot_persistence_model", "owner_snapshot_serialized_payload_v1");
+  add_mapping_string(contract, "owner_snapshot_persistence_adapter", "main_thread_file_adapter");
+  add_mapping_pair(contract, "owner_snapshot_direct_save_hot_path_audit_ready", 1);
+  add_mapping_pair(contract, "owner_commit_api_ready", 1);
+  add_mapping_string(contract, "owner_commit_model", "owner_commit_boundary_record");
+  add_mapping_string(contract, "lpc_modern_api_file", "packages/core/vm_owner.cc");
   add_mapping_pair(contract, "owner_task_manifest_module_ready", 1);
   add_mapping_string(contract, "owner_task_manifest_module_file", "vm/internal/owner_task_manifest.cc");
   add_mapping_pair(contract, "owner_trace_store_ready", 1);
@@ -1233,6 +1367,10 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "owner_metrics_store_file", "vm/internal/owner_runtime_metrics.cc");
   add_mapping_pair(contract, "object_store_owner_fast_path_ready", 1);
   add_mapping_pair(contract, "object_store_global_fallback_on_owner_fast_path", 0);
+  add_mapping_pair(contract, "object_handle_capability_ready", 1);
+  add_mapping_string(contract, "object_handle_capability_model", kVMObjectHandleCapabilityModelV1);
+  add_mapping_string(contract, "object_handle_capability_file", "vm/object_handle.h");
+  add_mapping_string(contract, "object_handle_permission_intent_default", kVMObjectHandleDefaultPermissionIntent);
   add_mapping_pair(contract, "owner_scheduler_backpressure_ready", 1);
   add_mapping_string(contract, "owner_scheduler_backpressure_strategy", "observe_then_reject_new_tasks");
   add_mapping_pair(contract, "owner_scheduler_max_owner_queue_depth", kOwnerSchedulerMaxOwnerQueueDepth);
@@ -1275,6 +1413,7 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "owner_callback_drop_reason_schema", kOwnerCallbackDropReasonSchemaV1);
   add_mapping_pair(contract, "owner_callback_allowlist_complete", 1);
   add_mapping_string(contract, "owner_callback_supported_kinds", kOwnerCallbackSupportedKinds);
+  add_owner_callback_diagnostic_contract_fields(contract);
   add_mapping_pair(contract, "executor_callback_cleanup_main_required", 1);
   add_mapping_pair(contract, "executor_callback_allowlist_count", owner_executor_callback_allowlist_count());
   add_mapping_string(contract, "executor_callback_allowlist", kOwnerCallbackSupportedKinds);
@@ -1341,11 +1480,32 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "ordinary_lpc_policy", "explicit_open_same_owner_only");
   add_mapping_pair(contract, "lpc_surface_expanded", 0);
   add_mapping_pair(contract, "registered_owner_task_domains_ready", 1);
+  add_mapping_pair(contract, "owner_service_shard_registry_ready", 1);
+  add_mapping_string(contract, "owner_service_shard_registry_schema", kOwnerServiceShardRegistrySchemaV1);
+  add_mapping_pair(contract, "owner_service_shard_domain_count",
+                   static_cast<long>(owner_service_shard_descriptors().size()));
+  add_mapping_string(contract, "owner_service_shard_domains", owner_service_shard_domain_list().c_str());
+  add_mapping_pair(contract, "owner_service_registry_lpc_domain_alignment_ready",
+                   owner_service_registry_matches_lpc_domains() ? 1 : 0);
+  add_mapping_pair(contract, "owner_tick_group_scheduler_ready", 1);
+  add_mapping_string(contract, "owner_tick_group_scheduler_schema", kOwnerTickGroupSchedulerSchemaV1);
+  add_mapping_pair(contract, "owner_tick_group_count", static_cast<long>(owner_tick_group_descriptors().size()));
+  add_mapping_string(contract, "owner_tick_groups", owner_tick_group_name_list().c_str());
+  add_mapping_pair(contract, "owner_scheduler_tuning_config_ready", 1);
+  add_mapping_string(contract, "owner_scheduler_tuning_config_schema", kOwnerSchedulerTuningConfigSchemaV1);
+  add_mapping_string(contract, "owner_scheduler_tick_group_budget_source", "owner_service_registry");
+  add_mapping_pair(contract, "owner_scheduler_priority_groups_ready", 1);
+  add_mapping_pair(contract, "owner_scheduler_tick_group_backpressure_ready", 1);
+  add_mapping_pair(contract, "owner_scheduler_starvation_guard_ready", 1);
   add_mapping_pair(contract, "target_owner_message_executor_ready", 1);
   add_mapping_pair(contract, "normal_path_main_fallback_count", 0);
   add_mapping_pair(contract, "normal_path_main_fallback_ready", 1);
   add_mapping_pair(contract, "main_fallback_policy_ready", 1);
   add_mapping_string(contract, "main_fallback_classification", "explicit_policy");
+  add_mapping_pair(contract, "session_fifo_contract_ready", 1);
+  add_mapping_pair(contract, "gateway_io_adapter_only_ready", 1);
+  add_mapping_string(contract, "gateway_io_boundary", "main_thread_io_adapter");
+  add_mapping_pair(contract, "callback_payload_strict_ready", 1);
   add_mapping_pair(contract, "service_shard_executor_ready", 1);
   add_mapping_pair(contract, "domain_task_registry_mudlib_aligned", 1);
   add_mapping_pair(contract, "keyed_service_shard_ready", 1);
@@ -1420,7 +1580,7 @@ const OwnerTaskRouteContract &owner_task_route_contract(const OwnerMailboxTask &
 }
 
 mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
-  auto *map = allocate_mapping(41);
+  auto *map = allocate_mapping(48);
   const auto &descriptor = owner_executor_task_descriptor(task);
   const auto target_message = task.task_type == "owner_message" && task.has_target_handle;
   const auto &message_route_contract = owner_task_route_contract(task);
@@ -1457,6 +1617,11 @@ mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
   add_mapping_string(map, "admission_policy", task.admission_policy.c_str());
   add_mapping_string(map, "admission_state", task.admission_state.c_str());
   add_mapping_string(map, "trace_schema", task.trace_schema.c_str());
+  add_mapping_string(map, "tick_group", task.tick_group.c_str());
+  add_mapping_pair(map, "scheduler_priority", task.scheduler_priority);
+  add_mapping_pair(map, "scheduler_budget", task.scheduler_budget);
+  add_mapping_pair(map, "scheduler_max_queue_depth", task.scheduler_max_queue_depth);
+  add_mapping_string(map, "backpressure_policy", task.backpressure_policy.c_str());
   add_mapping_pair(map, "trace_schema_version", 2);
   add_mapping_string(map, "diagnostic_schema", kOwnerCallbackDiagnosticsSchemaV1);
   add_mapping_string(map, "failure_code_schema", kOwnerCallbackFailureCodeSchemaV1);
@@ -1464,6 +1629,9 @@ mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
   add_mapping_string(map, "failure_code", owner_task_failure_code("", task.admission_state));
   add_mapping_string(map, "failure_reason", owner_task_failure_reason("", task.admission_state));
   add_mapping_string(map, "drop_reason", owner_task_drop_reason("", task.admission_state));
+  add_mapping_string(map, "payload_policy_code", task.payload_policy.c_str());
+  add_mapping_pair(map, "callback_payload_strict_required",
+                   descriptor.dispatch_kind == OwnerExecutorDispatchKind::ExecutorCallback ? 1 : 0);
   add_mapping_pair(map, "deadline_ms", static_cast<long>(task.deadline_ms));
   add_mapping_string(map, "task_contract_key", contract_key);
   add_mapping_string(map, "dispatch_kind", owner_executor_dispatch_kind_name(descriptor.dispatch_kind));
@@ -1483,7 +1651,7 @@ mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
 mapping_t *owner_task_trace_mapping(const OwnerTaskTrace &trace) {
   auto target_status = trace.has_target_handle ? vm_object_handle_resolve_status(trace.target_handle).status
                                                : VMObjectHandleResolveStatus::kInvalidHandle;
-  auto *map = allocate_mapping(54);
+  auto *map = allocate_mapping(61);
   add_mapping_pair(map, "trace_id", static_cast<long>(trace.trace_id));
   add_mapping_string(map, "trace_model", "owner_task_lifecycle_event");
   add_mapping_pair(map, "task_id", static_cast<long>(trace.task_id));
@@ -1504,6 +1672,11 @@ mapping_t *owner_task_trace_mapping(const OwnerTaskTrace &trace) {
   add_mapping_string(map, "admission_policy", trace.admission_policy.c_str());
   add_mapping_string(map, "admission_state", trace.admission_state.c_str());
   add_mapping_string(map, "trace_schema", trace.trace_schema.c_str());
+  add_mapping_string(map, "tick_group", trace.tick_group.c_str());
+  add_mapping_pair(map, "scheduler_priority", trace.scheduler_priority);
+  add_mapping_pair(map, "scheduler_budget", trace.scheduler_budget);
+  add_mapping_pair(map, "scheduler_max_queue_depth", trace.scheduler_max_queue_depth);
+  add_mapping_string(map, "backpressure_policy", trace.backpressure_policy.c_str());
   add_mapping_pair(map, "trace_schema_version", 2);
   add_mapping_string(map, "diagnostic_schema", kOwnerCallbackDiagnosticsSchemaV1);
   add_mapping_string(map, "failure_code_schema", kOwnerCallbackFailureCodeSchemaV1);
@@ -1511,6 +1684,9 @@ mapping_t *owner_task_trace_mapping(const OwnerTaskTrace &trace) {
   add_mapping_string(map, "failure_code", owner_task_failure_code(trace.state, trace.admission_state));
   add_mapping_string(map, "failure_reason", owner_task_failure_reason(trace.state, trace.admission_state));
   add_mapping_string(map, "drop_reason", owner_task_drop_reason(trace.state, trace.admission_state));
+  add_mapping_string(map, "payload_policy_code", trace.payload_policy.c_str());
+  add_mapping_pair(map, "callback_payload_strict_required",
+                   trace.task_kind == owner_executor_dispatch_kind_name(OwnerExecutorDispatchKind::ExecutorCallback) ? 1 : 0);
   add_mapping_pair(map, "has_target_handle", trace.has_target_handle ? 1 : 0);
   add_mapping_pair(map, "target_handle_current",
                    target_status == VMObjectHandleResolveStatus::kCurrent ? 1 : 0);
@@ -1826,6 +2002,11 @@ uint64_t append_owner_task_trace(const OwnerMailboxTask &task, const char *state
   trace.admission_policy = task.admission_policy;
   trace.admission_state = task.admission_state;
   trace.trace_schema = task.trace_schema;
+  trace.tick_group = task.tick_group;
+  trace.scheduler_priority = task.scheduler_priority;
+  trace.scheduler_budget = task.scheduler_budget;
+  trace.scheduler_max_queue_depth = task.scheduler_max_queue_depth;
+  trace.backpressure_policy = task.backpressure_policy;
   trace.has_target_handle = task.has_target_handle;
   return owner_trace_store.append_task(std::move(trace));
 }
@@ -4449,7 +4630,7 @@ void vm_owner_thread_stop() {
 
 mapping_t *vm_owner_thread_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(153);
+  auto *map = allocate_mapping(192);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
   add_mapping_pair(map, "thread_count", static_cast<long>(owner_threads.size()));
@@ -4548,6 +4729,7 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_string(map, "owner_callback_drop_reason_schema", kOwnerCallbackDropReasonSchemaV1);
   add_mapping_pair(map, "owner_callback_allowlist_complete", 1);
   add_mapping_string(map, "owner_callback_supported_kinds", kOwnerCallbackSupportedKinds);
+  add_owner_callback_diagnostic_contract_fields(map);
   add_mapping_string(map, "executor_callback_payload_policy", "frozen_payload_or_owner_handle_only");
   add_mapping_pair(map, "heartbeat_owner_executor_ready", 1);
   add_mapping_string(map, "heartbeat_owner_executor_task_type", "heartbeat");
@@ -4701,7 +4883,7 @@ mapping_t *vm_owner_thread_status() {
 
 mapping_t *vm_owner_runtime_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(145);
+  auto *map = allocate_mapping(182);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
   add_mapping_string(map, "multicore_mode_name", vm_multicore_mode_name(vm_multicore_mode()));
@@ -4758,6 +4940,7 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_string(map, "owner_callback_drop_reason_schema", kOwnerCallbackDropReasonSchemaV1);
   add_mapping_pair(map, "owner_callback_allowlist_complete", 1);
   add_mapping_string(map, "owner_callback_supported_kinds", kOwnerCallbackSupportedKinds);
+  add_owner_callback_diagnostic_contract_fields(map);
   add_mapping_string(map, "executor_callback_payload_policy", "frozen_payload_or_owner_handle_only");
   add_mapping_pair(map, "heartbeat_owner_executor_ready", 1);
   add_mapping_string(map, "heartbeat_owner_executor_task_type", "heartbeat");

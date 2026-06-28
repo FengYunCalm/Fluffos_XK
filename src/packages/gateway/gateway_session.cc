@@ -17,6 +17,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 uint64_t gateway_enqueue_pending_command_internal(object_t *user);
@@ -305,6 +306,70 @@ GatewaySession *gateway_find_session_by_object(object_t *ob) {
   return sess;
 }
 
+long gateway_session_fifo_depth_total() {
+  long depth = 0;
+  for (const auto &entry : g_gateway_sessions) {
+    depth += static_cast<long>(entry.second->output_fifo.size());
+  }
+  return depth;
+}
+
+uint64_t gateway_session_fifo_enqueued_total() {
+  uint64_t total = 0;
+  for (const auto &entry : g_gateway_sessions) {
+    total += entry.second->output_fifo_enqueued;
+  }
+  return total;
+}
+
+uint64_t gateway_session_fifo_flushed_total() {
+  uint64_t total = 0;
+  for (const auto &entry : g_gateway_sessions) {
+    total += entry.second->output_fifo_flushed;
+  }
+  return total;
+}
+
+uint64_t gateway_session_fifo_rejected_total() {
+  uint64_t total = 0;
+  for (const auto &entry : g_gateway_sessions) {
+    total += entry.second->output_fifo_rejected;
+  }
+  return total;
+}
+
+int gateway_flush_session_output_fifo(GatewaySession *sess) {
+  int flushed = 0;
+  if (!sess || sess->master_fd < 0) {
+    return 0;
+  }
+  while (!sess->output_fifo.empty()) {
+    const auto &encoded = sess->output_fifo.front();
+    if (!gateway_send_raw_to_fd(sess->master_fd, encoded.c_str(), encoded.size())) {
+      break;
+    }
+    sess->output_fifo.pop_front();
+    sess->output_fifo_flushed++;
+    flushed = 1;
+  }
+  return flushed;
+}
+
+int gateway_enqueue_session_output(GatewaySession *sess, std::string encoded) {
+  if (!sess || sess->master_fd < 0 || encoded.empty()) {
+    return 0;
+  }
+  if (sess->output_fifo.size() >= sess->output_fifo_max_depth) {
+    sess->output_fifo_rejected++;
+    return 0;
+  }
+  sess->output_fifo.push_back(std::move(encoded));
+  sess->output_fifo_enqueued++;
+  sess->last_active = get_current_time();
+  gateway_flush_session_output_fifo(sess);
+  return 1;
+}
+
 int gateway_bind_session_object(const char *session_id, object_t *ob, const char *ip, int port,
                                 int master_fd) {
   GatewaySession *sess;
@@ -458,8 +523,7 @@ int gateway_send_to_session(const char *session_id, const char *data, size_t len
   if (g_gateway_debug) {
     debug_message("[gateway] output sid=%s len=%zu\n", session_id, len);
   }
-  sess->last_active = get_current_time();
-  return gateway_send_raw_to_fd(sess->master_fd, encoded.c_str(), encoded.size());
+  return gateway_enqueue_session_output(sess, std::move(encoded));
 }
 
 object_t *gateway_create_session_internal(const char *session_id, svalue_t *data_val,
@@ -735,8 +799,7 @@ void f_gateway_session_send() {
   }
 
   encoded = payload.dump();
-  sess->last_active = get_current_time();
-  result = gateway_send_raw_to_fd(sess->master_fd, encoded.c_str(), encoded.size());
+  result = gateway_enqueue_session_output(sess, std::move(encoded));
 
   pop_n_elems(num_args);
   push_number(result);
@@ -795,7 +858,7 @@ void f_gateway_session_info() {
     return;
   }
 
-  map = allocate_mapping(9);
+  map = allocate_mapping(16);
   add_mapping_string(map, "session_id", sess->session_id.c_str());
   add_mapping_string(map, "ip", sess->real_ip.c_str());
   add_mapping_pair(map, "port", sess->real_port);
@@ -805,6 +868,13 @@ void f_gateway_session_info() {
   add_mapping_string(map, "object_name", sess->user_ob->obname);
   add_mapping_string(map, "owner_id", vm_owner_id(sess->user_ob));
   add_mapping_pair(map, "owner_epoch", static_cast<long>(vm_owner_epoch(sess->user_ob)));
+  add_mapping_pair(map, "session_fifo_contract_ready", 1);
+  add_mapping_pair(map, "session_fifo_depth", static_cast<long>(sess->output_fifo.size()));
+  add_mapping_pair(map, "session_fifo_max_depth", static_cast<long>(sess->output_fifo_max_depth));
+  add_mapping_pair(map, "session_fifo_enqueued", static_cast<long>(sess->output_fifo_enqueued));
+  add_mapping_pair(map, "session_fifo_flushed", static_cast<long>(sess->output_fifo_flushed));
+  add_mapping_pair(map, "session_fifo_rejected", static_cast<long>(sess->output_fifo_rejected));
+  add_mapping_string(map, "gateway_io_boundary", "main_thread_io_adapter");
   push_refed_mapping(map);
 }
 

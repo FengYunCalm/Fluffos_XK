@@ -183,6 +183,11 @@ const char *safe_owner_id(const char *owner_id) {
 
 std::string safe_object_path(object_t *object) { return object && object->obname ? object->obname : ""; }
 
+std::string safe_permission_intent(const char *permission_intent) {
+  return permission_intent && permission_intent[0] != '\0' ? permission_intent
+                                                          : kVMObjectHandleDefaultPermissionIntent;
+}
+
 const char *owner_local_store_complete_blocker(bool owner_local_store_complete, bool global_index_bridge,
                                                bool uses_global_object_table) {
   if (owner_local_store_complete) {
@@ -1475,8 +1480,9 @@ mapping_t *shard_mapping(const VMObjectShard &shard, const OwnerLocalBridgeSumma
 }
 }  // namespace
 
-VMObjectHandle vm_object_handle(object_t *object) {
+VMObjectHandle vm_object_handle_with_intent(object_t *object, const char *permission_intent) {
   VMObjectHandle handle;
+  handle.permission_intent = safe_permission_intent(permission_intent);
   if (!object) {
     return handle;
   }
@@ -1486,8 +1492,13 @@ VMObjectHandle vm_object_handle(object_t *object) {
   handle.owner_id = record.owner_id;
   handle.owner_epoch = record.owner_epoch;
   handle.object_path = record.object_path;
+  handle.snapshot_version = record.owner_epoch;
   handle.valid = !record.destructed;
   return handle;
+}
+
+VMObjectHandle vm_object_handle(object_t *object) {
+  return vm_object_handle_with_intent(object, kVMObjectHandleDefaultPermissionIntent);
 }
 
 object_t *vm_object_handle_resolve(const VMObjectHandle &handle) {
@@ -1677,15 +1688,20 @@ bool vm_object_store_test_support_remove_live_object_ref_for_bridge_readiness(co
   return true;
 }
 
-mapping_t *vm_object_handle_status(object_t *object) {
-  auto handle = vm_object_handle(object);
+mapping_t *vm_object_handle_status_with_intent(object_t *object, const char *permission_intent) {
+  auto handle = vm_object_handle_with_intent(object, permission_intent);
   auto status = vm_object_handle_resolve_status(handle);
-  auto *map = allocate_mapping(37);
+  auto *map = allocate_mapping(43);
   add_mapping_pair(map, "success", handle.valid ? 1 : 0);
+  add_mapping_pair(map, "object_handle_capability_ready", 1);
+  add_mapping_string(map, "capability_model", kVMObjectHandleCapabilityModelV1);
   add_mapping_pair(map, "object_id", static_cast<long>(handle.object_id));
   add_mapping_string(map, "owner_id", handle.owner_id.c_str());
   add_mapping_pair(map, "owner_epoch", static_cast<long>(handle.owner_epoch));
   add_mapping_string(map, "object_path", handle.object_path.c_str());
+  add_mapping_string(map, "permission_intent", handle.permission_intent.c_str());
+  add_mapping_pair(map, "snapshot_version", static_cast<long>(handle.snapshot_version));
+  add_mapping_pair(map, "capability_epoch_guard", handle.owner_epoch == handle.snapshot_version ? 1 : 0);
   add_mapping_pair(map, "valid", handle.valid ? 1 : 0);
   add_mapping_pair(map, "current", status.status == VMObjectHandleResolveStatus::kCurrent ? 1 : 0);
   add_mapping_string(map, "resolve_status", vm_object_handle_resolve_status_name(status.status));
@@ -1754,6 +1770,10 @@ mapping_t *vm_object_handle_status(object_t *object) {
   add_mapping_pair(map, "diagnosed_via_global_index", status.diagnosed_via_global_index ? 1 : 0);
   add_mapping_pair(map, "resolved_via_global_index", status.resolved_via_global_index ? 1 : 0);
   return map;
+}
+
+mapping_t *vm_object_handle_status(object_t *object) {
+  return vm_object_handle_status_with_intent(object, kVMObjectHandleDefaultPermissionIntent);
 }
 
 void vm_object_store_update_owner(object_t *object) {

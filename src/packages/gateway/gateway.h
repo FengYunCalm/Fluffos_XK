@@ -4,6 +4,8 @@
 #include "base/package_api.h"
 
 #include <cstdint>
+#include <deque>
+#include <string>
 
 #include <event2/listener.h>
 
@@ -37,6 +39,11 @@ struct GatewaySession {
   time_t last_active{0};
   object_t *user_ob{nullptr};
   int64_t user_ob_load_time{0};
+  std::deque<std::string> output_fifo;
+  uint64_t output_fifo_enqueued{0};
+  uint64_t output_fifo_flushed{0};
+  uint64_t output_fifo_rejected{0};
+  size_t output_fifo_max_depth{4096};
 };
 
 void init_gateway(void);
@@ -45,6 +52,10 @@ void cleanup_gateway(void);
 int gateway_listen_internal(int port, int bind_all);
 mapping_t *gateway_status_internal();
 int gateway_get_session_count();
+long gateway_session_fifo_depth_total();
+uint64_t gateway_session_fifo_enqueued_total();
+uint64_t gateway_session_fifo_flushed_total();
+uint64_t gateway_session_fifo_rejected_total();
 int gateway_send_raw_to_fd(int fd, const char *data, size_t len);
 int gateway_svalue_to_json_string(const svalue_t *sv, std::string *out);
 int gateway_ping_master_internal(int fd);

@@ -1509,6 +1509,8 @@ static pragma_t our_pragmas[] = {{"strict_types", PRAGMA_STRICT_TYPES},
                                  {"warnings", PRAGMA_WARNINGS},
                                  {"optimize", PRAGMA_OPTIMIZE},
                                  {"show_error_context", PRAGMA_ERROR_CONTEXT},
+                                 {"modern_lpc", PRAGMA_MODERN_LPC},
+                                 {"strict_owner", PRAGMA_STRICT_OWNER},
                                  {nullptr, 0}};
 
 static void handle_pragma(char *str) {

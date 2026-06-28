@@ -7,11 +7,16 @@
 struct mapping_t;
 struct object_t;
 
+constexpr const char *kVMObjectHandleCapabilityModelV1 = "object_handle_capability_v1";
+constexpr const char *kVMObjectHandleDefaultPermissionIntent = "owner_runtime";
+
 struct VMObjectHandle {
   uint64_t object_id{0};
   std::string owner_id;
   uint64_t owner_epoch{0};
   std::string object_path;
+  std::string permission_intent{kVMObjectHandleDefaultPermissionIntent};
+  uint64_t snapshot_version{0};
   bool valid{false};
 };
 
@@ -65,7 +70,9 @@ struct VMObjectHandleResolveResult {
 };
 
 VMObjectHandle vm_object_handle(object_t *object);
+VMObjectHandle vm_object_handle_with_intent(object_t *object, const char *permission_intent);
 mapping_t *vm_object_handle_status(object_t *object);
+mapping_t *vm_object_handle_status_with_intent(object_t *object, const char *permission_intent);
 VMObjectHandleResolveResult vm_object_handle_resolve_status(const VMObjectHandle &handle);
 const char *vm_object_handle_resolve_status_name(VMObjectHandleResolveStatus status);
 object_t *vm_object_handle_resolve(const VMObjectHandle &handle);

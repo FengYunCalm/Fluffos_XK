@@ -21,13 +21,16 @@
 #include "user.h"
 
 #include "compiler/internal/compiler.h"
+#include "compiler/internal/lpc_modern_profile.h"
 #include "packages/core/call_out.h"
 #include "packages/core/heartbeat.h"
 #include "packages/gateway/gateway.h"
 #include "vm/context.h"
+#include "vm/internal/base/apply_cache.h"
 #include "vm/internal/base/array.h"
 #include "vm/internal/base/mapping.h"
 #include "vm/internal/base/object.h"
+#include "vm/internal/lpc_vm_profile.h"
 #include "vm/internal/otable.h"
 #include "vm/internal/simulate.h"
 #include "vm/object_handle.h"
@@ -64,6 +67,97 @@ class DriverTest : public ::testing::Test {
     clear_state();
   }
 };
+
+TEST_F(DriverTest, TestLpcModernProfilePragmasAndAuditRules) {
+  int flag = 0;
+  ASSERT_TRUE(lpc_modern_pragma_name("modern_lpc", &flag));
+  ASSERT_EQ(flag, LPC_MODERN_PRAGMA_MODERN_LPC);
+  ASSERT_STREQ(lpc_modern_pragma_name_for_flag(flag), "modern_lpc");
+
+  ASSERT_TRUE(lpc_modern_pragma_name("strict_owner", &flag));
+  ASSERT_EQ(flag, LPC_MODERN_PRAGMA_STRICT_OWNER);
+  ASSERT_STREQ(lpc_modern_pragma_name_for_flag(flag), "strict_owner");
+
+  ASSERT_FALSE(lpc_modern_pragma_name("strict_types", &flag));
+  ASSERT_STREQ(kLpcModernProfileSchemaV1, "lpc_modern_profile_v1");
+  ASSERT_STREQ(kLpcOwnerAuditSchemaV1, "lpcc_owner_audit_v1");
+
+  const auto &rules = lpc_owner_audit_rules();
+  ASSERT_EQ(rules.size(), 4);
+  ASSERT_STREQ(rules[0].code, "cross_owner_mutable_write");
+  ASSERT_STREQ(rules[1].code, "bare_object_payload");
+  ASSERT_STREQ(rules[2].code, "unfrozen_callback_payload");
+  ASSERT_STREQ(rules[3].code, "direct_save_object_hot_path");
+
+  auto report = lpc_owner_audit_source(
+      "#pragma modern_lpc\n"
+      "#pragma strict_owner\n"
+      "void f(object ob) {\n"
+      "  call_other(ob, \"mutate\");\n"
+      "  owner_async(\"owner/x\", ([ \"object\": this_object() ]));\n"
+      "  call_out(\"tick\", 1, this_object());\n"
+      "  save_object(\"/tmp/x\");\n"
+      "}\n");
+  ASSERT_TRUE(report.modern_lpc);
+  ASSERT_TRUE(report.strict_owner);
+  ASSERT_EQ(report.findings.size(), 4);
+  ASSERT_EQ(report.findings[0].code, "cross_owner_mutable_write");
+  ASSERT_EQ(report.findings[1].code, "bare_object_payload");
+  ASSERT_EQ(report.findings[2].code, "unfrozen_callback_payload");
+  ASSERT_EQ(report.findings[3].code, "direct_save_object_hot_path");
+}
+
+TEST_F(DriverTest, TestLpcVmProfileRecordsApplyCacheLookups) {
+  ASSERT_STREQ(kLpcVmProfileSchemaV1, "lpc_vm_profile_v1");
+  ASSERT_STREQ(kLpcVmBenchSchemaV1, "lpc_vm_bench_v1");
+
+  lpc_vm_profile_reset();
+  object_t *obj = clone_object("single/void", 0);
+  ASSERT_NE(obj, nullptr);
+
+  auto hit = apply_cache_lookup("dummy", obj->prog);
+  ASSERT_NE(hit.funp, nullptr);
+  auto direct_hit = apply_cache_lookup("dummy", obj->prog);
+  ASSERT_EQ(direct_hit.funp, hit.funp);
+  auto miss = apply_cache_lookup("__missing_lpc_vm_profile_probe__", obj->prog);
+  ASSERT_EQ(miss.funp, nullptr);
+
+  auto snapshot = lpc_vm_profile_snapshot();
+  ASSERT_GE(snapshot.apply_cache_lookup_count, 3);
+  ASSERT_GE(snapshot.apply_cache_hit_count, 2);
+  ASSERT_GE(snapshot.apply_cache_miss_count, 1);
+  ASSERT_GE(snapshot.apply_cache_table_build_count, 1);
+  ASSERT_GT(snapshot.apply_cache_table_item_count, 0);
+  ASSERT_GE(snapshot.apply_dispatch_cache_lookup_count, 3);
+  ASSERT_GE(snapshot.apply_dispatch_cache_hit_count, 1);
+
+  destruct_object(obj);
+}
+
+TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    svalue_t* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr) << key;
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER) << key;
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    svalue_t* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr) << key;
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING) << key;
+    return (value && value->type == T_STRING) ? value->u.string : "";
+  };
+
+  mapping_t* status = gateway_status_internal();
+  ASSERT_NE(status, nullptr);
+  ASSERT_EQ(mapping_number(status, "session_fifo_contract_ready"), 1);
+  ASSERT_GE(mapping_number(status, "session_fifo_depth"), 0);
+  ASSERT_GE(mapping_number(status, "session_fifo_enqueued"), 0);
+  ASSERT_GE(mapping_number(status, "session_fifo_flushed"), 0);
+  ASSERT_GE(mapping_number(status, "session_fifo_rejected"), 0);
+  ASSERT_STREQ(mapping_string(status, "gateway_io_boundary"), "main_thread_io_adapter");
+  free_mapping(status);
+}
 
 namespace {
 std::string read_source_file_for_test(const char* path) {
@@ -4259,8 +4353,47 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(status, "owner_runtime_benchmark_schema"), "owner_runtime_bench_v1");
     ASSERT_EQ(mapping_number(status, "owner_runtime_stress_profile_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_runtime_stress_entry"), "tools/owner-runtime-v4-stress.sh");
+    ASSERT_EQ(mapping_number(status, "lpc_modern_runtime_stress_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_modern_runtime_stress_entry"),
+                 "tools/lpc-modern-runtime-stress.sh");
     ASSERT_EQ(mapping_number(status, "owner_runtime_layering_guard_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_runtime_coordinator_module_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_modern_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_modern_profile_schema"), "lpc_modern_profile_v1");
+    ASSERT_STREQ(mapping_string(status, "lpc_modern_profile_mode"), "opt_in_pragma");
+    ASSERT_EQ(mapping_number(status, "lpc_vm_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_vm_profile_schema"), "lpc_vm_profile_v1");
+    ASSERT_EQ(mapping_number(status, "lpc_vm_benchmark_smoke_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_vm_benchmark_schema"), "lpc_vm_bench_v1");
+    ASSERT_EQ(mapping_number(status, "object_store_benchmark_smoke_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "object_store_benchmark_schema"), "object_store_bench_v1");
+    ASSERT_EQ(mapping_number(status, "lpc_apply_dispatch_cache_probe_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_dispatch_cache_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_dispatch_cache_model"),
+                 "apply_dispatch_thread_local_direct_cache_v1");
+    ASSERT_EQ(mapping_number(status, "lpc_jit_experiment_default_off"), 1);
+    ASSERT_EQ(mapping_number(status, "modern_lpc_pragma_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "strict_owner_pragma_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "strict_owner_policy"), "strict_owner_owner_safe_payloads_v1");
+    ASSERT_EQ(mapping_number(status, "lpcc_owner_audit_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpcc_owner_audit_schema"), "lpcc_owner_audit_v1");
+    ASSERT_EQ(mapping_number(status, "lpcc_owner_audit_cli_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpcc_owner_audit_cli"), "lpcc --owner-audit --format=json");
+    ASSERT_EQ(mapping_number(status, "lpcc_owner_audit_static_scanner_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "legacy_lpc_default_closed"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_safe_future_api_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_async_api_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_await_poll_adapter_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_await_coroutine_runtime_ready"), 0);
+    ASSERT_EQ(mapping_number(status, "freeze_snapshot_api_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "freeze_snapshot_model"), "validated_deep_copy");
+    ASSERT_EQ(mapping_number(status, "owner_snapshot_persistence_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_snapshot_persistence_model"),
+                 "owner_snapshot_serialized_payload_v1");
+    ASSERT_STREQ(mapping_string(status, "owner_snapshot_persistence_adapter"), "main_thread_file_adapter");
+    ASSERT_EQ(mapping_number(status, "owner_snapshot_direct_save_hot_path_audit_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_commit_api_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_commit_model"), "owner_commit_boundary_record");
     ASSERT_EQ(mapping_number(status, "owner_task_manifest_module_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_trace_store_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_future_store_ready"), 1);
@@ -4268,6 +4401,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "owner_metrics_store_ready"), 1);
     ASSERT_EQ(mapping_number(status, "object_store_owner_fast_path_ready"), 1);
     ASSERT_EQ(mapping_number(status, "object_store_global_fallback_on_owner_fast_path"), 0);
+    ASSERT_EQ(mapping_number(status, "object_handle_capability_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "object_handle_capability_model"),
+                 "object_handle_capability_v1");
     ASSERT_EQ(mapping_number(status, "owner_scheduler_backpressure_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_scheduler_backpressure_strategy"),
                  "observe_then_reject_new_tasks");
@@ -4312,11 +4448,51 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "owner_executor_socket_release_trace_ready"), 1);
     ASSERT_EQ(mapping_number(status, "registered_owner_task_domains_ready"), 1);
     ASSERT_EQ(mapping_number(status, "registered_owner_task_domain_count"), 18);
+    ASSERT_EQ(mapping_number(status, "owner_service_shard_registry_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_service_shard_registry_schema"),
+                 "owner_service_shard_registry_v1");
+    ASSERT_EQ(mapping_number(status, "owner_service_shard_domain_count"), 18);
+    ASSERT_STREQ(mapping_string(status, "owner_service_shard_domains"),
+                 "readonly,player,room,session,item,economy,combat,mail,reward,world,persistence,"
+                 "team,guild,sect,quest,rank,crafting,life_skill");
+    ASSERT_EQ(mapping_number(status, "owner_service_registry_lpc_domain_alignment_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_tick_group_scheduler_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_tick_group_scheduler_schema"),
+                 "owner_tick_group_scheduler_v1");
+    ASSERT_EQ(mapping_number(status, "owner_tick_group_count"), 6);
+    ASSERT_STREQ(mapping_string(status, "owner_tick_groups"),
+                 "gateway_command,heartbeat,callout,socket_async,service_tick,diagnostic");
+    ASSERT_EQ(mapping_number(status, "owner_scheduler_tuning_config_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_scheduler_tuning_config_schema"),
+                 "owner_scheduler_tuning_v1");
+    ASSERT_STREQ(mapping_string(status, "owner_scheduler_tick_group_budget_source"),
+                 "owner_service_registry");
+    ASSERT_EQ(mapping_number(status, "owner_scheduler_priority_groups_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_scheduler_tick_group_backpressure_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_scheduler_starvation_guard_ready"), 1);
     ASSERT_EQ(mapping_number(status, "target_owner_message_executor_ready"), 1);
     ASSERT_EQ(mapping_number(status, "normal_path_main_fallback_count"), 0);
     ASSERT_EQ(mapping_number(status, "normal_path_main_fallback_ready"), 1);
     ASSERT_EQ(mapping_number(status, "main_fallback_policy_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "main_fallback_classification"), "explicit_policy");
+    ASSERT_EQ(mapping_number(status, "session_fifo_contract_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "gateway_io_adapter_only_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "gateway_io_boundary"), "main_thread_io_adapter");
+    ASSERT_EQ(mapping_number(status, "callback_payload_strict_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_callback_payload_strict_diagnostics_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_callback_payload_policy_schema"),
+                 "owner_callback_payload_policy_v1");
+    ASSERT_STREQ(mapping_string(status, "owner_callback_payload_policy"),
+                 "frozen_payload_or_owner_handle_only");
+    ASSERT_STREQ(mapping_string(status, "owner_callback_failure_codes"),
+                 "owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,"
+                 "owner_epoch_mismatch,target_destructed,target_stale,admission_rejected,task_dropped");
+    ASSERT_STREQ(mapping_string(status, "owner_callback_drop_reasons"),
+                 "none,owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,"
+                 "owner_epoch_mismatch,target_destructed,target_stale,admission_rejected,task_dropped");
+    ASSERT_EQ(mapping_number(status, "owner_callback_human_reason_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_callback_failure_reason_schema"),
+                 "owner_callback_failure_reason_v1");
     ASSERT_EQ(mapping_number(status, "service_shard_executor_ready"), 1);
     ASSERT_EQ(mapping_number(status, "domain_task_registry_mudlib_aligned"), 1);
     ASSERT_EQ(mapping_number(status, "keyed_service_shard_ready"), 1);
@@ -4603,6 +4779,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_stress_profile_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_stress_entry"),
                  "tools/owner-runtime-v4-stress.sh");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_modern_runtime_stress_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_runtime_stress_entry"),
+                 "tools/lpc-modern-runtime-stress.sh");
     ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_layering_guard_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_coordinator_module_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_coordinator_file"),
@@ -4610,6 +4789,46 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_store_owner"), "OwnerRuntimeCoordinator");
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_cc_runtime_role"),
                  "runtime_status_facade_and_legacy_glue");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_modern_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_profile_schema"), "lpc_modern_profile_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_profile_mode"), "opt_in_pragma");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_vm_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_profile_schema"), "lpc_vm_profile_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_vm_benchmark_smoke_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_benchmark_schema"), "lpc_vm_bench_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "object_store_benchmark_smoke_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "object_store_benchmark_schema"), "object_store_bench_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_apply_dispatch_cache_probe_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_dispatch_cache_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_dispatch_cache_model"),
+                 "apply_dispatch_thread_local_direct_cache_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_jit_experiment_default_off"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "modern_lpc_pragma_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "strict_owner_pragma_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "strict_owner_policy"), "strict_owner_owner_safe_payloads_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpcc_owner_audit_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpcc_owner_audit_schema"), "lpcc_owner_audit_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpcc_owner_audit_cli_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpcc_owner_audit_cli"), "lpcc --owner-audit --format=json");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpcc_owner_audit_static_scanner_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "legacy_lpc_default_closed"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_profile_module_file"),
+                 "compiler/internal/lpc_modern_profile.cc");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_safe_future_api_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_async_api_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_await_poll_adapter_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_await_coroutine_runtime_ready"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "freeze_snapshot_api_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "freeze_snapshot_model"), "validated_deep_copy");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_snapshot_persistence_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_snapshot_persistence_model"),
+                 "owner_snapshot_serialized_payload_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_snapshot_persistence_adapter"),
+                 "main_thread_file_adapter");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_snapshot_direct_save_hot_path_audit_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_commit_api_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_commit_model"), "owner_commit_boundary_record");
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_api_file"), "packages/core/vm_owner.cc");
     ASSERT_EQ(mapping_number(boundary_contract, "owner_task_manifest_module_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_task_manifest_module_file"),
                  "vm/internal/owner_task_manifest.cc");
@@ -4625,6 +4844,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "vm/internal/owner_runtime_metrics.cc");
     ASSERT_EQ(mapping_number(boundary_contract, "object_store_owner_fast_path_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "object_store_global_fallback_on_owner_fast_path"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "object_handle_capability_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "object_handle_capability_model"),
+                 "object_handle_capability_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "object_handle_capability_file"), "vm/object_handle.h");
+    ASSERT_STREQ(mapping_string(boundary_contract, "object_handle_permission_intent_default"),
+                 "owner_runtime");
     ASSERT_EQ(mapping_number(boundary_contract, "owner_scheduler_backpressure_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_scheduler_backpressure_strategy"),
                  "observe_then_reject_new_tasks");
@@ -4756,11 +4981,51 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                  "explicit_open_same_owner_only");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_surface_expanded"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "registered_owner_task_domains_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_service_shard_registry_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_service_shard_registry_schema"),
+                 "owner_service_shard_registry_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_service_shard_domain_count"), 18);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_service_shard_domains"),
+                 "readonly,player,room,session,item,economy,combat,mail,reward,world,persistence,"
+                 "team,guild,sect,quest,rank,crafting,life_skill");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_service_registry_lpc_domain_alignment_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_tick_group_scheduler_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_tick_group_scheduler_schema"),
+                 "owner_tick_group_scheduler_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_tick_group_count"), 6);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_tick_groups"),
+                 "gateway_command,heartbeat,callout,socket_async,service_tick,diagnostic");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_scheduler_tuning_config_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_scheduler_tuning_config_schema"),
+                 "owner_scheduler_tuning_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_scheduler_tick_group_budget_source"),
+                 "owner_service_registry");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_scheduler_priority_groups_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_scheduler_tick_group_backpressure_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_scheduler_starvation_guard_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "target_owner_message_executor_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "normal_path_main_fallback_count"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "normal_path_main_fallback_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "main_fallback_policy_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "main_fallback_classification"), "explicit_policy");
+    ASSERT_EQ(mapping_number(boundary_contract, "session_fifo_contract_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "gateway_io_adapter_only_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "gateway_io_boundary"), "main_thread_io_adapter");
+    ASSERT_EQ(mapping_number(boundary_contract, "callback_payload_strict_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_callback_payload_strict_diagnostics_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_payload_policy_schema"),
+                 "owner_callback_payload_policy_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_payload_policy"),
+                 "frozen_payload_or_owner_handle_only");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_failure_codes"),
+                 "owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,"
+                 "owner_epoch_mismatch,target_destructed,target_stale,admission_rejected,task_dropped");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_drop_reasons"),
+                 "none,owner_scheduler_backpressure,callback_not_allowlisted,callback_invalid_target,"
+                 "owner_epoch_mismatch,target_destructed,target_stale,admission_rejected,task_dropped");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_callback_human_reason_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_failure_reason_schema"),
+                 "owner_callback_failure_reason_v1");
     ASSERT_EQ(mapping_number(boundary_contract, "service_shard_executor_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "domain_task_registry_mudlib_aligned"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "keyed_service_shard_ready"), 1);
@@ -5154,6 +5419,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
       ASSERT_NE(mapping_string(entry, "payload_policy"), nullptr);
       ASSERT_NE(mapping_string(entry, "cleanup_policy"), nullptr);
       ASSERT_NE(mapping_string(entry, "reply_future_policy"), nullptr);
+      ASSERT_NE(mapping_string(entry, "tick_group"), nullptr);
+      ASSERT_GT(mapping_number(entry, "scheduler_priority"), 0);
+      ASSERT_GT(mapping_number(entry, "scheduler_budget"), 0);
+      ASSERT_GT(mapping_number(entry, "scheduler_max_queue_depth"), 0);
+      ASSERT_STREQ(mapping_string(entry, "backpressure_policy"), "observe_then_reject_new_tasks");
     }
     auto dispatch_entry = [&](const char* task_type) -> mapping_t* {
       auto it = dispatch_by_type.find(task_type);
@@ -5200,6 +5470,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     assert_dispatch("compute_result", "compute_result", "compute_result", "executor_safe", 1, 1, 0);
     assert_dispatch("lpc", "lpc", "reject_lpc", "rejected", 1, 0, 1);
     assert_dispatch("owner_state", "owner_state", "guard_owner_state", "rejected", 1, 0, 1);
+    ASSERT_STREQ(mapping_string(dispatch_entry("gateway_command_execute"), "tick_group"), "gateway_command");
+    ASSERT_STREQ(mapping_string(dispatch_entry("heartbeat"), "tick_group"), "heartbeat");
+    ASSERT_STREQ(mapping_string(dispatch_entry("call_out"), "tick_group"), "callout");
+    ASSERT_STREQ(mapping_string(dispatch_entry("socket_callback"), "tick_group"), "socket_async");
+    ASSERT_STREQ(mapping_string(dispatch_entry("executor_probe"), "tick_group"), "diagnostic");
 
     auto* compute = mapping_entry(contract, "compute_result");
     ASSERT_STREQ(mapping_string(compute, "executor_mode"), "executor_safe");
@@ -7637,6 +7912,51 @@ TEST_F(DriverTest, TestVmObjectHandleRejectsStaleOwnerEpoch) {
   ASSERT_FALSE(stale_status.owner_local_object_pointer_index_found);
   ASSERT_FALSE(stale_status.diagnosed_via_global_index);
   ASSERT_FALSE(vm_object_handle_is_current(handle));
+
+  vm_owner_clear_id(obj);
+  destruct_object(obj);
+}
+
+TEST_F(DriverTest, TestVmObjectHandleReportsCapabilityMetadata) {
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  object_t* obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+
+  vm_owner_set_id(obj, "owner/test/handle/capability");
+  auto default_handle = vm_object_handle(obj);
+  ASSERT_TRUE(default_handle.valid);
+  ASSERT_STREQ(default_handle.permission_intent.c_str(), kVMObjectHandleDefaultPermissionIntent);
+  ASSERT_GT(default_handle.snapshot_version, 0u);
+  ASSERT_EQ(default_handle.snapshot_version, default_handle.owner_epoch);
+
+  auto snapshot_handle = vm_object_handle_with_intent(obj, "snapshot_payload");
+  ASSERT_TRUE(snapshot_handle.valid);
+  ASSERT_STREQ(snapshot_handle.permission_intent.c_str(), "snapshot_payload");
+  ASSERT_EQ(snapshot_handle.snapshot_version, snapshot_handle.owner_epoch);
+  ASSERT_EQ(vm_object_handle_resolve(snapshot_handle), obj);
+
+  auto* status = vm_object_handle_status_with_intent(obj, "owner_async_message");
+  ASSERT_EQ(mapping_number(status, "success"), 1);
+  ASSERT_EQ(mapping_number(status, "object_handle_capability_ready"), 1);
+  ASSERT_STREQ(mapping_string(status, "capability_model"), kVMObjectHandleCapabilityModelV1);
+  ASSERT_STREQ(mapping_string(status, "permission_intent"), "owner_async_message");
+  ASSERT_EQ(mapping_number(status, "snapshot_version"), default_handle.owner_epoch);
+  ASSERT_EQ(mapping_number(status, "capability_epoch_guard"), 1);
+  ASSERT_EQ(mapping_number(status, "current"), 1);
+  ASSERT_STREQ(mapping_string(status, "resolve_status"), "current");
+  free_mapping(status);
 
   vm_owner_clear_id(obj);
   destruct_object(obj);
