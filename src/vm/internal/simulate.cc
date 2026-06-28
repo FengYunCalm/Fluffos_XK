@@ -2,6 +2,7 @@
 
 #include "vm/internal/simulate.h"
 
+#include <cerrno>
 #include <fcntl.h>     // for O_RDONLY
 #include <stdlib.h>    // for exit
 #include <sys/stat.h>  // for load_object struct stat
@@ -493,30 +494,44 @@ object_t *load_object(const char *lname, int callcreate) {
   (void)strcpy(obname, name);
   (void)strcat(obname, ".c");
 
-  if (stat(real_name, &c_st) == -1 || S_ISDIR(c_st.st_mode)) {
+  auto load_virtual = [&]() -> object_t * {
     save_command_giver(command_giver);
     ob = load_virtual_object(actualname, 0);
     restore_command_giver();
     vm_context_adjust_load_object_depth(vm_context(), -1);
     return ob;
+  };
+
+  f = open(real_name, O_RDONLY);
+  if (f == -1) {
+    if (errno == ENOENT || errno == ENOTDIR || errno == EISDIR) {
+      return load_virtual();
+    }
+    debug_perror("compile_file", real_name);
+    error("Could not read the file '/%s'.\n", real_name);
+  }
+  if (fstat(f, &c_st) == -1) {
+    close(f);
+    debug_perror("compile_file", real_name);
+    error("Could not stat the file '/%s'.\n", real_name);
+  }
+  if (S_ISDIR(c_st.st_mode)) {
+    close(f);
+    return load_virtual();
   }
   /*
    * Check if it's a legal name.
    */
   if (!legal_path(real_name)) {
+    close(f);
     debug_message("Illegal pathname: /%s\n", real_name);
     error("Illegal path name '/%s'.\n", real_name);
   }
 
-  f = open(real_name, O_RDONLY);
 #ifdef _WIN32
   // TODO: change everything to use fopen instead.
   _setmode(f, _O_BINARY);
 #endif
-  if (f == -1) {
-    debug_perror("compile_file", real_name);
-    error("Could not read the file '/%s'.\n", real_name);
-  }
   save_command_giver(command_giver);
   auto stream = std::make_unique<FileLexStream>(f);
   prog = compile_file(std::move(stream), obname);

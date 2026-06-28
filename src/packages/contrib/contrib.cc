@@ -1552,14 +1552,16 @@ static int file_length(const char *file) {
   if (!file) {
     return -1;
   }
-  if (stat(file, &st) == -1) {
-    return -1;
-  }
-  if (st.st_mode & S_IFDIR) {
-    return -2;
-  }
   if (!(f = fopen(file, "rb"))) {
     return -1;
+  }
+  if (fstat(fileno(f), &st) == -1) {
+    fclose(f);
+    return -1;
+  }
+  if (S_ISDIR(st.st_mode)) {
+    fclose(f);
+    return -2;
   }
 
   do {
