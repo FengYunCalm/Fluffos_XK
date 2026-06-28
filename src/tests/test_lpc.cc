@@ -4254,6 +4254,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "owner_runtime_split_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_runtime_split_model"),
                  "runtime_v4_modules_with_owner_runtime_coordinator");
+    ASSERT_EQ(mapping_number(status, "owner_runtime_v4_hardening_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_runtime_benchmark_smoke_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_runtime_benchmark_schema"), "owner_runtime_bench_v1");
+    ASSERT_EQ(mapping_number(status, "owner_runtime_stress_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_runtime_stress_entry"), "tools/owner-runtime-v4-stress.sh");
     ASSERT_EQ(mapping_number(status, "owner_runtime_layering_guard_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_runtime_coordinator_module_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_task_manifest_module_ready"), 1);
@@ -4592,6 +4597,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_split_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_split_model"),
                  "runtime_v4_modules_with_owner_runtime_coordinator");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_v4_hardening_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_benchmark_smoke_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_benchmark_schema"), "owner_runtime_bench_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_stress_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_stress_entry"),
+                 "tools/owner-runtime-v4-stress.sh");
     ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_layering_guard_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "owner_runtime_coordinator_module_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_runtime_coordinator_file"),

@@ -35,6 +35,8 @@ constexpr int kOwnerExecutorTaskBudget = 32;
 constexpr long kOwnerSchedulerMaxOwnerQueueDepth = 4096;
 constexpr long kOwnerSchedulerBackpressureHighWatermark = kOwnerSchedulerMaxOwnerQueueDepth * 8 / 10;
 constexpr const char *kOwnerExecutorContractVersion = "owner_executor_v2";
+constexpr const char *kOwnerRuntimeBenchmarkSchemaV1 = "owner_runtime_bench_v1";
+constexpr const char *kOwnerRuntimeStressEntry = "tools/owner-runtime-v4-stress.sh";
 constexpr const char *kOwnerCallbackDiagnosticsSchemaV1 = "owner_callback_diagnostics_v1";
 constexpr const char *kOwnerCallbackFailureCodeSchemaV1 = "owner_callback_failure_code_v1";
 constexpr const char *kOwnerCallbackDropReasonSchemaV1 = "owner_callback_drop_reason_v1";
@@ -370,6 +372,11 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   auto normal_path_main_fallbacks = static_cast<long>(metrics.owner_normal_path_main_fallback_count);
   add_mapping_pair(map, "owner_runtime_split_ready", 1);
   add_mapping_string(map, "owner_runtime_split_model", "runtime_v4_modules_with_owner_runtime_coordinator");
+  add_mapping_pair(map, "owner_runtime_v4_hardening_ready", 1);
+  add_mapping_pair(map, "owner_runtime_benchmark_smoke_ready", 1);
+  add_mapping_string(map, "owner_runtime_benchmark_schema", kOwnerRuntimeBenchmarkSchemaV1);
+  add_mapping_pair(map, "owner_runtime_stress_profile_ready", 1);
+  add_mapping_string(map, "owner_runtime_stress_entry", kOwnerRuntimeStressEntry);
   add_mapping_pair(map, "owner_runtime_layering_guard_ready", 1);
   add_mapping_pair(map, "owner_runtime_coordinator_module_ready", 1);
   add_mapping_pair(map, "owner_task_manifest_module_ready", 1);
@@ -1191,7 +1198,7 @@ mapping_t *vm_context_contract_mapping() {
 }
 
 mapping_t *owner_executor_boundary_contract_mapping() {
-  auto *contract = allocate_mapping(112);
+  auto *contract = allocate_mapping(117);
   add_mapping_pair(contract, "contract_version", 1);
   add_mapping_string(contract, "boundary_model", "owner_executor_boundary_v1");
   add_mapping_string(contract, "implementation_state", "compilation_unit_active");
@@ -1204,6 +1211,11 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "depends_on_owner_cc_internal_state", 0);
   add_mapping_pair(contract, "owner_runtime_split_ready", 1);
   add_mapping_string(contract, "owner_runtime_split_model", "runtime_v4_modules_with_owner_runtime_coordinator");
+  add_mapping_pair(contract, "owner_runtime_v4_hardening_ready", 1);
+  add_mapping_pair(contract, "owner_runtime_benchmark_smoke_ready", 1);
+  add_mapping_string(contract, "owner_runtime_benchmark_schema", kOwnerRuntimeBenchmarkSchemaV1);
+  add_mapping_pair(contract, "owner_runtime_stress_profile_ready", 1);
+  add_mapping_string(contract, "owner_runtime_stress_entry", kOwnerRuntimeStressEntry);
   add_mapping_pair(contract, "owner_runtime_layering_guard_ready", 1);
   add_mapping_pair(contract, "owner_runtime_coordinator_module_ready", 1);
   add_mapping_string(contract, "owner_runtime_coordinator_file", "vm/internal/owner_runtime_coordinator.cc");
@@ -4437,7 +4449,7 @@ void vm_owner_thread_stop() {
 
 mapping_t *vm_owner_thread_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(148);
+  auto *map = allocate_mapping(153);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
   add_mapping_pair(map, "thread_count", static_cast<long>(owner_threads.size()));
@@ -4689,7 +4701,7 @@ mapping_t *vm_owner_thread_status() {
 
 mapping_t *vm_owner_runtime_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(140);
+  auto *map = allocate_mapping(145);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
   add_mapping_string(map, "multicore_mode_name", vm_multicore_mode_name(vm_multicore_mode()));

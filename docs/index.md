@@ -34,6 +34,7 @@ Current entry points:
 
 - [FluffOS_XK Engine Overview](./fluffos-xk-overview.md)
 - [Multicore Runtime v2 Contract](./multicore-runtime-v2.md)
+- [Multicore Runtime v4 Hardening Baseline](./multicore-runtime-v4.md)
 - [Multicore Production Gate](./multicore-production-gate.md)
 - [Owner/Actor Shard VM Multicore API Guide](./owner-multicore-api.md)
 - [Multicore Production Baseline - 2026-06-27](./releases/multicore-production-baseline-2026-06-27.md)

@@ -61,6 +61,7 @@ ownership 合同的情况下开放不安全的任意后台 LPC 执行。
 接入 mudlib 前请先阅读这些权威入口：
 
 - [Runtime v2 contract](docs/multicore-runtime-v2.md)
+- [Runtime v4 hardening baseline](docs/multicore-runtime-v4.md)
 - [Production gate](docs/multicore-production-gate.md)
 - [Owner multicore API](docs/owner-multicore-api.md)
 - [Production baseline release note](docs/releases/multicore-production-baseline-2026-06-27.md)
@@ -206,6 +207,7 @@ tools/wsl-cmake-build.sh build --target install
 - [LPC reference](docs/lpc/index.md)
 - [Owner multicore API](docs/owner-multicore-api.md)
 - [Multicore runtime v2](docs/multicore-runtime-v2.md)
+- [Multicore runtime v4](docs/multicore-runtime-v4.md)
 - [Production gate](docs/multicore-production-gate.md)
 - [变更记录](CHANGELOG.md)
 - [发布说明](RELEASE.md)

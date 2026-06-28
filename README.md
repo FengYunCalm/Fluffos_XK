@@ -72,6 +72,7 @@ Key properties:
 Read the contract before integrating a mudlib:
 
 - [Runtime v2 contract](docs/multicore-runtime-v2.md)
+- [Runtime v4 hardening baseline](docs/multicore-runtime-v4.md)
 - [Production gate](docs/multicore-production-gate.md)
 - [Owner multicore API](docs/owner-multicore-api.md)
 - [Production baseline release note](docs/releases/multicore-production-baseline-2026-06-27.md)
@@ -228,6 +229,7 @@ Recommended flow:
 - [LPC reference](docs/lpc/index.md)
 - [Owner multicore API](docs/owner-multicore-api.md)
 - [Multicore runtime v2](docs/multicore-runtime-v2.md)
+- [Multicore runtime v4](docs/multicore-runtime-v4.md)
 - [Production gate](docs/multicore-production-gate.md)
 - [Changelog](CHANGELOG.md)
 - [Release notes](RELEASE.md)

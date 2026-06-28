@@ -642,6 +642,11 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(0, boundary_contract["depends_on_owner_cc_internal_state"]);
     ASSERT_EQ(1, boundary_contract["owner_runtime_split_ready"]);
     ASSERT_EQ("runtime_v4_modules_with_owner_runtime_coordinator", boundary_contract["owner_runtime_split_model"]);
+    ASSERT_EQ(1, boundary_contract["owner_runtime_v4_hardening_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_runtime_benchmark_smoke_ready"]);
+    ASSERT_EQ("owner_runtime_bench_v1", boundary_contract["owner_runtime_benchmark_schema"]);
+    ASSERT_EQ(1, boundary_contract["owner_runtime_stress_profile_ready"]);
+    ASSERT_EQ("tools/owner-runtime-v4-stress.sh", boundary_contract["owner_runtime_stress_entry"]);
     ASSERT_EQ(1, boundary_contract["owner_runtime_layering_guard_ready"]);
     ASSERT_EQ(1, boundary_contract["owner_runtime_coordinator_module_ready"]);
     ASSERT_EQ("vm/internal/owner_runtime_coordinator.cc", boundary_contract["owner_runtime_coordinator_file"]);
@@ -797,6 +802,11 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("", status["ordinary_lpc_next_blocker"]);
     ASSERT_EQ(1, status["owner_runtime_split_ready"]);
     ASSERT_EQ("runtime_v4_modules_with_owner_runtime_coordinator", status["owner_runtime_split_model"]);
+    ASSERT_EQ(1, status["owner_runtime_v4_hardening_ready"]);
+    ASSERT_EQ(1, status["owner_runtime_benchmark_smoke_ready"]);
+    ASSERT_EQ("owner_runtime_bench_v1", status["owner_runtime_benchmark_schema"]);
+    ASSERT_EQ(1, status["owner_runtime_stress_profile_ready"]);
+    ASSERT_EQ("tools/owner-runtime-v4-stress.sh", status["owner_runtime_stress_entry"]);
     ASSERT_EQ(1, status["owner_runtime_layering_guard_ready"]);
     ASSERT_EQ(1, status["owner_runtime_coordinator_module_ready"]);
     ASSERT_EQ(1, status["owner_task_manifest_module_ready"]);
