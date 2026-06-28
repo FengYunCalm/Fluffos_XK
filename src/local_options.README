@@ -292,6 +292,12 @@
  * string), needs openssl lib and includes and -lssl in system_libs*/
 #undef PACKAGE_CRYPTO
 
+/* ENABLE_LEGACY_DES_CRYPT: defaults to off. Enable only for controlled
+ * migration of old crypt() password hashes that used traditional two-character
+ * DES salts. The default build ignores those salts and generates SHA512
+ * crypt() hashes instead. */
+#undef ENABLE_LEGACY_DES_CRYPT
+
 /*
   PACKAGE_TRIM: efuns for remove leading / trailing whitepsaces (or chars in
   provided charset)

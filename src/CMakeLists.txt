@@ -29,6 +29,7 @@ option(PACKAGE_GATEWAY "gateway package for Go gateway communication" ON)
 option(PACKAGE_TRIM "trim package" ON)
 option(PACKAGE_UIDS "uids package" ON)
 option(PACKAGE_EXTERNAL "external package" ON)
+option(ENABLE_LEGACY_DES_CRYPT "Enable legacy DES crypt()/setkey()/encrypt() compatibility" OFF)
 option(DEBUG OFF)
 option(DEBUGMALLOC ${DEBUG})
 # End of list of compile options.
@@ -460,6 +461,9 @@ add_library(libdriver
   ${SRC} ${SRC_HEADER}
   )
 add_dependencies(libdriver autogen)
+if (ENABLE_LEGACY_DES_CRYPT)
+  target_compile_definitions(libdriver PUBLIC FLUFFOS_ENABLE_LEGACY_DES_CRYPT=1)
+endif ()
 
 list(APPEND FLUFFOS_LIBRARIES libdriver)
 

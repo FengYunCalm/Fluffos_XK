@@ -3379,6 +3379,7 @@ void f_crypt() {
         }
       }
     } else if (SVALUE_STRLEN(sp) >= 2) {
+#ifdef FLUFFOS_ENABLE_LEGACY_DES_CRYPT
       // Compat: Old f_crypt only use first two character as key.
       debug_message(
           "old crypt() password detected, It is only using first 2 character as key and ignore "
@@ -3388,6 +3389,11 @@ void f_crypt() {
       salt[1] = sp->u.string[1];
       salt[2] = '\0';
       saltp = salt;
+#else
+      debug_message(
+          "legacy DES crypt() salt ignored; generating SHA512 hash. Rebuild with "
+          "-DENABLE_LEGACY_DES_CRYPT=ON only for controlled password migration.\n");
+#endif
     }
   }
 

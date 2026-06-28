@@ -10,13 +10,14 @@ void test_oldcrypt(string key) {
 void test_crypt(string key) {
   string result;
 
-  // Old algo/salt is DES with 2 character key and maximum pasword length is 8
-  ASSERT_EQ("12IbR.gJ8wcpc", crypt("123", "123"));
-  ASSERT_EQ("12IbR.gJ8wcpc", crypt("123", "12IbR.gJ8wcpc"));
+  // Legacy DES salts are no longer accepted by the default build.
+  result = crypt("123", "123");
+  ASSERT_EQ("$6$", result[0..2]);
+  ASSERT_EQ(result, crypt("123", result));
 
-  // yes, it is very broken
-  ASSERT_EQ("11abPRGlgbz9A", crypt("deadbeef", "11"));
-  ASSERT_EQ("11abPRGlgbz9A", crypt("deadbeef-wtf", "11-wtf"));
+  result = crypt("deadbeef", "11");
+  ASSERT_EQ("$6$", result[0..2]);
+  ASSERT_EQ(result, crypt("deadbeef", result));
 
   // Make sure we use SHA512 as default
   result = crypt(key, "");

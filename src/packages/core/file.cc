@@ -78,6 +78,41 @@ namespace fs = ghc::filesystem;
 static int match_string(char * /*match*/, char * /*str*/);
 static int do_move(const char *from, const char *to, int flag);
 static int pstrcmp(const void * /*p1*/, const void * /*p2*/);
+
+static FILE *open_binary_rw_existing_or_create(const char *file) {
+  int flags = O_RDWR;
+#ifdef O_BINARY
+  flags |= O_BINARY;
+#endif
+#ifdef O_CLOEXEC
+  flags |= O_CLOEXEC;
+#endif
+
+  int fd = open(file, flags);
+  if (fd == -1 && errno == ENOENT) {
+    fd = open(file, flags | O_CREAT | O_EXCL, 0666);
+    if (fd == -1 && errno == EEXIST) {
+      fd = open(file, flags);
+    }
+  }
+  if (fd == -1) {
+    return nullptr;
+  }
+
+  FILE *fptr = fdopen(fd, "r+b");
+  if (fptr == nullptr) {
+    close(fd);
+  }
+  return fptr;
+}
+
+static bool same_stat_identity(const struct stat &left, const struct stat &right) {
+#ifdef __WIN32
+  return left.st_size == right.st_size && left.st_mtime == right.st_mtime;
+#else
+  return left.st_dev == right.st_dev && left.st_ino == right.st_ino;
+#endif
+}
 static int parrcmp(const void * /*p1*/, const void * /*p2*/);
 static void encode_stat(svalue_t * /*vp*/, int /*flags*/, char * /*str*/, struct stat * /*st*/);
 
@@ -538,17 +573,7 @@ int write_bytes(const char *file, int start, const char *str, int theLength) {
   if (theLength > max_byte_transfer) {
     return 0;
   }
-  /* Under system V, it isn't possible change existing data in a file
-   * opened for append, so it can't be opened for append.
-   * opening for r+ won't create the file if it doesn't exist.
-   * opening for w or w+ will truncate it if it does exist.  So we
-   * have to check if it exists first.
-   */
-  if (stat(file, &st) == -1) {
-    fptr = fopen(file, "wb");
-  } else {
-    fptr = fopen(file, "r+b");
-  }
+  fptr = open_binary_rw_existing_or_create(file);
   if (fptr == nullptr) {
     return 0;
   }
@@ -707,14 +732,14 @@ again:
   }
 }
 
-static struct stat to_stats, from_stats;
-
 /* Move FROM onto TO.  Handles cross-filesystem moves.
    If TO is a directory, FROM must be also.
    Return 0 if successful, 1 if an error occurred.  */
 
 #ifdef F_RENAME
 static int do_move(const char *from, const char *to, int flag) {
+  struct stat from_stats, to_stats;
+
   if (lstat(from, &from_stats) != 0) {
     error("/%s: lstat failed\n", from);
     return 1;
@@ -742,26 +767,31 @@ static int do_move(const char *from, const char *to, int flag) {
     if (!error_code) {
       return 0;
     }
+    if (error_code.value() != EXDEV) {
+      error("cannot move `/%s' to `/%s'\n", from, to);
+      return 1;
+    }
   }
 #ifdef F_LINK
   else if (flag == F_LINK) {
     if (link(from, to) == 0) {
       return 0;
     }
+    if (errno != EXDEV) {
+      error("cannot link `/%s' to `/%s'\n", from, to);
+      return 1;
+    }
   }
 #endif
 
-  if (errno != EXDEV) {
-    if (flag == F_RENAME) {
-      error("cannot move `/%s' to `/%s'\n", from, to);
-    } else {
-      error("cannot link `/%s' to `/%s'\n", from, to);
-    }
-    return 1;
-  }
   /* rename failed on cross-filesystem link.  Copy the file instead. */
   if (flag == F_RENAME) {
-    if (copy_file(from, to)) {
+    if (copy_file(from, to) != 1) {
+      return 1;
+    }
+    struct stat current_from_stats;
+    if (lstat(from, &current_from_stats) != 0 || !same_stat_identity(from_stats, current_from_stats)) {
+      error("cannot remove `/%s': source changed during cross-filesystem move", from);
       return 1;
     }
     if (unlink(from)) {
@@ -872,6 +902,7 @@ int do_rename(const char *fr, const char *t, int flag) {
 
 int copy_file(const char *from, const char *to) {
   extern thread_local svalue_t apply_ret_value;
+  struct stat from_stats, to_stats;
 
   from = check_valid_path(from, current_object, "move_file", 0);
   assign_svalue(&from_sv, &apply_ret_value);

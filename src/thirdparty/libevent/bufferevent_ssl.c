@@ -282,13 +282,14 @@ do_read(struct bufferevent_ssl *bev_ssl, int n_to_read) {
 					return OP_ERR | result;
 			bev_ssl->ssl_ops->decrement_buckets(bev_ssl);
 			len += r;
-			if (space[i].iov_len - len > 0) {
+			if (len < space[i].iov_len) {
 				continue;
-			} else {
-				space[i].iov_len = len;
-				len = 0;
-				++i;
 			}
+			if (len > space[i].iov_len)
+				return OP_ERR | result;
+			space[i].iov_len = len;
+			len = 0;
+			++i;
 		} else {
 			int err = bev_ssl->ssl_ops->get_error(bev_ssl->ssl, r);
 			bev_ssl->ssl_ops->print_err(err);

@@ -900,7 +900,7 @@ static svalue_t *number_parse(array_t *warr, int *cix_in, int *fail) {
   cix = *cix_in;
   *fail = 0;
 
-  if (sscanf(warr->item[cix].u.string, "%d", &num)) {
+  if (sscanf(warr->item[cix].u.string, "%d", &num) == 1) {
     if (num >= 0) {
       (*cix_in)++;
       parse_ret.type = T_NUMBER;

@@ -78,6 +78,13 @@ static void SHA1Transform(uint32_t state[5], const unsigned char buffer[64]);
 
 static void SHA1Init(SHA1_CTX *context);
 
+static void SHA1Clear(void *ptr, size_t len) {
+    volatile unsigned char *p = (volatile unsigned char *)ptr;
+    while (len--) {
+        *p++ = 0;
+    }
+}
+
 static void SHA1Update(SHA1_CTX *context, const unsigned char *data, uint32_t len);
 
 static void SHA1Final(unsigned char digest[20], SHA1_CTX *context);
@@ -199,7 +206,7 @@ static void SHA1Transform(uint32_t state[5], const unsigned char buffer[64]) {
     state[3] += d;
     state[4] += e;
 #ifdef SHA1HANDSOFF
-    memset(block, '\0', sizeof(block));
+    SHA1Clear(block, sizeof(block));
 #endif
 }
 
