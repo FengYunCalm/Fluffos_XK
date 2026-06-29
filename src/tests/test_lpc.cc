@@ -6007,11 +6007,13 @@ TEST_F(DriverTest, TestVmOwnerExecutorRunsDifferentOwnersInParallel) {
 
   test_set_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "80");
   vm_owner_thread_start(2);
-  for (int i = 0; i < 100; i++) {
+  for (int i = 0; i < 200; i++) {
     auto* status = vm_owner_thread_status();
     auto probe_done = mapping_number(status, "executor_probe_executed");
+    auto releases_done = mapping_number(status, "executor_owner_releases");
+    auto active_owners = mapping_number(status, "active_owners");
     free_mapping(status);
-    if (probe_done >= before_probe + 2) {
+    if (probe_done >= before_probe + 2 && releases_done >= before_releases + 2 && active_owners == 0) {
       break;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));

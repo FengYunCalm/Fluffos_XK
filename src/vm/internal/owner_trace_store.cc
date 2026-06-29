@@ -163,3 +163,12 @@ uint64_t OwnerTraceStore::total_message_traced() const {
 uint64_t OwnerTraceStore::total_commit_traced() const {
   return total_commit_traced_.load(std::memory_order_relaxed);
 }
+
+#ifdef DEBUGMALLOC_EXTENSIONS
+void OwnerTraceStore::mark_debug_refs(std::unordered_set<const VMFrozenValue *> &seen) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  for (const auto &trace : task_traces_) {
+    vm_mark_frozen_value_once(trace.payload, seen);
+  }
+}
+#endif

@@ -1,5 +1,7 @@
 #include "vm/frozen_value.h"
 
+#include "vm/internal/base/interpret.h"
+
 #include <cstring>
 
 namespace {
@@ -123,3 +125,20 @@ bool vm_frozen_value_safe(const svalue_t *value, int depth, const char *error_pr
       return false;
   }
 }
+
+#ifdef DEBUGMALLOC_EXTENSIONS
+void vm_mark_frozen_value(const VMFrozenValue *value) {
+  if (value) {
+    mark_svalue(const_cast<svalue_t *>(&value->value));
+  }
+}
+
+void vm_mark_frozen_value_once(const std::shared_ptr<VMFrozenValue> &value,
+                               std::unordered_set<const VMFrozenValue *> &seen) {
+  auto *raw = value.get();
+  if (!raw || !seen.insert(raw).second) {
+    return;
+  }
+  vm_mark_frozen_value(raw);
+}
+#endif

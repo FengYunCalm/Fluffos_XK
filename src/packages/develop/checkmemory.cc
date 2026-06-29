@@ -11,6 +11,7 @@
 #include "packages/core/call_out.h"
 #include "packages/core/outbuf.h"
 #include "packages/core/heartbeat.h"
+#include "vm/owner.h"
 #ifdef PACKAGE_PARSER
 #include "packages/parser/parser.h"
 #endif
@@ -162,6 +163,10 @@ static void mark_object(object_t *ob) {
     EXTRA_REF(BLOCK(ob->privs))++;
   }
 #endif
+
+  if (ob->vm_owner_id && strcmp(ob->vm_owner_id, vm_owner_default_id()) != 0) {
+    EXTRA_REF(BLOCK(ob->vm_owner_id))++;
+  }
 
 #ifndef NO_ADD_ACTION
   if (ob->living_name) {
@@ -709,6 +714,7 @@ void check_all_blocks(int flag) {
 #ifdef PACKAGE_ASYNC
     async_mark_request();
 #endif
+    vm_owner_mark_runtime_refs();
     free_svalue(&apply_ret_value, "checkmemory");
     apply_ret_value = const0u;
 

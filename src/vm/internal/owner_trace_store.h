@@ -150,6 +150,10 @@ class OwnerTraceStore {
   uint64_t total_message_traced() const;
   uint64_t total_commit_traced() const;
 
+#ifdef DEBUGMALLOC_EXTENSIONS
+  void mark_debug_refs(std::unordered_set<const VMFrozenValue *> &seen) const;
+#endif
+
  private:
   template <typename Trace>
   OwnerTraceSnapshot<Trace> snapshot_locked(const std::deque<Trace> &events, uint64_t total, int limit) const;

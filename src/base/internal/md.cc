@@ -13,8 +13,10 @@
 #include <cstdlib>  // malloc etc
 #include <cinttypes>
 #include <map>
+#include <mutex>
 #include <vector>
 #include <string>
+#include <utility>
 
 #include "base/internal/log.h"
 #include "base/internal/stralloc.h"
@@ -38,30 +40,46 @@ extern uint64_t g_current_gametick;
 #ifdef DEBUGMALLOC_EXTENSIONS
 // journal to record all ref/unref operations
 namespace {
-std::map<int, std::vector<std::string>> md_refjournal;
+std::map<int, std::vector<std::string>> &md_refjournal() {
+  static auto *journal = new std::map<int, std::vector<std::string>>();
+  return *journal;
+}
+
+std::mutex &md_refjournal_mutex() {
+  static auto *mutex = new std::mutex();
+  return *mutex;
+}
 } // namespace
 #endif
 
 void md_record_ref_journal(md_node_t *node, bool is_ref, int current_ref, std::string desc) {
 #ifdef DEBUGMALLOC_EXTENSIONS
-  auto id = node->id;
-  auto it = md_refjournal.find(id);
-  if (it == md_refjournal.end()) {
-    md_refjournal[id] = std::vector<std::string>();
+  auto tag = node->tag & 0xff;
+  if (tag != (TAG_STRING & 0xff) && tag != (TAG_MALLOC_STRING & 0xff) &&
+      tag != (TAG_SHARED_STRING & 0xff)) {
+    return;
   }
+  auto id = node->id;
   auto entry = fmt::format(FMT_STRING("{:s}: {:s}, ref={:d}\n"), is_ref ? "REF" : "UNREF", desc, current_ref);
-  md_refjournal[id].push_back(entry);
+  std::lock_guard<std::mutex> lock(md_refjournal_mutex());
+  md_refjournal()[id].push_back(std::move(entry));
 #endif
 }
 
 void md_print_ref_journal(md_node_t *node, outbuffer_t *outbuf) {
 #ifdef DEBUGMALLOC_EXTENSIONS
   auto id = node->id;
-  auto it = md_refjournal.find(id);
-  if (it == md_refjournal.end()) {
-    return;
+  std::vector<std::string> entries;
+  {
+    std::lock_guard<std::mutex> lock(md_refjournal_mutex());
+    auto &journal = md_refjournal();
+    auto it = journal.find(id);
+    if (it == journal.end()) {
+      return;
+    }
+    entries = it->second;
   }
-  for (auto &entry: it->second) {
+  for (auto &entry: entries) {
     outbuf_add(outbuf, entry.c_str());
   }
 #endif
@@ -71,11 +89,15 @@ namespace {
 void clear_ref_journal(md_node_t* node) {
 #ifdef DEBUGMALLOC_EXTENSIONS
   auto id = node->id;
-  auto it = md_refjournal.find(id);
-  if (it == md_refjournal.end()) {
+  std::vector<std::string> entries;
+  std::lock_guard<std::mutex> lock(md_refjournal_mutex());
+  auto &journal = md_refjournal();
+  auto it = journal.find(id);
+  if (it == journal.end()) {
     return;
   }
-  md_refjournal.erase(it);
+  entries = std::move(it->second);
+  journal.erase(it);
 #endif
 }
 } // namespace

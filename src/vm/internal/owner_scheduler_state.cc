@@ -361,6 +361,21 @@ void OwnerSchedulerState::erase_owner_mailbox(const std::string &owner_id) {
   schedulable_owner_set_.erase(owner_id);
 }
 
+#ifdef DEBUGMALLOC_EXTENSIONS
+void OwnerSchedulerState::mark_debug_refs(std::unordered_set<const VMFrozenValue *> &seen) const {
+  for (const auto &entry : owner_mailboxes_) {
+    for (const auto &task : entry.second) {
+      vm_mark_frozen_value_once(task.payload, seen);
+    }
+  }
+  for (const auto &entry : owner_main_queues_) {
+    for (const auto &task : entry.second) {
+      vm_mark_frozen_value_once(task.payload, seen);
+    }
+  }
+}
+#endif
+
 void OwnerSchedulerState::mark_owner_schedulable(const std::string &owner_id) {
   if (schedulable_owner_set_.insert(owner_id).second) {
     schedulable_owners_.push_back(owner_id);

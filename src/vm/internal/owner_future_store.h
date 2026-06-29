@@ -61,6 +61,10 @@ class OwnerFutureStore {
   uint64_t completed_count() const;
   uint64_t failed_count() const;
 
+#ifdef DEBUGMALLOC_EXTENSIONS
+  void mark_debug_refs(std::unordered_set<const VMFrozenValue *> &seen) const;
+#endif
+
  private:
   static const char *normalize_text(const char *text, const char *fallback);
   static VMObjectHandleResolveStatus target_status(const OwnerFutureRecord &record);

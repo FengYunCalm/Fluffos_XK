@@ -45,17 +45,17 @@ void do_tests() {
         write("ASYNC: async_write callback\n");
         ASSERT_EQ(0, res);
         calledWrite++;
+        async_read("/log/testfile", function(mixed read_res) {
+            write("ASYNC: async_read callback\n");
+            ASSERT_EQ("test data written to file", read_res);
+            calledRead++;
+        });
     });
 
     // async_read
     async_read("/log", function(mixed res) {
         write("ASYNC: async_read callback\n");
         ASSERT_EQ(-1, res);
-        calledRead++;
-    });
-    async_read("/log/testfile", function(mixed res) {
-        write("ASYNC: async_read callback\n");
-        ASSERT_EQ("test data written to file", res);
         calledRead++;
     });
 
