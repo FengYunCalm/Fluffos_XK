@@ -843,7 +843,7 @@ static int do_move(const char *from, const char *to, int flag) {
     }
 
     if (copy_file_unchecked(staged_from.c_str(), to) != 1) {
-      if (rename(staged_from.c_str(), from) != 0) {
+      if (rename_no_replace(staged_from.c_str(), from) != 0) {
         debug_message("Error restoring staged move source /%s to /%s: %s", staged_from.c_str(),
                       from, strerror(errno));
       }
