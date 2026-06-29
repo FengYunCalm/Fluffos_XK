@@ -313,6 +313,6 @@ void test_cross_owner_access() {
 
 ## See Also
 
-- [Multicore Architecture](multicore-architecture.md)
-- [Owner Implementation](../src/vm/internal/owner.cc)
-- [API Reference](../src/vm/owner.h)
+- [Multicore Runtime v4](multicore-runtime-v4.md)
+- [Owner Implementation](https://github.com/FengYunCalm/Fluffos_XK/blob/master/src/vm/internal/owner.cc)
+- [API Reference](https://github.com/FengYunCalm/Fluffos_XK/blob/master/src/vm/owner.h)

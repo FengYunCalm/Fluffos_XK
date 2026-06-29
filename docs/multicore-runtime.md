@@ -23,5 +23,5 @@ The current production facts are recorded in these documents:
 ## Historical Plans
 
 Older multicore plans and v1 notes are retained for audit history under
-[`docs/archive/multicore/`](archive/multicore/). They are not current execution
+[`docs/archive/multicore/`](archive/multicore/README.md). They are not current execution
 plans and must not be used to infer unfinished production work.

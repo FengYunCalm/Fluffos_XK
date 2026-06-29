@@ -10,21 +10,19 @@
   },
   "author": "",
   "license": "ISC",
-  "dependencies": {
-    "@docusaurus/core": "3.0.0",
-    "@docusaurus/preset-classic": "3.0.0",
-    "@mdx-js/react": "^3.0.0",
-    "clsx": "^1.2.1",
-    "prism-react-renderer": "^2.1.0",
-    "react": "^18.0.0",
-    "react-dom": "^18.0.0"
-  },
   "devDependencies": {
-    "@docusaurus/module-type-aliases": "3.0.0",
-    "@docusaurus/tsconfig": "3.0.0",
-    "@docusaurus/types": "3.0.0",
-    "typescript": "~5.2.2",
-    "vitepress": "^1.0.0-rc.30"
+    "esbuild": "0.25.12",
+    "typescript": "~5.9.3",
+    "vitepress": "1.6.4"
+  },
+  "overrides": {
+    "@vitejs/plugin-vue": "5.2.4",
+    "esbuild": "0.25.12",
+    "postcss": "8.5.16",
+    "rollup": "4.62.2",
+    "vite": "6.4.3",
+    "vue": "3.5.39",
+    "ws": "8.21.0"
   },
   "browserslist": {
     "production": [

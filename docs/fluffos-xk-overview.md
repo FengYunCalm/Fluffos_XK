@@ -85,7 +85,7 @@ private deployment scripts, or project-specific secrets.
 
 ## Key References
 
-- [README](../README.md)
+- [README](https://github.com/FengYunCalm/Fluffos_XK/blob/master/README.md)
 - [Multicore Runtime v2](./multicore-runtime-v2.md)
 - [Multicore Production Gate](./multicore-production-gate.md)
 - [Owner Multicore API](./owner-multicore-api.md)
