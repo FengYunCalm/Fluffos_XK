@@ -30,6 +30,7 @@
 #include "packages/core/heartbeat.h"
 #include "vm/context.h"
 #include "vm/owner.h"
+#include "vm/internal/lpc_vm_profile.h"
 
 int data_size(object_t *ob);
 void reload_object(object_t *obj);
@@ -187,6 +188,8 @@ void f__call_other() {
   const char *funcname;
   int num_arg = st_num_arg;
   object_t *ob;
+
+  lpc_vm_profile_record_call_other_dispatch();
 
   if (current_object->flags & O_DESTRUCTED) { /* No external calls allowed */
     pop_n_elems(num_arg);

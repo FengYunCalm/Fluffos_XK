@@ -1,6 +1,7 @@
 #include "base/package_api.h"
 
 #include "packages/core/add_action.h"
+#include "vm/internal/lpc_vm_profile.h"
 
 #ifndef NO_ADD_ACTION
 
@@ -376,6 +377,7 @@ static int user_parser(char *buff) {
     /*
      * Now we have found a special sentence !
      */
+    lpc_vm_profile_record_parser_action_lookup(true);
 
     if (!(s->flags & V_FUNCTION))
       debug(add_action, "Local command %s on /%s\n", s->function.s, s->ob->obname);
@@ -475,6 +477,7 @@ static int user_parser(char *buff) {
   }
   notify_no_command();
   illegal_sentence_action = save_illegal_sentence_action;
+  lpc_vm_profile_record_parser_action_lookup(false);
 
   return 0;
 }

@@ -4,6 +4,7 @@
 #include "vm/context.h"
 #include "vm/vm.h"
 #include "vm/internal/base/machine.h"
+#include "vm/internal/lpc_vm_profile.h"
 #include "compiler/internal/lex.h"  // for instrs, FIXME
 
 #include "packages/core/replace_program.h"
@@ -217,6 +218,8 @@ extern func_t efun_table[];
 
 svalue_t *call_function_pointer(funptr_t *funp, int num_arg) {
   array_t *v;
+
+  lpc_vm_profile_record_function_pointer_dispatch(funp->hdr.type == FP_EFUN);
 
   if (!funp->hdr.owner || (funp->hdr.owner->flags & O_DESTRUCTED)) {
     error("Owner (/%s) of function pointer is destructed.\n",

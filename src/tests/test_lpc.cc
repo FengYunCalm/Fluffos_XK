@@ -193,6 +193,39 @@ TEST_F(DriverTest, TestLpcVmProfileRecordsApplyCacheLookups) {
   destruct_object_for_test(obj);
 }
 
+TEST_F(DriverTest, TestLpcVmProfileRecordsHotPathCounters) {
+  lpc_vm_profile_reset();
+
+  lpc_vm_profile_record_opcode_dispatch();
+  lpc_vm_profile_record_opcode_dispatch();
+  lpc_vm_profile_record_efun_dispatch(17);
+  lpc_vm_profile_record_call_other_dispatch();
+  lpc_vm_profile_record_function_pointer_dispatch(true);
+  lpc_vm_profile_record_parser_action_lookup(true);
+  lpc_vm_profile_record_parser_action_lookup(false);
+  lpc_vm_profile_record_string_push();
+
+  mapping_t* map = allocate_mapping(2);
+  add_mapping_pair(map, "alpha", 42);
+  ASSERT_EQ(find_string_in_mapping(map, "alpha")->type, T_NUMBER);
+  ASSERT_EQ(find_string_in_mapping(map, "alpha")->u.number, 42);
+  ASSERT_EQ(find_string_in_mapping(map, "missing")->type, T_NUMBER);
+  free_mapping(map);
+
+  auto snapshot = lpc_vm_profile_snapshot();
+  ASSERT_GE(snapshot.opcode_dispatch_count, 2);
+  ASSERT_EQ(snapshot.efun_dispatch_count, 1);
+  ASSERT_EQ(snapshot.efun_dispatch_ns, 17);
+  ASSERT_EQ(snapshot.call_other_dispatch_count, 1);
+  ASSERT_EQ(snapshot.function_pointer_dispatch_count, 1);
+  ASSERT_EQ(snapshot.function_pointer_efun_dispatch_count, 1);
+  ASSERT_EQ(snapshot.parser_action_lookup_count, 2);
+  ASSERT_EQ(snapshot.parser_action_match_count, 1);
+  ASSERT_GE(snapshot.mapping_lookup_count, 3);
+  ASSERT_GE(snapshot.mapping_insert_lookup_count, 1);
+  ASSERT_EQ(snapshot.string_push_count, 1);
+}
+
 TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   auto mapping_number = [](mapping_t* map, const char* key) -> long {
     svalue_t* value = find_string_in_mapping(map, key);
@@ -4472,9 +4505,18 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(status, "lpc_vm_profile_schema"), "lpc_vm_profile_v1");
     ASSERT_EQ(mapping_number(status, "lpc_vm_benchmark_smoke_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "lpc_vm_benchmark_schema"), "lpc_vm_bench_v1");
+    ASSERT_EQ(mapping_number(status, "lpc_vm_hot_path_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_vm_hot_path_profile_model"),
+                 "opcode_efun_call_other_function_pointer_parser_mapping_string_v1");
     ASSERT_EQ(mapping_number(status, "object_store_benchmark_smoke_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "object_store_benchmark_schema"), "object_store_bench_v1");
     ASSERT_EQ(mapping_number(status, "lpc_apply_dispatch_cache_probe_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_opcode_dispatch_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_efun_dispatch_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_call_other_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_function_pointer_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_parser_action_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_mapping_string_profile_ready"), 1);
     ASSERT_EQ(mapping_number(status, "lpc_dispatch_cache_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "lpc_dispatch_cache_model"),
                  "apply_dispatch_thread_local_direct_cache_v1");
@@ -4914,9 +4956,18 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_profile_schema"), "lpc_vm_profile_v1");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_vm_benchmark_smoke_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_benchmark_schema"), "lpc_vm_bench_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_vm_hot_path_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_hot_path_profile_model"),
+                 "opcode_efun_call_other_function_pointer_parser_mapping_string_v1");
     ASSERT_EQ(mapping_number(boundary_contract, "object_store_benchmark_smoke_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "object_store_benchmark_schema"), "object_store_bench_v1");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_apply_dispatch_cache_probe_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_opcode_dispatch_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_efun_dispatch_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_call_other_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_function_pointer_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_parser_action_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_mapping_string_profile_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_dispatch_cache_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_dispatch_cache_model"),
                  "apply_dispatch_thread_local_direct_cache_v1");

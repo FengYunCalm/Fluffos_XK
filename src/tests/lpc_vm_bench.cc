@@ -2,7 +2,11 @@
 
 #include "backend.h"
 #include "mainlib.h"
+#include "vm/internal/apply.h"
 #include "vm/internal/base/apply_cache.h"
+#include "vm/internal/base/interpret.h"
+#include "vm/internal/base/mapping.h"
+#include "vm/internal/base/machine.h"
 #include "vm/internal/base/object.h"
 #include "vm/internal/lpc_vm_profile.h"
 
@@ -211,6 +215,66 @@ void run_apply_cache_bench(Report &report) {
   destruct_object_for_bench(probe);
 }
 
+void add_profile_snapshot_metrics(Report &report, const std::string &prefix,
+                                  const LpcVmProfileSnapshot &snapshot) {
+  report.add(prefix + "opcode_dispatch_count", static_cast<long long>(snapshot.opcode_dispatch_count));
+  report.add(prefix + "efun_dispatch_count", static_cast<long long>(snapshot.efun_dispatch_count));
+  report.add(prefix + "efun_dispatch_ns", static_cast<long long>(snapshot.efun_dispatch_ns));
+  report.add(prefix + "call_other_dispatch_count", static_cast<long long>(snapshot.call_other_dispatch_count));
+  report.add(prefix + "function_pointer_dispatch_count",
+             static_cast<long long>(snapshot.function_pointer_dispatch_count));
+  report.add(prefix + "function_pointer_efun_dispatch_count",
+             static_cast<long long>(snapshot.function_pointer_efun_dispatch_count));
+  report.add(prefix + "parser_action_lookup_count", static_cast<long long>(snapshot.parser_action_lookup_count));
+  report.add(prefix + "parser_action_match_count", static_cast<long long>(snapshot.parser_action_match_count));
+  report.add(prefix + "mapping_lookup_count", static_cast<long long>(snapshot.mapping_lookup_count));
+  report.add(prefix + "mapping_insert_lookup_count", static_cast<long long>(snapshot.mapping_insert_lookup_count));
+  report.add(prefix + "string_push_count", static_cast<long long>(snapshot.string_push_count));
+}
+
+void run_hot_path_profile_bench(Report &report) {
+  const long iterations = 128;
+  lpc_vm_profile_reset();
+
+  object_t *probe = clone_object_for_bench("single/void");
+  require(probe != nullptr, "failed to clone VM hot path probe object");
+
+  std::vector<long long> call_other_samples;
+  auto start = Clock::now();
+  for (long i = 0; i < iterations; i++) {
+    auto call_start = Clock::now();
+    push_object(probe);
+    auto *result = safe_apply("call_target", probe, 1, ORIGIN_DRIVER);
+    call_other_samples.push_back(elapsed_ns(call_start));
+    require(result != nullptr, "call_target() did not return");
+  }
+
+  mapping_t *map = allocate_mapping(4);
+  add_mapping_pair(map, "alpha", 1);
+  add_mapping_pair(map, "beta", 2);
+  require(find_string_in_mapping(map, "alpha")->type == T_NUMBER, "mapping alpha lookup failed");
+  require(find_string_in_mapping(map, "missing")->type == T_NUMBER,
+          "mapping missing lookup did not return undefined sentinel");
+  free_mapping(map);
+
+  copy_and_push_string("lpc_vm_profile_string_copy");
+  pop_stack();
+  share_and_push_string("lpc_vm_profile_string_shared");
+  pop_stack();
+  push_constant_string("lpc_vm_profile_string_constant");
+  pop_stack();
+
+  auto snapshot = lpc_vm_profile_snapshot();
+  report.add("hot_path_iterations", iterations);
+  report.add("hot_path_elapsed_ns", elapsed_ns(start));
+  report.add("hot_path_call_other_latency_p50_ns", percentile(call_other_samples, 0.50));
+  report.add("hot_path_call_other_latency_p95_ns", percentile(call_other_samples, 0.95));
+  report.add("hot_path_call_other_latency_p99_ns", percentile(call_other_samples, 0.99));
+  add_profile_snapshot_metrics(report, "hot_path_profile_", snapshot);
+
+  destruct_object_for_bench(probe);
+}
+
 void print_text_report(const Report &report, const std::string &json_path) {
   std::cout << "lpc_vm_bench: schema=" << kLpcVmBenchSchemaV1 << "\n";
   for (const auto &metric : report.metrics) {
@@ -253,8 +317,10 @@ int main(int argc, char **argv) {
     report.add_string("mode", "diagnostic");
     report.add_string("profile_schema", kLpcVmProfileSchemaV1);
     report.add_string("dispatch_cache_probe", "apply_cache_lookup_v1");
+    report.add_string("hot_path_profile_probe", "opcode_efun_call_other_mapping_string_v1");
 
     run_apply_cache_bench(report);
+    run_hot_path_profile_bench(report);
 
     auto json = report_json(report);
     write_json_report(json_path, json);

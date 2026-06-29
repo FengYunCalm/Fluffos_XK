@@ -666,9 +666,18 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("lpc_vm_profile_v1", boundary_contract["lpc_vm_profile_schema"]);
     ASSERT_EQ(1, boundary_contract["lpc_vm_benchmark_smoke_ready"]);
     ASSERT_EQ("lpc_vm_bench_v1", boundary_contract["lpc_vm_benchmark_schema"]);
+    ASSERT_EQ(1, boundary_contract["lpc_vm_hot_path_profile_ready"]);
+    ASSERT_EQ("opcode_efun_call_other_function_pointer_parser_mapping_string_v1",
+              boundary_contract["lpc_vm_hot_path_profile_model"]);
     ASSERT_EQ(1, boundary_contract["object_store_benchmark_smoke_ready"]);
     ASSERT_EQ("object_store_bench_v1", boundary_contract["object_store_benchmark_schema"]);
     ASSERT_EQ(1, boundary_contract["lpc_apply_dispatch_cache_probe_ready"]);
+    ASSERT_EQ(1, boundary_contract["lpc_opcode_dispatch_profile_ready"]);
+    ASSERT_EQ(1, boundary_contract["lpc_efun_dispatch_profile_ready"]);
+    ASSERT_EQ(1, boundary_contract["lpc_call_other_profile_ready"]);
+    ASSERT_EQ(1, boundary_contract["lpc_function_pointer_profile_ready"]);
+    ASSERT_EQ(1, boundary_contract["lpc_parser_action_profile_ready"]);
+    ASSERT_EQ(1, boundary_contract["lpc_mapping_string_profile_ready"]);
     ASSERT_EQ(1, boundary_contract["lpc_dispatch_cache_ready"]);
     ASSERT_EQ("apply_dispatch_thread_local_direct_cache_v1", boundary_contract["lpc_dispatch_cache_model"]);
     ASSERT_EQ(1, boundary_contract["lpc_jit_experiment_default_off"]);
@@ -912,9 +921,18 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("lpc_vm_profile_v1", status["lpc_vm_profile_schema"]);
     ASSERT_EQ(1, status["lpc_vm_benchmark_smoke_ready"]);
     ASSERT_EQ("lpc_vm_bench_v1", status["lpc_vm_benchmark_schema"]);
+    ASSERT_EQ(1, status["lpc_vm_hot_path_profile_ready"]);
+    ASSERT_EQ("opcode_efun_call_other_function_pointer_parser_mapping_string_v1",
+              status["lpc_vm_hot_path_profile_model"]);
     ASSERT_EQ(1, status["object_store_benchmark_smoke_ready"]);
     ASSERT_EQ("object_store_bench_v1", status["object_store_benchmark_schema"]);
     ASSERT_EQ(1, status["lpc_apply_dispatch_cache_probe_ready"]);
+    ASSERT_EQ(1, status["lpc_opcode_dispatch_profile_ready"]);
+    ASSERT_EQ(1, status["lpc_efun_dispatch_profile_ready"]);
+    ASSERT_EQ(1, status["lpc_call_other_profile_ready"]);
+    ASSERT_EQ(1, status["lpc_function_pointer_profile_ready"]);
+    ASSERT_EQ(1, status["lpc_parser_action_profile_ready"]);
+    ASSERT_EQ(1, status["lpc_mapping_string_profile_ready"]);
     ASSERT_EQ(1, status["lpc_dispatch_cache_ready"]);
     ASSERT_EQ("apply_dispatch_thread_local_direct_cache_v1", status["lpc_dispatch_cache_model"]);
     ASSERT_EQ(1, status["lpc_jit_experiment_default_off"]);

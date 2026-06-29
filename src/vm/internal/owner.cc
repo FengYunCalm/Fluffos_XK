@@ -415,9 +415,18 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_string(map, "lpc_vm_profile_schema", kLpcVmProfileSchemaV1);
   add_mapping_pair(map, "lpc_vm_benchmark_smoke_ready", 1);
   add_mapping_string(map, "lpc_vm_benchmark_schema", kLpcVmBenchSchemaV1);
+  add_mapping_pair(map, "lpc_vm_hot_path_profile_ready", 1);
+  add_mapping_string(map, "lpc_vm_hot_path_profile_model",
+                     "opcode_efun_call_other_function_pointer_parser_mapping_string_v1");
   add_mapping_pair(map, "object_store_benchmark_smoke_ready", 1);
   add_mapping_string(map, "object_store_benchmark_schema", kObjectStoreBenchmarkSchemaV1);
   add_mapping_pair(map, "lpc_apply_dispatch_cache_probe_ready", 1);
+  add_mapping_pair(map, "lpc_opcode_dispatch_profile_ready", 1);
+  add_mapping_pair(map, "lpc_efun_dispatch_profile_ready", 1);
+  add_mapping_pair(map, "lpc_call_other_profile_ready", 1);
+  add_mapping_pair(map, "lpc_function_pointer_profile_ready", 1);
+  add_mapping_pair(map, "lpc_parser_action_profile_ready", 1);
+  add_mapping_pair(map, "lpc_mapping_string_profile_ready", 1);
   add_mapping_pair(map, "lpc_dispatch_cache_ready", 1);
   add_mapping_string(map, "lpc_dispatch_cache_model", "apply_dispatch_thread_local_direct_cache_v1");
   add_mapping_pair(map, "lpc_jit_experiment_default_off", 1);
@@ -1338,9 +1347,18 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "lpc_vm_profile_schema", kLpcVmProfileSchemaV1);
   add_mapping_pair(contract, "lpc_vm_benchmark_smoke_ready", 1);
   add_mapping_string(contract, "lpc_vm_benchmark_schema", kLpcVmBenchSchemaV1);
+  add_mapping_pair(contract, "lpc_vm_hot_path_profile_ready", 1);
+  add_mapping_string(contract, "lpc_vm_hot_path_profile_model",
+                     "opcode_efun_call_other_function_pointer_parser_mapping_string_v1");
   add_mapping_pair(contract, "object_store_benchmark_smoke_ready", 1);
   add_mapping_string(contract, "object_store_benchmark_schema", kObjectStoreBenchmarkSchemaV1);
   add_mapping_pair(contract, "lpc_apply_dispatch_cache_probe_ready", 1);
+  add_mapping_pair(contract, "lpc_opcode_dispatch_profile_ready", 1);
+  add_mapping_pair(contract, "lpc_efun_dispatch_profile_ready", 1);
+  add_mapping_pair(contract, "lpc_call_other_profile_ready", 1);
+  add_mapping_pair(contract, "lpc_function_pointer_profile_ready", 1);
+  add_mapping_pair(contract, "lpc_parser_action_profile_ready", 1);
+  add_mapping_pair(contract, "lpc_mapping_string_profile_ready", 1);
   add_mapping_pair(contract, "lpc_dispatch_cache_ready", 1);
   add_mapping_string(contract, "lpc_dispatch_cache_model", "apply_dispatch_thread_local_direct_cache_v1");
   add_mapping_pair(contract, "lpc_jit_experiment_default_off", 1);
