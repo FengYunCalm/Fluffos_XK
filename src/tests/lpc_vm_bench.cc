@@ -1,5 +1,6 @@
 #include "base/package_api.h"
 
+#include "backend.h"
 #include "mainlib.h"
 #include "vm/internal/base/apply_cache.h"
 #include "vm/internal/base/object.h"
@@ -55,6 +56,47 @@ long long percentile(std::vector<long long> samples, double rank) {
 void require(bool condition, const std::string &message) {
   if (!condition) {
     throw std::runtime_error(message);
+  }
+}
+
+object_t *clone_object_for_bench(const char *path) {
+  error_context_t econ{};
+  object_t *object = nullptr;
+  object_t *saved_current_object = current_object;
+  if (current_object == nullptr && master_ob != nullptr) {
+    current_object = master_ob;
+  }
+  save_context(&econ);
+  try {
+    object = clone_object(path, 0);
+    pop_context(&econ);
+    current_object = saved_current_object;
+  } catch (...) {
+    restore_context(&econ);
+    current_object = saved_current_object;
+    throw std::runtime_error(std::string("clone_object failed for ") + path);
+  }
+  return object;
+}
+
+void destruct_object_for_bench(object_t *object) {
+  if (object == nullptr || (object->flags & O_DESTRUCTED)) {
+    return;
+  }
+  error_context_t econ{};
+  object_t *saved_current_object = current_object;
+  if (current_object == nullptr && master_ob != nullptr) {
+    current_object = master_ob;
+  }
+  save_context(&econ);
+  try {
+    destruct_object(object);
+    pop_context(&econ);
+    current_object = saved_current_object;
+  } catch (...) {
+    restore_context(&econ);
+    current_object = saved_current_object;
+    throw std::runtime_error(std::string("destruct_object failed for ") + object->obname);
   }
 }
 
@@ -125,7 +167,7 @@ void run_apply_cache_bench(Report &report) {
   const long iterations = 512;
   lpc_vm_profile_reset();
 
-  object_t *probe = clone_object("single/void", 0);
+  object_t *probe = clone_object_for_bench("single/void");
   require(probe != nullptr, "failed to clone VM profile probe object");
 
   std::vector<long long> hit_samples;
@@ -166,7 +208,7 @@ void run_apply_cache_bench(Report &report) {
   report.add("apply_cache_miss_latency_p95_ns", percentile(miss_samples, 0.95));
   report.add("apply_cache_miss_latency_p99_ns", percentile(miss_samples, 0.99));
 
-  destruct_object(probe);
+  destruct_object_for_bench(probe);
 }
 
 void print_text_report(const Report &report, const std::string &json_path) {

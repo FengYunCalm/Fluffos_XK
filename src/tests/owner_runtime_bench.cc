@@ -102,6 +102,47 @@ void require(bool condition, const std::string &message) {
   }
 }
 
+object_t *clone_object_for_bench(const char *path) {
+  error_context_t econ{};
+  object_t *object = nullptr;
+  object_t *saved_current_object = current_object;
+  if (current_object == nullptr && master_ob != nullptr) {
+    current_object = master_ob;
+  }
+  save_context(&econ);
+  try {
+    object = clone_object(path, 0);
+    pop_context(&econ);
+    current_object = saved_current_object;
+  } catch (...) {
+    restore_context(&econ);
+    current_object = saved_current_object;
+    throw std::runtime_error(std::string("clone_object failed for ") + path);
+  }
+  return object;
+}
+
+void destruct_object_for_bench(object_t *object) {
+  if (object == nullptr || (object->flags & O_DESTRUCTED)) {
+    return;
+  }
+  error_context_t econ{};
+  object_t *saved_current_object = current_object;
+  if (current_object == nullptr && master_ob != nullptr) {
+    current_object = master_ob;
+  }
+  save_context(&econ);
+  try {
+    destruct_object(object);
+    pop_context(&econ);
+    current_object = saved_current_object;
+  } catch (...) {
+    restore_context(&econ);
+    current_object = saved_current_object;
+    throw std::runtime_error(std::string("destruct_object failed for ") + object->obname);
+  }
+}
+
 std::string json_escape(const std::string &value) {
   std::ostringstream out;
   for (char ch : value) {
@@ -286,7 +327,7 @@ void run_future_bench(Report &report) {
 
 void run_object_resolve_bench(Report &report) {
   const long iterations = 256;
-  object_t *probe = clone_object("single/void", 0);
+  object_t *probe = clone_object_for_bench("single/void");
   require(probe != nullptr, "failed to clone resolve probe object");
   vm_owner_set_id(probe, "owner/bench/runtime-v4/resolve");
   vm_object_store_register(probe);
@@ -318,11 +359,11 @@ void run_object_resolve_bench(Report &report) {
   report.add("object_resolve_api_latency_p95_us", percentile(samples, 0.95));
   report.add("object_resolve_api_latency_p99_us", percentile(samples, 0.99));
   vm_owner_clear_id(probe);
-  destruct_object(probe);
+  destruct_object_for_bench(probe);
 }
 
 void run_callback_admission_bench(Report &report) {
-  object_t *probe = clone_object("single/void", 0);
+  object_t *probe = clone_object_for_bench("single/void");
   require(probe != nullptr, "failed to clone callback probe object");
   const char *owner = "owner/bench/runtime-v4/callback";
   vm_owner_set_id(probe, owner);
@@ -384,7 +425,7 @@ void run_callback_admission_bench(Report &report) {
   free_mapping(after);
 
   vm_owner_clear_id(probe);
-  destruct_object(probe);
+  destruct_object_for_bench(probe);
 }
 
 void add_final_status(Report &report) {
