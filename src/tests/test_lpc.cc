@@ -4547,6 +4547,10 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "owner_await_coroutine_runtime_ready"), 0);
     ASSERT_EQ(mapping_number(status, "freeze_snapshot_api_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "freeze_snapshot_model"), "validated_deep_copy");
+    ASSERT_EQ(mapping_number(status, "lpc_value_object_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_value_object_model"), "frozen_snapshot_value_object_v1");
+    ASSERT_EQ(mapping_number(status, "lpc_value_object_live_lifecycle_member"), 0);
+    ASSERT_EQ(mapping_number(status, "lpc_value_object_cross_owner_payload_safe"), 1);
     ASSERT_EQ(mapping_number(status, "owner_snapshot_persistence_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_snapshot_persistence_model"),
                  "owner_snapshot_serialized_payload_v1");
@@ -5000,6 +5004,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "owner_await_coroutine_runtime_ready"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "freeze_snapshot_api_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "freeze_snapshot_model"), "validated_deep_copy");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_value_object_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_value_object_model"),
+                 "frozen_snapshot_value_object_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_value_object_live_lifecycle_member"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_value_object_cross_owner_payload_safe"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "owner_snapshot_persistence_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_snapshot_persistence_model"),
                  "owner_snapshot_serialized_payload_v1");

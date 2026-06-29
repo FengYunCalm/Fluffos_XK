@@ -454,6 +454,10 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "owner_await_coroutine_runtime_ready", 0);
   add_mapping_pair(map, "freeze_snapshot_api_ready", 1);
   add_mapping_string(map, "freeze_snapshot_model", "validated_deep_copy");
+  add_mapping_pair(map, "lpc_value_object_profile_ready", 1);
+  add_mapping_string(map, "lpc_value_object_model", "frozen_snapshot_value_object_v1");
+  add_mapping_pair(map, "lpc_value_object_live_lifecycle_member", 0);
+  add_mapping_pair(map, "lpc_value_object_cross_owner_payload_safe", 1);
   add_mapping_pair(map, "owner_snapshot_persistence_ready", 1);
   add_mapping_string(map, "owner_snapshot_persistence_model", "owner_snapshot_serialized_payload_v1");
   add_mapping_string(map, "owner_snapshot_persistence_adapter", "main_thread_file_adapter");
@@ -1387,6 +1391,10 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "owner_await_coroutine_runtime_ready", 0);
   add_mapping_pair(contract, "freeze_snapshot_api_ready", 1);
   add_mapping_string(contract, "freeze_snapshot_model", "validated_deep_copy");
+  add_mapping_pair(contract, "lpc_value_object_profile_ready", 1);
+  add_mapping_string(contract, "lpc_value_object_model", "frozen_snapshot_value_object_v1");
+  add_mapping_pair(contract, "lpc_value_object_live_lifecycle_member", 0);
+  add_mapping_pair(contract, "lpc_value_object_cross_owner_payload_safe", 1);
   add_mapping_pair(contract, "owner_snapshot_persistence_ready", 1);
   add_mapping_string(contract, "owner_snapshot_persistence_model", "owner_snapshot_serialized_payload_v1");
   add_mapping_string(contract, "owner_snapshot_persistence_adapter", "main_thread_file_adapter");

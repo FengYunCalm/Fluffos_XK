@@ -102,6 +102,12 @@ mapping_t *owner_frozen_value_result(svalue_t *value, const char *api_name) {
   add_mapping_pair(map, "snapshot_only", 1);
   add_mapping_pair(map, "immutable_runtime_type", 0);
   add_mapping_string(map, "immutability_model", "validated_deep_copy");
+  add_mapping_pair(map, "value_object_profile_ready", 1);
+  add_mapping_string(map, "value_object_model", "frozen_snapshot_value_object_v1");
+  add_mapping_pair(map, "live_object_lifecycle_member", 0);
+  add_mapping_pair(map, "traditional_destruct_chain_member", 0);
+  add_mapping_pair(map, "cross_owner_payload_safe", 1);
+  add_mapping_string(map, "canonical_payload_encoding", "utf-8");
   if (!add_mapping_frozen_value(map, "value", value)) {
     free_mapping(map);
     return owner_api_error("frozen_copy_failed", "failed to deep-copy frozen-safe value");

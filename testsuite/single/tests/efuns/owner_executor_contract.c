@@ -708,6 +708,10 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(0, boundary_contract["owner_await_coroutine_runtime_ready"]);
     ASSERT_EQ(1, boundary_contract["freeze_snapshot_api_ready"]);
     ASSERT_EQ("validated_deep_copy", boundary_contract["freeze_snapshot_model"]);
+    ASSERT_EQ(1, boundary_contract["lpc_value_object_profile_ready"]);
+    ASSERT_EQ("frozen_snapshot_value_object_v1", boundary_contract["lpc_value_object_model"]);
+    ASSERT_EQ(0, boundary_contract["lpc_value_object_live_lifecycle_member"]);
+    ASSERT_EQ(1, boundary_contract["lpc_value_object_cross_owner_payload_safe"]);
     ASSERT_EQ(1, boundary_contract["owner_snapshot_persistence_ready"]);
     ASSERT_EQ("owner_snapshot_serialized_payload_v1",
               boundary_contract["owner_snapshot_persistence_model"]);
@@ -962,6 +966,10 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(0, status["owner_await_coroutine_runtime_ready"]);
     ASSERT_EQ(1, status["freeze_snapshot_api_ready"]);
     ASSERT_EQ("validated_deep_copy", status["freeze_snapshot_model"]);
+    ASSERT_EQ(1, status["lpc_value_object_profile_ready"]);
+    ASSERT_EQ("frozen_snapshot_value_object_v1", status["lpc_value_object_model"]);
+    ASSERT_EQ(0, status["lpc_value_object_live_lifecycle_member"]);
+    ASSERT_EQ(1, status["lpc_value_object_cross_owner_payload_safe"]);
     ASSERT_EQ(1, status["owner_snapshot_persistence_ready"]);
     ASSERT_EQ("owner_snapshot_serialized_payload_v1", status["owner_snapshot_persistence_model"]);
     ASSERT_EQ("main_thread_file_adapter", status["owner_snapshot_persistence_adapter"]);
@@ -1450,6 +1458,12 @@ void assert_lpc_modern_runtime_apis() {
     ASSERT_EQ(1, frozen["deep_copy"]);
     ASSERT_EQ(0, frozen["immutable_runtime_type"]);
     ASSERT_EQ("validated_deep_copy", frozen["immutability_model"]);
+    ASSERT_EQ(1, frozen["value_object_profile_ready"]);
+    ASSERT_EQ("frozen_snapshot_value_object_v1", frozen["value_object_model"]);
+    ASSERT_EQ(0, frozen["live_object_lifecycle_member"]);
+    ASSERT_EQ(0, frozen["traditional_destruct_chain_member"]);
+    ASSERT_EQ(1, frozen["cross_owner_payload_safe"]);
+    ASSERT_EQ("utf-8", frozen["canonical_payload_encoding"]);
     ASSERT(mapp(frozen["value"]));
     frozen_value = frozen["value"];
     ASSERT_EQ("modern", frozen_value["name"]);
@@ -1471,6 +1485,10 @@ void assert_lpc_modern_runtime_apis() {
     ASSERT_EQ("", snapshot_value["reason"]);
     ASSERT_EQ("snapshot", snapshot_value["api"]);
     ASSERT_EQ(1, snapshot_value["snapshot_only"]);
+    ASSERT_EQ(1, snapshot_value["value_object_profile_ready"]);
+    ASSERT_EQ("frozen_snapshot_value_object_v1", snapshot_value["value_object_model"]);
+    ASSERT_EQ(0, snapshot_value["live_object_lifecycle_member"]);
+    ASSERT_EQ(1, snapshot_value["cross_owner_payload_safe"]);
     ASSERT(mapp(snapshot_value["value"]));
     ASSERT_EQ("safe", snapshot_value["value"]["snapshot"]);
 
