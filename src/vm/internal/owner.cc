@@ -429,6 +429,12 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "lpcc_owner_audit_cli_ready", 1);
   add_mapping_string(map, "lpcc_owner_audit_cli", "lpcc --owner-audit --format=json");
   add_mapping_pair(map, "lpcc_owner_audit_static_scanner_ready", 1);
+  add_mapping_pair(map, "lpc_source_encoding_ready", 1);
+  add_mapping_string(map, "lpc_source_encoding_schema", kLpcSourceEncodingSchemaV1);
+  add_mapping_string(map, "vm_internal_string_encoding", kLpcInternalStringEncoding);
+  add_mapping_pair(map, "session_encoding_contract_ready", 1);
+  add_mapping_pair(map, "gateway_encoding_boundary_ready", 1);
+  add_mapping_pair(map, "encoding_audit_ready", 1);
   add_mapping_pair(map, "legacy_lpc_default_closed", 1);
   add_mapping_pair(map, "owner_safe_future_api_ready", 1);
   add_mapping_pair(map, "owner_async_api_ready", 1);
@@ -1343,6 +1349,12 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "lpcc_owner_audit_cli_ready", 1);
   add_mapping_string(contract, "lpcc_owner_audit_cli", "lpcc --owner-audit --format=json");
   add_mapping_pair(contract, "lpcc_owner_audit_static_scanner_ready", 1);
+  add_mapping_pair(contract, "lpc_source_encoding_ready", 1);
+  add_mapping_string(contract, "lpc_source_encoding_schema", kLpcSourceEncodingSchemaV1);
+  add_mapping_string(contract, "vm_internal_string_encoding", kLpcInternalStringEncoding);
+  add_mapping_pair(contract, "session_encoding_contract_ready", 1);
+  add_mapping_pair(contract, "gateway_encoding_boundary_ready", 1);
+  add_mapping_pair(contract, "encoding_audit_ready", 1);
   add_mapping_pair(contract, "legacy_lpc_default_closed", 1);
   add_mapping_string(contract, "lpc_modern_profile_module_file", "compiler/internal/lpc_modern_profile.cc");
   add_mapping_pair(contract, "owner_safe_future_api_ready", 1);

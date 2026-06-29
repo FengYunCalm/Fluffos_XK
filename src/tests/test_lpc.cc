@@ -123,11 +123,47 @@ TEST_F(DriverTest, TestLpcModernProfilePragmasAndAuditRules) {
       "}\n");
   ASSERT_TRUE(report.modern_lpc);
   ASSERT_TRUE(report.strict_owner);
+  ASSERT_STREQ(report.source_encoding.c_str(), "utf-8");
+  ASSERT_FALSE(report.transcoded);
+  ASSERT_EQ(report.invalid_sequence_count, 0);
   ASSERT_EQ(report.findings.size(), 4);
   ASSERT_EQ(report.findings[0].code, "cross_owner_mutable_write");
+  ASSERT_FALSE(report.findings[0].suggestion.empty());
   ASSERT_EQ(report.findings[1].code, "bare_object_payload");
   ASSERT_EQ(report.findings[2].code, "unfrozen_callback_payload");
   ASSERT_EQ(report.findings[3].code, "direct_save_object_hot_path");
+}
+
+TEST_F(DriverTest, TestLpcModernProfileDetectsSourceEncodingPragma) {
+  auto report = lpc_owner_audit_source(
+      "#pragma source_encoding(\"GBK\")\n"
+      "#pragma modern_lpc\n"
+      "void f() {}\n");
+  ASSERT_TRUE(report.modern_lpc);
+  ASSERT_STREQ(report.source_encoding.c_str(), "GBK");
+  ASSERT_TRUE(report.transcoded);
+  ASSERT_EQ(report.invalid_sequence_count, 0);
+}
+
+TEST_F(DriverTest, TestCompileFileAcceptsGbkSourceEncodingPragma) {
+  std::string source = "#pragma source_encoding(\"GBK\")\nstring value() { return \"";
+  source.append("\xD6\xD0\xCE\xC4", 4);
+  source += "\"; }\n";
+
+  std::istringstream stream_source(source);
+  auto stream = std::make_unique<IStreamLexStream>(stream_source);
+  auto *compiled = compile_file(std::move(stream), "gbk_source_encoding_test");
+
+  ASSERT_NE(compiled, nullptr);
+  bool found_utf8_literal = false;
+  for (int i = 0; i < compiled->num_strings; i++) {
+    if (compiled->strings[i] && std::string(compiled->strings[i]) == u8"中文") {
+      found_utf8_literal = true;
+      break;
+    }
+  }
+  ASSERT_TRUE(found_utf8_literal);
+  deallocate_program(compiled);
 }
 
 TEST_F(DriverTest, TestLpcVmProfileRecordsApplyCacheLookups) {
@@ -4451,6 +4487,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "lpcc_owner_audit_cli_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "lpcc_owner_audit_cli"), "lpcc --owner-audit --format=json");
     ASSERT_EQ(mapping_number(status, "lpcc_owner_audit_static_scanner_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_source_encoding_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_source_encoding_schema"), "lpc_source_encoding_v1");
+    ASSERT_STREQ(mapping_string(status, "vm_internal_string_encoding"), "utf-8");
+    ASSERT_EQ(mapping_number(status, "session_encoding_contract_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "gateway_encoding_boundary_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "encoding_audit_ready"), 1);
     ASSERT_EQ(mapping_number(status, "legacy_lpc_default_closed"), 1);
     ASSERT_EQ(mapping_number(status, "owner_safe_future_api_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_async_api_ready"), 1);
@@ -4882,6 +4924,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "lpcc_owner_audit_cli_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpcc_owner_audit_cli"), "lpcc --owner-audit --format=json");
     ASSERT_EQ(mapping_number(boundary_contract, "lpcc_owner_audit_static_scanner_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_source_encoding_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_source_encoding_schema"), "lpc_source_encoding_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "vm_internal_string_encoding"), "utf-8");
+    ASSERT_EQ(mapping_number(boundary_contract, "session_encoding_contract_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "gateway_encoding_boundary_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "encoding_audit_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "legacy_lpc_default_closed"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_profile_module_file"),
                  "compiler/internal/lpc_modern_profile.cc");

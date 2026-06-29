@@ -41,6 +41,11 @@ int run_owner_audit_json(const char *config_file, const char *lpc_file) {
   output["file"] = lpc_file;
   output["modern_lpc"] = report.modern_lpc;
   output["strict_owner"] = report.strict_owner;
+  output["source_encoding_schema"] = kLpcSourceEncodingSchemaV1;
+  output["source_encoding"] = report.source_encoding;
+  output["vm_internal_string_encoding"] = kLpcInternalStringEncoding;
+  output["transcoded"] = report.transcoded;
+  output["invalid_sequence_count"] = report.invalid_sequence_count;
   output["finding_count"] = report.findings.size();
   output["rules"] = nlohmann::json::array();
   for (const auto &rule : lpc_owner_audit_rules()) {
@@ -49,6 +54,7 @@ int run_owner_audit_json(const char *config_file, const char *lpc_file) {
         {"category", rule.category},
         {"severity", rule.severity},
         {"message", rule.message},
+        {"suggestion", rule.suggestion},
     });
   }
   output["findings"] = nlohmann::json::array();
@@ -58,6 +64,7 @@ int run_owner_audit_json(const char *config_file, const char *lpc_file) {
         {"category", finding.category},
         {"severity", finding.severity},
         {"message", finding.message},
+        {"suggestion", finding.suggestion},
         {"line", finding.line},
         {"column", finding.column},
         {"excerpt", finding.excerpt},

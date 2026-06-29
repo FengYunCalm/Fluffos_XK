@@ -7,8 +7,10 @@
 
 inline constexpr const char *kLpcModernProfileSchemaV1 = "lpc_modern_profile_v1";
 inline constexpr const char *kLpcOwnerAuditSchemaV1 = "lpcc_owner_audit_v1";
+inline constexpr const char *kLpcSourceEncodingSchemaV1 = "lpc_source_encoding_v1";
 inline constexpr const char *kLpcModernProfileModeOptIn = "opt_in_pragma";
 inline constexpr const char *kLpcStrictOwnerPolicyV1 = "strict_owner_owner_safe_payloads_v1";
+inline constexpr const char *kLpcInternalStringEncoding = "utf-8";
 
 enum LpcModernPragmaFlag {
   LPC_MODERN_PRAGMA_MODERN_LPC = 1 << 0,
@@ -20,6 +22,7 @@ struct LpcOwnerAuditRule {
   const char *category;
   const char *severity;
   const char *message;
+  const char *suggestion;
 };
 
 struct LpcOwnerAuditFinding {
@@ -27,6 +30,7 @@ struct LpcOwnerAuditFinding {
   std::string category;
   std::string severity;
   std::string message;
+  std::string suggestion;
   int line{0};
   int column{0};
   std::string excerpt;
@@ -35,6 +39,9 @@ struct LpcOwnerAuditFinding {
 struct LpcOwnerAuditReport {
   bool modern_lpc{false};
   bool strict_owner{false};
+  std::string source_encoding{kLpcInternalStringEncoding};
+  bool transcoded{false};
+  int invalid_sequence_count{0};
   std::vector<LpcOwnerAuditFinding> findings;
 };
 
@@ -42,5 +49,6 @@ const std::array<LpcOwnerAuditRule, 4> &lpc_owner_audit_rules();
 bool lpc_modern_pragma_name(const char *name, int *flag);
 const char *lpc_modern_pragma_name_for_flag(int flag);
 LpcOwnerAuditReport lpc_owner_audit_source(const std::string &source);
+std::string lpc_source_encoding_from_source(const std::string &source);
 
 #endif /* LPC_MODERN_PROFILE_H */
