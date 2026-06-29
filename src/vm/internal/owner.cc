@@ -437,6 +437,9 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "encoding_audit_ready", 1);
   add_mapping_pair(map, "legacy_lpc_default_closed", 1);
   add_mapping_pair(map, "owner_safe_future_api_ready", 1);
+  add_mapping_pair(map, "owner_safe_lpc_api_failure_schema_ready", 1);
+  add_mapping_string(map, "owner_safe_lpc_api_failure_schema", "owner_safe_lpc_api_failure_v1");
+  add_mapping_string(map, "owner_safe_lpc_api_return_fields", "success,ok,code,error,reason,api,trace_id");
   add_mapping_pair(map, "owner_async_api_ready", 1);
   add_mapping_pair(map, "owner_await_poll_adapter_ready", 1);
   add_mapping_pair(map, "owner_await_coroutine_runtime_ready", 0);
@@ -1358,6 +1361,9 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "legacy_lpc_default_closed", 1);
   add_mapping_string(contract, "lpc_modern_profile_module_file", "compiler/internal/lpc_modern_profile.cc");
   add_mapping_pair(contract, "owner_safe_future_api_ready", 1);
+  add_mapping_pair(contract, "owner_safe_lpc_api_failure_schema_ready", 1);
+  add_mapping_string(contract, "owner_safe_lpc_api_failure_schema", "owner_safe_lpc_api_failure_v1");
+  add_mapping_string(contract, "owner_safe_lpc_api_return_fields", "success,ok,code,error,reason,api,trace_id");
   add_mapping_pair(contract, "owner_async_api_ready", 1);
   add_mapping_pair(contract, "owner_await_poll_adapter_ready", 1);
   add_mapping_pair(contract, "owner_await_coroutine_runtime_ready", 0);

@@ -689,6 +689,11 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["legacy_lpc_default_closed"]);
     ASSERT_EQ("compiler/internal/lpc_modern_profile.cc", boundary_contract["lpc_modern_profile_module_file"]);
     ASSERT_EQ(1, boundary_contract["owner_safe_future_api_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_safe_lpc_api_failure_schema_ready"]);
+    ASSERT_EQ("owner_safe_lpc_api_failure_v1",
+              boundary_contract["owner_safe_lpc_api_failure_schema"]);
+    ASSERT_EQ("success,ok,code,error,reason,api,trace_id",
+              boundary_contract["owner_safe_lpc_api_return_fields"]);
     ASSERT_EQ(1, boundary_contract["owner_async_api_ready"]);
     ASSERT_EQ(1, boundary_contract["owner_await_poll_adapter_ready"]);
     ASSERT_EQ(0, boundary_contract["owner_await_coroutine_runtime_ready"]);
@@ -929,6 +934,11 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["encoding_audit_ready"]);
     ASSERT_EQ(1, status["legacy_lpc_default_closed"]);
     ASSERT_EQ(1, status["owner_safe_future_api_ready"]);
+    ASSERT_EQ(1, status["owner_safe_lpc_api_failure_schema_ready"]);
+    ASSERT_EQ("owner_safe_lpc_api_failure_v1",
+              status["owner_safe_lpc_api_failure_schema"]);
+    ASSERT_EQ("success,ok,code,error,reason,api,trace_id",
+              status["owner_safe_lpc_api_return_fields"]);
     ASSERT_EQ(1, status["owner_async_api_ready"]);
     ASSERT_EQ(1, status["owner_await_poll_adapter_ready"]);
     ASSERT_EQ(0, status["owner_await_coroutine_runtime_ready"]);
@@ -1414,6 +1424,9 @@ void assert_lpc_modern_runtime_apis() {
         "numbers": ({ 1, 2, 3 }),
     ]));
     ASSERT_EQ(1, frozen["success"]);
+    ASSERT_EQ(1, frozen["ok"]);
+    ASSERT_EQ("", frozen["reason"]);
+    ASSERT_EQ("owner_safe_lpc_api_failure_v1", frozen["failure_schema"]);
     ASSERT_EQ(1, frozen["modern_lpc_api"]);
     ASSERT_EQ(1, frozen["frozen_payload"]);
     ASSERT_EQ(1, frozen["deep_copy"]);
@@ -1429,10 +1442,15 @@ void assert_lpc_modern_runtime_apis() {
 
     rejected = freeze(([ "object": this_object() ]));
     ASSERT_EQ(0, rejected["success"]);
+    ASSERT_EQ(0, rejected["ok"]);
     ASSERT_EQ("invalid_frozen_payload", rejected["code"]);
+    ASSERT(stringp(rejected["reason"]));
+    ASSERT_EQ(rejected["error"], rejected["reason"]);
 
     snapshot_value = snapshot(([ "snapshot": "safe" ]));
     ASSERT_EQ(1, snapshot_value["success"]);
+    ASSERT_EQ(1, snapshot_value["ok"]);
+    ASSERT_EQ("", snapshot_value["reason"]);
     ASSERT_EQ("snapshot", snapshot_value["api"]);
     ASSERT_EQ(1, snapshot_value["snapshot_only"]);
     ASSERT(mapp(snapshot_value["value"]));
@@ -1440,6 +1458,8 @@ void assert_lpc_modern_runtime_apis() {
 
     persisted_snapshot = owner_snapshot_persist(this_object(), ([ "save_zeros": 1 ]));
     ASSERT_EQ(1, persisted_snapshot["success"]);
+    ASSERT_EQ(1, persisted_snapshot["ok"]);
+    ASSERT_EQ("", persisted_snapshot["reason"]);
     ASSERT_EQ("owner_snapshot_persist", persisted_snapshot["api"]);
     ASSERT_EQ(1, persisted_snapshot["modern_lpc_api"]);
     ASSERT_EQ(1, persisted_snapshot["owner_snapshot_persistence_ready"]);
@@ -1458,19 +1478,25 @@ void assert_lpc_modern_runtime_apis() {
 
     rejected = owner_async(this_object(), ([ "payload_key": "missing-method" ]));
     ASSERT_EQ(0, rejected["success"]);
+    ASSERT_EQ(0, rejected["ok"]);
     ASSERT_EQ("missing_method", rejected["code"]);
+    ASSERT_EQ(rejected["error"], rejected["reason"]);
 
     async_result = owner_async(target_owner, ([
         "type": "modern_contract",
         "payload_key": "payload/v1",
     ]));
     ASSERT_EQ(1, async_result["success"]);
+    ASSERT_EQ(1, async_result["ok"]);
+    ASSERT_EQ("", async_result["reason"]);
     ASSERT_EQ(1, async_result["modern_lpc_api"]);
     ASSERT_EQ("owner_async", async_result["api"]);
     ASSERT(async_result["future_id"] > 0);
 
     await_result = owner_await(async_result["future_id"]);
     ASSERT_EQ(1, await_result["modern_lpc_api"]);
+    ASSERT_EQ(1, await_result["ok"]);
+    ASSERT_EQ("", await_result["reason"]);
     ASSERT_EQ("owner_await", await_result["api"]);
     ASSERT_EQ("poll_adapter_until_coroutine_runtime", await_result["await_model"]);
     ASSERT_EQ(0, await_result["coroutine_runtime_ready"]);
@@ -1483,6 +1509,8 @@ void assert_lpc_modern_runtime_apis() {
         "state": "prepared",
     ]));
     ASSERT_EQ(1, commit["success"]);
+    ASSERT_EQ(1, commit["ok"]);
+    ASSERT_EQ("", commit["reason"]);
     ASSERT_EQ(1, commit["modern_lpc_api"]);
     ASSERT_EQ("owner_commit", commit["api"]);
     ASSERT_EQ(1, commit["commit_proposal"]);
