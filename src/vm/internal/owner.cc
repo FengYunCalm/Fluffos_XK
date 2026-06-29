@@ -550,7 +550,9 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "service_shard_executor_ready", 1);
   add_mapping_pair(map, "domain_task_registry_mudlib_aligned", 1);
   add_mapping_pair(map, "keyed_service_shard_ready", 1);
-  add_mapping_pair(map, "hot_path_service_owner_single_point", 0);
+  add_mapping_pair(map, "hot_path_service_owner_single_point", owner_service_hot_path_service_owner_count());
+  add_mapping_pair(map, "hot_path_service_shard_count", owner_service_hot_path_service_shard_count());
+  add_mapping_string(map, "owner_service_shard_policy_model", "keyed_service_shard_for_hot_paths");
   add_mapping_pair(map, "target_owner_message_main_fallback", 0);
   add_mapping_pair(map, "production_perfect_contract_ready", normal_path_main_fallbacks == 0 ? 1 : 0);
   add_mapping_pair(map, "facade_only_runtime_claims", 0);
@@ -1556,7 +1558,9 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "service_shard_executor_ready", 1);
   add_mapping_pair(contract, "domain_task_registry_mudlib_aligned", 1);
   add_mapping_pair(contract, "keyed_service_shard_ready", 1);
-  add_mapping_pair(contract, "hot_path_service_owner_single_point", 0);
+  add_mapping_pair(contract, "hot_path_service_owner_single_point", owner_service_hot_path_service_owner_count());
+  add_mapping_pair(contract, "hot_path_service_shard_count", owner_service_hot_path_service_shard_count());
+  add_mapping_string(contract, "owner_service_shard_policy_model", "keyed_service_shard_for_hot_paths");
   add_mapping_pair(contract, "target_owner_message_main_fallback", 0);
   add_mapping_pair(contract, "production_perfect_contract_ready", 1);
   add_mapping_pair(contract, "facade_only_runtime_claims", 0);

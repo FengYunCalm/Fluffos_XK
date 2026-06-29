@@ -890,6 +890,9 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["domain_task_registry_mudlib_aligned"]);
     ASSERT_EQ(1, boundary_contract["keyed_service_shard_ready"]);
     ASSERT_EQ(0, boundary_contract["hot_path_service_owner_single_point"]);
+    ASSERT(boundary_contract["hot_path_service_shard_count"] > 0);
+    ASSERT_EQ("keyed_service_shard_for_hot_paths",
+              boundary_contract["owner_service_shard_policy_model"]);
     ASSERT_EQ(0, boundary_contract["target_owner_message_main_fallback"]);
     ASSERT_EQ(1, boundary_contract["production_perfect_contract_ready"]);
     ASSERT_EQ(0, boundary_contract["facade_only_runtime_claims"]);
@@ -1129,6 +1132,8 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["domain_task_registry_mudlib_aligned"]);
     ASSERT_EQ(1, status["keyed_service_shard_ready"]);
     ASSERT_EQ(0, status["hot_path_service_owner_single_point"]);
+    ASSERT(status["hot_path_service_shard_count"] > 0);
+    ASSERT_EQ("keyed_service_shard_for_hot_paths", status["owner_service_shard_policy_model"]);
     ASSERT_EQ(0, status["target_owner_message_main_fallback"]);
     ASSERT_EQ(1, status["production_perfect_contract_ready"]);
     ASSERT_EQ(0, status["facade_only_runtime_claims"]);

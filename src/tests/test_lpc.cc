@@ -31,6 +31,7 @@
 #include "vm/internal/base/mapping.h"
 #include "vm/internal/base/object.h"
 #include "vm/internal/lpc_vm_profile.h"
+#include "vm/internal/owner_service_registry.h"
 #include "vm/internal/otable.h"
 #include "vm/internal/simulate.h"
 #include "vm/object_handle.h"
@@ -249,6 +250,19 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "session_fifo_rejected"), 0);
   ASSERT_STREQ(mapping_string(status, "gateway_io_boundary"), "main_thread_io_adapter");
   free_mapping(status);
+}
+
+TEST_F(DriverTest, TestOwnerServiceRegistryUsesKeyedShardsForHotPaths) {
+  ASSERT_EQ(owner_service_hot_path_service_owner_count(), 0);
+  ASSERT_GT(owner_service_hot_path_service_shard_count(), 0);
+  for (const auto& descriptor : owner_service_shard_descriptors()) {
+    if (!descriptor.hot_path) {
+      continue;
+    }
+    ASSERT_STRNE(descriptor.owner_policy, "service_owner") << descriptor.domain;
+    ASSERT_NE(descriptor.shard_policy, nullptr) << descriptor.domain;
+    ASSERT_NE(std::string(descriptor.shard_policy), "") << descriptor.domain;
+  }
 }
 
 namespace {
@@ -4661,6 +4675,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "domain_task_registry_mudlib_aligned"), 1);
     ASSERT_EQ(mapping_number(status, "keyed_service_shard_ready"), 1);
     ASSERT_EQ(mapping_number(status, "hot_path_service_owner_single_point"), 0);
+    ASSERT_GT(mapping_number(status, "hot_path_service_shard_count"), 0);
+    ASSERT_STREQ(mapping_string(status, "owner_service_shard_policy_model"),
+                 "keyed_service_shard_for_hot_paths");
     ASSERT_EQ(mapping_number(status, "target_owner_message_main_fallback"), 0);
     ASSERT_EQ(mapping_number(status, "production_perfect_contract_ready"), 1);
     ASSERT_EQ(mapping_number(status, "facade_only_runtime_claims"), 0);
@@ -5219,6 +5236,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "domain_task_registry_mudlib_aligned"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "keyed_service_shard_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "hot_path_service_owner_single_point"), 0);
+    ASSERT_GT(mapping_number(boundary_contract, "hot_path_service_shard_count"), 0);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_service_shard_policy_model"),
+                 "keyed_service_shard_for_hot_paths");
     ASSERT_EQ(mapping_number(boundary_contract, "target_owner_message_main_fallback"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "production_perfect_contract_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "facade_only_runtime_claims"), 0);
