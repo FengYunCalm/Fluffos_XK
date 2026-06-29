@@ -22,6 +22,13 @@ mudlib content, private deployment data, or account state.
   for the current production contract, including object lifecycle, heartbeat,
   callout, async/file/db, DNS, socket callbacks, gateway commands,
   target-owner messages, and the `socket_release` release/acquire handshake.
+- **Modern LPC, opt-in**: `#pragma modern_lpc` and `#pragma strict_owner`
+  add owner-aware audit rules, owner-safe async/future APIs, snapshot/value
+  objects, and VM hot-path diagnostics without breaking old mudlibs.
+- **Encoding boundary support**: VM strings stay canonical UTF-8, while source
+  files, sessions, gateway payloads, and external data can explicitly use
+  boundary encodings such as GBK, GB2312, and Big5 through ICU-backed
+  transcoding.
 - **Safe by default**: ordinary legacy LPC is still default-closed for arbitrary
   background execution. Multicore entry requires explicit ownership, allowlist,
   driver callback, frozen payload, ObjectHandle, or owner/service shard
@@ -73,10 +80,34 @@ Read the contract before integrating a mudlib:
 
 - [Runtime v2 contract](docs/multicore-runtime-v2.md)
 - [Runtime v4 hardening baseline](docs/multicore-runtime-v4.md)
+- [LPC Modern Runtime](docs/lpc-modern-runtime.md)
 - [Production gate](docs/multicore-production-gate.md)
 - [Owner multicore API](docs/owner-multicore-api.md)
 - [Production baseline release note](docs/releases/multicore-production-baseline-2026-06-27.md)
 - [Engine overview for integrators](docs/fluffos-xk-overview.md)
+
+## LPC Modern Runtime
+
+FluffOS_XK does not replace LPC with another scripting language. It adds a
+modern opt-in profile on top of LPC:
+
+- `#pragma modern_lpc` enables modern diagnostics and owner-safe runtime APIs;
+- `#pragma strict_owner` turns owner migration findings into strict audit
+  results for new code;
+- `lpcc --owner-audit --format=json` reports source encoding, profile pragmas,
+  cross-owner write risks, mutable callback payloads, direct hot-path
+  persistence, and suggestions;
+- `freeze`, `snapshot`, `owner_async`, `owner_await`, `owner_commit`, and
+  `owner_snapshot_persist` provide explicit payload, future, commit, and
+  persistence boundaries;
+- VM profiling and benchmarks expose opcode, efun, `call_other`, function
+  pointer, parser/action, mapping, and string hot paths.
+
+Legacy LPC keeps its old behavior unless a mudlib opts into these profiles.
+For legacy Chinese source or clients, use `#pragma source_encoding("GBK")`,
+`set_encoding("GBK")`, `string_encode`, `string_decode`, and
+`buffer_transcode` at the boundary instead of changing VM internal string
+semantics.
 
 ## Using The Multicore Interfaces
 
@@ -227,6 +258,7 @@ Recommended flow:
 - [Build guide](docs/build.md)
 - [Driver CLI](docs/cli/driver.md)
 - [LPC reference](docs/lpc/index.md)
+- [LPC Modern Runtime](docs/lpc-modern-runtime.md)
 - [Owner multicore API](docs/owner-multicore-api.md)
 - [Multicore runtime v2](docs/multicore-runtime-v2.md)
 - [Multicore runtime v4](docs/multicore-runtime-v4.md)

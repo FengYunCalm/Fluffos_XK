@@ -97,6 +97,25 @@ Its JSON uses `schema=object_store_bench_v1` and records owner-local resolve
 latency, owner id lookup latency, owner path lookup latency, owner-local fast
 path count, and global fallback count.
 
+## Value Objects And Snapshot Persistence
+
+Frozen mapping and array payloads are represented as value objects for owner
+runtime purposes. They are not live LPC objects, do not join the traditional
+destruct chain, and are safe to move across owner boundaries after validation.
+
+Required fields:
+
+- `lpc_value_object_profile_ready=1`
+- `lpc_value_object_model=frozen_snapshot_value_object_v1`
+- `lpc_value_object_live_lifecycle_member=0`
+- `lpc_value_object_cross_owner_payload_safe=1`
+- `object_handle_capability_ready=1`
+- `owner_snapshot_persistence_ready=1`
+
+`owner_snapshot_persist()` serializes same-owner object snapshots through the
+owner persistence contract. The main thread remains a file I/O adapter; it is
+not the normal business execution path.
+
 ## Scheduler And Backpressure
 
 Owner scheduler backpressure is observable through:
@@ -113,6 +132,36 @@ Owner scheduler backpressure is observable through:
 Backpressure rejects new work after the per-owner queue reaches the configured
 limit. Same-owner execution stays serial; different owners may execute in
 parallel when owner executor threads are available.
+
+Hot-path global gameplay domains must be keyed `service_shard` entries, not
+single `service_owner` bottlenecks. Runtime status derives
+`hot_path_service_owner_single_point` from the service registry so documentation
+and status cannot drift from the registered domains. Current hot-path shard
+domains include economy, combat, mail, reward, persistence, guild, quest, and
+rank. Low-frequency domains may remain `service_owner` only when they are not on
+the player command hot path.
+
+## LPC VM Hot-Path Profiling
+
+Runtime v4 exposes hot-path profiling counters through `lpc_vm_profile_v1` and
+`lpc_vm_bench_v1`. These counters are diagnostic signals, not machine-specific
+performance thresholds.
+
+Tracked paths include:
+
+- opcode dispatch;
+- efun dispatch and dispatch time;
+- `call_other` dispatch;
+- function pointer invocation;
+- parser/add_action lookup;
+- mapping lookup and insert;
+- string push;
+- apply dispatch cache hit, miss, and invalidation.
+
+The integrated `tools/lpc-modern-runtime-stress.sh smoke` gate requires the
+benchmark JSON to record non-zero opcode, efun, `call_other`, mapping lookup,
+and string push counters. This proves the probes are wired to live VM paths
+instead of static status fields.
 
 ## Benchmark And Stress Entry Points
 
