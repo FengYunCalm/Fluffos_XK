@@ -78,12 +78,14 @@ jobs:
           - platform: macOS
             os: macos-14
             build: Debug
+            cmake_flags: -DMARCH_NATIVE=OFF -DENABLE_LTO=OFF
             packages: cmake pkg-config pcre libgcrypt openssl jemalloc icu4c mysql sqlite3 googletest
             openssl_root: /usr/local/opt/openssl
             icu_root: /opt/homebrew/opt/icu4c
           - platform: macOS
             os: macos-14
             build: RelWithDebInfo
+            cmake_flags: -DMARCH_NATIVE=OFF -DENABLE_LTO=OFF
             packages: cmake pkg-config pcre libgcrypt openssl jemalloc icu4c mysql sqlite3 googletest
             openssl_root: /usr/local/opt/openssl
             icu_root: /opt/homebrew/opt/icu4c

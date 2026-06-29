@@ -20,7 +20,7 @@ COPY . /build/fluffos
 RUN mkdir /build/fluffos/build
 
 WORKDIR /build/fluffos/build
-RUN cmake .. -DMARCH_NATIVE=OFF -DSTATIC=ON \
+RUN cmake .. -DMARCH_NATIVE=OFF -DSTATIC=ON -DENABLE_LTO=OFF \
     && make install
 
 FROM alpine:3.18

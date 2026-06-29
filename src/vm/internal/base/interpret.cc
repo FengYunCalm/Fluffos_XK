@@ -3469,6 +3469,12 @@ void eval_instruction(char *p) {
             if (i < 0) {
               error("String index out of bounds.\n");
             }
+            // COMPAT: direct index at the start of an empty string returns 0.
+            if (i == 0 && SVALUE_STRLEN(sp) == 0) {
+              free_string_svalue(sp);
+              (--sp)->u.number = 0;
+              break;
+            }
 
             UChar32 res = u8_egc_index_as_single_codepoint(sp->u.string, SVALUE_STRLEN(sp), i);
             if (res == -2) {

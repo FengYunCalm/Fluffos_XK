@@ -7,7 +7,13 @@
 #include "vm/context.h"
 #include "vm/owner.h"
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#endif
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
 #include <event2/event.h>
