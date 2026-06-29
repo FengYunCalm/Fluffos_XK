@@ -48,6 +48,24 @@ extern bool vm_socket_test_support_dispatch_callback(object_t* owner, const char
 extern int replace_interactive(object_t *ob, object_t *obfrom);
 extern bool gateway_dispatch_message_for_test(int fd, const char *payload);
 
+namespace {
+void test_set_env(const char* name, const char* value) {
+#ifdef _WIN32
+  (void)_putenv_s(name, value);
+#else
+  (void)setenv(name, value, 1);
+#endif
+}
+
+void test_unset_env(const char* name) {
+#ifdef _WIN32
+  (void)_putenv_s(name, "");
+#else
+  (void)unsetenv(name);
+#endif
+}
+}  // namespace
+
 // Test fixture class
 class DriverTest : public ::testing::Test {
  public:
@@ -5668,9 +5686,9 @@ TEST_F(DriverTest, TestVmOwnerExecutorBudgetYieldsAndRequeuesSameOwnerBacklog) {
   const char* owner = "owner/test/executor/budget-yield";
 
   vm_owner_thread_stop();
-  setenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "5", 1);
+  test_set_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "5");
   struct ProbeDelayGuard {
-    ~ProbeDelayGuard() { unsetenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS"); }
+    ~ProbeDelayGuard() { test_unset_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS"); }
   } probe_delay_guard;
   auto mapping_number = [](mapping_t* map, const char* key) -> long {
     auto* value = find_string_in_mapping(map, key);
@@ -5934,7 +5952,7 @@ TEST_F(DriverTest, TestVmOwnerExecutorRunsDifferentOwnersInParallel) {
   ASSERT_GT(task_a, 0u);
   ASSERT_GT(task_b, task_a);
 
-  setenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "80", 1);
+  test_set_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "80");
   vm_owner_thread_start(2);
   for (int i = 0; i < 100; i++) {
     auto* status = vm_owner_thread_status();
@@ -5945,7 +5963,7 @@ TEST_F(DriverTest, TestVmOwnerExecutorRunsDifferentOwnersInParallel) {
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  unsetenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
+  test_unset_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
 
   auto* running = vm_owner_thread_status();
   ASSERT_GE(mapping_number(running, "executor_probe_executed"), before_probe + 2);
@@ -5977,7 +5995,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimePerformanceProbesRecordDiagnostics) {
     object_t* resolve_probe{nullptr};
     ~RuntimeProbeGuard() {
       vm_owner_thread_stop();
-      unsetenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
+      test_unset_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
       if (callback_probe) {
         vm_owner_clear_id(callback_probe);
         destruct_object(callback_probe);
@@ -6070,7 +6088,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimePerformanceProbesRecordDiagnostics) {
   auto before_parallel_releases = mapping_number(before_parallel, "executor_owner_releases");
   free_mapping(before_parallel);
 
-  setenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "20", 1);
+  test_set_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "20");
   auto parallel_start = std::chrono::steady_clock::now();
   for (long i = 0; i < different_owner_tasks; i++) {
     ASSERT_GT(vm_owner_enqueue_task(owner_a, "executor_probe", "runtime-v3-owner-a"), 0u);
@@ -6080,7 +6098,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimePerformanceProbesRecordDiagnostics) {
   wait_for_owner_probe(owner_a, before_parallel_probe + different_owner_tasks * 2);
   wait_for_owner_probe(owner_b, before_parallel_probe + different_owner_tasks * 2);
   vm_owner_thread_stop();
-  unsetenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
+  test_unset_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
   auto parallel_elapsed_us =
       std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - parallel_start).count();
 

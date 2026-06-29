@@ -22,10 +22,38 @@
 #include <string>
 #include <thread>
 #include <vector>
+#ifdef _WIN32
+#include <direct.h>
+#else
 #include <unistd.h>
+#endif
 
 namespace {
 using Clock = std::chrono::steady_clock;
+
+void bench_set_env(const char *name, const char *value) {
+#ifdef _WIN32
+  (void)_putenv_s(name, value);
+#else
+  (void)setenv(name, value, 1);
+#endif
+}
+
+void bench_unset_env(const char *name) {
+#ifdef _WIN32
+  (void)_putenv_s(name, "");
+#else
+  (void)unsetenv(name);
+#endif
+}
+
+int bench_chdir(const char *path) {
+#ifdef _WIN32
+  return _chdir(path);
+#else
+  return chdir(path);
+#endif
+}
 
 struct Metric {
   std::string name;
@@ -197,7 +225,7 @@ void run_different_owner_bench(Report &report) {
   auto before_releases = mapping_number(before, "executor_owner_releases");
   free_mapping(before);
 
-  setenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "4", 1);
+  bench_set_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "4");
   auto start = Clock::now();
   for (long i = 0; i < tasks_per_owner; i++) {
     require(vm_owner_enqueue_task(owner_a, "executor_probe", "bench_parallel_a") > 0, "parallel owner A enqueue failed");
@@ -206,7 +234,7 @@ void run_different_owner_bench(Report &report) {
   vm_owner_thread_start(2);
   wait_for_probe_count(before_probe + tasks_per_owner * 2);
   vm_owner_thread_stop();
-  unsetenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
+  bench_unset_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
   auto total_elapsed = elapsed_us(start);
 
   auto *after = vm_owner_thread_status();
@@ -404,7 +432,7 @@ int main(int argc, char **argv) {
     if (!json_path.empty()) {
       json_path = std::filesystem::absolute(json_path).string();
     }
-    if (chdir(TESTSUITE_DIR) != 0) {
+    if (bench_chdir(TESTSUITE_DIR) != 0) {
       std::ostringstream error;
       error << "failed to chdir to " << TESTSUITE_DIR << ": " << strerror(errno);
       throw std::runtime_error(error.str());

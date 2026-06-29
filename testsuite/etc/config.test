@@ -382,7 +382,7 @@ maximum users : 40
 
 # Define the maximum stack size of the stack machine. This stack will also
 # contain all local variables and arguments.  (unused currently)
-evaluator stack size : 1000
+evaluator stack size : 6000
 
 # Define the size of the compiler stack. This defines how complex
 # expressions the compiler can parse.  (unused currently)
