@@ -55,17 +55,17 @@ void f_sys_reload_tls() {
 
   DEFER { pop_stack(); };
   if (port_index < 0 || port_index > sizeof(external_port)) {
-    error("Invalid port index: %d\n", port_index_display);
+    error("Invalid port index: %" LPC_INT_FMTSTR_P "\n", port_index_display);
   }
   auto *port = &external_port[port_index];
   if (port->kind == PORT_TYPE_UNDEFINED) {
-    error("Invalid port index: %d\n", port_index_display);
+    error("Invalid port index: %" LPC_INT_FMTSTR_P "\n", port_index_display);
   }
   if (port->kind == PORT_TYPE_WEBSOCKET) {
     error("Reloading websocket TLS config is not supported for port %d.\n", port->port);
   } else {
     if (port->ssl == nullptr) {
-      error("Port %d is not TLS enabled\n", port_index_display);
+      error("Port %" LPC_INT_FMTSTR_P " is not TLS enabled\n", port_index_display);
     }
     auto *ctx = tls_server_init(port->tls_cert, port->tls_key);
     if (ctx == nullptr) {

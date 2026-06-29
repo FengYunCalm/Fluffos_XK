@@ -38,9 +38,17 @@
 #include <sys/mkdev.h>
 #endif
 #include <fcntl.h>
+#include <cstdio>
 #include <sstream>
+#include <string>
 #include <unistd.h>
 #include <zlib.h>
+#ifdef __linux__
+#include <sys/syscall.h>
+#ifndef RENAME_NOREPLACE
+#define RENAME_NOREPLACE (1U << 0)
+#endif
+#endif
 
 #include "base/internal/strutils.h"
 #include "ghc/filesystem.hpp"
@@ -106,12 +114,42 @@ static FILE *open_binary_rw_existing_or_create(const char *file) {
   return fptr;
 }
 
-static bool same_stat_identity(const struct stat &left, const struct stat &right) {
-#ifdef __WIN32
-  return left.st_size == right.st_size && left.st_mtime == right.st_mtime;
-#else
-  return left.st_dev == right.st_dev && left.st_ino == right.st_ino;
+static int rename_no_replace(const char *from, const char *to) {
+#ifdef __linux__
+  if (syscall(SYS_renameat2, AT_FDCWD, from, AT_FDCWD, to, RENAME_NOREPLACE) == 0) {
+    return 0;
+  }
+  if (errno != ENOSYS && errno != EINVAL) {
+    return -1;
+  }
 #endif
+  return rename(from, to);
+}
+
+static std::string cross_device_move_staging_path(const char *from, int attempt) {
+  const char *basename = strrchr(from, '/');
+  std::string dir;
+  if (basename != nullptr) {
+    dir.assign(from, static_cast<size_t>(basename - from) + 1);
+    basename++;
+  } else {
+    basename = from;
+  }
+
+  return dir + "." + basename + ".fluffos-move." + std::to_string(getpid()) + "." +
+         std::to_string(attempt);
+}
+
+static int copy_file_unchecked(const char *from, const char *to) {
+  std::error_code error_code;
+  auto base = fs::current_path();
+  fs::copy_file(base / from, base / to, fs::copy_options::overwrite_existing, error_code);
+  if (error_code) {
+    debug_message("Error copying file from /%s to /%s, Error: %s", from, to,
+                  error_code.message().c_str());
+    return -1;
+  }
+  return 1;
 }
 static int parrcmp(const void * /*p1*/, const void * /*p2*/);
 static void encode_stat(svalue_t * /*vp*/, int /*flags*/, char * /*str*/, struct stat * /*st*/);
@@ -784,18 +822,35 @@ static int do_move(const char *from, const char *to, int flag) {
   }
 #endif
 
-  /* rename failed on cross-filesystem link.  Copy the file instead. */
+  /* rename failed on cross-filesystem link.  Stage the source under a private
+     same-directory name first, so cleanup never unlinks a replaced source path. */
   if (flag == F_RENAME) {
-    if (copy_file(from, to) != 1) {
+    std::string staged_from;
+    for (int attempt = 0; attempt < 100; attempt++) {
+      staged_from = cross_device_move_staging_path(from, attempt);
+      if (rename_no_replace(from, staged_from.c_str()) == 0) {
+        break;
+      }
+      if (errno != EEXIST) {
+        error("cannot stage `/%s' for cross-filesystem move\n", from);
+        return 1;
+      }
+      staged_from.clear();
+    }
+    if (staged_from.empty()) {
+      error("cannot stage `/%s' for cross-filesystem move\n", from);
       return 1;
     }
-    struct stat current_from_stats;
-    if (lstat(from, &current_from_stats) != 0 || !same_stat_identity(from_stats, current_from_stats)) {
-      error("cannot remove `/%s': source changed during cross-filesystem move", from);
+
+    if (copy_file_unchecked(staged_from.c_str(), to) != 1) {
+      if (rename(staged_from.c_str(), from) != 0) {
+        debug_message("Error restoring staged move source /%s to /%s: %s", staged_from.c_str(),
+                      from, strerror(errno));
+      }
       return 1;
     }
-    if (unlink(from)) {
-      error("cannot remove `/%s'", from);
+    if (unlink(staged_from.c_str())) {
+      error("cannot remove staged source `/%s'", staged_from.c_str());
       return 1;
     }
   }
@@ -950,13 +1005,7 @@ int copy_file(const char *from, const char *to) {
     return copy_file(from, newto);
   }
 
-  std::error_code error_code;
-  auto base = fs::current_path();
-  fs::copy_file(base / from, base / to, fs::copy_options::overwrite_existing, error_code);
-
-  if (error_code) {
-    debug_message("Error copying file from /%s to /%s, Error: %s", from, to,
-                  error_code.message().c_str());
+  if (copy_file_unchecked(from, to) != 1) {
     return -1;
   }
 

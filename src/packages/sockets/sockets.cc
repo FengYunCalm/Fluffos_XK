@@ -306,7 +306,7 @@ void f_socket_set_option() {
   auto *arg = sp;
 
   if (lpc_sock < 0 || lpc_sock >= lpc_socks_num()) {
-     error("Bad socket descriptor: %d\n", lpc_sock);
+     error("Bad socket descriptor: %" LPC_INT_FMTSTR_P "\n", lpc_sock);
   }
 
   switch(option) {
@@ -315,7 +315,7 @@ void f_socket_set_option() {
         bad_arg(3, F_SOCKET_SET_OPTION);
       }
       if (arg->u.number != 0 && arg->u.number != 1) {
-        error("Bad socket option value: %d, onl 0 or 1 is accepted.\n", arg->u.number);
+        error("Bad socket option value: %" LPC_INT_FMTSTR_P ", onl 0 or 1 is accepted.\n", arg->u.number);
       }
       assign_svalue_no_free(&lpc_socks_get(lpc_sock)->options[SO_TLS_VERIFY_PEER], arg);
       break;
@@ -338,7 +338,7 @@ void f_socket_set_option() {
       assign_svalue(&lpc_socks_get(lpc_sock)->options[SO_TLS_KEY], arg);
       break;
     default:
-        error("Unknown socket option: %d\n", option);
+        error("Unknown socket option: %" LPC_INT_FMTSTR_P "\n", option);
   }
   pop_3_elems();
 }
@@ -350,7 +350,7 @@ void f_socket_get_option() {
   auto option = (sp - 1)->u.number;
 
   if (lpc_sock < 0 || lpc_sock >= lpc_socks_num()) {
-    error("Bad socket descriptor: %d\n", lpc_sock);
+    error("Bad socket descriptor: %" LPC_INT_FMTSTR_P "\n", lpc_sock);
   }
 
   switch(option) {
@@ -383,7 +383,7 @@ void f_socket_get_option() {
       }
       break;
     default:
-      error("Unknown socket option: %d\n", option);
+      error("Unknown socket option: %" LPC_INT_FMTSTR_P "\n", option);
   }
   pop_2_elems();
 }
