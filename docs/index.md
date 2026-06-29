@@ -40,7 +40,7 @@ Current entry points:
 - [Multicore Production Baseline - 2026-06-27](./releases/multicore-production-baseline-2026-06-27.md)
 
 Historical plans and v1 notes are archived under
-[docs/archive/multicore](./archive/multicore/).
+[docs/archive/multicore](./archive/multicore/README.md).
 
 ## Current Release
 
