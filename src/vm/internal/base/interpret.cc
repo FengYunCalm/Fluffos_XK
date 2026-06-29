@@ -141,15 +141,15 @@ thread_local int st_num_arg;
 
 // For safety, we leave some buffer in before and after the space.
 static thread_local svalue_t _stack[10 + CFG_EVALUATOR_STACK_SIZE + 10];
-static thread_local svalue_t *const start_of_stack = &_stack[10];
-thread_local svalue_t *const end_of_stack = start_of_stack + CFG_EVALUATOR_STACK_SIZE;
+static thread_local svalue_t *start_of_stack = nullptr;
+thread_local svalue_t *end_of_stack = nullptr;
 
 /* Used to throw an error to a catch */
 thread_local svalue_t catch_value = {T_NUMBER};
 
 // For safety, we leave some buffer in before and after the space.
 static thread_local control_stack_t _control_stack[5 + CFG_MAX_CALL_DEPTH + 5];
-thread_local control_stack_t *const control_stack = &_control_stack[5];
+thread_local control_stack_t *control_stack = nullptr;
 thread_local control_stack_t *csp; /* Points to last element pushed */
 
 thread_local int too_deep_error = 0, max_eval_error = 0;
@@ -3469,6 +3469,12 @@ void eval_instruction(char *p) {
             if (i < 0) {
               error("String index out of bounds.\n");
             }
+            // COMPAT: direct index at the start of an empty string returns 0.
+            if (i == 0 && SVALUE_STRLEN(sp) == 0) {
+              free_string_svalue(sp);
+              (--sp)->u.number = 0;
+              break;
+            }
 
             UChar32 res = u8_egc_index_as_single_codepoint(sp->u.string, SVALUE_STRLEN(sp), i);
             if (res == -2) {
@@ -4877,7 +4883,21 @@ int inter_sscanf(svalue_t *arg, svalue_t *s0, svalue_t *s1, int num_arg) {
 /*
  * Reset the virtual stack machine.
  */
+// Bind stack bounds at runtime so every thread observes its own initialized TLS arrays.
+static inline void ensure_thread_stack_bounds() {
+  if (start_of_stack == nullptr) {
+    start_of_stack = &_stack[10];
+  }
+  if (end_of_stack == nullptr) {
+    end_of_stack = start_of_stack + CFG_EVALUATOR_STACK_SIZE;
+  }
+  if (control_stack == nullptr) {
+    control_stack = &_control_stack[5];
+  }
+}
+
 void reset_machine(int first) {
+  ensure_thread_stack_bounds();
   csp = control_stack - 1;
   if (first) {
     sp = start_of_stack - 1;
@@ -4890,6 +4910,7 @@ void reset_machine(int first) {
 }
 
 long vm_eval_stack_depth() {
+  ensure_thread_stack_bounds();
   if (sp < start_of_stack) {
     return 0;
   }
@@ -4899,6 +4920,7 @@ long vm_eval_stack_depth() {
 long vm_eval_stack_capacity() { return CFG_EVALUATOR_STACK_SIZE; }
 
 bool vm_eval_stack_thread_local_storage_ready() {
+  ensure_thread_stack_bounds();
   return start_of_stack != nullptr && end_of_stack == start_of_stack + CFG_EVALUATOR_STACK_SIZE;
 }
 
@@ -4917,6 +4939,7 @@ long vm_value_stack_lvalue_ref_count() {
 bool vm_value_stack_thread_local_storage_ready() { return vm_eval_stack_thread_local_storage_ready(); }
 
 long vm_control_stack_depth() {
+  ensure_thread_stack_bounds();
   if (csp == nullptr || csp < control_stack) {
     return 0;
   }
@@ -4925,7 +4948,10 @@ long vm_control_stack_depth() {
 
 long vm_control_stack_capacity() { return CFG_MAX_CALL_DEPTH; }
 
-bool vm_control_stack_thread_local_storage_ready() { return control_stack == &_control_stack[5]; }
+bool vm_control_stack_thread_local_storage_ready() {
+  ensure_thread_stack_bounds();
+  return control_stack == &_control_stack[5];
+}
 
 static const char *get_arg(int a, int b) {
   static char buff[50];

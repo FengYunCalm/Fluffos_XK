@@ -22,10 +22,38 @@
 #include <string>
 #include <thread>
 #include <vector>
+#ifdef _WIN32
+#include <direct.h>
+#else
 #include <unistd.h>
+#endif
 
 namespace {
 using Clock = std::chrono::steady_clock;
+
+void bench_set_env(const char *name, const char *value) {
+#ifdef _WIN32
+  (void)_putenv_s(name, value);
+#else
+  (void)setenv(name, value, 1);
+#endif
+}
+
+void bench_unset_env(const char *name) {
+#ifdef _WIN32
+  (void)_putenv_s(name, "");
+#else
+  (void)unsetenv(name);
+#endif
+}
+
+int bench_chdir(const char *path) {
+#ifdef _WIN32
+  return _chdir(path);
+#else
+  return chdir(path);
+#endif
+}
 
 struct Metric {
   std::string name;
@@ -71,6 +99,47 @@ long long percentile(std::vector<long long> samples, double rank) {
 void require(bool condition, const std::string &message) {
   if (!condition) {
     throw std::runtime_error(message);
+  }
+}
+
+object_t *clone_object_for_bench(const char *path) {
+  error_context_t econ{};
+  object_t *object = nullptr;
+  object_t *saved_current_object = current_object;
+  if (current_object == nullptr && master_ob != nullptr) {
+    current_object = master_ob;
+  }
+  save_context(&econ);
+  try {
+    object = clone_object(path, 0);
+    pop_context(&econ);
+    current_object = saved_current_object;
+  } catch (...) {
+    restore_context(&econ);
+    current_object = saved_current_object;
+    throw std::runtime_error(std::string("clone_object failed for ") + path);
+  }
+  return object;
+}
+
+void destruct_object_for_bench(object_t *object) {
+  if (object == nullptr || (object->flags & O_DESTRUCTED)) {
+    return;
+  }
+  error_context_t econ{};
+  object_t *saved_current_object = current_object;
+  if (current_object == nullptr && master_ob != nullptr) {
+    current_object = master_ob;
+  }
+  save_context(&econ);
+  try {
+    destruct_object(object);
+    pop_context(&econ);
+    current_object = saved_current_object;
+  } catch (...) {
+    restore_context(&econ);
+    current_object = saved_current_object;
+    throw std::runtime_error(std::string("destruct_object failed for ") + object->obname);
   }
 }
 
@@ -197,7 +266,7 @@ void run_different_owner_bench(Report &report) {
   auto before_releases = mapping_number(before, "executor_owner_releases");
   free_mapping(before);
 
-  setenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "4", 1);
+  bench_set_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "4");
   auto start = Clock::now();
   for (long i = 0; i < tasks_per_owner; i++) {
     require(vm_owner_enqueue_task(owner_a, "executor_probe", "bench_parallel_a") > 0, "parallel owner A enqueue failed");
@@ -206,7 +275,7 @@ void run_different_owner_bench(Report &report) {
   vm_owner_thread_start(2);
   wait_for_probe_count(before_probe + tasks_per_owner * 2);
   vm_owner_thread_stop();
-  unsetenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
+  bench_unset_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
   auto total_elapsed = elapsed_us(start);
 
   auto *after = vm_owner_thread_status();
@@ -258,7 +327,7 @@ void run_future_bench(Report &report) {
 
 void run_object_resolve_bench(Report &report) {
   const long iterations = 256;
-  object_t *probe = clone_object("single/void", 0);
+  object_t *probe = clone_object_for_bench("single/void");
   require(probe != nullptr, "failed to clone resolve probe object");
   vm_owner_set_id(probe, "owner/bench/runtime-v4/resolve");
   vm_object_store_register(probe);
@@ -290,11 +359,11 @@ void run_object_resolve_bench(Report &report) {
   report.add("object_resolve_api_latency_p95_us", percentile(samples, 0.95));
   report.add("object_resolve_api_latency_p99_us", percentile(samples, 0.99));
   vm_owner_clear_id(probe);
-  destruct_object(probe);
+  destruct_object_for_bench(probe);
 }
 
 void run_callback_admission_bench(Report &report) {
-  object_t *probe = clone_object("single/void", 0);
+  object_t *probe = clone_object_for_bench("single/void");
   require(probe != nullptr, "failed to clone callback probe object");
   const char *owner = "owner/bench/runtime-v4/callback";
   vm_owner_set_id(probe, owner);
@@ -356,7 +425,7 @@ void run_callback_admission_bench(Report &report) {
   free_mapping(after);
 
   vm_owner_clear_id(probe);
-  destruct_object(probe);
+  destruct_object_for_bench(probe);
 }
 
 void add_final_status(Report &report) {
@@ -404,7 +473,7 @@ int main(int argc, char **argv) {
     if (!json_path.empty()) {
       json_path = std::filesystem::absolute(json_path).string();
     }
-    if (chdir(TESTSUITE_DIR) != 0) {
+    if (bench_chdir(TESTSUITE_DIR) != 0) {
       std::ostringstream error;
       error << "failed to chdir to " << TESTSUITE_DIR << ": " << strerror(errno);
       throw std::runtime_error(error.str());

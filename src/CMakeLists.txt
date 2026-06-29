@@ -3,6 +3,7 @@ option(MARCH_NATIVE "use march=native for GCC" ON)
 option(STATIC "Build static version of driver" OFF)
 option(USE_JEMALLOC "Build driver with jemalloc support" ON)
 option(ENABLE_SANITIZER "Build driver with sanitizer support" OFF)
+option(ENABLE_LTO "Enable interprocedural optimization/LTO on supported release builds" ON)
 # Packages
 option(PACKAGE_ASYNC "async package" ON)
 option(PACKAGE_COMPRESS "compress package" ON)
@@ -140,8 +141,9 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL
   endif ()
 endif ()
 
-# LTO on release builds
-if(NOT ${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+# LTO on release builds. Keep it off for static and Apple builds: both paths
+# currently hit platform linker/TLS model issues in CI.
+if(ENABLE_LTO AND NOT STATIC AND NOT APPLE AND NOT ${CMAKE_BUILD_TYPE} STREQUAL "Debug")
   include(CheckIPOSupported)
   check_ipo_supported(RESULT result)
   if (result)

@@ -87,6 +87,15 @@ uint64_t OwnerFutureStore::failed_count() const {
   return failed_.load(std::memory_order_relaxed);
 }
 
+#ifdef DEBUGMALLOC_EXTENSIONS
+void OwnerFutureStore::mark_debug_refs(std::unordered_set<const VMFrozenValue *> &seen) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  for (const auto &entry : futures_) {
+    vm_mark_frozen_value_once(entry.second.result, seen);
+  }
+}
+#endif
+
 const char *OwnerFutureStore::normalize_text(const char *text, const char *fallback) {
   return text && text[0] != '\0' ? text : fallback;
 }

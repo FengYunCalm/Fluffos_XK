@@ -12,6 +12,7 @@
 #include <cctype>
 #include <locale>
 #include <string>
+#include <utility>
 
 #include "base/internal/EGCIterator.h"
 
@@ -23,7 +24,7 @@
 ///
 /// @return returns trimmed string
 // --------------------------------------------------------------------------
-inline std::string &ltrim(std::string &&str, const std::string &chars = "\t\n\v\f\r ") {
+inline std::string ltrim(std::string &&str, const std::string &chars = "\t\n\v\f\r ") {
   str.erase(0, str.find_first_not_of(chars));
   return str;
 }
@@ -43,7 +44,7 @@ inline std::string ltrim(const std::string &str, const std::string &chars = "\t\
 ///
 /// @return returns trimmed string
 // --------------------------------------------------------------------------
-inline std::string &rtrim(std::string &&str, const std::string &chars = "\t\n\v\f\r ") {
+inline std::string rtrim(std::string &&str, const std::string &chars = "\t\n\v\f\r ") {
   str.erase(str.find_last_not_of(chars) + 1);
   return str;
 }
@@ -63,8 +64,8 @@ inline std::string rtrim(const std::string &str, const std::string &chars = "\t\
 ///
 /// @return returns trimmed string
 // --------------------------------------------------------------------------
-inline std::string &trim(std::string &&str, const std::string &chars = "\t\n\v\f\r ") {
-  return ltrim(rtrim(str, chars), chars);
+inline std::string trim(std::string &&str, const std::string &chars = "\t\n\v\f\r ") {
+  return ltrim(rtrim(std::move(str), chars), chars);
 }
 
 inline std::string trim(const std::string &str, const std::string &chars = "\t\n\v\f\r ") {

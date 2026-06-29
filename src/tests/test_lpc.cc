@@ -43,10 +43,33 @@ extern bool vm_object_store_test_support_remove_live_object_ref_for_bridge_readi
                                                                                     uint64_t object_id);
 extern bool vm_call_out_test_support_run_handle(LPC_INT handle);
 extern bool vm_async_test_support_dispatch_read_callback(object_t* owner, const char* method, const char* payload);
+
+namespace {
+object_t* clone_object_for_test(const char* path);
+void destruct_object_for_test(object_t* object);
+}
 extern bool vm_dns_test_support_dispatch_callback(object_t* owner, const char* method, LPC_INT key);
 extern bool vm_socket_test_support_dispatch_callback(object_t* owner, const char* method, LPC_INT fd);
 extern int replace_interactive(object_t *ob, object_t *obfrom);
 extern bool gateway_dispatch_message_for_test(int fd, const char *payload);
+
+namespace {
+void test_set_env(const char* name, const char* value) {
+#ifdef _WIN32
+  (void)_putenv_s(name, value);
+#else
+  (void)setenv(name, value, 1);
+#endif
+}
+
+void test_unset_env(const char* name) {
+#ifdef _WIN32
+  (void)_putenv_s(name, "");
+#else
+  (void)unsetenv(name);
+#endif
+}
+}  // namespace
 
 // Test fixture class
 class DriverTest : public ::testing::Test {
@@ -112,7 +135,7 @@ TEST_F(DriverTest, TestLpcVmProfileRecordsApplyCacheLookups) {
   ASSERT_STREQ(kLpcVmBenchSchemaV1, "lpc_vm_bench_v1");
 
   lpc_vm_profile_reset();
-  object_t *obj = clone_object("single/void", 0);
+  object_t *obj = clone_object_for_test("single/void");
   ASSERT_NE(obj, nullptr);
 
   auto hit = apply_cache_lookup("dummy", obj->prog);
@@ -131,7 +154,7 @@ TEST_F(DriverTest, TestLpcVmProfileRecordsApplyCacheLookups) {
   ASSERT_GE(snapshot.apply_dispatch_cache_lookup_count, 3);
   ASSERT_GE(snapshot.apply_dispatch_cache_hit_count, 1);
 
-  destruct_object(obj);
+  destruct_object_for_test(obj);
 }
 
 TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
@@ -171,15 +194,62 @@ std::string read_source_file_for_test(const char* path) {
 object_t* load_object_for_test(const char* path) {
   error_context_t econ{};
   object_t* object = nullptr;
+  object_t* saved_current_object = current_object;
+  if (current_object == nullptr && master_ob != nullptr) {
+    current_object = master_ob;
+  }
   save_context(&econ);
   try {
     object = load_object(path, 1);
     pop_context(&econ);
+    current_object = saved_current_object;
   } catch (...) {
     restore_context(&econ);
+    current_object = saved_current_object;
     ADD_FAILURE() << "load_object failed for " << path;
   }
   return object;
+}
+
+object_t* clone_object_for_test(const char* path) {
+  error_context_t econ{};
+  object_t* object = nullptr;
+  object_t* saved_current_object = current_object;
+  if (current_object == nullptr && master_ob != nullptr) {
+    current_object = master_ob;
+  }
+  save_context(&econ);
+  try {
+    object = clone_object(path, 0);
+    pop_context(&econ);
+    current_object = saved_current_object;
+  } catch (...) {
+    restore_context(&econ);
+    current_object = saved_current_object;
+    ADD_FAILURE() << "clone_object failed for " << path;
+  }
+  return object;
+}
+
+void destruct_object_for_test(object_t* object) {
+  if (object == nullptr || (object->flags & O_DESTRUCTED)) {
+    return;
+  }
+  error_context_t econ{};
+  object_t* saved_current_object = current_object;
+  if (current_object == nullptr && master_ob != nullptr) {
+    current_object = master_ob;
+  }
+  save_context(&econ);
+  try {
+    destruct_object(object);
+    pop_context(&econ);
+    current_object = saved_current_object;
+  } catch (...) {
+    restore_context(&econ);
+    current_object = saved_current_object;
+    ADD_FAILURE() << "destruct_object failed for " << object->obname;
+  }
 }
 }  // namespace
 
@@ -755,8 +825,9 @@ TEST_F(DriverTest, TestVmOwnerMetadataDefaultsAndChecks) {
   ASSERT_EQ(vm_owner_total_checks(), before_total + 1);
   ASSERT_EQ(vm_owner_mismatch_checks(), before_mismatch + 1);
 
-  vm_owner_clear_id(obj);
+  vm_owner_set_id(obj, vm_owner_default_id());
   ASSERT_STREQ(vm_owner_default_id(), vm_owner_id(obj));
+  ASSERT_FALSE(vm_owner_has_explicit_id(obj));
   ASSERT_EQ(vm_owner_epoch(obj), default_epoch + 2);
 }
 
@@ -804,8 +875,8 @@ TEST_F(DriverTest, TestVmOwnerQueryObjectSnapshotOnlyForCrossOwnerTargets) {
 }
 
 TEST_F(DriverTest, TestLoadedSingletonUsesDefaultOwnerInsideOwnerScope) {
-  if (auto* existing = find_object("single/owner_singleton.c")) {
-    destruct_object(existing);
+  if (auto* existing = find_object2("single/owner_singleton.c")) {
+    destruct_object_for_test(existing);
   }
 
   VMOwnerScope scope(vm_context(), "owner/test/player", 1);
@@ -814,15 +885,15 @@ TEST_F(DriverTest, TestLoadedSingletonUsesDefaultOwnerInsideOwnerScope) {
 
   ASSERT_NE(obj, nullptr);
   ASSERT_STREQ(vm_owner_default_id(), vm_owner_id(obj));
-  destruct_object(obj);
+  destruct_object_for_test(obj);
 }
 
 TEST_F(DriverTest, TestCommandSingletonUsesDefaultOwnerInsidePlayerOwnerScope) {
-  if (auto* existing = find_object("command/refs.c")) {
-    destruct_object(existing);
+  if (auto* existing = find_object2("command/refs.c")) {
+    destruct_object_for_test(existing);
   }
   current_object = master_ob;
-  auto* player = clone_object("single/owner_singleton", 0);
+  auto* player = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(player, nullptr);
   vm_owner_set_id(player, "owner/test/command/player");
 
@@ -834,16 +905,16 @@ TEST_F(DriverTest, TestCommandSingletonUsesDefaultOwnerInsidePlayerOwnerScope) {
   ASSERT_STREQ(vm_owner_default_id(), vm_owner_id(command));
   ASSERT_NE(vm_owner_id(command), vm_owner_id(player));
 
-  destruct_object(command);
-  destruct_object(player);
+  destruct_object_for_test(command);
+  destruct_object_for_test(player);
 }
 
 TEST_F(DriverTest, TestStdServiceUsesDefaultOwnerInsidePlayerOwnerScope) {
-  if (auto* existing = find_object("std/database.c")) {
-    destruct_object(existing);
+  if (auto* existing = find_object2("std/database.c")) {
+    destruct_object_for_test(existing);
   }
   current_object = master_ob;
-  auto* player = clone_object("single/owner_singleton", 0);
+  auto* player = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(player, nullptr);
   vm_owner_set_id(player, "owner/test/std-service/player");
 
@@ -855,20 +926,20 @@ TEST_F(DriverTest, TestStdServiceUsesDefaultOwnerInsidePlayerOwnerScope) {
   ASSERT_STREQ(vm_owner_default_id(), vm_owner_id(service));
   ASSERT_NE(vm_owner_id(service), vm_owner_id(player));
 
-  destruct_object(service);
-  destruct_object(player);
+  destruct_object_for_test(service);
+  destruct_object_for_test(player);
 }
 
 TEST_F(DriverTest, TestSharedStdServicesUseDefaultOwnerInsidePlayerOwnerScope) {
   const char* service_paths[] = {"std/http.c", "std/present_clone.c", "std/telnet.c"};
   for (auto* path : service_paths) {
-    if (auto* existing = find_object(path)) {
-      destruct_object(existing);
+    if (auto* existing = find_object2(path)) {
+      destruct_object_for_test(existing);
     }
   }
 
   current_object = master_ob;
-  auto* player = clone_object("single/owner_singleton", 0);
+  auto* player = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(player, nullptr);
   vm_owner_set_id(player, "owner/test/shared-service/player");
 
@@ -883,11 +954,11 @@ TEST_F(DriverTest, TestSharedStdServicesUseDefaultOwnerInsidePlayerOwnerScope) {
   }
 
   for (auto* path : service_paths) {
-    if (auto* service = find_object(path)) {
-      destruct_object(service);
+    if (auto* service = find_object2(path)) {
+      destruct_object_for_test(service);
     }
   }
-  destruct_object(player);
+  destruct_object_for_test(player);
 }
 
 TEST_F(DriverTest, TestStdHelperServicesUseDefaultOwnerInsidePlayerOwnerScope) {
@@ -895,13 +966,13 @@ TEST_F(DriverTest, TestStdHelperServicesUseDefaultOwnerInsidePlayerOwnerScope) {
                                 "std/reduce.c", "std/highest.c",       "std/lowest.c",
                                 "std/number_string.c", "std/sum.c"};
   for (auto* path : helper_paths) {
-    if (auto* existing = find_object(path)) {
-      destruct_object(existing);
+    if (auto* existing = find_object2(path)) {
+      destruct_object_for_test(existing);
     }
   }
 
   current_object = master_ob;
-  auto* player = clone_object("single/owner_singleton", 0);
+  auto* player = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(player, nullptr);
   vm_owner_set_id(player, "owner/test/std-helper/player");
 
@@ -926,16 +997,16 @@ TEST_F(DriverTest, TestStdHelperServicesUseDefaultOwnerInsidePlayerOwnerScope) {
   }
 
   for (auto* path : helper_paths) {
-    if (auto* service = find_object(path)) {
-      destruct_object(service);
+    if (auto* service = find_object2(path)) {
+      destruct_object_for_test(service);
     }
   }
-  destruct_object(player);
+  destruct_object_for_test(player);
 }
 
 TEST_F(DriverTest, TestSimulEfunSingletonKeepsDefaultOwnerInsidePlayerOwnerScope) {
   current_object = master_ob;
-  auto* player = clone_object("single/owner_singleton", 0);
+  auto* player = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(player, nullptr);
   vm_owner_set_id(player, "owner/test/simul-efun/player");
 
@@ -950,15 +1021,15 @@ TEST_F(DriverTest, TestSimulEfunSingletonKeepsDefaultOwnerInsidePlayerOwnerScope
     ASSERT_NE(vm_owner_id(service), vm_owner_id(player)) << path;
   }
 
-  destruct_object(player);
+  destruct_object_for_test(player);
 }
 
 TEST_F(DriverTest, TestVirtualObjectUsesDefaultOwnerAndUpdatesStorePath) {
-  if (auto* existing = find_object("test/virtual")) {
-    destruct_object(existing);
+  if (auto* existing = find_object2("test/virtual")) {
+    destruct_object_for_test(existing);
   }
-  if (auto* source = find_object("single/void.c")) {
-    destruct_object(source);
+  if (auto* source = find_object2("single/void.c")) {
+    destruct_object_for_test(source);
   }
 
   auto mapping_number = [](mapping_t* map, const char* key) -> long {
@@ -975,7 +1046,7 @@ TEST_F(DriverTest, TestVirtualObjectUsesDefaultOwnerAndUpdatesStorePath) {
   };
 
   current_object = master_ob;
-  auto* player = clone_object("single/owner_singleton", 0);
+  auto* player = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(player, nullptr);
   vm_owner_set_id(player, "owner/test/virtual/player");
 
@@ -1105,31 +1176,31 @@ TEST_F(DriverTest, TestVirtualObjectUsesDefaultOwnerAndUpdatesStorePath) {
   ASSERT_STREQ(mapping_string(virtual_path_lookup, "record_owner_id"), vm_owner_default_id());
   free_mapping(virtual_path_lookup);
 
-  destruct_object(virtual_object);
-  destruct_object(player);
+  destruct_object_for_test(virtual_object);
+  destruct_object_for_test(player);
 }
 
 TEST_F(DriverTest, TestCloneOwnerUsesCurrentObjectNotAmbientScope) {
-  if (auto* existing = find_object("single/owner_singleton.c")) {
-    destruct_object(existing);
+  if (auto* existing = find_object2("single/owner_singleton.c")) {
+    destruct_object_for_test(existing);
   }
   auto* prototype = load_object_for_test("single/owner_singleton.c");
   ASSERT_NE(prototype, nullptr);
 
   VMOwnerScope scope(vm_context(), "owner/test/player", 1);
   current_object = master_ob;
-  auto* shared_clone = clone_object("single/owner_singleton", 0);
+  auto* shared_clone = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(shared_clone, nullptr);
   ASSERT_STREQ(vm_owner_default_id(), vm_owner_id(shared_clone));
-  destruct_object(shared_clone);
+  destruct_object_for_test(shared_clone);
 
   vm_owner_set_id(prototype, "owner/test/factory");
   current_object = prototype;
-  auto* owned_clone = clone_object("single/owner_singleton", 0);
+  auto* owned_clone = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(owned_clone, nullptr);
   ASSERT_STREQ("owner/test/factory", vm_owner_id(owned_clone));
-  destruct_object(owned_clone);
-  destruct_object(prototype);
+  destruct_object_for_test(owned_clone);
+  destruct_object_for_test(prototype);
 }
 
 TEST_F(DriverTest, TestMoveObjectOwnerInheritanceRespectsExplicitOwner) {
@@ -1137,7 +1208,7 @@ TEST_F(DriverTest, TestMoveObjectOwnerInheritanceRespectsExplicitOwner) {
   ASSERT_NE(dest, nullptr);
 
   current_object = master_ob;
-  auto* inherited_item = clone_object("single/owner_singleton", 0);
+  auto* inherited_item = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(inherited_item, nullptr);
   vm_owner_clear_id(inherited_item);
   auto inherited_epoch = vm_owner_epoch(inherited_item);
@@ -1148,9 +1219,9 @@ TEST_F(DriverTest, TestMoveObjectOwnerInheritanceRespectsExplicitOwner) {
   ASSERT_TRUE(vm_owner_has_explicit_id(inherited_item));
   ASSERT_STREQ("owner/test/move/inherit-dest", vm_owner_id(inherited_item));
   ASSERT_GT(vm_owner_epoch(inherited_item), inherited_epoch);
-  destruct_object(inherited_item);
+  destruct_object_for_test(inherited_item);
 
-  auto* explicit_item = clone_object("single/owner_singleton", 0);
+  auto* explicit_item = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(explicit_item, nullptr);
   vm_owner_set_id(explicit_item, "owner/test/move/explicit-item");
   auto explicit_epoch = vm_owner_epoch(explicit_item);
@@ -1159,15 +1230,15 @@ TEST_F(DriverTest, TestMoveObjectOwnerInheritanceRespectsExplicitOwner) {
   ASSERT_TRUE(vm_owner_has_explicit_id(explicit_item));
   ASSERT_STREQ("owner/test/move/explicit-item", vm_owner_id(explicit_item));
   ASSERT_EQ(vm_owner_epoch(explicit_item), explicit_epoch);
-  destruct_object(explicit_item);
+  destruct_object_for_test(explicit_item);
 
   vm_owner_clear_id(dest);
 }
 
 TEST_F(DriverTest, TestInteractiveExecPreservesNewObjectOwner) {
   current_object = master_ob;
-  auto* old_user = clone_object("single/owner_singleton", 0);
-  auto* new_user = clone_object("single/owner_singleton", 0);
+  auto* old_user = clone_object_for_test("single/owner_singleton");
+  auto* new_user = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(old_user, nullptr);
   ASSERT_NE(new_user, nullptr);
 
@@ -1199,8 +1270,8 @@ TEST_F(DriverTest, TestInteractiveExecPreservesNewObjectOwner) {
   set_command_giver(nullptr);
   remove_interactive(new_user, 1);
   ASSERT_EQ(new_user->interactive, nullptr);
-  destruct_object(old_user);
-  destruct_object(new_user);
+  destruct_object_for_test(old_user);
+  destruct_object_for_test(new_user);
 }
 
 TEST_F(DriverTest, TestVmOwnerMailboxDrainsOwnerFifo) {
@@ -1391,7 +1462,7 @@ TEST_F(DriverTest, TestVmOwnerTaskTraceRecordsObservedAndDispatchedEvents) {
 
 TEST_F(DriverTest, TestVmOwnerMainQueueDispatchesWithOwnerScope) {
   current_object = master_ob;
-  object_t* obj = clone_object("single/void", 0);
+  object_t* obj = clone_object_for_test("single/void");
   ASSERT_NE(obj, nullptr);
   vm_owner_set_id(obj, "owner/test/main-queue");
 
@@ -2996,7 +3067,7 @@ TEST_F(DriverTest, TestPresentEnforcedModeBlocksCrossOwnerIdSearch) {
 
 TEST_F(DriverTest, TestParserEnforcedModeBlocksCrossOwnerInterrogateApply) {
   object_t* parser = load_object_for_test("single/tests/efuns/parser_owner_probe");
-  object_t* item = clone_object("single/tests/efuns/parser_owner_probe", 0);
+  object_t* item = clone_object_for_test("single/tests/efuns/parser_owner_probe");
   ASSERT_NE(parser, nullptr);
   ASSERT_NE(item, nullptr);
 
@@ -5668,9 +5739,9 @@ TEST_F(DriverTest, TestVmOwnerExecutorBudgetYieldsAndRequeuesSameOwnerBacklog) {
   const char* owner = "owner/test/executor/budget-yield";
 
   vm_owner_thread_stop();
-  setenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "5", 1);
+  test_set_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "5");
   struct ProbeDelayGuard {
-    ~ProbeDelayGuard() { unsetenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS"); }
+    ~ProbeDelayGuard() { test_unset_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS"); }
   } probe_delay_guard;
   auto mapping_number = [](mapping_t* map, const char* key) -> long {
     auto* value = find_string_in_mapping(map, key);
@@ -5934,18 +6005,20 @@ TEST_F(DriverTest, TestVmOwnerExecutorRunsDifferentOwnersInParallel) {
   ASSERT_GT(task_a, 0u);
   ASSERT_GT(task_b, task_a);
 
-  setenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "80", 1);
+  test_set_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "80");
   vm_owner_thread_start(2);
-  for (int i = 0; i < 100; i++) {
+  for (int i = 0; i < 200; i++) {
     auto* status = vm_owner_thread_status();
     auto probe_done = mapping_number(status, "executor_probe_executed");
+    auto releases_done = mapping_number(status, "executor_owner_releases");
+    auto active_owners = mapping_number(status, "active_owners");
     free_mapping(status);
-    if (probe_done >= before_probe + 2) {
+    if (probe_done >= before_probe + 2 && releases_done >= before_releases + 2 && active_owners == 0) {
       break;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  unsetenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
+  test_unset_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
 
   auto* running = vm_owner_thread_status();
   ASSERT_GE(mapping_number(running, "executor_probe_executed"), before_probe + 2);
@@ -5977,7 +6050,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimePerformanceProbesRecordDiagnostics) {
     object_t* resolve_probe{nullptr};
     ~RuntimeProbeGuard() {
       vm_owner_thread_stop();
-      unsetenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
+      test_unset_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
       if (callback_probe) {
         vm_owner_clear_id(callback_probe);
         destruct_object(callback_probe);
@@ -6070,7 +6143,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimePerformanceProbesRecordDiagnostics) {
   auto before_parallel_releases = mapping_number(before_parallel, "executor_owner_releases");
   free_mapping(before_parallel);
 
-  setenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "20", 1);
+  test_set_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "20");
   auto parallel_start = std::chrono::steady_clock::now();
   for (long i = 0; i < different_owner_tasks; i++) {
     ASSERT_GT(vm_owner_enqueue_task(owner_a, "executor_probe", "runtime-v3-owner-a"), 0u);
@@ -6080,7 +6153,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimePerformanceProbesRecordDiagnostics) {
   wait_for_owner_probe(owner_a, before_parallel_probe + different_owner_tasks * 2);
   wait_for_owner_probe(owner_b, before_parallel_probe + different_owner_tasks * 2);
   vm_owner_thread_stop();
-  unsetenv("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
+  test_unset_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
   auto parallel_elapsed_us =
       std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - parallel_start).count();
 
@@ -6122,7 +6195,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimePerformanceProbesRecordDiagnostics) {
   ASSERT_EQ(mapping_number(timed_out, "timed_out"), 1);
   free_mapping(timed_out);
 
-  guard.resolve_probe = clone_object("single/void", 0);
+  guard.resolve_probe = clone_object_for_test("single/void");
   ASSERT_NE(guard.resolve_probe, nullptr);
   vm_owner_set_id(guard.resolve_probe, "owner/test/runtime-v3/resolve");
   vm_object_store_register(guard.resolve_probe);
@@ -8226,7 +8299,7 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
   };
 
   current_object = master_ob;
-  object_t* obj = clone_object("single/void", 0);
+  object_t* obj = clone_object_for_test("single/void");
   ASSERT_NE(obj, nullptr);
   vm_owner_set_id(obj, "owner/test/migration/a");
   vm_object_store_register(obj);
@@ -8722,7 +8795,7 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
   expect_owner_local_store_complete_contract(missing_owner_shard_contract->u.map);
   free_mapping(missing_owner);
 
-  object_t* obj = clone_object("single/void", 0);
+  object_t* obj = clone_object_for_test("single/void");
   ASSERT_NE(obj, nullptr);
   vm_owner_set_id(obj, "owner/test/store/destruct");
   vm_object_store_register(obj);
@@ -9980,11 +10053,11 @@ object_t *create_gateway_session_for_test(const char *session_id, const char *lo
 }  // namespace
 
 TEST_F(DriverTest, TestGatewayDaemonUsesDefaultOwnerForSystemMessages) {
-  if (auto *existing = find_object("adm/daemons/gateway_d.c")) {
-    destruct_object(existing);
+  if (auto *existing = find_object2("adm/daemons/gateway_d.c")) {
+    destruct_object_for_test(existing);
   }
   current_object = master_ob;
-  auto *player = clone_object("single/owner_singleton", 0);
+  auto *player = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(player, nullptr);
   vm_owner_set_id(player, "owner/test/gateway/daemon-player");
 
@@ -10045,8 +10118,8 @@ TEST_F(DriverTest, TestGatewayDaemonUsesDefaultOwnerForSystemMessages) {
   ASSERT_TRUE(found_gateway_trace);
   free_mapping(trace);
 
-  destruct_object(daemon);
-  destruct_object(player);
+  destruct_object_for_test(daemon);
+  destruct_object_for_test(player);
 }
 
 TEST_F(DriverTest, TestGatewaySessionDestroyCallsGatewayDisconnected) {
@@ -11121,6 +11194,7 @@ TEST_F(DriverTest, TestGatewayCommandMainQueueDropsStaleOwnerEpoch) {
   ASSERT_NE(ob, nullptr);
   ASSERT_NE(ob->interactive, nullptr);
   ASSERT_TRUE(gateway_is_session(ob));
+  vm_owner_set_id(ob, "owner/test/gateway-command-main-stale");
   const std::string owner_id = vm_owner_id(ob);
   auto stale_epoch = vm_owner_epoch(ob);
 
@@ -11140,7 +11214,7 @@ TEST_F(DriverTest, TestGatewayCommandMainQueueDropsStaleOwnerEpoch) {
   ASSERT_EQ(gateway_inject_input_internal(ob, "look"), 1);
   auto task_id = gateway_enqueue_pending_command_internal(ob);
   ASSERT_GT(task_id, 0u);
-  vm_owner_clear_id(ob);
+  vm_owner_set_id(ob, "owner/test/gateway-command-main-stale/moved");
   vm_owner_set_id(ob, owner_id.c_str());
   ASSERT_STREQ(vm_owner_id(ob), owner_id.c_str());
   auto current_epoch = vm_owner_epoch(ob);

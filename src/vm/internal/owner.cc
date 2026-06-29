@@ -13,6 +13,7 @@
 #include "vm/internal/owner_task_manifest.h"
 #include "vm/internal/owner_trace_store.h"
 #include "vm/internal/lpc_vm_profile.h"
+#include "vm/internal/apply.h"
 #include "compiler/internal/lpc_modern_profile.h"
 
 #include <array>
@@ -58,6 +59,8 @@ constexpr const char *kOwnerCallbackSupportedKinds =
     "heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback";
 
 constexpr const char *kGatewayCommandExecutorActivationBlocker = "";
+
+void clear_owner_apply_return() { vm_apply_return_clear(); }
 
 void add_owner_callback_diagnostic_contract_fields(mapping_t *map) {
   add_mapping_pair(map, "owner_callback_payload_strict_diagnostics_ready", 1);
@@ -2241,10 +2244,12 @@ void dispatch_owner_main_message(const OwnerMainTask &task) {
   }
   auto *result = safe_apply(task.task_key.c_str(), target, num_args, ORIGIN_DRIVER);
   if (!result) {
+    clear_owner_apply_return();
     complete_owner_main_message_task_threadsafe(task, "failed", "", "lpc call failed");
     return;
   }
   auto frozen_result = vm_clone_frozen_value(result);
+  clear_owner_apply_return();
   if (!frozen_result) {
     complete_owner_main_message_task_threadsafe(task, "failed", "", "owner async result must be frozen data");
     return;
@@ -2286,10 +2291,12 @@ void dispatch_owner_message_in_current_context(const OwnerMailboxTask &task) {
   }
   auto *result = safe_apply(task.task_key.c_str(), target, num_args, ORIGIN_DRIVER);
   if (!result) {
+    clear_owner_apply_return();
     complete_owner_message_task_threadsafe(task, "failed", "", "lpc call failed");
     return;
   }
   auto frozen_result = vm_clone_frozen_value(result);
+  clear_owner_apply_return();
   if (!frozen_result) {
     complete_owner_message_task_threadsafe(task, "failed", "", "owner async result must be frozen data");
     return;
@@ -2642,8 +2649,10 @@ void run_owner_lpc_canary(const OwnerMailboxTask &task) {
   owner_thread_lpc_canary_executed.fetch_add(1, std::memory_order_relaxed);
   auto *result = safe_apply(task.task_key.c_str(), task.target, 0, ORIGIN_DRIVER);
   vm_context().owner.lpc_canary_active = saved_canary;
+  auto canary_succeeded = result && result->type == T_NUMBER && result->u.number == 1;
+  clear_owner_apply_return();
 
-  if (result && result->type == T_NUMBER && result->u.number == 1) {
+  if (canary_succeeded) {
     append_owner_task_trace_threadsafe(task, "thread_lpc_canary_succeeded");
     owner_thread_lpc_canary_succeeded.fetch_add(1, std::memory_order_relaxed);
     return;
@@ -2679,19 +2688,22 @@ void run_owner_lpc_task(const OwnerMailboxTask &task) {
   vm_context().owner.controlled_lpc_active = saved_controlled_lpc;
 
   if (!result) {
+    clear_owner_apply_return();
     append_owner_task_trace_threadsafe(task, "thread_lpc_task_failed");
     owner_thread_lpc_task_failed.fetch_add(1, std::memory_order_relaxed);
     complete_owner_future_for_task_threadsafe(task.task_id, "failed", "", "lpc call failed");
     return;
   }
+  auto lpc_task_succeeded = result->type == T_NUMBER && result->u.number == 1;
   auto frozen_result = vm_clone_frozen_value(result);
+  clear_owner_apply_return();
   if (!frozen_result) {
     append_owner_task_trace_threadsafe(task, "thread_lpc_task_failed");
     owner_thread_lpc_task_failed.fetch_add(1, std::memory_order_relaxed);
     complete_owner_future_for_task_threadsafe(task.task_id, "failed", "", "owner lpc result must be frozen data");
     return;
   }
-  if (result && result->type == T_NUMBER && result->u.number == 1) {
+  if (lpc_task_succeeded) {
     append_owner_task_trace_threadsafe(task, "thread_lpc_task_succeeded");
     owner_thread_lpc_task_succeeded.fetch_add(1, std::memory_order_relaxed);
     complete_owner_future_for_task_threadsafe(task.task_id, "completed", task.task_key.c_str(), "",
@@ -2730,12 +2742,14 @@ void run_owner_ordinary_lpc(const OwnerMailboxTask &task) {
   vm_context().owner.controlled_lpc_active = saved_controlled_lpc;
 
   if (!result) {
+    clear_owner_apply_return();
     append_owner_task_trace_threadsafe(task, "thread_ordinary_lpc_failed");
     owner_thread_ordinary_lpc_failed.fetch_add(1, std::memory_order_relaxed);
     complete_owner_future_for_task_threadsafe(task.task_id, "failed", "", "ordinary lpc call failed");
     return;
   }
   auto frozen_result = vm_clone_frozen_value(result);
+  clear_owner_apply_return();
   if (!frozen_result) {
     append_owner_task_trace_threadsafe(task, "thread_ordinary_lpc_failed");
     owner_thread_ordinary_lpc_failed.fetch_add(1, std::memory_order_relaxed);
@@ -3100,6 +3114,10 @@ void vm_owner_set_id(object_t *object, const char *owner_id) {
   }
   if (!valid_owner_id(owner_id)) {
     owner_id = kDefaultOwnerId;
+  }
+  if (owner_id_is_default(owner_id)) {
+    vm_owner_clear_id(object);
+    return;
   }
   if (object->vm_owner_id && std::strcmp(object->vm_owner_id, owner_id) == 0) {
     return;
@@ -5104,6 +5122,15 @@ mapping_t *vm_owner_runtime_status() {
                    static_cast<long>(vm_context_object_store_sync_rejections()));
   return map;
 }
+
+#ifdef DEBUGMALLOC_EXTENSIONS
+void vm_owner_mark_runtime_refs() {
+  std::unordered_set<const VMFrozenValue *> seen;
+  owner_scheduler_state.mark_debug_refs(seen);
+  owner_trace_store.mark_debug_refs(seen);
+  owner_future_store.mark_debug_refs(seen);
+}
+#endif
 
 // Query object snapshot for safe cross-owner read-only access
 // Returns a mapping with basic properties that don't require synchronous call_other

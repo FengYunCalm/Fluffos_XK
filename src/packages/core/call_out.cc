@@ -129,8 +129,10 @@ static void free_called_call(pending_call_t *cop) {
       cop->command_giver = nullptr;
     }
   }
+  if (cop->handle) {
+    vm_object_store_remove_callout(callout_owner_id(cop), static_cast<uint64_t>(cop->handle));
+  }
   if (cop->owner_id) {
-    vm_object_store_remove_callout(cop->owner_id, static_cast<uint64_t>(cop->handle));
     free_string(cop->owner_id);
     cop->owner_id = nullptr;
   }
@@ -210,10 +212,11 @@ LPC_INT new_call_out(object_t *ob, svalue_t *fun, std::chrono::milliseconds dela
   DBG_CALLOUT("  handle: %" LPC_INT_FMTSTR_P "\n", cop->handle);
 
   object_t *owner_ob = cop->ob ? cop->ob : fun->u.fp->hdr.owner;
-  cop->owner_id = make_shared_string(vm_owner_id(owner_ob));
+  const char *owner_id = vm_owner_id(owner_ob);
+  cop->owner_id = std::strcmp(owner_id, vm_owner_default_id()) == 0 ? nullptr : make_shared_string(owner_id);
   cop->owner_epoch = vm_owner_epoch(owner_ob);
   vm_object_store_record_callout(owner_ob, static_cast<uint64_t>(cop->handle));
-  vm_owner_record_task_trace(cop->owner_id, "call_out", fun->type == T_STRING ? fun->u.string : "<function>",
+  vm_owner_record_task_trace(callout_owner_id(cop), "call_out", fun->type == T_STRING ? fun->u.string : "<function>",
                              cop->owner_epoch, "scheduled");
 
   g_callout_handle_map.insert(std::make_pair(cop->handle, cop));

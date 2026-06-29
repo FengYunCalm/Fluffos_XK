@@ -76,7 +76,7 @@ time to swap : 600
 maximum bits in a bitfield : 1200
 
 # Max number of local variables in a function.
-maximum local variables : 30
+maximum local variables : 64
 
 # Define the maximum call depth for functions.
 maximum call depth : 30
@@ -382,8 +382,8 @@ maximum users : 40
 
 # Define the maximum stack size of the stack machine. This stack will also
 # contain all local variables and arguments.  (unused currently)
-evaluator stack size : 1000
+evaluator stack size : 65536
 
 # Define the size of the compiler stack. This defines how complex
 # expressions the compiler can parse.  (unused currently)
-compiler stack size : 200
+compiler stack size : 600

@@ -3,11 +3,6 @@
 name: Deploy VitePress site to Pages
 
 on:
-  # Runs on pushes targeting the `main` branch. Change this to `master` if you're
-  # using the `master` branch as the default branch.
-  push:
-    branches: [master]
-
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
@@ -37,11 +32,13 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm # or pnpm / yarn
           cache-dependency-path: docs/package-lock.json # or docs/pnpm-lock.yaml / docs/yarn.lock
       - name: Setup Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - name: Install dependencies
         run: |
           cd docs

@@ -122,4 +122,8 @@ mapping_t *vm_owner_runtime_status();
 // Object snapshot API for safe cross-owner structure inspection.
 mapping_t *vm_owner_query_object_snapshot(object_t *target, const char *requesting_owner_id);
 
+#ifdef DEBUGMALLOC_EXTENSIONS
+void vm_owner_mark_runtime_refs();
+#endif
+
 #endif /* SRC_VM_OWNER_H_ */

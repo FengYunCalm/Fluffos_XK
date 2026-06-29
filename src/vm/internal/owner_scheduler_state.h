@@ -165,6 +165,10 @@ class OwnerSchedulerState {
   std::vector<OwnerMailboxTask> remove_owner_mailbox(const std::string &owner_id);
   void erase_owner_mailbox(const std::string &owner_id);
 
+#ifdef DEBUGMALLOC_EXTENSIONS
+  void mark_debug_refs(std::unordered_set<const VMFrozenValue *> &seen) const;
+#endif
+
  private:
   void mark_owner_schedulable(const std::string &owner_id);
   void mark_main_owner_schedulable(const std::string &owner_id);
