@@ -825,8 +825,9 @@ TEST_F(DriverTest, TestVmOwnerMetadataDefaultsAndChecks) {
   ASSERT_EQ(vm_owner_total_checks(), before_total + 1);
   ASSERT_EQ(vm_owner_mismatch_checks(), before_mismatch + 1);
 
-  vm_owner_clear_id(obj);
+  vm_owner_set_id(obj, vm_owner_default_id());
   ASSERT_STREQ(vm_owner_default_id(), vm_owner_id(obj));
+  ASSERT_FALSE(vm_owner_has_explicit_id(obj));
   ASSERT_EQ(vm_owner_epoch(obj), default_epoch + 2);
 }
 
@@ -11191,6 +11192,7 @@ TEST_F(DriverTest, TestGatewayCommandMainQueueDropsStaleOwnerEpoch) {
   ASSERT_NE(ob, nullptr);
   ASSERT_NE(ob->interactive, nullptr);
   ASSERT_TRUE(gateway_is_session(ob));
+  vm_owner_set_id(ob, "owner/test/gateway-command-main-stale");
   const std::string owner_id = vm_owner_id(ob);
   auto stale_epoch = vm_owner_epoch(ob);
 
@@ -11210,7 +11212,7 @@ TEST_F(DriverTest, TestGatewayCommandMainQueueDropsStaleOwnerEpoch) {
   ASSERT_EQ(gateway_inject_input_internal(ob, "look"), 1);
   auto task_id = gateway_enqueue_pending_command_internal(ob);
   ASSERT_GT(task_id, 0u);
-  vm_owner_clear_id(ob);
+  vm_owner_set_id(ob, "owner/test/gateway-command-main-stale/moved");
   vm_owner_set_id(ob, owner_id.c_str());
   ASSERT_STREQ(vm_owner_id(ob), owner_id.c_str());
   auto current_epoch = vm_owner_epoch(ob);

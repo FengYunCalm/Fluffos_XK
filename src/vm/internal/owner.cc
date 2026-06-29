@@ -3101,6 +3101,10 @@ void vm_owner_set_id(object_t *object, const char *owner_id) {
   if (!valid_owner_id(owner_id)) {
     owner_id = kDefaultOwnerId;
   }
+  if (owner_id_is_default(owner_id)) {
+    vm_owner_clear_id(object);
+    return;
+  }
   if (object->vm_owner_id && std::strcmp(object->vm_owner_id, owner_id) == 0) {
     return;
   }

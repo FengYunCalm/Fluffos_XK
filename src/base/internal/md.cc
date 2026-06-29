@@ -75,7 +75,7 @@ void clear_ref_journal(md_node_t* node) {
   if (it == md_refjournal.end()) {
     return;
   }
-  it->second.clear();
+  md_refjournal.erase(it);
 #endif
 }
 } // namespace
