@@ -5,16 +5,21 @@ title: cli / lpcc
 
 # cli / lpcc
 
-`lpcc` is a command line tool to dump compiled LPC code, it is useful for understanding how FluffOS compiles LPC code.
+`lpcc` is a command line tool for inspecting compiled LPC code and for running
+the LPC Modern Runtime owner audit scanner.
 
-## Usage
+`lpcc` 是用于查看 LPC 编译结果的命令行工具，也提供 LPC Modern Runtime 的 owner
+审计扫描入口。
+
+## Usage / 用法
 
 ```bash
 ./lpcc config_file lpc_file
 ```
 
-For LPC Modern Runtime migrations, `lpcc` also exposes a conservative owner
-audit scanner:
+For LPC Modern Runtime migrations, run the owner audit scanner:
+
+迁移 LPC Modern Runtime 时，可以运行 owner 审计扫描：
 
 ```bash
 ./lpcc --owner-audit --format=json config_file lpc_file
@@ -34,8 +39,23 @@ The JSON report uses `schema=lpcc_owner_audit_v1` and includes:
 - stable finding fields: file, line, rule code, severity, message, and
   suggestion.
 
+JSON 报告使用 `schema=lpcc_owner_audit_v1`，包含：
+
+- 是否存在 `#pragma modern_lpc`；
+- 是否存在 `#pragma strict_owner`；
+- 文件选择的源码编码；
+- 是否执行了源码转码；
+- 非法源码字节序列数量；
+- cross-owner mutable write 静态发现；
+- bare object payload 静态发现；
+- unfrozen callback payload 静态发现；
+- direct hot-path `save_object` 静态发现；
+- 稳定发现字段：file、line、rule code、severity、message 和 suggestion。
+
 Source files are UTF-8 by default. A modern mudlib can opt into other source
 encodings at the file boundary:
+
+源码默认按 UTF-8 处理。现代 mudlib 可以在文件边界显式选择其他源码编码：
 
 ```c
 #pragma source_encoding("GBK")
@@ -46,11 +66,17 @@ before normal lexer validation. This is intended for legacy Chinese mudlibs and
 other boundary encodings such as GB2312 or Big5; it does not change internal VM
 string semantics.
 
+编译器会在普通 lexer 校验前，把源码文本转码到 VM 内部规范 UTF-8 表示。这个能力面向遗留中文
+mudlib 以及 GB2312、Big5 等边界编码；它不会改变 VM 内部字符串语义。
+
 The scanner is intentionally conservative. Treat findings as migration work
 items and confirm behavior with the runtime contract tests before enabling
 strict owner policy in a mudlib.
 
-## Example output
+扫描器有意保守。应把发现项视为迁移工作项，并在 mudlib 启用 strict owner policy
+前用 runtime contract 测试确认行为。
+
+## Example output / 示例输出
 
 ```bash
 $ ./lpcc etc/config.test ../test.c

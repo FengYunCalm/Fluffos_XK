@@ -3,286 +3,242 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CMake](https://img.shields.io/badge/build-CMake-blue.svg)](CMakeLists.txt)
 [![LPC Runtime](https://img.shields.io/badge/runtime-LPC%20%2F%20MUD-informational.svg)](https://www.fluffos.info)
-[![Multicore](https://img.shields.io/badge/multicore-owner%2Fservice%20executor-success.svg)](docs/multicore-runtime-v2.md)
+[![Multicore](https://img.shields.io/badge/multicore-owner%2Fservice%20executor-success.svg)](docs/multicore-runtime-v4.md)
 
-English | [简体中文](README_CN.md)
+English first. Chinese follows each major section.
+英文在前；每个主要章节后提供中文说明。
+
+## What This Engine Is
 
 FluffOS_XK is a production-oriented FluffOS engine fork for modern LPC/MUD
-projects. It keeps the classic FluffOS driver model, then adds a completed
-owner/service multicore runtime baseline, stronger gateway integration, cleaner
-build behavior, and downstream-friendly engine maintenance.
+projects. It keeps LPC and the classic FluffOS driver model, then adds a
+completed owner/service multicore runtime, opt-in modern LPC contracts,
+source/session encoding boundaries, VM hot-path diagnostics, and
+downstream-friendly maintenance practices.
 
-Use it when you want a practical source-level LPC runtime that can be rebuilt,
-audited, and embedded by a real game repository without mixing engine work,
-mudlib content, private deployment data, or account state.
+Use this repository as an engine source tree or as the source for rebuilt
+`driver` and `lpcc` binaries. Keep mudlib content, world data, accounts,
+deployment secrets, and operations policy in your game repository.
 
-## Why FluffOS_XK
+FluffOS_XK 是面向现代 LPC/MUD 项目的生产型 FluffOS 引擎分支。它保留 LPC
+和经典 FluffOS driver 模型，同时加入已经完成的 owner/service 多核运行时、
+按需启用的现代 LPC 合同、源码/会话编码边界、VM 热路径诊断，以及适合下游项目长期维护的工程边界。
 
-- **Production multicore baseline**: owner/service executor execution is sealed
-  for the current production contract, including object lifecycle, heartbeat,
-  callout, async/file/db, DNS, socket callbacks, gateway commands,
-  target-owner messages, and the `socket_release` release/acquire handshake.
-- **Modern LPC, opt-in**: `#pragma modern_lpc` and `#pragma strict_owner`
-  add owner-aware audit rules, owner-safe async/future APIs, snapshot/value
-  objects, and VM hot-path diagnostics without breaking old mudlibs.
-- **Encoding boundary support**: VM strings stay canonical UTF-8, while source
-  files, sessions, gateway payloads, and external data can explicitly use
-  boundary encodings such as GBK, GB2312, and Big5 through ICU-backed
-  transcoding.
-- **Safe by default**: ordinary legacy LPC is still default-closed for arbitrary
-  background execution. Multicore entry requires explicit ownership, allowlist,
-  driver callback, frozen payload, ObjectHandle, or owner/service shard
-  contracts.
-- **Built for downstream games**: keep the engine in this repository and keep
-  mudlib, world data, accounts, deployment secrets, and operations policy in
-  your own game repository.
-- **Modern client path**: gateway/session integration supports WebSocket-facing
-  clients and service-managed deployments.
-- **Auditable maintenance fork**: CMake, install behavior, warning hygiene,
-  release notes, security policy, and project scope are kept visible for
-  external review.
+本仓库应作为引擎源码树，或作为重建 `driver` 与 `lpcc` 二进制的来源。
+mudlib、世界内容、账号、部署密钥和运维策略应留在游戏项目仓库中。
 
-## What Is Included
+## Why It Exists
 
-FluffOS_XK focuses on engine runtime foundations:
+- **Controlled multicore execution**: owner/service executor paths cover object
+  lifecycle, heartbeat, callout, async/file/db, DNS, socket callbacks, gateway
+  commands, target-owner messages, and socket release/acquire handshakes.
+- **Modern LPC without breaking legacy code**: `#pragma modern_lpc` and
+  `#pragma strict_owner` are opt-in. Existing mudlibs keep legacy behavior until
+  they choose stricter contracts.
+- **Explicit owner-safe APIs**: mudlibs can use `freeze`, `snapshot`,
+  `owner_async`, `owner_await`, `owner_commit`, owner futures, ObjectHandle
+  routing, and service shard domains instead of passing mutable objects across
+  owner boundaries.
+- **Encoding compatibility at the right boundary**: VM strings remain canonical
+  UTF-8, while legacy source files, player sessions, gateway payloads, and
+  external text can opt into GBK, GB2312, Big5, or other ICU-supported encodings
+  at explicit boundaries.
+- **Measurable runtime behavior**: VM profiling, owner runtime status, benchmark
+  reports, stress scripts, queue/backpressure counters, fallback counters, and
+  stale/drop classifications make production behavior auditable.
 
-- LPC interpreter, network server, EFUN/apply glue, and the classic FluffOS
-  driver model;
-- owner metadata, ObjectHandle routing, VMContext isolation, OwnerExecutor
-  tasks, owner futures, shard-aware messages, and production gate contracts;
-- gateway command execution and callback dispatch through controlled
-  owner/service executor paths;
-- Linux, WSL, Windows/MSYS2, and install-oriented CMake workflows;
-- documentation for downstream projects that need a stable engine baseline.
+- **受控多核执行**：owner/service executor 路径覆盖 object lifecycle、heartbeat、
+  callout、async/file/db、DNS、socket callback、gateway command、target-owner
+  message 和 socket release/acquire handshake。
+- **不破坏旧 LPC 的现代化**：`#pragma modern_lpc` 与 `#pragma strict_owner`
+  是按需启用能力。旧 mudlib 默认保持原行为，只有新代码主动选择后才进入更严格合同。
+- **显式 owner-safe API**：mudlib 可以使用 `freeze`、`snapshot`、
+  `owner_async`、`owner_await`、`owner_commit`、owner future、ObjectHandle
+  route 和 service shard domain，避免跨 owner 传递可变对象。
+- **编码兼容放在正确边界**：VM 内部字符串保持规范 UTF-8；遗留源码、玩家会话、
+  gateway payload 和外部文本可在明确边界使用 GBK、GB2312、Big5 或其他 ICU 支持编码。
+- **运行行为可量化**：VM profiling、owner runtime status、benchmark report、
+  stress script、队列/反压计数、fallback 计数和 stale/drop 分类让生产行为可审计。
 
-It does not bundle a complete game mudlib, replace upstream FluffOS as the
-canonical project, or open unsafe arbitrary LPC execution on background threads.
+## Runtime Boundaries
 
-## Multicore Runtime
+FluffOS_XK does not make arbitrary legacy LPC run freely on background threads.
+That is deliberate. Normal LPC remains default-closed for background execution.
+The multicore path requires one of these contracts:
 
-The current production baseline is a controlled multicore runtime for
-owner/service execution. It is designed for projects that want to move mutable
-game state away from global single-thread hot paths without breaking classic LPC
-compatibility.
+- same-owner direct execution;
+- driver callback allowlist;
+- frozen mapping/array payload;
+- ObjectHandle-routed target;
+- owner message/future;
+- owner/service commit proposal;
+- keyed service shard domain.
 
-Key properties:
+The main thread remains available for IO adapters, cleanup adapters, explicit
+compatibility fallback, and documented main-required surfaces. Production
+business paths are expected to keep `normal_path_main_fallback_count=0`.
 
-- same-owner execution remains direct and fast;
-- cross-owner work uses snapshots, ObjectHandle routing, owner messages,
-  futures, or service shard domains;
-- stale owner, destructed object, epoch mismatch, payload policy, and cleanup
-  failures are classified by the runtime contract;
-- main-thread work is limited to IO adapters, cleanup adapters, explicit
-  fallback, and documented compatibility surfaces;
-- normal production paths keep `normal_path_main_fallback_count=0`.
+FluffOS_XK 不会把任意 legacy LPC 自动放到后台线程执行，这是有意保守的安全边界。
+普通 LPC 默认不开放后台执行。进入多核路径必须满足以下合同之一：
 
-Read the contract before integrating a mudlib:
+- same-owner 直接执行；
+- driver callback allowlist；
+- frozen mapping/array payload；
+- ObjectHandle route；
+- owner message/future；
+- owner/service commit proposal；
+- keyed service shard domain。
 
-- [Runtime v2 contract](docs/multicore-runtime-v2.md)
-- [Runtime v4 hardening baseline](docs/multicore-runtime-v4.md)
-- [LPC Modern Runtime](docs/lpc-modern-runtime.md)
-- [Production gate](docs/multicore-production-gate.md)
-- [Owner multicore API](docs/owner-multicore-api.md)
-- [Production baseline release note](docs/releases/multicore-production-baseline-2026-06-27.md)
-- [Engine overview for integrators](docs/fluffos-xk-overview.md)
+main thread 仍可作为 IO adapter、cleanup adapter、显式兼容 fallback 和明确的
+main-required 兼容面。生产业务正常路径要求 `normal_path_main_fallback_count=0`。
 
-## LPC Modern Runtime
-
-FluffOS_XK does not replace LPC with another scripting language. It adds a
-modern opt-in profile on top of LPC:
-
-- `#pragma modern_lpc` enables modern diagnostics and owner-safe runtime APIs;
-- `#pragma strict_owner` turns owner migration findings into strict audit
-  results for new code;
-- `lpcc --owner-audit --format=json` reports source encoding, profile pragmas,
-  cross-owner write risks, mutable callback payloads, direct hot-path
-  persistence, and suggestions;
-- `freeze`, `snapshot`, `owner_async`, `owner_await`, `owner_commit`, and
-  `owner_snapshot_persist` provide explicit payload, future, commit, and
-  persistence boundaries;
-- VM profiling and benchmarks expose opcode, efun, `call_other`, function
-  pointer, parser/action, mapping, and string hot paths.
-
-Legacy LPC keeps its old behavior unless a mudlib opts into these profiles.
-For legacy Chinese source or clients, use `#pragma source_encoding("GBK")`,
-`set_encoding("GBK")`, `string_encode`, `string_decode`, and
-`buffer_transcode` at the boundary instead of changing VM internal string
-semantics.
-
-## Using The Multicore Interfaces
-
-The new runtime APIs are intentionally explicit. A mudlib should not pass live
-objects or mutable closures across owners; it should pass frozen data, snapshots,
-ObjectHandle-routed async calls, or service-domain tasks.
-
-Common LPC entry points:
-
-| API | Use it for |
-|---|---|
-| `vm_owner_id(object)` / `vm_owner_epoch(object)` | Inspect the owner and lifecycle epoch of an object. |
-| `vm_owner_guard(object, string)` / `vm_owner_guard_epoch(object, string, int)` | Check owner or owner+epoch before doing sensitive work. |
-| `owner_query_object_snapshot(object)` | Read safe structural data from a cross-owner object without executing target LPC. |
-| `owner_send(string owner_id, mapping payload)` | Send frozen data to an owner mailbox and get a future id. |
-| `owner_call_async(object target, string method, mapping payload)` | Call a target object through ObjectHandle routing and owner executor guards. |
-| `owner_future_poll(int future_id)` | Poll pending/completed/failed state and frozen results. |
-| `owner_snapshot(object)` / `owner_publish_snapshot(mapping)` | Publish or consume snapshot-style data instead of sharing mutable objects. |
-| `vm_owner_runtime_status()` | Inspect production gate fields, domain registry readiness, fallback counters, and executor state. |
-
-Payload rules are shared by owner messages, async calls, snapshots, worker
-results, and domain tasks:
-
-- top-level owner payloads are mappings;
-- mapping keys must be strings;
-- allowed values are numbers, reals, strings, arrays, and mappings;
-- nesting depth is limited;
-- objects, functions, buffers, classes, and other VM-bound mutable values are
-  rejected.
-
-Minimal async example:
+## Modern LPC Example
 
 ```c
-mapping submit_player_save(object player) {
-    mapping payload = ([
-        "payload_key": "player/save/v1",
-        "player_id": player->query_id(),
-        "snapshot": owner_snapshot(player),
-    ]);
+#pragma modern_lpc
+#pragma strict_owner
+#pragma source_encoding("GBK")
 
-    return owner_call_async(player, "owner_task_persistence", payload);
-}
+mapping submit_reward_commit(string player_id, mapping reward) {
+    mapping frozen = freeze(([
+        "player_id": player_id,
+        "reward": reward,
+    ]));
 
-mapping wait_for_result(int future_id) {
-    mapping future = owner_future_poll(future_id);
-
-    if (future["state"] == "completed") {
-        return future["result"];
+    if (!frozen["ok"]) {
+        return frozen;
     }
 
-    if (future["state"] == "failed") {
-        error("owner task failed: " + future["error"] + "\n");
-    }
-
-    return ([ "state": "pending" ]);
+    return owner_async("service/reward/" + player_id, ([
+        "type": "owner_task_reward",
+        "payload_key": "reward/commit/v1",
+        "payload": frozen["value"],
+    ]));
 }
 ```
 
-Production owner domains are explicitly registered by the engine. The current
-allowlist contains `owner_task_readonly`, `owner_task_player`,
-`owner_task_room`, `owner_task_session`, `owner_task_item`,
-`owner_task_economy`, `owner_task_combat`, `owner_task_mail`,
-`owner_task_reward`, `owner_task_world`, `owner_task_persistence`,
-`owner_task_team`, `owner_task_guild`, `owner_task_sect`,
-`owner_task_quest`, `owner_task_rank`, `owner_task_crafting`, and
-`owner_task_life_skill`.
+Audit a file before migrating it:
 
-Use these domains to route real gameplay work by owner or service shard. Keep
-ordinary legacy LPC on the classic path unless it has an explicit owner-safe
-contract.
+```bash
+build/bin/lpcc --owner-audit --format=json etc/config.test path/to/file.c
+```
 
-## Expected Performance Gains
+上面的示例展示了现代 LPC 的典型用法：用 pragma 显式启用现代 profile 和严格
+owner 审计；用 `freeze` 生成 owner-safe payload；通过 `owner_async` 投递到
+service shard。迁移旧代码前可使用 `lpcc --owner-audit --format=json` 输出机器可读审计结果。
 
-The multicore baseline improves throughput by moving independent owner/service
-work off the single global hot path. It does not make every individual LPC
-function faster, and it does not make one player's same-owner command magically
-parallel.
+## Expected Performance Model
 
-Expected behavior:
+The multicore runtime improves throughput when a mudlib moves independent
+player, room, item, callback, and service work into owner/service paths. It does
+not make one same-owner command automatically parallel, and it does not remove
+serial work such as IO adapters or unavoidable global coordination.
 
-| Workload | Expected gain |
+| Workload | Expected result |
 |---|---|
-| Single player, light command path | Usually small; compatibility overhead can dominate. |
-| Many players in different owners or rooms | Stronger throughput; commands can be distributed across owner executors. |
-| Heartbeat/callout-heavy worlds | Better tail latency because callbacks no longer all compete for one business path. |
-| Async/db/file/DNS/socket callback bursts | Better isolation; frozen results return to the callback owner instead of flooding main business execution. |
-| Global services not split into shards | Limited by the remaining service bottleneck. |
-| Keyed service shards and owner-safe mudlib code | Best scaling profile; gains become closer to available cores, bounded by serial work. |
+| Single player, light command path | Usually small gain; compatibility overhead may dominate. |
+| Many players across owners or rooms | Higher throughput; commands distribute across owner executors. |
+| Heartbeat/callout-heavy worlds | Better tail latency because callbacks are admitted and classified. |
+| Async/db/file/DNS/socket callback bursts | Better isolation; frozen results return to the callback owner. |
+| Unsharded global services | Limited by the remaining service bottleneck. |
+| Keyed service shards and owner-safe mudlib code | Best scaling profile, bounded by serial work and core count. |
 
-The theoretical upper bound follows Amdahl's law:
+The theoretical ceiling follows Amdahl's law:
 
 ```text
 speedup = 1 / (serial_part + parallel_part / cores)
 ```
 
-For example, if 70% of a workload is owner/service parallel and 30% remains
-serial, an 8-core machine has a theoretical ceiling around 2.6x. If a mudlib
-migration moves 90% of hot work into owner/service paths, the same 8-core
-machine has a theoretical ceiling around 4.7x.
+If 70% of hot work is owner/service parallel and 30% remains serial, an 8-core
+machine has a theoretical ceiling around 2.6x. If a mudlib moves 90% of hot work
+into owner/service paths, the same machine has a theoretical ceiling around
+4.7x. Real gains depend on shard keys, mudlib structure, persistence cost,
+callback volume, and fallback counters.
 
-Real gains depend on mudlib structure, shard keys, IO behavior, persistence
-costs, and how much work still uses explicit fallback. The engine exposes
-runtime fields such as `normal_path_main_fallback_count`,
-`target_owner_message_main_fallback`, owner executor queue state, stale/drop
-classification, and future status so downstream projects can verify whether
-they are actually using the multicore path.
+多核收益来自把相互独立的玩家、房间、物品、callback 和服务工作迁移到 owner/service
+路径。它不会让单个 same-owner 命令自动并行，也不会消除 IO adapter 或全局协调这类串行部分。
 
-## Quick Start
+理论上限符合 Amdahl 定律。若 70% 热路径可按 owner/service 并行，30% 仍串行，
+8 核机器理论上限约 2.6x；若 90% 热路径进入 owner/service，8 核理论上限约 4.7x。
+真实收益取决于 shard key、mudlib 结构、持久化成本、callback 规模和 fallback 计数。
+
+## Build And Verify
 
 ```bash
 git clone https://github.com/FengYunCalm/Fluffos_XK.git
 cd Fluffos_XK
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-tools/wsl-cmake-build.sh build --target driver lpcc lpc_tests
+cmake --build build --target driver lpcc lpc_tests -j2
 build/src/tests/lpc_tests
 ```
 
-For install-oriented environments:
+Runtime-focused checks:
 
 ```bash
-tools/wsl-cmake-build.sh build --target install
+build/src/tests/lpc_tests --gtest_filter=DriverTest.TestVmOwnerRuntimeReportsExecutorTaskContract
+cd testsuite && ../build/bin/driver etc/config.test -ftest:single/tests/efuns/owner_executor_contract
+tools/lpc-modern-runtime-stress.sh smoke
 ```
 
-The wrapper is a thin `cmake --build` helper for WSL-launched builds. Native
-Linux users can also invoke CMake directly. Windows/MSYS2 users should prefer
-the CMake install path instead of manually copying generated binaries.
+Benchmarks and diagnostics:
+
+```bash
+cmake --build build --target owner_runtime_bench lpc_vm_bench object_store_bench -j2
+build/src/tests/owner_runtime_bench --json build/reports/owner_runtime_bench.json
+build/src/tests/lpc_vm_bench --json build/reports/lpc_vm_bench.json
+build/src/tests/object_store_bench --json build/reports/object_store_bench.json
+```
+
+构建入口使用 CMake。核心验证包括 C++ `lpc_tests`、LPC
+`owner_executor_contract` 和 `tools/lpc-modern-runtime-stress.sh smoke`。
+性能报告通过 `owner_runtime_bench`、`lpc_vm_bench` 和 `object_store_bench`
+输出 JSON，用于趋势和退化定位，不建议用机器相关绝对耗时作为硬门槛。
 
 ## Downstream Integration
 
-A downstream game should treat FluffOS_XK as the engine source tree or as the
-source for rebuilt `driver` and `lpcc` binaries.
+Recommended flow for a game repository:
 
-Recommended flow:
-
-1. Pin a known FluffOS_XK commit or release tag.
+1. Pin a FluffOS_XK commit or release tag.
 2. Build `driver`, `lpcc`, and `lpc_tests`.
-3. Run engine tests such as `build/src/tests/lpc_tests`.
-4. Copy the resulting binaries into the downstream runtime tree.
-5. Run project-level smoke tests for login, gateway, commands, movement,
-   content loading, persistence, and reconnect behavior.
-6. Keep mudlib code, accounts, secrets, deployment scripts, and operational
-   reports outside the engine repository.
+3. Run engine tests and runtime contracts.
+4. Copy the rebuilt binaries into the game runtime tree.
+5. Run game-level smoke tests for login, gateway, commands, movement,
+   persistence, reconnect, heartbeat, callout, and callbacks.
+6. Use `lpcc --owner-audit --format=json` and `vm_owner_runtime_status()` to
+   verify real owner/service usage.
+
+下游游戏仓库推荐流程：
+
+1. 固定一个 FluffOS_XK commit 或 release tag。
+2. 构建 `driver`、`lpcc` 和 `lpc_tests`。
+3. 运行引擎测试和 runtime contract。
+4. 将重建的二进制同步到游戏运行树。
+5. 在项目侧验证登录、gateway、命令、移动、持久化、断线重连、heartbeat、callout 和 callback。
+6. 使用 `lpcc --owner-audit --format=json` 与 `vm_owner_runtime_status()` 验证真实 owner/service 使用情况。
 
 ## Documentation
 
-- [Documentation index](docs/index.md)
-- [Engine overview](docs/fluffos-xk-overview.md)
-- [Build guide](docs/build.md)
+- [Documentation index / 文档入口](docs/index.md)
+- [Engine overview / 引擎概览](docs/fluffos-xk-overview.md)
+- [Build guide / 构建指南](docs/build.md)
+- [LPC Modern Runtime / LPC 现代运行时](docs/lpc-modern-runtime.md)
+- [Owner Multicore API / Owner 多核接口](docs/owner-multicore-api.md)
+- [Multicore Runtime v4 / 多核运行时 v4](docs/multicore-runtime-v4.md)
+- [Production Gate / 生产门禁](docs/multicore-production-gate.md)
 - [Driver CLI](docs/cli/driver.md)
-- [LPC reference](docs/lpc/index.md)
-- [LPC Modern Runtime](docs/lpc-modern-runtime.md)
-- [Owner multicore API](docs/owner-multicore-api.md)
-- [Multicore runtime v2](docs/multicore-runtime-v2.md)
-- [Multicore runtime v4](docs/multicore-runtime-v4.md)
-- [Production gate](docs/multicore-production-gate.md)
-- [Changelog](CHANGELOG.md)
-- [Release notes](RELEASE.md)
+- [lpcc CLI](docs/cli/lpcc.md)
+- [LPC Reference](docs/lpc/index.md)
 
-## Contributing
+## Upstream And License
 
-Focused contributions are welcome: build fixes, warning cleanup, tests,
-documentation, gateway/runtime maintenance, and narrowly scoped improvements
-that fit this fork's role. Read [CONTRIBUTING.md](CONTRIBUTING.md) before
-opening a pull request.
+Upstream FluffOS remains the canonical base: <https://github.com/fluffos/fluffos>
+Official FluffOS documentation: <https://www.fluffos.info>
 
-Security issues should be reported responsibly. See [SECURITY.md](SECURITY.md).
+License: [MIT](LICENSE). Historical LPmud/MudOS notices remain in
+[Copyright](Copyright), [NOTICE](NOTICE), and `src/thirdparty/*`.
 
-## License And Attribution
+上游 FluffOS 仍是 canonical base：<https://github.com/fluffos/fluffos>
+官方文档：<https://www.fluffos.info>
 
-- MIT License: see [LICENSE](LICENSE).
-- Historical LPmud/MudOS notices still apply to legacy components: see
-  [Copyright](Copyright).
-- Third-party licenses: see [NOTICE](NOTICE) and `src/thirdparty/*`.
-
-## Upstream
-
-- Upstream FluffOS: https://github.com/fluffos/fluffos
-- Official FluffOS documentation: https://www.fluffos.info
+许可证为 [MIT](LICENSE)。历史 LPmud/MudOS notice 保留在 [Copyright](Copyright)、
+[NOTICE](NOTICE) 和 `src/thirdparty/*`。

@@ -1,105 +1,155 @@
-# Owner/Actor Shard VM Multicore API Guide
+# Owner Multicore API / Owner 多核接口
 
-## Overview
+## Overview / 概览
 
-FluffOS_XK supports owner-based object boundaries for controlled multicore migration. Each player-owned object can be assigned to an independent owner shard, while legacy system objects remain under the default owner. The current model does not make arbitrary LPC execution freely parallel; it provides guarded owner queues, deterministic worker tasks, and explicit snapshot/message contracts.
+FluffOS_XK supports controlled owner/service execution for multicore mudlib
+migration. It does not run arbitrary legacy LPC in parallel. A mudlib enters the
+multicore path through explicit contracts: same-owner execution, owner mailbox
+messages, ObjectHandle-routed async calls, futures, snapshots, commit proposals,
+driver callback allowlists, or service shard domains.
 
-## Core Concepts
+FluffOS_XK 支持受控 owner/service 执行，用于 mudlib 多核迁移。它不会把任意
+legacy LPC 自动并行执行。mudlib 通过明确合同进入多核路径：same-owner 执行、
+owner mailbox message、ObjectHandle 路由的 async call、future、snapshot、
+commit proposal、driver callback allowlist 或 service shard domain。
 
-### Owner ID
-- Every object has an associated owner ID
-- Default owner: `"legacy/main"` (for system objects, daemons, rooms)
-- Player owner: `"player/<account>"` (e.g., `"player/alice"`)
-- Objects created by players automatically inherit player's owner ID
+## Core Concepts / 核心概念
 
-### Cross-Owner Access Rules
-- **Same owner**: Direct access allowed (fast path)
-- **Default owner target**: Always accessible from any owner
-- **Cross-owner synchronous calls/writes**: Blocked in enforced mode unless they use an explicit owner contract
-- **Cross-owner structure inspection**: Use `owner_query_object_snapshot()` for data that can be read without executing target LPC code
+| Concept | English | 中文 |
+|---|---|---|
+| Owner ID | Runtime shard identity for object ownership. | 对象归属的运行时 shard 身份。 |
+| Owner epoch | Lifecycle generation used to classify stale handles. | 生命周期世代，用于分类 stale handle。 |
+| Same owner | Direct path remains allowed and fast. | same-owner 直接路径保持允许且快速。 |
+| Cross owner | Must use snapshot, message, future, commit, or shard contracts. | cross-owner 必须使用 snapshot、message、future、commit 或 shard 合同。 |
+| ObjectHandle | Capability handle carrying owner, epoch, object id, path, intent, and snapshot version. | 携带 owner、epoch、object id、path、intent 和 snapshot version 的 capability handle。 |
+| Service shard | Keyed domain executor for global or shared gameplay services. | 面向全局或共享玩法服务的 keyed domain executor。 |
 
-### Multicore Modes
-```c
-// In driver config
-multicore mode : 0    // Disabled
-multicore mode : 1    // Owner-based (default)
-multicore mode : 2    // Enforced isolation
-```
+Default owner values remain compatibility details. New mudlib code should query
+runtime state instead of hardcoding assumptions.
 
-## Modern Owner-Safe LPC APIs
+默认 owner 值属于兼容细节。新 mudlib 代码应查询 runtime state，而不是硬编码假设。
 
-LPC Modern Runtime adds opt-in APIs for mudlibs that want explicit owner
-boundaries without replacing LPC. Use them with `#pragma modern_lpc`; use
-`#pragma strict_owner` when new code should fail audit for unsafe owner
-patterns.
+## Modern Owner-Safe APIs / 现代 Owner-Safe API
+
+Use these APIs with `#pragma modern_lpc`; add `#pragma strict_owner` for new code
+that should fail audit on unsafe owner patterns.
+
+这些 API 建议配合 `#pragma modern_lpc` 使用；新代码若需要把 unsafe owner pattern
+变成严格审计结果，应同时使用 `#pragma strict_owner`。
 
 ### `freeze(value)`
 
 Validates and deep-copies values that are safe to pass through owner messages,
-callbacks, futures, and service shard tasks. Frozen payloads may contain
-numbers, reals, strings, arrays, and mappings. Live mutable objects and VM-bound
-values are rejected.
+callbacks, futures, and service shard tasks. Allowed payload values are numbers,
+reals, strings, arrays, and mappings. Live mutable objects and VM-bound values
+are rejected.
 
-Successful results include:
-
-- `success=1`
-- `ok=1`
-- `api="freeze"`
-- `value`: the validated deep-copy payload
-- `value_object_profile_ready=1`
-- `value_object_model="frozen_snapshot_value_object_v1"`
-- `cross_owner_payload_safe=1`
+校验并深拷贝可通过 owner message、callback、future 和 service shard task 传递的安全值。
+允许的 payload 值包括 number、real、string、array 和 mapping。live mutable object
+和 VM 绑定值会被拒绝。
 
 ### `snapshot(value)`
 
 Creates a frozen value snapshot for mappings and arrays, or an ObjectHandle
-capability snapshot for live objects. Value snapshots are payload values, not
-live LPC objects, and do not join the traditional destruct chain.
+capability snapshot for live objects. Value snapshots are not live LPC objects
+and do not join the traditional destruct chain.
 
-Object snapshots include owner id, epoch, object id, object path, permission
-intent, and snapshot version so stale/destructed/epoch mismatch cases can be
-classified before execution.
+为 mapping/array 生成 frozen value snapshot，或为 live object 生成 ObjectHandle
+capability snapshot。value snapshot 不是 live LPC object，也不进入传统 destruct 链。
 
 ### `owner_async(target, mapping payload)`
 
-Submits owner-safe work to an owner executor and returns a future-oriented
-mapping. `target` may be an owner id string or an object. Object targets require
-ObjectHandle routing and a `payload["method"]` entry. Payloads must be frozen or
-freeze-compatible.
+Submits owner-safe work and returns a future-oriented mapping. `target` may be an
+owner id string or an object. Object targets require ObjectHandle routing and a
+`payload["method"]` entry.
 
-Typical failure mappings include:
-
-- `success=0`
-- `ok=0`
-- `code`
-- `error`
-- `reason`
-- `api="owner_async"`
-- `trace_id` when a trace was created
+投递 owner-safe 工作并返回面向 future 的 mapping。`target` 可以是 owner id string
+或 object。object target 需要 ObjectHandle route，并且 payload 中必须有
+`payload["method"]`。
 
 ### `owner_await(int future_id)`
 
 Returns the current future state through the owner future contract. It is a
-modern-profile API boundary; coroutine suspension is not enabled for legacy LPC
-by default.
+polling adapter today; coroutine suspension is not enabled for legacy LPC.
+
+通过 owner future 合同返回当前 future 状态。当前它是 polling adapter；legacy LPC
+默认不启用 coroutine suspension。
 
 ### `owner_commit(mapping proposal)`
 
-Submits a proposal to the owner/service commit boundary. Use it for cross-owner
+Records a proposal at the owner/service commit boundary. Use it for cross-owner
 writes that should not mutate another owner directly. Proposals should include a
 stable key, target owner or service shard, domain, frozen payload, and idempotent
 commit identity.
 
+在 owner/service commit 边界记录 proposal。跨 owner 写入不应直接修改目标 owner，
+而应使用该入口。proposal 应包含稳定 key、目标 owner 或 service shard、domain、
+frozen payload 和幂等 commit identity。
+
 ### `owner_snapshot_persist(object target, mapping options)`
 
 Serializes a same-owner object snapshot for persistence. The owner/service
-executor owns consistency; the main/file side remains an adapter for I/O. In
-strict owner migrations, direct hot-path `save_object` calls should be audited
-and replaced with snapshot persistence where appropriate.
+executor owns consistency; the main/file side remains an I/O adapter. In strict
+owner migrations, direct hot-path `save_object` calls should be audited and
+replaced where appropriate.
 
-### Minimal Modern Example
+序列化 same-owner object snapshot 用于持久化。owner/service executor 负责一致性；
+main/file 侧只作为 I/O adapter。在 strict owner 迁移中，热路径直接 `save_object`
+应被审计，并在合适场景替换。
 
-```lpc
+## Return Structure / 返回结构
+
+Successful owner-safe APIs return machine-readable fields such as:
+
+```c
+([
+    "success": 1,
+    "ok": 1,
+    "api": "owner_async",
+    "future_id": 123,
+    "trace_id": "owner-trace/...",
+])
+```
+
+Failures return stable codes and readable reasons:
+
+```c
+([
+    "success": 0,
+    "ok": 0,
+    "api": "owner_async",
+    "code": "non_frozen_payload",
+    "reason": "owner_async requires frozen or freeze-compatible payload",
+])
+```
+
+成功的 owner-safe API 会返回机器可判定字段，例如：
+
+```c
+([
+    "success": 1,
+    "ok": 1,
+    "api": "owner_async",
+    "future_id": 123,
+    "trace_id": "owner-trace/...",
+])
+```
+
+失败结果会返回稳定 code 和可读 reason：
+
+```c
+([
+    "success": 0,
+    "ok": 0,
+    "api": "owner_async",
+    "code": "non_frozen_payload",
+    "reason": "owner_async requires frozen or freeze-compatible payload",
+])
+```
+
+## Minimal Modern Example / 最小现代示例
+
+```c
 #pragma modern_lpc
 #pragma strict_owner
 
@@ -121,293 +171,134 @@ mapping submit_reward_commit(string player_id, mapping reward) {
 }
 ```
 
-## Cross-Owner Snapshot API
+This pattern keeps live objects out of the cross-owner payload and routes the
+write through a keyed service shard.
 
-Get read-only structural information about cross-owner objects.
+这个模式避免把 live object 放进 cross-owner payload，并把写入通过 keyed service shard
+路由。
 
-#### C++ API
-```cpp
-#include "vm/owner.h"
+## Cross-Owner Snapshot / Cross-Owner Snapshot
 
-mapping *vm_owner_query_object_snapshot(object_t *target, const char *requesting_owner_id);
-```
+Use `owner_query_object_snapshot(object target)` for read-only structural
+information when the caller cannot safely execute target LPC directly.
 
-**Returns:**
-- `nullptr` - Same owner or default owner target (direct access safe)
-- `mapping *` - Cross-owner object snapshot with keys:
-  - `"object_name"` (string): Object file path
-  - `"owner_id"` (string): Target's owner ID
-  - `"living"` (int): Whether object is living (1/0)
-  - `"has_is_character"` (int): Has is_character() method
-  - `"has_is_npc"` (int): Has is_npc() method
-  - `"has_is_player"` (int): Has is_player() method
+当调用方不能安全地直接执行目标 LPC 时，可使用
+`owner_query_object_snapshot(object target)` 读取只读结构信息。
 
-#### LPC API
-```lpc
-mapping owner_query_object_snapshot(object target);
-```
-
-**Usage Example:**
-```lpc
-object find_living_in_room(object env, string name) {
-    object *obs = all_inventory(env);
-    
-    foreach(object ob in obs) {
-        mapping snapshot = owner_query_object_snapshot(ob);
-        
-        if (mapp(snapshot)) {
-            // Cross-owner object - use snapshot
-            if (!snapshot["living"] && !snapshot["has_is_character"])
-                continue;
-                
-            // Try to get name with error catching
-            catch {
-                string ob_name = ob->query_name();
-                if (ob_name == name)
-                    return ob;
-            };
-        } else {
-            // Same owner - direct access
-            if (!living(ob))
-                continue;
-                
-            if (ob->query_name() == name)
-                return ob;
-        }
-    }
-    
-    return 0;
-}
-```
-
-### 2. Error Suppression Pattern
-
-For cross-owner queries that may fail, use LPC `catch` to suppress errors:
-
-```lpc
-// Check if NPC should be visible
-int should_include_npc(object npc) {
-    if (!objectp(npc))
-        return 0;
-    
-    // Use catch for cross-owner queries
-    catch {
-        if (npc->query_temp("is_dying"))
-            return 0;
-            
-        int hp = npc->query("combat/hp");
-        int max_hp = npc->query("combat/max_hp");
-        if (intp(max_hp) && max_hp > 0 && intp(hp) && hp <= 0)
-            return 0;
-    };
-    
-    return 1;
-}
-```
-
-## Best Practices
-
-### 1. Check Snapshot First
-Always check if snapshot API returns mapping before attempting cross-owner access:
-
-```lpc
-mapping snapshot = owner_query_object_snapshot(target);
-if (mapp(snapshot)) {
-    // Cross-owner - use snapshot + catch
-} else {
-    // Same owner - direct access
-}
-```
-
-### 2. Handle Type Variations
-Cross-owner queries may return different types than expected:
-
-```lpc
-catch {
-    mixed id = ob->query_id();  // May return string or array
-    if (stringp(id) && id == name)
-        return ob;
-};
-```
-
-### 3. Minimize Cross-Owner Calls
-- Cache snapshot data when possible
-- Use structural information (living flag, method existence) before querying
-- Batch queries when feasible
-
-### 4. Error Recovery
-Always provide fallback behavior when cross-owner queries fail:
-
-```lpc
-string get_display_name(object ob) {
-    mapping snapshot = owner_query_object_snapshot(ob);
-    if (mapp(snapshot)) {
-        string name;
-        catch {
-            name = ob->query_name();
-        };
-        return stringp(name) ? name : snapshot["object_name"];
-    }
-    return ob->query_name();
-}
-```
-
-## Common Patterns
-
-### Pattern 1: Room Visibility Check
-```lpc
-private int is_visible_character(object ob) {
-    mapping snapshot = owner_query_object_snapshot(ob);
-    if (mapp(snapshot)) {
-        return snapshot["living"] 
-            || snapshot["has_is_character"]
-            || snapshot["has_is_npc"]
-            || snapshot["has_is_player"];
-    }
-    
-    return living(ob)
-        || (function_exists("is_character", ob) && ob->is_character())
-        || (function_exists("is_npc", ob) && ob->is_npc())
-        || (function_exists("is_player", ob) && ob->is_player());
-}
-```
-
-### Pattern 2: Safe Property Query
-```lpc
-private mixed safe_query(object ob, string property, mixed default_value) {
-    mapping snapshot = owner_query_object_snapshot(ob);
-    if (mapp(snapshot)) {
-        mixed result;
-        catch {
-            result = ob->query(property);
-        };
-        return result ? result : default_value;
-    }
-    return ob->query(property);
-}
-```
-
-### Pattern 3: Filter Cross-Owner List
-```lpc
-object *filter_living_objects(object *obs) {
-    object *result = ({});
-    
-    foreach(object ob in obs) {
-        mapping snapshot = owner_query_object_snapshot(ob);
-        if (mapp(snapshot)) {
-            if (snapshot["living"])
-                result += ({ ob });
-        } else {
-            if (living(ob))
-                result += ({ ob });
-        }
-    }
-    
-    return result;
-}
-```
-
-## Performance Considerations
-
-### Snapshot API Cost
-- **Fast path**: Same owner check is O(1) pointer comparison
-- **Cross-owner**: Creates a small mapping with identity and type flags
-- **Recommended**: Cache snapshot results when querying multiple properties
-
-### Error Catching Cost
-- LPC `catch` has minimal overhead
-- Use for bounded operations only
-- Avoid in tight loops with thousands of iterations
-
-### Optimization Tips
-```lpc
-// Good: Check snapshot once
-mapping snapshot = owner_query_object_snapshot(ob);
-if (mapp(snapshot) && snapshot["living"]) {
-    catch {
-        string name = ob->query_name();
-        string id = ob->query_id();
-        // ... use cached snapshot and queried values
-    };
+```c
+mapping maybe_snapshot = owner_query_object_snapshot(target);
+if (mapp(maybe_snapshot)) {
+    // Cross-owner target: use snapshot fields.
+    return maybe_snapshot["object_name"];
 }
 
-// Bad: Multiple snapshot checks
-if (mapp(owner_query_object_snapshot(ob))) {
-    // ...
-}
-if (mapp(owner_query_object_snapshot(ob))) {  // Duplicate check
-    // ...
-}
+// Same owner or default-safe target: direct path remains available.
+return file_name(target);
 ```
 
-## Migration Guide
-
-### Before (Direct Access)
-```lpc
-object find_player(string name) {
-    object *players = users();
-    foreach(object p in players) {
-        if (p->query_name() == name)
-            return p;
-    }
-    return 0;
+```c
+mapping maybe_snapshot = owner_query_object_snapshot(target);
+if (mapp(maybe_snapshot)) {
+    // cross-owner 目标：使用 snapshot 字段。
+    return maybe_snapshot["object_name"];
 }
+
+// same-owner 或 default-safe 目标：仍可走直接路径。
+return file_name(target);
 ```
 
-### After (Snapshot + Catch)
-```lpc
-object find_player(string name) {
-    object *players = users();
-    foreach(object p in players) {
-        mapping snapshot = owner_query_object_snapshot(p);
-        if (mapp(snapshot)) {
-            string p_name;
-            catch { p_name = p->query_name(); };
-            if (p_name == name)
-                return p;
-        } else {
-            if (p->query_name() == name)
-                return p;
-        }
-    }
-    return 0;
-}
+Snapshot fields include object path, owner id, living flags, and method presence
+bits used by compatibility code.
+
+snapshot 字段包括 object path、owner id、living flag，以及兼容代码需要的方法存在性标志。
+
+## Payload Rules / Payload 规则
+
+Payload rules are shared by owner messages, async calls, snapshots, worker
+results, and domain tasks:
+
+- top-level owner payloads are mappings;
+- mapping keys must be strings;
+- allowed values are numbers, reals, strings, arrays, and mappings;
+- nesting depth is limited;
+- objects, functions, buffers, classes, and other VM-bound mutable values are
+  rejected.
+
+owner message、async call、snapshot、worker result 和 domain task 共用 payload 规则：
+
+- top-level owner payload 必须是 mapping；
+- mapping key 必须是 string；
+- value 允许 number、real、string、array 和 mapping；
+- nesting depth 有限制；
+- object、function、buffer、class 和其他 VM 绑定可变值会被拒绝。
+
+## Registered Domains / 已注册 Domain
+
+The engine registers production owner task domains explicitly. Current domains:
+
+```text
+owner_task_readonly, owner_task_player, owner_task_room, owner_task_session,
+owner_task_item, owner_task_economy, owner_task_combat, owner_task_mail,
+owner_task_reward, owner_task_world, owner_task_persistence, owner_task_team,
+owner_task_guild, owner_task_sect, owner_task_quest, owner_task_rank,
+owner_task_crafting, owner_task_life_skill
 ```
 
-## Debugging
+引擎显式注册生产 owner task domain。当前 domain：
 
-### Check Owner ID
-```lpc
-string debug_owner(object ob) {
-    mapping snapshot = owner_query_object_snapshot(ob);
-    if (mapp(snapshot))
-        return snapshot["owner_id"];
-    return "same_owner_or_default";
-}
+```text
+owner_task_readonly, owner_task_player, owner_task_room, owner_task_session,
+owner_task_item, owner_task_economy, owner_task_combat, owner_task_mail,
+owner_task_reward, owner_task_world, owner_task_persistence, owner_task_team,
+owner_task_guild, owner_task_sect, owner_task_quest, owner_task_rank,
+owner_task_crafting, owner_task_life_skill
 ```
 
-## Testing
+Use these domains to route real gameplay work by owner or keyed service shard.
+Do not invent undocumented domain names in mudlib code.
 
-### Unit Test Template
-```lpc
-void test_cross_owner_access() {
-    object player1 = new("/std/player");
-    object player2 = new("/std/player");
-    
-    // Same owner access
-    mapping snapshot = owner_query_object_snapshot(player1);
-    assert(!mapp(snapshot), "Same owner should return 0");
-    
-    // Cross-owner access
-    // (Requires multicore mode 2)
-    mapping p2_snapshot = owner_query_object_snapshot(player2);
-    assert(mapp(p2_snapshot), "Cross-owner should return mapping");
-    assert(p2_snapshot["owner_id"], "Should have owner_id");
-}
+真实玩法工作应按 owner 或 keyed service shard 路由到这些 domain。mudlib 代码不要发明未记录的
+domain 名称。
+
+## Runtime Status / 运行时状态
+
+Use `vm_owner_runtime_status()` to verify integration. Important fields:
+
+- `normal_path_main_fallback_count=0`;
+- `target_owner_message_main_fallback=0`;
+- `owner_service_shard_registry_ready=1`;
+- `owner_tick_group_scheduler_ready=1`;
+- `session_fifo_contract_ready=1`;
+- `object_store_global_fallback_on_owner_fast_path=0`;
+- `lpc_modern_profile_ready=1`;
+- `lpc_source_encoding_ready=1`.
+
+使用 `vm_owner_runtime_status()` 验证接入效果。关键字段：
+
+- `normal_path_main_fallback_count=0`；
+- `target_owner_message_main_fallback=0`；
+- `owner_service_shard_registry_ready=1`；
+- `owner_tick_group_scheduler_ready=1`；
+- `session_fifo_contract_ready=1`；
+- `object_store_global_fallback_on_owner_fast_path=0`；
+- `lpc_modern_profile_ready=1`；
+- `lpc_source_encoding_ready=1`。
+
+## Verification / 验证
+
+```bash
+build/src/tests/lpc_tests --gtest_filter=DriverTest.TestVmOwnerRuntimeReportsExecutorTaskContract
+cd testsuite && ../build/bin/driver etc/config.test -ftest:single/tests/efuns/owner_executor_contract
+tools/lpc-modern-runtime-stress.sh smoke
 ```
 
-## See Also
+```bash
+build/src/tests/lpc_tests --gtest_filter=DriverTest.TestVmOwnerRuntimeReportsExecutorTaskContract
+cd testsuite && ../build/bin/driver etc/config.test -ftest:single/tests/efuns/owner_executor_contract
+tools/lpc-modern-runtime-stress.sh smoke
+```
 
-- [Multicore Runtime v4](multicore-runtime-v4.md)
-- [Owner Implementation](https://github.com/FengYunCalm/Fluffos_XK/blob/master/src/vm/internal/owner.cc)
-- [API Reference](https://github.com/FengYunCalm/Fluffos_XK/blob/master/src/vm/owner.h)
+These checks prove the documented fields are runtime-backed and not just static
+documentation claims.
+
+这些检查用于证明文档字段有运行时合同支撑，而不是静态文档宣称。
