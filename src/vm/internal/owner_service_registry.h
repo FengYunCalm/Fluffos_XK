@@ -32,3 +32,5 @@ const OwnerTickGroupDescriptor &owner_tick_group_for_executor_task(const char *t
 bool owner_service_registry_matches_lpc_domains();
 std::string owner_service_shard_domain_list();
 std::string owner_tick_group_name_list();
+long owner_service_hot_path_service_owner_count();
+long owner_service_hot_path_service_shard_count();

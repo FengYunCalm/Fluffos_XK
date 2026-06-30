@@ -98,6 +98,12 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_string(payload.u.map, "payload_model", "gateway_command_buffer_metadata_v1");
   add_mapping_string(payload.u.map, "payload_policy", "no_raw_command_text_in_trace");
   add_mapping_string(payload.u.map, "input_source", "interactive_text_buffer");
+  add_mapping_string(payload.u.map, "vm_internal_string_encoding", "utf-8");
+  add_mapping_pair(payload.u.map, "session_encoding_contract_ready", 1);
+  add_mapping_pair(payload.u.map, "gateway_encoding_boundary_ready", 1);
+  add_mapping_string(payload.u.map, "gateway_command_encoding_model",
+                     "session_encoding_to_vm_utf8_before_owner_executor");
+  add_mapping_string(payload.u.map, "gateway_command_payload_encoding", "utf-8");
   add_mapping_string(payload.u.map, "command_text_snapshot_policy", "owner_private_redacted_from_trace");
   add_mapping_pair(payload.u.map, "command_text_snapshot_ready", snapshot_ready ? 1 : 0);
   add_mapping_pair(payload.u.map, "command_text_snapshot_bytes", static_cast<long>(snapshot_bytes));

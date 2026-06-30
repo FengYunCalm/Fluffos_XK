@@ -24,10 +24,27 @@ The JSON report uses `schema=lpcc_owner_audit_v1` and includes:
 
 - whether `#pragma modern_lpc` is present;
 - whether `#pragma strict_owner` is present;
+- the source encoding selected for the file;
+- whether source transcoding was applied;
+- invalid source byte sequence count;
 - static findings for cross-owner mutable writes;
 - static findings for bare object payloads;
 - static findings for unfrozen callback payloads;
 - static findings for direct hot-path `save_object` calls.
+- stable finding fields: file, line, rule code, severity, message, and
+  suggestion.
+
+Source files are UTF-8 by default. A modern mudlib can opt into other source
+encodings at the file boundary:
+
+```c
+#pragma source_encoding("GBK")
+```
+
+The compiler transcodes source text to the VM's canonical UTF-8 representation
+before normal lexer validation. This is intended for legacy Chinese mudlibs and
+other boundary encodings such as GB2312 or Big5; it does not change internal VM
+string semantics.
 
 The scanner is intentionally conservative. Treat findings as migration work
 items and confirm behavior with the runtime contract tests before enabling

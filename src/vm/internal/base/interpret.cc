@@ -3,6 +3,7 @@
 #include "vm/internal/base/interpret.h"
 
 #include <algorithm>
+#include <chrono>
 #include <functional>
 #include <memory>
 
@@ -20,6 +21,7 @@
 #include "vm/internal/master.h"
 #include "vm/internal/simulate.h"
 #include "vm/internal/simul_efun.h"
+#include "vm/internal/lpc_vm_profile.h"
 #include "compiler/internal/icode.h"  // for PUSH_WHAT
 #include "compiler/internal/lex.h"    // for insstr, FIXME
 #include "packages/core/sprintf.h"    // FIXME
@@ -380,6 +382,7 @@ void push_undefineds(int num) {
 }
 
 void copy_and_push_string(const char *p) {
+  lpc_vm_profile_record_string_push();
   STACK_INC;
   sp->type = T_STRING;
   sp->subtype = STRING_MALLOC;
@@ -387,6 +390,7 @@ void copy_and_push_string(const char *p) {
 }
 
 void share_and_push_string(const char *p) {
+  lpc_vm_profile_record_string_push();
   STACK_INC;
   sp->type = T_STRING;
   sp->subtype = STRING_SHARED;
@@ -1417,6 +1421,7 @@ void push_refed_class(array_t *v) {
  * Push a string on the stack that is already malloced.
  */
 void push_malloced_string(const char *p) {
+  lpc_vm_profile_record_string_push();
   STACK_INC;
   sp->type = T_STRING;
   sp->u.string = p;
@@ -1428,6 +1433,7 @@ void push_malloced_string(const char *p) {
  * push_malloced_string doesn't.
  */
 void push_shared_string(const char *p) {
+  lpc_vm_profile_record_string_push();
   STACK_INC;
   sp->type = T_STRING;
   sp->u.string = p;
@@ -1440,6 +1446,7 @@ void push_shared_string(const char *p) {
  */
 
 void push_constant_string(const char *p) {
+  lpc_vm_profile_record_string_push();
   STACK_INC;
   sp->type = T_STRING;
   sp->subtype = STRING_CONSTANT;
@@ -2009,6 +2016,7 @@ void eval_instruction(char *p) {
       show_lpc_line(f, l);
     }
     instruction = EXTRACT_UCHAR(pc++);
+    lpc_vm_profile_record_opcode_dispatch();
     if (CONFIG_INT(__RC_TRACE_CODE__)) {
       real_instruction = instruction;
       /* real EFUN is stored as an short after F_EFUN0 - F_EFUNV instructions */
@@ -4075,7 +4083,13 @@ void eval_instruction(char *p) {
 
           ScopedTracer _efun_tracer(instrs[instruction].name, EventCategory::LPC_EFUN,
                                     [&] { return trace_context; });
+          auto lpc_vm_profile_efun_start = std::chrono::steady_clock::now();
           (*efun_table[instruction - EFUN_BASE])();
+          auto lpc_vm_profile_efun_elapsed =
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  std::chrono::steady_clock::now() - lpc_vm_profile_efun_start)
+                  .count();
+          lpc_vm_profile_record_efun_dispatch(static_cast<uint64_t>(lpc_vm_profile_efun_elapsed));
         }
 
 #ifdef DEBUG

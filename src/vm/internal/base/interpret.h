@@ -150,6 +150,12 @@ const char *function_name(program_t *, int);
 void remove_object_from_stack(object_t *);
 void setup_fake_frame(funptr_t *);
 void remove_fake_frame(void);
+void copy_and_push_string(const char *);
+void share_and_push_string(const char *);
+void push_malloced_string(const char *);
+void push_shared_string(const char *);
+void push_constant_string(const char *);
+void pop_stack();
 void push_indexed_lvalue(int);
 void setup_variables(int, int, int);
 

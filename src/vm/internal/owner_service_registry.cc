@@ -14,27 +14,27 @@ constexpr std::array<OwnerServiceShardDescriptor, 18> kOwnerServiceShardDescript
      "session_fifo", 1},
     {"item", "owner_task_item", "owner_scheduler", "object_id", "service_tick",
      "same_owner_or_commit_proposal", 1},
-    {"economy", "owner_task_economy", "service_owner", "account_key", "service_tick",
+    {"economy", "owner_task_economy", "service_shard", "account_key", "service_tick",
      "commit_proposal", 1},
-    {"combat", "owner_task_combat", "service_owner", "combat_instance", "heartbeat",
+    {"combat", "owner_task_combat", "service_shard", "combat_instance", "heartbeat",
      "commit_proposal", 1},
-    {"mail", "owner_task_mail", "service_owner", "mailbox_key", "service_tick",
+    {"mail", "owner_task_mail", "service_shard", "mailbox_key", "service_tick",
      "commit_proposal", 1},
-    {"reward", "owner_task_reward", "service_owner", "reward_key", "callout",
+    {"reward", "owner_task_reward", "service_shard", "reward_key", "callout",
      "commit_proposal", 1},
     {"world", "owner_task_world", "owner_scheduler", "world_path", "service_tick",
      "same_owner_or_commit_proposal", 1},
-    {"persistence", "owner_task_persistence", "service_owner", "snapshot_key", "service_tick",
+    {"persistence", "owner_task_persistence", "service_shard", "snapshot_key", "service_tick",
      "snapshot_pipeline", 1},
     {"team", "owner_task_team", "service_owner", "team_id", "service_tick",
      "commit_proposal", 0},
-    {"guild", "owner_task_guild", "service_owner", "guild_id", "service_tick",
+    {"guild", "owner_task_guild", "service_shard", "guild_id", "service_tick",
      "commit_proposal", 1},
     {"sect", "owner_task_sect", "service_owner", "sect_id", "service_tick",
      "commit_proposal", 0},
-    {"quest", "owner_task_quest", "service_owner", "quest_id", "service_tick",
+    {"quest", "owner_task_quest", "service_shard", "quest_id", "service_tick",
      "commit_proposal", 1},
-    {"rank", "owner_task_rank", "service_owner", "rank_board", "service_tick",
+    {"rank", "owner_task_rank", "service_shard", "rank_board", "service_tick",
      "snapshot_then_commit", 1},
     {"crafting", "owner_task_crafting", "owner_scheduler", "crafting_session", "callout",
      "same_owner_or_commit_proposal", 0},
@@ -130,3 +130,23 @@ bool owner_service_registry_matches_lpc_domains() {
 std::string owner_service_shard_domain_list() { return join_domains(); }
 
 std::string owner_tick_group_name_list() { return join_tick_groups(); }
+
+long owner_service_hot_path_service_owner_count() {
+  long count = 0;
+  for (const auto &descriptor : kOwnerServiceShardDescriptors) {
+    if (descriptor.hot_path && std::string(descriptor.owner_policy) == "service_owner") {
+      count++;
+    }
+  }
+  return count;
+}
+
+long owner_service_hot_path_service_shard_count() {
+  long count = 0;
+  for (const auto &descriptor : kOwnerServiceShardDescriptors) {
+    if (descriptor.hot_path && std::string(descriptor.owner_policy) == "service_shard") {
+      count++;
+    }
+  }
+  return count;
+}

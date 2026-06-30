@@ -31,6 +31,7 @@
 #include "vm/internal/base/mapping.h"
 #include "vm/internal/base/object.h"
 #include "vm/internal/lpc_vm_profile.h"
+#include "vm/internal/owner_service_registry.h"
 #include "vm/internal/otable.h"
 #include "vm/internal/simulate.h"
 #include "vm/object_handle.h"
@@ -123,11 +124,47 @@ TEST_F(DriverTest, TestLpcModernProfilePragmasAndAuditRules) {
       "}\n");
   ASSERT_TRUE(report.modern_lpc);
   ASSERT_TRUE(report.strict_owner);
+  ASSERT_STREQ(report.source_encoding.c_str(), "utf-8");
+  ASSERT_FALSE(report.transcoded);
+  ASSERT_EQ(report.invalid_sequence_count, 0);
   ASSERT_EQ(report.findings.size(), 4);
   ASSERT_EQ(report.findings[0].code, "cross_owner_mutable_write");
+  ASSERT_FALSE(report.findings[0].suggestion.empty());
   ASSERT_EQ(report.findings[1].code, "bare_object_payload");
   ASSERT_EQ(report.findings[2].code, "unfrozen_callback_payload");
   ASSERT_EQ(report.findings[3].code, "direct_save_object_hot_path");
+}
+
+TEST_F(DriverTest, TestLpcModernProfileDetectsSourceEncodingPragma) {
+  auto report = lpc_owner_audit_source(
+      "#pragma source_encoding(\"GBK\")\n"
+      "#pragma modern_lpc\n"
+      "void f() {}\n");
+  ASSERT_TRUE(report.modern_lpc);
+  ASSERT_STREQ(report.source_encoding.c_str(), "GBK");
+  ASSERT_TRUE(report.transcoded);
+  ASSERT_EQ(report.invalid_sequence_count, 0);
+}
+
+TEST_F(DriverTest, TestCompileFileAcceptsGbkSourceEncodingPragma) {
+  std::string source = "#pragma source_encoding(\"GBK\")\nstring value() { return \"";
+  source.append("\xD6\xD0\xCE\xC4", 4);
+  source += "\"; }\n";
+
+  std::istringstream stream_source(source);
+  auto stream = std::make_unique<IStreamLexStream>(stream_source);
+  auto *compiled = compile_file(std::move(stream), "gbk_source_encoding_test");
+
+  ASSERT_NE(compiled, nullptr);
+  bool found_utf8_literal = false;
+  for (int i = 0; i < compiled->num_strings; i++) {
+    if (compiled->strings[i] && std::string(compiled->strings[i]) == u8"中文") {
+      found_utf8_literal = true;
+      break;
+    }
+  }
+  ASSERT_TRUE(found_utf8_literal);
+  deallocate_program(compiled);
 }
 
 TEST_F(DriverTest, TestLpcVmProfileRecordsApplyCacheLookups) {
@@ -157,6 +194,39 @@ TEST_F(DriverTest, TestLpcVmProfileRecordsApplyCacheLookups) {
   destruct_object_for_test(obj);
 }
 
+TEST_F(DriverTest, TestLpcVmProfileRecordsHotPathCounters) {
+  lpc_vm_profile_reset();
+
+  lpc_vm_profile_record_opcode_dispatch();
+  lpc_vm_profile_record_opcode_dispatch();
+  lpc_vm_profile_record_efun_dispatch(17);
+  lpc_vm_profile_record_call_other_dispatch();
+  lpc_vm_profile_record_function_pointer_dispatch(true);
+  lpc_vm_profile_record_parser_action_lookup(true);
+  lpc_vm_profile_record_parser_action_lookup(false);
+  lpc_vm_profile_record_string_push();
+
+  mapping_t* map = allocate_mapping(2);
+  add_mapping_pair(map, "alpha", 42);
+  ASSERT_EQ(find_string_in_mapping(map, "alpha")->type, T_NUMBER);
+  ASSERT_EQ(find_string_in_mapping(map, "alpha")->u.number, 42);
+  ASSERT_EQ(find_string_in_mapping(map, "missing")->type, T_NUMBER);
+  free_mapping(map);
+
+  auto snapshot = lpc_vm_profile_snapshot();
+  ASSERT_GE(snapshot.opcode_dispatch_count, 2);
+  ASSERT_EQ(snapshot.efun_dispatch_count, 1);
+  ASSERT_EQ(snapshot.efun_dispatch_ns, 17);
+  ASSERT_EQ(snapshot.call_other_dispatch_count, 1);
+  ASSERT_EQ(snapshot.function_pointer_dispatch_count, 1);
+  ASSERT_EQ(snapshot.function_pointer_efun_dispatch_count, 1);
+  ASSERT_EQ(snapshot.parser_action_lookup_count, 2);
+  ASSERT_EQ(snapshot.parser_action_match_count, 1);
+  ASSERT_GE(snapshot.mapping_lookup_count, 3);
+  ASSERT_GE(snapshot.mapping_insert_lookup_count, 1);
+  ASSERT_EQ(snapshot.string_push_count, 1);
+}
+
 TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   auto mapping_number = [](mapping_t* map, const char* key) -> long {
     svalue_t* value = find_string_in_mapping(map, key);
@@ -180,6 +250,19 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "session_fifo_rejected"), 0);
   ASSERT_STREQ(mapping_string(status, "gateway_io_boundary"), "main_thread_io_adapter");
   free_mapping(status);
+}
+
+TEST_F(DriverTest, TestOwnerServiceRegistryUsesKeyedShardsForHotPaths) {
+  ASSERT_EQ(owner_service_hot_path_service_owner_count(), 0);
+  ASSERT_GT(owner_service_hot_path_service_shard_count(), 0);
+  for (const auto& descriptor : owner_service_shard_descriptors()) {
+    if (!descriptor.hot_path) {
+      continue;
+    }
+    ASSERT_STRNE(descriptor.owner_policy, "service_owner") << descriptor.domain;
+    ASSERT_NE(descriptor.shard_policy, nullptr) << descriptor.domain;
+    ASSERT_NE(std::string(descriptor.shard_policy), "") << descriptor.domain;
+  }
 }
 
 namespace {
@@ -4436,9 +4519,18 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(status, "lpc_vm_profile_schema"), "lpc_vm_profile_v1");
     ASSERT_EQ(mapping_number(status, "lpc_vm_benchmark_smoke_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "lpc_vm_benchmark_schema"), "lpc_vm_bench_v1");
+    ASSERT_EQ(mapping_number(status, "lpc_vm_hot_path_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_vm_hot_path_profile_model"),
+                 "opcode_efun_call_other_function_pointer_parser_mapping_string_v1");
     ASSERT_EQ(mapping_number(status, "object_store_benchmark_smoke_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "object_store_benchmark_schema"), "object_store_bench_v1");
     ASSERT_EQ(mapping_number(status, "lpc_apply_dispatch_cache_probe_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_opcode_dispatch_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_efun_dispatch_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_call_other_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_function_pointer_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_parser_action_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_mapping_string_profile_ready"), 1);
     ASSERT_EQ(mapping_number(status, "lpc_dispatch_cache_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "lpc_dispatch_cache_model"),
                  "apply_dispatch_thread_local_direct_cache_v1");
@@ -4451,13 +4543,28 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "lpcc_owner_audit_cli_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "lpcc_owner_audit_cli"), "lpcc --owner-audit --format=json");
     ASSERT_EQ(mapping_number(status, "lpcc_owner_audit_static_scanner_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "lpc_source_encoding_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_source_encoding_schema"), "lpc_source_encoding_v1");
+    ASSERT_STREQ(mapping_string(status, "vm_internal_string_encoding"), "utf-8");
+    ASSERT_EQ(mapping_number(status, "session_encoding_contract_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "gateway_encoding_boundary_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "encoding_audit_ready"), 1);
     ASSERT_EQ(mapping_number(status, "legacy_lpc_default_closed"), 1);
     ASSERT_EQ(mapping_number(status, "owner_safe_future_api_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "owner_safe_lpc_api_failure_schema_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "owner_safe_lpc_api_failure_schema"),
+                 "owner_safe_lpc_api_failure_v1");
+    ASSERT_STREQ(mapping_string(status, "owner_safe_lpc_api_return_fields"),
+                 "success,ok,code,error,reason,api,trace_id");
     ASSERT_EQ(mapping_number(status, "owner_async_api_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_await_poll_adapter_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_await_coroutine_runtime_ready"), 0);
     ASSERT_EQ(mapping_number(status, "freeze_snapshot_api_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "freeze_snapshot_model"), "validated_deep_copy");
+    ASSERT_EQ(mapping_number(status, "lpc_value_object_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "lpc_value_object_model"), "frozen_snapshot_value_object_v1");
+    ASSERT_EQ(mapping_number(status, "lpc_value_object_live_lifecycle_member"), 0);
+    ASSERT_EQ(mapping_number(status, "lpc_value_object_cross_owner_payload_safe"), 1);
     ASSERT_EQ(mapping_number(status, "owner_snapshot_persistence_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_snapshot_persistence_model"),
                  "owner_snapshot_serialized_payload_v1");
@@ -4568,6 +4675,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "domain_task_registry_mudlib_aligned"), 1);
     ASSERT_EQ(mapping_number(status, "keyed_service_shard_ready"), 1);
     ASSERT_EQ(mapping_number(status, "hot_path_service_owner_single_point"), 0);
+    ASSERT_GT(mapping_number(status, "hot_path_service_shard_count"), 0);
+    ASSERT_STREQ(mapping_string(status, "owner_service_shard_policy_model"),
+                 "keyed_service_shard_for_hot_paths");
     ASSERT_EQ(mapping_number(status, "target_owner_message_main_fallback"), 0);
     ASSERT_EQ(mapping_number(status, "production_perfect_contract_ready"), 1);
     ASSERT_EQ(mapping_number(status, "facade_only_runtime_claims"), 0);
@@ -4867,9 +4977,18 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_profile_schema"), "lpc_vm_profile_v1");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_vm_benchmark_smoke_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_benchmark_schema"), "lpc_vm_bench_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_vm_hot_path_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_hot_path_profile_model"),
+                 "opcode_efun_call_other_function_pointer_parser_mapping_string_v1");
     ASSERT_EQ(mapping_number(boundary_contract, "object_store_benchmark_smoke_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "object_store_benchmark_schema"), "object_store_bench_v1");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_apply_dispatch_cache_probe_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_opcode_dispatch_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_efun_dispatch_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_call_other_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_function_pointer_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_parser_action_profile_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_mapping_string_profile_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_dispatch_cache_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_dispatch_cache_model"),
                  "apply_dispatch_thread_local_direct_cache_v1");
@@ -4882,15 +5001,31 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "lpcc_owner_audit_cli_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpcc_owner_audit_cli"), "lpcc --owner-audit --format=json");
     ASSERT_EQ(mapping_number(boundary_contract, "lpcc_owner_audit_static_scanner_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_source_encoding_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_source_encoding_schema"), "lpc_source_encoding_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "vm_internal_string_encoding"), "utf-8");
+    ASSERT_EQ(mapping_number(boundary_contract, "session_encoding_contract_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "gateway_encoding_boundary_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "encoding_audit_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "legacy_lpc_default_closed"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_profile_module_file"),
                  "compiler/internal/lpc_modern_profile.cc");
     ASSERT_EQ(mapping_number(boundary_contract, "owner_safe_future_api_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "owner_safe_lpc_api_failure_schema_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_safe_lpc_api_failure_schema"),
+                 "owner_safe_lpc_api_failure_v1");
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_safe_lpc_api_return_fields"),
+                 "success,ok,code,error,reason,api,trace_id");
     ASSERT_EQ(mapping_number(boundary_contract, "owner_async_api_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "owner_await_poll_adapter_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "owner_await_coroutine_runtime_ready"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "freeze_snapshot_api_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "freeze_snapshot_model"), "validated_deep_copy");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_value_object_profile_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_value_object_model"),
+                 "frozen_snapshot_value_object_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_value_object_live_lifecycle_member"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_value_object_cross_owner_payload_safe"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "owner_snapshot_persistence_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_snapshot_persistence_model"),
                  "owner_snapshot_serialized_payload_v1");
@@ -5101,6 +5236,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "domain_task_registry_mudlib_aligned"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "keyed_service_shard_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "hot_path_service_owner_single_point"), 0);
+    ASSERT_GT(mapping_number(boundary_contract, "hot_path_service_shard_count"), 0);
+    ASSERT_STREQ(mapping_string(boundary_contract, "owner_service_shard_policy_model"),
+                 "keyed_service_shard_for_hot_paths");
     ASSERT_EQ(mapping_number(boundary_contract, "target_owner_message_main_fallback"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "production_perfect_contract_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "facade_only_runtime_claims"), 0);

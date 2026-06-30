@@ -15,6 +15,7 @@
 #include "generate.h"
 #include "icode.h"
 #include "lex.h"
+#include "compiler/internal/lpc_source_encoding.h"
 #include "scratchpad.h"
 #include "symbol.h"
 #include <string>
@@ -2020,7 +2021,7 @@ program_t *compile_file(std::unique_ptr<LexStream> stream, const char *name) {
     DEFER { setlocale(LC_ALL, current_locale); };
 
     symbol_start(name);
-    prolog(std::move(stream), name);
+    prolog(lpc_source_encoding_stream(std::move(stream)), name);
     func_present = 0;
     yyparse();
     symbol_end();

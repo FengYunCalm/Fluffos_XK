@@ -26,6 +26,101 @@ multicore mode : 1    // Owner-based (default)
 multicore mode : 2    // Enforced isolation
 ```
 
+## Modern Owner-Safe LPC APIs
+
+LPC Modern Runtime adds opt-in APIs for mudlibs that want explicit owner
+boundaries without replacing LPC. Use them with `#pragma modern_lpc`; use
+`#pragma strict_owner` when new code should fail audit for unsafe owner
+patterns.
+
+### `freeze(value)`
+
+Validates and deep-copies values that are safe to pass through owner messages,
+callbacks, futures, and service shard tasks. Frozen payloads may contain
+numbers, reals, strings, arrays, and mappings. Live mutable objects and VM-bound
+values are rejected.
+
+Successful results include:
+
+- `success=1`
+- `ok=1`
+- `api="freeze"`
+- `value`: the validated deep-copy payload
+- `value_object_profile_ready=1`
+- `value_object_model="frozen_snapshot_value_object_v1"`
+- `cross_owner_payload_safe=1`
+
+### `snapshot(value)`
+
+Creates a frozen value snapshot for mappings and arrays, or an ObjectHandle
+capability snapshot for live objects. Value snapshots are payload values, not
+live LPC objects, and do not join the traditional destruct chain.
+
+Object snapshots include owner id, epoch, object id, object path, permission
+intent, and snapshot version so stale/destructed/epoch mismatch cases can be
+classified before execution.
+
+### `owner_async(target, mapping payload)`
+
+Submits owner-safe work to an owner executor and returns a future-oriented
+mapping. `target` may be an owner id string or an object. Object targets require
+ObjectHandle routing and a `payload["method"]` entry. Payloads must be frozen or
+freeze-compatible.
+
+Typical failure mappings include:
+
+- `success=0`
+- `ok=0`
+- `code`
+- `error`
+- `reason`
+- `api="owner_async"`
+- `trace_id` when a trace was created
+
+### `owner_await(int future_id)`
+
+Returns the current future state through the owner future contract. It is a
+modern-profile API boundary; coroutine suspension is not enabled for legacy LPC
+by default.
+
+### `owner_commit(mapping proposal)`
+
+Submits a proposal to the owner/service commit boundary. Use it for cross-owner
+writes that should not mutate another owner directly. Proposals should include a
+stable key, target owner or service shard, domain, frozen payload, and idempotent
+commit identity.
+
+### `owner_snapshot_persist(object target, mapping options)`
+
+Serializes a same-owner object snapshot for persistence. The owner/service
+executor owns consistency; the main/file side remains an adapter for I/O. In
+strict owner migrations, direct hot-path `save_object` calls should be audited
+and replaced with snapshot persistence where appropriate.
+
+### Minimal Modern Example
+
+```lpc
+#pragma modern_lpc
+#pragma strict_owner
+
+mapping submit_reward_commit(string player_id, mapping reward) {
+    mapping frozen = freeze(([
+        "player_id": player_id,
+        "reward": reward,
+    ]));
+
+    if (!frozen["ok"]) {
+        return frozen;
+    }
+
+    return owner_async("service/reward/" + player_id, ([
+        "type": "owner_task_reward",
+        "payload_key": "reward/commit/v1",
+        "payload": frozen["value"],
+    ]));
+}
+```
+
 ## Cross-Owner Snapshot API
 
 Get read-only structural information about cross-owner objects.

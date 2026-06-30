@@ -9,6 +9,7 @@
 #include <mutex>
 
 #include "vm/internal/base/machine.h"
+#include "vm/internal/lpc_vm_profile.h"
 
 thread_local mapping_node_t *locked_map_nodes = nullptr;
 
@@ -531,6 +532,8 @@ void mapping_delete(mapping_t *m, svalue_t *lv) {
  */
 
 svalue_t *find_for_insert(mapping_t *m, svalue_t *lv, int doTheFree) {
+  lpc_vm_profile_record_mapping_insert_lookup();
+
   int oi = svalue_to_int(lv);
   unsigned int i = oi & m->table_size;
   mapping_node_t *n, *newnode, **a = m->table + i;
@@ -783,6 +786,8 @@ svalue_t *find_in_mapping(const mapping_t *m, svalue_t key) {
 }
 
 svalue_t *find_string_in_mapping(const mapping_t *m, const char *p) {
+  lpc_vm_profile_record_mapping_lookup();
+
   const char *ss = findstring(p);
   if (!ss) {
     return &const0u;

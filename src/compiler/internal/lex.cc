@@ -44,6 +44,7 @@
 
 #include "symbol.h"
 #include "compiler/internal/LexStream.h"
+#include "compiler/internal/lpc_source_encoding.h"
 
 // FIXME: in master.h
 extern struct object_t *master_ob;
@@ -1042,7 +1043,7 @@ static void handle_include(char *name, int global) {
     current_line = 1;
     current_file = make_shared_string(buf);
     current_file_id = add_program_file(buf, 0);
-    current_stream = std::make_unique<FileLexStream>(f);
+    current_stream = lpc_source_encoding_stream(std::make_unique<FileLexStream>(f));
     refill_buffer();
   } else {
     snprintf(buf, sizeof(buf), "Cannot #include %s", name);
@@ -1528,6 +1529,10 @@ static void handle_pragma(char *str) {
     no_flag = 1;
   } else {
     no_flag = 0;
+  }
+
+  if (strncmp(str, "source_encoding", strlen("source_encoding")) == 0) {
+    return;
   }
 
   for (i = 0; our_pragmas[i].name; i++) {

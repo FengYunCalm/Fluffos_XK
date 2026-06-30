@@ -70,5 +70,10 @@ void db_cleanup(void);
 svalue_t *valid_database(const char *action, array_t *info);
 db_t *find_db_conn(int handle);
 
+#ifdef PACKAGE_ASYNC
+void db_lock_mutex();
+void db_unlock_mutex();
+#endif
+
 void mark_db_conn();
 #endif /* PACKAGES_DB_H */

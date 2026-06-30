@@ -37,23 +37,38 @@ const char *current_owner_id_for_message() {
   return vm_owner_default_id();
 }
 
-mapping_t *owner_payload_error(const std::string &error_text) {
-  auto *map = allocate_mapping(5);
-  add_mapping_pair(map, "success", 0);
-  add_mapping_string(map, "code", "invalid_frozen_payload");
-  add_mapping_string(map, "error", error_text.c_str());
-  add_mapping_pair(map, "frozen_payload", 0);
+void owner_api_mark_success(mapping_t *map, const char *api_name) {
+  add_mapping_pair(map, "ok", 1);
+  add_mapping_string(map, "reason", "");
+  add_mapping_string(map, "failure_schema", "owner_safe_lpc_api_failure_v1");
   add_mapping_pair(map, "modern_lpc_api", 1);
+  if (api_name && api_name[0]) {
+    add_mapping_string(map, "api", api_name);
+  }
+}
+
+void owner_api_mark_failure(mapping_t *map, const char *code, const char *reason) {
+  add_mapping_pair(map, "ok", 0);
+  add_mapping_string(map, "code", code);
+  add_mapping_string(map, "error", reason);
+  add_mapping_string(map, "reason", reason);
+  add_mapping_string(map, "failure_schema", "owner_safe_lpc_api_failure_v1");
+  add_mapping_pair(map, "modern_lpc_api", 1);
+}
+
+mapping_t *owner_payload_error(const std::string &error_text) {
+  auto *map = allocate_mapping(8);
+  add_mapping_pair(map, "success", 0);
+  owner_api_mark_failure(map, "invalid_frozen_payload", error_text.c_str());
+  add_mapping_pair(map, "frozen_payload", 0);
   return map;
 }
 
 mapping_t *owner_api_error(const char *code, const char *error_text) {
-  auto *map = allocate_mapping(5);
+  auto *map = allocate_mapping(8);
   add_mapping_pair(map, "success", 0);
-  add_mapping_string(map, "code", code);
-  add_mapping_string(map, "error", error_text);
+  owner_api_mark_failure(map, code, error_text);
   add_mapping_pair(map, "frozen_payload", 0);
-  add_mapping_pair(map, "modern_lpc_api", 1);
   return map;
 }
 
@@ -79,15 +94,20 @@ mapping_t *owner_frozen_value_result(svalue_t *value, const char *api_name) {
     return owner_payload_error(error_text);
   }
 
-  auto *map = allocate_mapping(9);
+  auto *map = allocate_mapping(12);
   add_mapping_pair(map, "success", 1);
-  add_mapping_string(map, "api", api_name);
-  add_mapping_pair(map, "modern_lpc_api", 1);
+  owner_api_mark_success(map, api_name);
   add_mapping_pair(map, "frozen_payload", 1);
   add_mapping_pair(map, "deep_copy", 1);
   add_mapping_pair(map, "snapshot_only", 1);
   add_mapping_pair(map, "immutable_runtime_type", 0);
   add_mapping_string(map, "immutability_model", "validated_deep_copy");
+  add_mapping_pair(map, "value_object_profile_ready", 1);
+  add_mapping_string(map, "value_object_model", "frozen_snapshot_value_object_v1");
+  add_mapping_pair(map, "live_object_lifecycle_member", 0);
+  add_mapping_pair(map, "traditional_destruct_chain_member", 0);
+  add_mapping_pair(map, "cross_owner_payload_safe", 1);
+  add_mapping_string(map, "canonical_payload_encoding", "utf-8");
   if (!add_mapping_frozen_value(map, "value", value)) {
     free_mapping(map);
     return owner_api_error("frozen_copy_failed", "failed to deep-copy frozen-safe value");
@@ -580,8 +600,7 @@ void f_owner_async() {
     return;
   }
 
-  add_mapping_pair(result, "modern_lpc_api", 1);
-  add_mapping_string(result, "api", "owner_async");
+  owner_api_mark_success(result, "owner_async");
   add_mapping_pair(result, "frozen_payload", 1);
   pop_2_elems();
   push_refed_mapping(result);
@@ -592,8 +611,7 @@ void f_owner_async() {
 void f_owner_await() {
   auto future_id = static_cast<uint64_t>(sp->u.number);
   auto *result = vm_owner_future_poll(future_id);
-  add_mapping_pair(result, "modern_lpc_api", 1);
-  add_mapping_string(result, "api", "owner_await");
+  owner_api_mark_success(result, "owner_await");
   add_mapping_string(result, "await_model", "poll_adapter_until_coroutine_runtime");
   add_mapping_pair(result, "coroutine_runtime_ready", 0);
   pop_stack();
@@ -613,8 +631,7 @@ void f_freeze() {
 void f_snapshot() {
   if (sp->type == T_OBJECT) {
     auto *result = vm_object_handle_status_with_intent(sp->u.ob, "snapshot_payload");
-    add_mapping_string(result, "api", "snapshot");
-    add_mapping_pair(result, "modern_lpc_api", 1);
+    owner_api_mark_success(result, "snapshot");
     add_mapping_pair(result, "snapshot_only", 1);
     add_mapping_pair(result, "frozen_payload", 1);
     add_mapping_pair(result, "immutable_runtime_type", 0);
@@ -681,10 +698,9 @@ void f_owner_snapshot_persist() {
     return;
   }
 
-  auto *result = allocate_mapping(22);
+  auto *result = allocate_mapping(25);
   add_mapping_pair(result, "success", 1);
-  add_mapping_string(result, "api", "owner_snapshot_persist");
-  add_mapping_pair(result, "modern_lpc_api", 1);
+  owner_api_mark_success(result, "owner_snapshot_persist");
   add_mapping_pair(result, "owner_snapshot_persistence_ready", 1);
   add_mapping_string(result, "snapshot_persistence_model", "owner_snapshot_serialized_payload_v1");
   add_mapping_string(result, "file_adapter_boundary", "main_thread_file_adapter");
@@ -725,8 +741,7 @@ void f_owner_commit() {
   auto message_id = static_cast<uint64_t>(owner_mapping_number(sp->u.map, "message_id", 0));
   auto *result = vm_owner_record_commit_boundary(source_owner.c_str(), target_owner.c_str(),
                                                 operation.c_str(), message_id, state.c_str());
-  add_mapping_pair(result, "modern_lpc_api", 1);
-  add_mapping_string(result, "api", "owner_commit");
+  owner_api_mark_success(result, "owner_commit");
   add_mapping_pair(result, "frozen_payload", 1);
   add_mapping_pair(result, "commit_proposal", 1);
   add_mapping_string(result, "commit_model", "owner_commit_boundary_record");

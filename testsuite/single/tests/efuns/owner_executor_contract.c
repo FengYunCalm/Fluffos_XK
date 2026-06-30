@@ -666,9 +666,18 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("lpc_vm_profile_v1", boundary_contract["lpc_vm_profile_schema"]);
     ASSERT_EQ(1, boundary_contract["lpc_vm_benchmark_smoke_ready"]);
     ASSERT_EQ("lpc_vm_bench_v1", boundary_contract["lpc_vm_benchmark_schema"]);
+    ASSERT_EQ(1, boundary_contract["lpc_vm_hot_path_profile_ready"]);
+    ASSERT_EQ("opcode_efun_call_other_function_pointer_parser_mapping_string_v1",
+              boundary_contract["lpc_vm_hot_path_profile_model"]);
     ASSERT_EQ(1, boundary_contract["object_store_benchmark_smoke_ready"]);
     ASSERT_EQ("object_store_bench_v1", boundary_contract["object_store_benchmark_schema"]);
     ASSERT_EQ(1, boundary_contract["lpc_apply_dispatch_cache_probe_ready"]);
+    ASSERT_EQ(1, boundary_contract["lpc_opcode_dispatch_profile_ready"]);
+    ASSERT_EQ(1, boundary_contract["lpc_efun_dispatch_profile_ready"]);
+    ASSERT_EQ(1, boundary_contract["lpc_call_other_profile_ready"]);
+    ASSERT_EQ(1, boundary_contract["lpc_function_pointer_profile_ready"]);
+    ASSERT_EQ(1, boundary_contract["lpc_parser_action_profile_ready"]);
+    ASSERT_EQ(1, boundary_contract["lpc_mapping_string_profile_ready"]);
     ASSERT_EQ(1, boundary_contract["lpc_dispatch_cache_ready"]);
     ASSERT_EQ("apply_dispatch_thread_local_direct_cache_v1", boundary_contract["lpc_dispatch_cache_model"]);
     ASSERT_EQ(1, boundary_contract["lpc_jit_experiment_default_off"]);
@@ -680,14 +689,29 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["lpcc_owner_audit_cli_ready"]);
     ASSERT_EQ("lpcc --owner-audit --format=json", boundary_contract["lpcc_owner_audit_cli"]);
     ASSERT_EQ(1, boundary_contract["lpcc_owner_audit_static_scanner_ready"]);
+    ASSERT_EQ(1, boundary_contract["lpc_source_encoding_ready"]);
+    ASSERT_EQ("lpc_source_encoding_v1", boundary_contract["lpc_source_encoding_schema"]);
+    ASSERT_EQ("utf-8", boundary_contract["vm_internal_string_encoding"]);
+    ASSERT_EQ(1, boundary_contract["session_encoding_contract_ready"]);
+    ASSERT_EQ(1, boundary_contract["gateway_encoding_boundary_ready"]);
+    ASSERT_EQ(1, boundary_contract["encoding_audit_ready"]);
     ASSERT_EQ(1, boundary_contract["legacy_lpc_default_closed"]);
     ASSERT_EQ("compiler/internal/lpc_modern_profile.cc", boundary_contract["lpc_modern_profile_module_file"]);
     ASSERT_EQ(1, boundary_contract["owner_safe_future_api_ready"]);
+    ASSERT_EQ(1, boundary_contract["owner_safe_lpc_api_failure_schema_ready"]);
+    ASSERT_EQ("owner_safe_lpc_api_failure_v1",
+              boundary_contract["owner_safe_lpc_api_failure_schema"]);
+    ASSERT_EQ("success,ok,code,error,reason,api,trace_id",
+              boundary_contract["owner_safe_lpc_api_return_fields"]);
     ASSERT_EQ(1, boundary_contract["owner_async_api_ready"]);
     ASSERT_EQ(1, boundary_contract["owner_await_poll_adapter_ready"]);
     ASSERT_EQ(0, boundary_contract["owner_await_coroutine_runtime_ready"]);
     ASSERT_EQ(1, boundary_contract["freeze_snapshot_api_ready"]);
     ASSERT_EQ("validated_deep_copy", boundary_contract["freeze_snapshot_model"]);
+    ASSERT_EQ(1, boundary_contract["lpc_value_object_profile_ready"]);
+    ASSERT_EQ("frozen_snapshot_value_object_v1", boundary_contract["lpc_value_object_model"]);
+    ASSERT_EQ(0, boundary_contract["lpc_value_object_live_lifecycle_member"]);
+    ASSERT_EQ(1, boundary_contract["lpc_value_object_cross_owner_payload_safe"]);
     ASSERT_EQ(1, boundary_contract["owner_snapshot_persistence_ready"]);
     ASSERT_EQ("owner_snapshot_serialized_payload_v1",
               boundary_contract["owner_snapshot_persistence_model"]);
@@ -866,6 +890,9 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, boundary_contract["domain_task_registry_mudlib_aligned"]);
     ASSERT_EQ(1, boundary_contract["keyed_service_shard_ready"]);
     ASSERT_EQ(0, boundary_contract["hot_path_service_owner_single_point"]);
+    ASSERT(boundary_contract["hot_path_service_shard_count"] > 0);
+    ASSERT_EQ("keyed_service_shard_for_hot_paths",
+              boundary_contract["owner_service_shard_policy_model"]);
     ASSERT_EQ(0, boundary_contract["target_owner_message_main_fallback"]);
     ASSERT_EQ(1, boundary_contract["production_perfect_contract_ready"]);
     ASSERT_EQ(0, boundary_contract["facade_only_runtime_claims"]);
@@ -901,9 +928,18 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ("lpc_vm_profile_v1", status["lpc_vm_profile_schema"]);
     ASSERT_EQ(1, status["lpc_vm_benchmark_smoke_ready"]);
     ASSERT_EQ("lpc_vm_bench_v1", status["lpc_vm_benchmark_schema"]);
+    ASSERT_EQ(1, status["lpc_vm_hot_path_profile_ready"]);
+    ASSERT_EQ("opcode_efun_call_other_function_pointer_parser_mapping_string_v1",
+              status["lpc_vm_hot_path_profile_model"]);
     ASSERT_EQ(1, status["object_store_benchmark_smoke_ready"]);
     ASSERT_EQ("object_store_bench_v1", status["object_store_benchmark_schema"]);
     ASSERT_EQ(1, status["lpc_apply_dispatch_cache_probe_ready"]);
+    ASSERT_EQ(1, status["lpc_opcode_dispatch_profile_ready"]);
+    ASSERT_EQ(1, status["lpc_efun_dispatch_profile_ready"]);
+    ASSERT_EQ(1, status["lpc_call_other_profile_ready"]);
+    ASSERT_EQ(1, status["lpc_function_pointer_profile_ready"]);
+    ASSERT_EQ(1, status["lpc_parser_action_profile_ready"]);
+    ASSERT_EQ(1, status["lpc_mapping_string_profile_ready"]);
     ASSERT_EQ(1, status["lpc_dispatch_cache_ready"]);
     ASSERT_EQ("apply_dispatch_thread_local_direct_cache_v1", status["lpc_dispatch_cache_model"]);
     ASSERT_EQ(1, status["lpc_jit_experiment_default_off"]);
@@ -915,13 +951,28 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["lpcc_owner_audit_cli_ready"]);
     ASSERT_EQ("lpcc --owner-audit --format=json", status["lpcc_owner_audit_cli"]);
     ASSERT_EQ(1, status["lpcc_owner_audit_static_scanner_ready"]);
+    ASSERT_EQ(1, status["lpc_source_encoding_ready"]);
+    ASSERT_EQ("lpc_source_encoding_v1", status["lpc_source_encoding_schema"]);
+    ASSERT_EQ("utf-8", status["vm_internal_string_encoding"]);
+    ASSERT_EQ(1, status["session_encoding_contract_ready"]);
+    ASSERT_EQ(1, status["gateway_encoding_boundary_ready"]);
+    ASSERT_EQ(1, status["encoding_audit_ready"]);
     ASSERT_EQ(1, status["legacy_lpc_default_closed"]);
     ASSERT_EQ(1, status["owner_safe_future_api_ready"]);
+    ASSERT_EQ(1, status["owner_safe_lpc_api_failure_schema_ready"]);
+    ASSERT_EQ("owner_safe_lpc_api_failure_v1",
+              status["owner_safe_lpc_api_failure_schema"]);
+    ASSERT_EQ("success,ok,code,error,reason,api,trace_id",
+              status["owner_safe_lpc_api_return_fields"]);
     ASSERT_EQ(1, status["owner_async_api_ready"]);
     ASSERT_EQ(1, status["owner_await_poll_adapter_ready"]);
     ASSERT_EQ(0, status["owner_await_coroutine_runtime_ready"]);
     ASSERT_EQ(1, status["freeze_snapshot_api_ready"]);
     ASSERT_EQ("validated_deep_copy", status["freeze_snapshot_model"]);
+    ASSERT_EQ(1, status["lpc_value_object_profile_ready"]);
+    ASSERT_EQ("frozen_snapshot_value_object_v1", status["lpc_value_object_model"]);
+    ASSERT_EQ(0, status["lpc_value_object_live_lifecycle_member"]);
+    ASSERT_EQ(1, status["lpc_value_object_cross_owner_payload_safe"]);
     ASSERT_EQ(1, status["owner_snapshot_persistence_ready"]);
     ASSERT_EQ("owner_snapshot_serialized_payload_v1", status["owner_snapshot_persistence_model"]);
     ASSERT_EQ("main_thread_file_adapter", status["owner_snapshot_persistence_adapter"]);
@@ -1081,6 +1132,8 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT_EQ(1, status["domain_task_registry_mudlib_aligned"]);
     ASSERT_EQ(1, status["keyed_service_shard_ready"]);
     ASSERT_EQ(0, status["hot_path_service_owner_single_point"]);
+    ASSERT(status["hot_path_service_shard_count"] > 0);
+    ASSERT_EQ("keyed_service_shard_for_hot_paths", status["owner_service_shard_policy_model"]);
     ASSERT_EQ(0, status["target_owner_message_main_fallback"]);
     ASSERT_EQ(1, status["production_perfect_contract_ready"]);
     ASSERT_EQ(0, status["facade_only_runtime_claims"]);
@@ -1402,11 +1455,20 @@ void assert_lpc_modern_runtime_apis() {
         "numbers": ({ 1, 2, 3 }),
     ]));
     ASSERT_EQ(1, frozen["success"]);
+    ASSERT_EQ(1, frozen["ok"]);
+    ASSERT_EQ("", frozen["reason"]);
+    ASSERT_EQ("owner_safe_lpc_api_failure_v1", frozen["failure_schema"]);
     ASSERT_EQ(1, frozen["modern_lpc_api"]);
     ASSERT_EQ(1, frozen["frozen_payload"]);
     ASSERT_EQ(1, frozen["deep_copy"]);
     ASSERT_EQ(0, frozen["immutable_runtime_type"]);
     ASSERT_EQ("validated_deep_copy", frozen["immutability_model"]);
+    ASSERT_EQ(1, frozen["value_object_profile_ready"]);
+    ASSERT_EQ("frozen_snapshot_value_object_v1", frozen["value_object_model"]);
+    ASSERT_EQ(0, frozen["live_object_lifecycle_member"]);
+    ASSERT_EQ(0, frozen["traditional_destruct_chain_member"]);
+    ASSERT_EQ(1, frozen["cross_owner_payload_safe"]);
+    ASSERT_EQ("utf-8", frozen["canonical_payload_encoding"]);
     ASSERT(mapp(frozen["value"]));
     frozen_value = frozen["value"];
     ASSERT_EQ("modern", frozen_value["name"]);
@@ -1417,17 +1479,28 @@ void assert_lpc_modern_runtime_apis() {
 
     rejected = freeze(([ "object": this_object() ]));
     ASSERT_EQ(0, rejected["success"]);
+    ASSERT_EQ(0, rejected["ok"]);
     ASSERT_EQ("invalid_frozen_payload", rejected["code"]);
+    ASSERT(stringp(rejected["reason"]));
+    ASSERT_EQ(rejected["error"], rejected["reason"]);
 
     snapshot_value = snapshot(([ "snapshot": "safe" ]));
     ASSERT_EQ(1, snapshot_value["success"]);
+    ASSERT_EQ(1, snapshot_value["ok"]);
+    ASSERT_EQ("", snapshot_value["reason"]);
     ASSERT_EQ("snapshot", snapshot_value["api"]);
     ASSERT_EQ(1, snapshot_value["snapshot_only"]);
+    ASSERT_EQ(1, snapshot_value["value_object_profile_ready"]);
+    ASSERT_EQ("frozen_snapshot_value_object_v1", snapshot_value["value_object_model"]);
+    ASSERT_EQ(0, snapshot_value["live_object_lifecycle_member"]);
+    ASSERT_EQ(1, snapshot_value["cross_owner_payload_safe"]);
     ASSERT(mapp(snapshot_value["value"]));
     ASSERT_EQ("safe", snapshot_value["value"]["snapshot"]);
 
     persisted_snapshot = owner_snapshot_persist(this_object(), ([ "save_zeros": 1 ]));
     ASSERT_EQ(1, persisted_snapshot["success"]);
+    ASSERT_EQ(1, persisted_snapshot["ok"]);
+    ASSERT_EQ("", persisted_snapshot["reason"]);
     ASSERT_EQ("owner_snapshot_persist", persisted_snapshot["api"]);
     ASSERT_EQ(1, persisted_snapshot["modern_lpc_api"]);
     ASSERT_EQ(1, persisted_snapshot["owner_snapshot_persistence_ready"]);
@@ -1446,19 +1519,25 @@ void assert_lpc_modern_runtime_apis() {
 
     rejected = owner_async(this_object(), ([ "payload_key": "missing-method" ]));
     ASSERT_EQ(0, rejected["success"]);
+    ASSERT_EQ(0, rejected["ok"]);
     ASSERT_EQ("missing_method", rejected["code"]);
+    ASSERT_EQ(rejected["error"], rejected["reason"]);
 
     async_result = owner_async(target_owner, ([
         "type": "modern_contract",
         "payload_key": "payload/v1",
     ]));
     ASSERT_EQ(1, async_result["success"]);
+    ASSERT_EQ(1, async_result["ok"]);
+    ASSERT_EQ("", async_result["reason"]);
     ASSERT_EQ(1, async_result["modern_lpc_api"]);
     ASSERT_EQ("owner_async", async_result["api"]);
     ASSERT(async_result["future_id"] > 0);
 
     await_result = owner_await(async_result["future_id"]);
     ASSERT_EQ(1, await_result["modern_lpc_api"]);
+    ASSERT_EQ(1, await_result["ok"]);
+    ASSERT_EQ("", await_result["reason"]);
     ASSERT_EQ("owner_await", await_result["api"]);
     ASSERT_EQ("poll_adapter_until_coroutine_runtime", await_result["await_model"]);
     ASSERT_EQ(0, await_result["coroutine_runtime_ready"]);
@@ -1471,6 +1550,8 @@ void assert_lpc_modern_runtime_apis() {
         "state": "prepared",
     ]));
     ASSERT_EQ(1, commit["success"]);
+    ASSERT_EQ(1, commit["ok"]);
+    ASSERT_EQ("", commit["reason"]);
     ASSERT_EQ(1, commit["modern_lpc_api"]);
     ASSERT_EQ("owner_commit", commit["api"]);
     ASSERT_EQ(1, commit["commit_proposal"]);
