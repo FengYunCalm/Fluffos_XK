@@ -287,12 +287,11 @@ int aio_read(struct Request *req) {
 } // namespace
 
 #ifdef F_ASYNC_DB_EXEC
-pthread_mutex_t *db_mut = nullptr;
-
 void *dbexecthread(struct Request *req) {
   ScopedTracer const work_tracer("db_exec", EventCategory::DEFAULT, [=] { return json{req->data}; });
 
-  pthread_mutex_lock(db_mut);
+  db_lock_mutex();
+  DEFER { db_unlock_mutex(); };
   // see add_db_exec
   db_t *db = find_db_conn(req->handle);
   int ret = -1;
@@ -314,7 +313,6 @@ void *dbexecthread(struct Request *req) {
   } else {
     req->path = std::string("No database exec function!");
   }
-  pthread_mutex_unlock(db_mut);
 
   req->ret = ret;
   req->status = DONE;
@@ -695,15 +693,20 @@ void f_async_db_exec() {
   valid_database("exec", info);
 
   db_t *db;
+#ifdef PACKAGE_ASYNC
+  db_lock_mutex();
+#endif
   db = find_db_conn((sp - 1)->u.number);
   if (!db) {
+#ifdef PACKAGE_ASYNC
+    db_unlock_mutex();
+#endif
     error("Attempt to exec on an invalid database handle\n");
   }
+#ifdef PACKAGE_ASYNC
+  db_unlock_mutex();
+#endif
 
-  if (!db_mut) {
-    db_mut = (pthread_mutex_t *)DMALLOC(sizeof(pthread_mutex_t), TAG_PERMANENT, "async_db_exec");
-    pthread_mutex_init(db_mut, nullptr);
-  }
   add_db_exec((sp - 1)->u.number, sp->u.string, cb.release());
   pop_2_elems();
 }

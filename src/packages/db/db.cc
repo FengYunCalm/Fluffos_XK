@@ -81,6 +81,16 @@ db_t *find_db_conn(int);
 static int create_db_conn();
 static void free_db_conn(db_t *);
 
+#ifdef PACKAGE_ASYNC
+static pthread_mutex_t db_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void db_lock_mutex() {
+  pthread_mutex_lock(&db_mutex);
+}
+
+void db_unlock_mutex() { pthread_mutex_unlock(&db_mutex); }
+#endif
+
 #ifdef USE_MSQL
 static int msql_connect(dbconn_t *, const char *, const char *, const char *, const char *);
 static int msql_close(dbconn_t *);
@@ -175,10 +185,19 @@ void f_db_close() {
 
   valid_database("close", &the_null_array);
 
+#ifdef PACKAGE_ASYNC
+  db_lock_mutex();
+#endif
   db = find_db_conn(sp->u.number);
   if (!db) {
+#ifdef PACKAGE_ASYNC
+    db_unlock_mutex();
+#endif
     error("Attempt to close an invalid database handle\n");
   }
+#ifdef PACKAGE_ASYNC
+  DEFER { db_unlock_mutex(); };
+#endif
 
   /* Cleanup any memory structures left around */
   if (db->type->cleanup) {
@@ -213,10 +232,19 @@ void f_db_commit() {
 
   valid_database("commit", &the_null_array);
 
+#ifdef PACKAGE_ASYNC
+  db_lock_mutex();
+#endif
   db = find_db_conn(sp->u.number);
   if (!db) {
+#ifdef PACKAGE_ASYNC
+    db_unlock_mutex();
+#endif
     error("Attempt to commit an invalid database handle\n");
   }
+#ifdef PACKAGE_ASYNC
+  DEFER { db_unlock_mutex(); };
+#endif
 
   if (db->type->commit) {
     ret = db->type->commit(&(db->c));
@@ -356,9 +384,6 @@ void f_db_connect() {
  * NOTE: the number of rows on INSERT, UPDATE, and DELETE statements will
  * be zero since there is no result set.
  */
-#ifdef PACKAGE_ASYNC
-extern pthread_mutex_t *db_mut;
-#endif
 #ifdef F_DB_EXEC
 void f_db_exec() {
   int ret = 0;
@@ -370,14 +395,20 @@ void f_db_exec() {
   info->item[0].u.string = string_copy(sp->u.string, "f_db_exec");
   valid_database("exec", info);
 
+#ifdef PACKAGE_ASYNC
+  db_lock_mutex();
+#endif
   db = find_db_conn((sp - 1)->u.number);
   if (!db) {
+#ifdef PACKAGE_ASYNC
+    db_unlock_mutex();
+#endif
     error("Attempt to exec on an invalid database handle\n");
   }
-
 #ifdef PACKAGE_ASYNC
-  pthread_mutex_lock(db_mut);
+  DEFER { db_unlock_mutex(); };
 #endif
+
   if (db->type->cleanup) {
     db->type->cleanup(&(db->c));
   }
@@ -399,9 +430,6 @@ void f_db_exec() {
   } else {
     sp->u.number = ret;
   }
-#ifdef PACKAGE_ASYNC
-  pthread_mutex_unlock(db_mut);
-#endif
 }
 #endif
 
@@ -436,10 +464,19 @@ void f_db_fetch() {
 
   valid_database("fetch", &the_null_array);
 
+#ifdef PACKAGE_ASYNC
+  db_lock_mutex();
+#endif
   db = find_db_conn((sp - 1)->u.number);
   if (!db) {
+#ifdef PACKAGE_ASYNC
+    db_unlock_mutex();
+#endif
     error("Attempt to fetch from an invalid database handle\n");
   }
+#ifdef PACKAGE_ASYNC
+  DEFER { db_unlock_mutex(); };
+#endif
 
   if (db->type->fetch) {
     ret = db->type->fetch(&(db->c), sp->u.number);
@@ -478,10 +515,19 @@ void f_db_rollback() {
 
   valid_database("rollback", &the_null_array);
 
+#ifdef PACKAGE_ASYNC
+  db_lock_mutex();
+#endif
   db = find_db_conn(sp->u.number);
   if (!db) {
+#ifdef PACKAGE_ASYNC
+    db_unlock_mutex();
+#endif
     error("Attempt to rollback an invalid database handle\n");
   }
+#ifdef PACKAGE_ASYNC
+  DEFER { db_unlock_mutex(); };
+#endif
 
   if (db->type->rollback) {
     ret = db->type->rollback(&(db->c));
@@ -508,6 +554,10 @@ void f_db_status() {
 
   outbuf_zero(&out);
 
+#ifdef PACKAGE_ASYNC
+  db_lock_mutex();
+  DEFER { db_unlock_mutex(); };
+#endif
   for (i = 0; i < db_conn_alloc; i++) {
     if (db_conn_list[i].flags & DB_FLAG_EMPTY) {
       continue;
@@ -526,6 +576,10 @@ void f_db_status() {
 void db_cleanup() {
   int i;
 
+#ifdef PACKAGE_ASYNC
+  db_lock_mutex();
+  DEFER { db_unlock_mutex(); };
+#endif
   for (i = 0; i < db_conn_alloc; i++) {
     if (!(db_conn_list[i].flags & DB_FLAG_EMPTY)) {
       if (db_conn_list[i].type->cleanup) {
@@ -546,12 +600,8 @@ int create_db_conn() {
   int i;
 
 #ifdef PACKAGE_ASYNC
-  if (!db_mut) {
-    db_mut = (pthread_mutex_t *)malloc(sizeof(pthread_mutex_t));
-    pthread_mutex_init(db_mut, nullptr);
-  }
-  pthread_mutex_lock(db_mut);
-  DEFER { pthread_mutex_unlock(db_mut); };
+  db_lock_mutex();
+  DEFER { db_unlock_mutex(); };
 #endif
 
   /* allocate more slots if we need them */
@@ -958,6 +1008,7 @@ static int SQLite3_execute(dbconn_t *c, const char *s) {
                           NULL) != SQLITE_OK) {
       sqlite3_free_table(result);
       sqlite3_finalize(c->SQLite3.results);
+      c->SQLite3.results = 0;
       return 0;
     }
 
