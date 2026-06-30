@@ -19,6 +19,20 @@ void assert_payload_error(mapping result, string error) {
     ASSERT_EQ(error, result["error"]);
 }
 
+mapping wait_owner_future(int future_id) {
+    int i;
+    mapping future;
+
+    for (i = 0; i < 10000; i++) {
+        future = owner_future_poll(future_id);
+        if (future["state"] != "pending") {
+            return future;
+        }
+        vm_owner_thread_yield();
+    }
+    return future;
+}
+
 void assert_latest_message_trace(int future_id, string message_type,
                                  string state, string result_key,
                                  string error, string target_status,
@@ -106,14 +120,8 @@ void do_tests() {
     ASSERT_EQ(0, called);
     async_payload["value"] = 99;
     ASSERT_EQ(1, vm_owner_thread_start(1));
-    for (i = 0; i < 1000; i++) {
-        future = owner_future_poll(result["future_id"]);
-        if (future["state"] != "pending") {
-            break;
-        }
-    }
+    future = wait_owner_future(result["future_id"]);
     ASSERT_EQ(2, called);
-    future = owner_future_poll(result["future_id"]);
     ASSERT_EQ(1, future["success"]);
     ASSERT_EQ("completed", future["state"]);
     ASSERT_EQ(1, future["payload_frozen"]);
@@ -136,14 +144,8 @@ void do_tests() {
     ASSERT_EQ("owner/test/payload/stale-old", result["target_owner_id"]);
     vm_set_owner_id(this_object(), "owner/test/payload/stale-new");
     ASSERT_EQ(1, vm_owner_thread_start(1));
-    for (i = 0; i < 1000; i++) {
-        future = owner_future_poll(result["future_id"]);
-        if (future["state"] != "pending") {
-            break;
-        }
-    }
+    future = wait_owner_future(result["future_id"]);
     ASSERT_EQ(2, called);
-    future = owner_future_poll(result["future_id"]);
     ASSERT_EQ(1, future["success"]);
     ASSERT_EQ("failed", future["state"]);
     ASSERT_EQ("owner_mismatch", future["target_handle_status"]);
@@ -178,13 +180,7 @@ void do_tests() {
     ASSERT_EQ(1, result["frozen_payload"]);
     vm_owner_thread_stop();
     ASSERT_EQ(1, vm_owner_thread_start(1));
-    for (i = 0; i < 1000; i++) {
-        future = owner_future_poll(result["future_id"]);
-        if (future["state"] != "pending") {
-            break;
-        }
-    }
-    future = owner_future_poll(result["future_id"]);
+    future = wait_owner_future(result["future_id"]);
     ASSERT_EQ(1, future["success"]);
     ASSERT_EQ("failed", future["state"]);
     ASSERT_EQ("owner async result must be frozen data", future["error"]);

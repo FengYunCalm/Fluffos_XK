@@ -8,6 +8,7 @@
 
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -405,6 +406,13 @@ void f_vm_owner_thread_start() {
 #ifdef F_VM_OWNER_THREAD_STOP
 void f_vm_owner_thread_stop() {
   vm_owner_thread_stop();
+  push_number(1);
+}
+#endif
+
+#ifdef F_VM_OWNER_THREAD_YIELD
+void f_vm_owner_thread_yield() {
+  std::this_thread::yield();
   push_number(1);
 }
 #endif

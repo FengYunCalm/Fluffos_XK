@@ -423,5 +423,6 @@ mapping vm_owner_lpc_task(object, string, string);
 mapping vm_owner_ordinary_lpc_task(object, string, string, int);
 int vm_owner_thread_start(int);
 int vm_owner_thread_stop();
+int vm_owner_thread_yield();
 mapping vm_owner_thread_status();
 int vm_context_is_main_thread();
