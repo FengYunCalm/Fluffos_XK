@@ -1,0 +1,4 @@
+#/clone/gateway_net_dead_destruct_user.c
+last_disconnect_code "client_close"
+last_disconnect_text "bye"
+saved_before_destruct 1

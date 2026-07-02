@@ -73,24 +73,24 @@ constexpr std::array<OwnerExecutorTaskDescriptor, 19> kOwnerExecutorTaskDescript
     {"gateway_command", "gateway_command_executor_activation", OwnerExecutorDispatchKind::GatewayCommand,
      "executor_safe", "owner_executor",
      "guarded gateway command activation with owner epoch and frame cleanup checks", 1, 1, 0, 0, 1, 0},
-    {"heartbeat", "owner_executor_callback", OwnerExecutorDispatchKind::ExecutorCallback, "executor_safe_callback",
-     "owner_executor", "driver heartbeat callback closure on target owner executor", 1, 1, 0, 0, 1, 0},
-    {"call_out", "owner_executor_callback", OwnerExecutorDispatchKind::ExecutorCallback, "executor_safe_callback",
-     "owner_executor", "driver call_out callback closure on target owner executor", 1, 1, 0, 0, 1, 0},
+    {"heartbeat", "owner_executor_callback", OwnerExecutorDispatchKind::ExecutorCallback, "main_required_callback",
+     "owner_main_queue_callback_adapter", "driver heartbeat callback closure admitted by owner runtime and run on main callback adapter", 0, 0, 1, 0, 0, 1},
+    {"call_out", "owner_executor_callback", OwnerExecutorDispatchKind::ExecutorCallback, "main_required_callback",
+     "owner_main_queue_callback_adapter", "driver call_out callback closure admitted by owner runtime and run on main callback adapter", 0, 0, 1, 0, 0, 1},
     {"async_callback", "owner_executor_callback", OwnerExecutorDispatchKind::ExecutorCallback,
-     "executor_safe_callback", "owner_executor", "async worker callback closure with frozen result", 1, 1, 0, 0,
-     1, 0},
+     "main_required_callback", "owner_main_queue_callback_adapter", "async worker callback closure admitted by owner runtime and run on main callback adapter", 0, 0, 1, 0,
+     0, 1},
     {"dns_callback", "owner_executor_callback", OwnerExecutorDispatchKind::ExecutorCallback,
-     "executor_safe_callback", "owner_executor", "DNS callback closure with frozen result", 1, 1, 0, 0, 1, 0},
+     "main_required_callback", "owner_main_queue_callback_adapter", "DNS callback closure admitted by owner runtime and run on main callback adapter", 0, 0, 1, 0, 0, 1},
     {"socket_callback", "owner_executor_callback", OwnerExecutorDispatchKind::ExecutorCallback,
-     "executor_safe_callback", "owner_executor", "socket callback closure with main-thread cleanup", 1, 1, 0, 0,
-     1, 0},
-    {"gateway_command_execute", "owner_executor_callback", OwnerExecutorDispatchKind::ExecutorCallback,
-     "executor_safe_callback", "owner_executor", "guarded gateway command execution callback closure", 1, 1, 0, 0,
-     1, 0},
+     "main_required_callback", "owner_main_queue_callback_adapter", "socket callback closure admitted by owner runtime and run on main callback adapter", 0, 0, 1, 0,
+     0, 1},
+    {"gateway_command_execute", "gateway_command_main_queue", OwnerExecutorDispatchKind::MainThread,
+     "main_required", "owner_main_queue", "guarded gateway command execution main-thread IO adapter", 1, 0, 1, 0,
+     1, 1},
     {"ed_callback", "owner_executor_callback", OwnerExecutorDispatchKind::ExecutorCallback,
-     "executor_safe_callback", "owner_executor", "ed callback closure with main-thread cleanup adapter", 1, 1, 0,
-     0, 1, 0},
+     "main_required_callback", "owner_main_queue_callback_adapter", "ed callback closure admitted by owner runtime and run on main callback adapter", 0, 0, 1,
+     0, 0, 1},
     {"compute_result", "compute_result", OwnerExecutorDispatchKind::ComputeResult, "executor_safe",
      "owner_executor", "worker v2 result completion", 1, 1, 0, 0, 1, 0},
 }};
@@ -164,6 +164,8 @@ const char *owner_executor_dispatch_kind_name(OwnerExecutorDispatchKind kind) {
       return "gateway_command";
     case OwnerExecutorDispatchKind::ExecutorCallback:
       return "executor_callback";
+    case OwnerExecutorDispatchKind::MainThread:
+      return "main_thread";
     case OwnerExecutorDispatchKind::ComputeResult:
       return "compute_result";
     case OwnerExecutorDispatchKind::Generic:
@@ -177,6 +179,7 @@ const char *owner_manifest_payload_policy(OwnerExecutorDispatchKind kind, bool h
     case OwnerExecutorDispatchKind::OwnerMessage:
       return has_target_handle ? "owner_handle_or_frozen_payload" : "frozen_payload_or_message_key";
     case OwnerExecutorDispatchKind::GatewayCommand:
+    case OwnerExecutorDispatchKind::MainThread:
       return "owner_private_command_snapshot";
     case OwnerExecutorDispatchKind::ExecutorCallback:
       return "frozen_payload_or_owner_handle_only";
@@ -202,6 +205,7 @@ const char *owner_manifest_cleanup_policy(OwnerExecutorDispatchKind kind, bool h
     case OwnerExecutorDispatchKind::ComputeResult:
       return "future_completion_cleanup";
     case OwnerExecutorDispatchKind::GatewayCommand:
+    case OwnerExecutorDispatchKind::MainThread:
       return "owner_command_frame_cleanup";
     default:
       return "none";
@@ -217,6 +221,7 @@ const char *owner_manifest_reply_future_policy(OwnerExecutorDispatchKind kind) {
       return "owner_future";
     case OwnerExecutorDispatchKind::ExecutorCallback:
     case OwnerExecutorDispatchKind::GatewayCommand:
+    case OwnerExecutorDispatchKind::MainThread:
       return "main_reply_or_cleanup_queue";
     default:
       return "none";

@@ -25,6 +25,9 @@ uint64_t gateway_enqueue_pending_command_internal(object_t *user);
 namespace {
 std::unordered_map<std::string, std::unique_ptr<GatewaySession>> g_gateway_sessions;
 std::unordered_map<object_t *, GatewaySession *> g_gateway_obj_to_session;
+constexpr const char *kGatewayCommandExecutorActivationBlocker =
+    "interactive_command_requires_main_thread_io_adapter";
+constexpr int kGatewayCommandMainDrainBudget = 4;
 
 class GatewayControlledLpcScope {
  public:
@@ -81,6 +84,8 @@ bool gateway_executor_session_current(object_t *user, interactive_t *ip) {
   return ip && ::gateway_is_session(user) && user->interactive == ip && ip->ob == user &&
          !(user->flags & O_DESTRUCTED);
 }
+
+object_t *resolve_active_session_owner(const char *session_id, object_t *fallback = nullptr);
 
 svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, size_t snapshot_bytes) {
   svalue_t payload{};
@@ -205,13 +210,13 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_pair(payload.u.map, "telnet_ga_required",
                    user && user->telnet && (user->iflags & USING_TELNET) && !(user->iflags & SUPPRESS_GA) ? 1 : 0);
   add_mapping_pair(payload.u.map, "reschedule_cmd_in_buf", user && (user->iflags & CMD_IN_BUF) ? 1 : 0);
-  add_mapping_string(payload.u.map, "command_executor_blocker",
-                     snapshot_ready ? "" : "interactive_command_buffer_not_snapshotted");
+  add_mapping_string(payload.u.map, "command_executor_blocker", kGatewayCommandExecutorActivationBlocker);
   add_mapping_string(payload.u.map, "command_consume_model", "owner_owned_snapshot_main_thread_consume");
   add_mapping_pair(payload.u.map, "command_consume_snapshot_ready", snapshot_ready ? 1 : 0);
-  add_mapping_pair(payload.u.map, "command_consume_executor_ready", snapshot_ready ? 1 : 0);
-  add_mapping_string(payload.u.map, "command_consume_blocker", snapshot_ready ? "" : "interactive_command_buffer_not_snapshotted");
-  add_mapping_string(payload.u.map, "execution_frame_restore_policy", "owner_executor_vmcontext_restore");
+  add_mapping_pair(payload.u.map, "command_consume_executor_ready", 0);
+  add_mapping_string(payload.u.map, "command_consume_blocker",
+                     snapshot_ready ? kGatewayCommandExecutorActivationBlocker : "interactive_command_buffer_not_snapshotted");
+  add_mapping_string(payload.u.map, "execution_frame_restore_policy", "main_thread_vmcontext_scope");
   add_mapping_pair(payload.u.map, "execution_frame_restore_ready", 1);
   add_mapping_string(payload.u.map, "execution_frame_restore_blocker", "");
   add_mapping_string(payload.u.map, "session_id", user && user->gateway_session_id ? user->gateway_session_id : "");
@@ -253,6 +258,7 @@ void gateway_command_callback(evutil_socket_t /*fd*/, short /*what*/, void *arg)
   if (!user) {
     return;
   }
+  g_gateway_runtime_counters.command_callbacks.fetch_add(1, std::memory_order_relaxed);
 
   if (g_gateway_debug && user->gateway_session_id) {
     debug_message("[gateway] command_callback begin sid=%s\n", user->gateway_session_id);
@@ -261,7 +267,7 @@ void gateway_command_callback(evutil_socket_t /*fd*/, short /*what*/, void *arg)
   if (user->ob && !(user->ob->flags & O_DESTRUCTED)) {
     auto task_id = gateway_enqueue_pending_command_internal(user->ob);
     if (task_id != 0) {
-      vm_owner_drain_main_tasks(64);
+      vm_owner_drain_main_tasks(kGatewayCommandMainDrainBudget);
     }
   } else {
     set_eval(max_eval_cost);
@@ -270,7 +276,51 @@ void gateway_command_callback(evutil_socket_t /*fd*/, short /*what*/, void *arg)
   }
 }
 
-object_t *resolve_active_session_owner(const char *session_id, object_t *fallback = nullptr) {
+bool gateway_mark_command_task_pending(GatewaySession *sess) {
+  if (!sess) {
+    return false;
+  }
+  bool expected = false;
+  return sess->command_task_pending.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
+                                                           std::memory_order_acquire);
+}
+
+void gateway_clear_command_task_pending(const std::string &session_id) {
+  auto *sess = gateway_find_session(session_id.c_str());
+  if (!sess) {
+    return;
+  }
+  if (sess->command_task_pending.exchange(false, std::memory_order_acq_rel)) {
+    g_gateway_runtime_counters.command_tasks_cleared.fetch_add(1, std::memory_order_relaxed);
+  }
+}
+
+void gateway_finish_command_task(const std::string &session_id, object_t *fallback) {
+  auto *sess = gateway_find_session(session_id.c_str());
+  if (!sess) {
+    return;
+  }
+
+  if (sess->command_task_pending.exchange(false, std::memory_order_acq_rel)) {
+    g_gateway_runtime_counters.command_tasks_cleared.fetch_add(1, std::memory_order_relaxed);
+  }
+  g_gateway_runtime_counters.command_tasks_finished.fetch_add(1, std::memory_order_relaxed);
+  auto *active_user = resolve_active_session_owner(session_id.c_str(), fallback);
+  auto *active_ip = active_user ? active_user->interactive : nullptr;
+  if (!gateway_executor_session_current(active_user, active_ip)) {
+    return;
+  }
+  /*
+   * Do not enqueue the next buffered command here. process_user_command_text()
+   * queues command reply side effects, and that path reschedules the command
+   * event if CMD_IN_BUF is still set. Keeping the next command behind a fresh
+   * event preserves the driver command fairness rule and prevents one gateway
+   * drain from chasing a large buffered burst on the main thread.
+   */
+  (void)active_ip;
+}
+
+object_t *resolve_active_session_owner(const char *session_id, object_t *fallback) {
   auto *sess = gateway_find_session(session_id);
   if (sess && gateway_object_valid(sess->user_ob) && sess->user_ob->interactive &&
       sess->user_ob->interactive->ob == sess->user_ob) {
@@ -320,6 +370,16 @@ long gateway_session_fifo_depth_total() {
   return depth;
 }
 
+long gateway_session_command_pending_count() {
+  long total = 0;
+  for (const auto &entry : g_gateway_sessions) {
+    if (entry.second->command_task_pending.load(std::memory_order_acquire)) {
+      total++;
+    }
+  }
+  return total;
+}
+
 uint64_t gateway_session_fifo_enqueued_total() {
   uint64_t total = 0;
   for (const auto &entry : g_gateway_sessions) {
@@ -356,6 +416,7 @@ int gateway_flush_session_output_fifo(GatewaySession *sess) {
     }
     sess->output_fifo.pop_front();
     sess->output_fifo_flushed++;
+    g_gateway_runtime_counters.output_fifo_flushed.fetch_add(1, std::memory_order_relaxed);
     flushed = 1;
   }
   return flushed;
@@ -367,10 +428,12 @@ int gateway_enqueue_session_output(GatewaySession *sess, std::string encoded) {
   }
   if (sess->output_fifo.size() >= sess->output_fifo_max_depth) {
     sess->output_fifo_rejected++;
+    g_gateway_runtime_counters.output_fifo_rejected.fetch_add(1, std::memory_order_relaxed);
     return 0;
   }
   sess->output_fifo.push_back(std::move(encoded));
   sess->output_fifo_enqueued++;
+  g_gateway_runtime_counters.output_fifo_enqueued.fetch_add(1, std::memory_order_relaxed);
   sess->last_active = get_current_time();
   gateway_flush_session_output_fifo(sess);
   return 1;
@@ -436,51 +499,55 @@ bool gateway_is_session(object_t *ob) {
 
 uint64_t gateway_enqueue_pending_command_internal(object_t *user) {
   if (!gateway_is_session(user) || !user->interactive || !user->obname || (user->flags & O_DESTRUCTED)) {
+    g_gateway_runtime_counters.command_tasks_rejected.fetch_add(1, std::memory_order_relaxed);
     return 0;
   }
 
+  auto *sess = gateway_find_session_by_object(user);
+  if (!gateway_mark_command_task_pending(sess)) {
+    g_gateway_runtime_counters.command_tasks_rejected.fetch_add(1, std::memory_order_relaxed);
+    g_gateway_runtime_counters.command_tasks_rejected_pending.fetch_add(1, std::memory_order_relaxed);
+    return 0;
+  }
   auto *ip = user->interactive;
   auto command_snapshot = gateway_pending_command_snapshot(ip);
+  std::string session_id = ip->gateway_session_id ? ip->gateway_session_id : "";
   auto snapshot_ready = (ip->iflags & CMD_IN_BUF) != 0;
   auto payload = gateway_command_task_payload(ip, snapshot_ready, command_snapshot.size());
-  auto executor_available = snapshot_ready && vm_owner_executor_available();
-  if (executor_available) {
-    auto task_id = vm_owner_enqueue_executor_task(
-        user, "gateway_command_execute", "process_user_command", [user, ip, command_snapshot] {
-          if (!gateway_executor_session_current(user, ip)) {
-            vm_owner_record_task_trace(user ? vm_owner_id(user) : vm_owner_default_id(), "gateway_command_execute",
-                                       "process_user_command", user ? vm_owner_epoch(user) : 0, "session_stale");
-            vm_context_set_current_interactive(vm_context(), nullptr);
-            return;
-          }
-
-          GatewayControlledLpcScope controlled_lpc;
-          set_eval(max_eval_cost);
-          vm_owner_record_task_trace(vm_owner_id(user), "gateway_command_execute", "process_user_command",
-                                     vm_owner_epoch(user), "snapshot_dispatched");
-          if (!process_user_command_snapshot(ip, command_snapshot.c_str(), command_snapshot.size())) {
-            vm_owner_record_task_trace(vm_owner_id(user), "gateway_command_execute", "process_user_command",
-                                       vm_owner_epoch(user), "snapshot_dropped");
-          }
-          vm_context_set_current_interactive(vm_context(), nullptr);
-        });
-    if (task_id != 0) {
-      free_svalue(&payload, "gateway_command_task_payload");
-      return task_id;
-    }
-  }
-  auto main_task_policy = snapshot_ready ? (executor_available ? VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK
-                                                               : VM_OWNER_MAIN_TASK_OFF_MODE_FALLBACK)
-                                         : VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK;
+  /*
+   * process_user_command_snapshot() still consumes interactive_t, command_giver
+   * and global VM parser state. Keep this path on the main thread until command
+   * execution is fully detached from interactive/session objects.
+   */
+  auto main_task_policy = VM_OWNER_MAIN_TASK_IO_ADAPTER;
   auto task_id = vm_owner_enqueue_main_task_with_payload(
-      user, "gateway", "process_user_command", "gateway_command_input", &payload, [ip, command_snapshot] {
+      user, "gateway_command_execute", "process_user_command", "gateway_command_input", &payload, [user, session_id, command_snapshot] {
+        auto *active_user = resolve_active_session_owner(session_id.c_str(), user);
+        auto *active_ip = active_user ? active_user->interactive : nullptr;
+        if (!gateway_executor_session_current(active_user, active_ip)) {
+          vm_owner_record_task_trace(user ? vm_owner_id(user) : vm_owner_default_id(), "gateway_command_execute",
+                                     "process_user_command", user ? vm_owner_epoch(user) : 0, "session_stale");
+          g_gateway_runtime_counters.command_tasks_stale.fetch_add(1, std::memory_order_relaxed);
+          gateway_clear_command_task_pending(session_id);
+          vm_context_set_current_interactive(vm_context(), nullptr);
+          return;
+        }
         set_eval(max_eval_cost);
-        process_user_command_snapshot(ip, command_snapshot.c_str(), command_snapshot.size());
+        process_user_command_snapshot(active_ip, command_snapshot.c_str(), command_snapshot.size());
+        gateway_finish_command_task(session_id, active_user);
         vm_context_set_current_interactive(vm_context(), nullptr);
-      }, nullptr, "gateway_command_execution_frame_v1", "owner_scope_current_interactive_command_giver",
-      "owner_owned_snapshot_main_thread_consume", "", true, true, "owner_executor_vmcontext_restore", "",
+      }, [session_id] { gateway_clear_command_task_pending(session_id); },
+      "gateway_command_execution_frame_v1", "owner_scope_current_interactive_command_giver",
+      "owner_owned_snapshot_main_thread_consume", kGatewayCommandExecutorActivationBlocker, true, true,
+      "main_thread_vmcontext_scope", "",
       snapshot_ready ? command_snapshot.c_str() : nullptr, command_snapshot.size(),
       main_task_policy);
+  if (task_id == 0) {
+    g_gateway_runtime_counters.command_tasks_rejected.fetch_add(1, std::memory_order_relaxed);
+    gateway_clear_command_task_pending(session_id);
+  } else {
+    g_gateway_runtime_counters.command_tasks_enqueued.fetch_add(1, std::memory_order_relaxed);
+  }
   free_svalue(&payload, "gateway_command_task_payload");
   return task_id;
 }
@@ -490,6 +557,7 @@ int gateway_process_pending_command_internal(object_t *user) {
     return 0;
   }
   gateway_command_callback(0, 0, user->interactive);
+  vm_owner_drain_main_tasks(kGatewayCommandMainDrainBudget);
   return 1;
 }
 

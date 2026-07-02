@@ -414,6 +414,10 @@ void free_string_svalue(svalue_t *v) {
   const char *str = v->u.string;
 
   if (v->subtype & STRING_COUNTED) {
+    if (v->subtype & STRING_HASHED) {
+      free_string(str);
+      return;
+    }
     int size = MSTR_SIZE(str);
     if (DEC_COUNTED_REF(str)) {
       md_record_ref_journal(PTR_TO_NODET(str), false, MSTR_REF(str), __CURRENT_FILE_LINE__);

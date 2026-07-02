@@ -227,6 +227,10 @@ TEST_F(DriverTest, TestLpcVmProfileRecordsHotPathCounters) {
   ASSERT_EQ(snapshot.string_push_count, 1);
 }
 
+namespace {
+std::string read_source_file_for_test(const char* path);
+}
+
 TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   auto mapping_number = [](mapping_t* map, const char* key) -> long {
     svalue_t* value = find_string_in_mapping(map, key);
@@ -248,8 +252,73 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "session_fifo_enqueued"), 0);
   ASSERT_GE(mapping_number(status, "session_fifo_flushed"), 0);
   ASSERT_GE(mapping_number(status, "session_fifo_rejected"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_data_frames_received"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_data_frames_applied"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_data_frames_rejected"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_tasks_enqueued"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_tasks_dispatched"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_tasks_rejected"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_callbacks"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_tasks_enqueued"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_tasks_rejected"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_tasks_rejected_pending"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_tasks_finished"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_tasks_stale"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_tasks_cleared"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_pending_sessions"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_fifo_enqueued"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_fifo_flushed"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_fifo_rejected"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_raw_writes_sent"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_raw_writes_failed"), 0);
   ASSERT_STREQ(mapping_string(status, "gateway_io_boundary"), "main_thread_io_adapter");
   free_mapping(status);
+}
+
+TEST_F(DriverTest, TestGatewayReceiveDoesNotDrainMainTasksInsideReadCallback) {
+  const auto source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
+  const auto apply_pos = source.find("void gateway_apply_receive");
+  ASSERT_NE(apply_pos, std::string::npos);
+  const auto next_function_pos = source.find("\nsvalue_t json_to_gateway_svalue", apply_pos);
+  ASSERT_NE(next_function_pos, std::string::npos);
+
+  const auto apply_source = source.substr(apply_pos, next_function_pos - apply_pos);
+  ASSERT_EQ(apply_source.find("vm_owner_drain_main_tasks"), std::string::npos);
+  ASSERT_NE(apply_source.find("vm_owner_enqueue_main_task"), std::string::npos);
+}
+
+TEST_F(DriverTest, TestGatewayLoginRunsThroughOwnerMainQueue) {
+  const char* session_id = "gw-test-login-main-queue";
+  ASSERT_EQ(gateway_find_session(session_id), nullptr);
+
+  copy_and_push_string("/clone/gateway_login_example");
+  safe_apply("set_test_login_ob", master_ob, 1, ORIGIN_DRIVER);
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1, R"({"type":"login","cid":"gw-test-login-main-queue","data":{"ip":"127.0.0.1","port":6040}})"));
+  ASSERT_EQ(gateway_find_session(session_id), nullptr);
+  ASSERT_GE(vm_owner_drain_main_tasks(1), 1);
+
+  auto* sess = gateway_find_session(session_id);
+  ASSERT_NE(sess, nullptr);
+  ASSERT_NE(sess->user_ob, nullptr);
+  safe_apply("reset_test_login_ob", master_ob, 0, ORIGIN_DRIVER);
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
+}
+
+TEST_F(DriverTest, TestGatewayLoginMainQueueDropsStaleMaster) {
+  const char* session_id = "gw-test-login-stale-master";
+  ASSERT_EQ(gateway_find_session(session_id), nullptr);
+  ASSERT_FALSE(gateway_has_master(4040));
+
+  copy_and_push_string("/clone/gateway_login_example");
+  safe_apply("set_test_login_ob", master_ob, 1, ORIGIN_DRIVER);
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      4040, R"({"type":"login","cid":"gw-test-login-stale-master","data":{"ip":"127.0.0.1","port":6040}})"));
+  ASSERT_EQ(gateway_find_session(session_id), nullptr);
+  ASSERT_GE(vm_owner_drain_main_tasks(1), 1);
+
+  ASSERT_EQ(gateway_find_session(session_id), nullptr);
+  safe_apply("reset_test_login_ob", master_ob, 0, ORIGIN_DRIVER);
 }
 
 TEST_F(DriverTest, TestOwnerServiceRegistryUsesKeyedShardsForHotPaths) {
@@ -1943,26 +2012,27 @@ TEST_F(DriverTest, TestVmOwnerHeartbeatDispatchesThroughOwnerExecutor) {
   call_heart_beat();
   clear_tick_events();
 
-  for (int i = 0; i < 100 && !trace_has_state("thread_executor_callback_completed"); i++) {
+  for (int i = 0; i < 100 && !trace_has_state("main_executor_callback_completed"); i++) {
+    vm_owner_drain_main_tasks(8);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  ASSERT_TRUE(trace_has_state("thread_executor_callback_dispatched"));
-  ASSERT_TRUE(trace_has_state("thread_executor_callback_completed"));
+  ASSERT_TRUE(trace_has_state("main_executor_callback_dispatched"));
+  ASSERT_TRUE(trace_has_state("main_executor_callback_completed"));
   ASSERT_EQ(call_number("get_heartbeat_called", obj), 1);
 
   auto* after = vm_owner_thread_status();
   ASSERT_GE(mapping_number(after, "executor_callback_queued"), before_callback_queued + 1);
   ASSERT_GE(mapping_number(after, "executor_callback_dispatched"), before_callback_dispatched + 1);
-  ASSERT_EQ(mapping_number(after, "main_queued"), before_main_queued);
+  ASSERT_GE(mapping_number(after, "main_queued"), before_main_queued + 1);
   ASSERT_EQ(mapping_number(after, "heartbeat_owner_executor_ready"), 1);
   ASSERT_STREQ(mapping_string(after, "heartbeat_owner_executor_task_type"), "heartbeat");
-  ASSERT_STREQ(mapping_string(after, "heartbeat_owner_executor_route"), "owner_executor");
+  ASSERT_STREQ(mapping_string(after, "heartbeat_owner_executor_route"), "owner_main_queue_callback_adapter");
   ASSERT_STREQ(mapping_string(after, "heartbeat_owner_executor_fallback_route"),
-               "explicit_fallback_owner_main_queue");
+               "");
   ASSERT_STREQ(mapping_string(after, "heartbeat_owner_executor_policy"),
-               "audit_enforced_owner_thread_normal_path");
-  ASSERT_EQ(mapping_number(after, "heartbeat_owner_executor_fallback_main_ready"), 0);
-  ASSERT_EQ(mapping_number(after, "heartbeat_current_object_thread_local"), 1);
+               "main_thread_callback_adapter_after_owner_admission");
+  ASSERT_EQ(mapping_number(after, "heartbeat_owner_executor_fallback_main_ready"), 1);
+  ASSERT_EQ(mapping_number(after, "heartbeat_current_object_thread_local"), 0);
   free_mapping(after);
 }
 
@@ -2016,7 +2086,7 @@ TEST_F(DriverTest, TestVmOwnerHeartbeatExecutorDropsStaleOwnerEpoch) {
         auto* event = events->u.arr->item[i].u.map;
         if (std::string(mapping_string(event, "task_type")) == "heartbeat" &&
             std::string(mapping_string(event, "owner_id")) == owner &&
-            std::string(mapping_string(event, "state")) == "thread_executor_callback_stale") {
+            std::string(mapping_string(event, "state")) == "main_executor_callback_stale") {
           found = true;
           break;
         }
@@ -2026,34 +2096,20 @@ TEST_F(DriverTest, TestVmOwnerHeartbeatExecutorDropsStaleOwnerEpoch) {
     return found;
   };
 
-  std::atomic<int> blocker_started{0};
-  std::atomic<int> release_blocker{0};
   vm_owner_thread_start(1);
   ASSERT_TRUE(vm_owner_executor_available());
-  auto blocker = vm_owner_enqueue_executor_task(obj, "call_out", "heartbeat-stale-blocker", [&] {
-    blocker_started.store(1, std::memory_order_release);
-    for (int i = 0; i < 200 && release_blocker.load(std::memory_order_acquire) == 0; i++) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-  });
-  ASSERT_GT(blocker, 0u);
-  for (int i = 0; i < 100 && blocker_started.load(std::memory_order_acquire) == 0; i++) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
 
   ASSERT_EQ(call_number("get_heartbeat_called", obj), 0);
-  ASSERT_EQ(set_heart_beat(obj, 1), 1);
-  call_heart_beat();
-  clear_tick_events();
+  auto task_id = vm_owner_enqueue_executor_task(obj, "heartbeat", "heart_beat", [] {});
+  ASSERT_GT(task_id, 0u);
   vm_owner_set_id(obj, moved_owner);
-  release_blocker.store(1, std::memory_order_release);
+  ASSERT_GE(vm_owner_drain_main_tasks(8), 1);
 
   for (int i = 0; i < 100 && !trace_has_heartbeat_stale(); i++) {
+    vm_owner_drain_main_tasks(8);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   ASSERT_TRUE(trace_has_heartbeat_stale());
-  vm_owner_drain_main_tasks(8);
   ASSERT_EQ(call_number("get_heartbeat_called", obj), 0);
 }
 
@@ -2138,38 +2194,32 @@ TEST_F(DriverTest, TestVmOwnerCalloutDispatchesThroughOwnerExecutor) {
   ASSERT_GT(handle, 0);
   ASSERT_TRUE(vm_call_out_test_support_run_handle(static_cast<LPC_INT>(handle)));
 
-  for (int i = 0; i < 100 && !trace_has_callout_state("thread_executor_callback_completed"); i++) {
+  for (int i = 0; i < 100 && !trace_has_callout_state("main_executor_callback_completed"); i++) {
+    vm_owner_drain_main_tasks(64);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  ASSERT_TRUE(trace_has_callout_state("thread_executor_callback_dispatched"));
-  ASSERT_TRUE(trace_has_callout_state("thread_executor_callback_completed"));
+  ASSERT_TRUE(trace_has_callout_state("main_executor_callback_dispatched"));
+  ASSERT_TRUE(trace_has_callout_state("main_executor_callback_completed"));
   ASSERT_EQ(call_number("get_callout_called", obj), 1);
-  ASSERT_EQ(call_number("get_callout_off_main", obj), 1);
-
-  for (int i = 0; i < 100 && !trace_has_callout_state("executor_callback_main_cleanup_queued"); i++) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  ASSERT_TRUE(trace_has_callout_state("executor_callback_main_cleanup_queued"));
-  ASSERT_GE(vm_owner_drain_main_tasks(64), 1);
-  ASSERT_TRUE(trace_has_callout_state("executor_callback_main_cleanup_dispatched"));
+  ASSERT_EQ(call_number("get_callout_off_main", obj), 0);
 
   auto* after = vm_owner_thread_status();
   ASSERT_GE(mapping_number(after, "executor_callback_queued"), before_callback_queued + 1);
   ASSERT_GE(mapping_number(after, "executor_callback_dispatched"), before_callback_dispatched + 1);
-  ASSERT_GE(mapping_number(after, "executor_callback_main_cleanup_queued"), before_cleanup_queued + 1);
-  ASSERT_GE(mapping_number(after, "executor_callback_main_cleanup_dispatched"), before_cleanup_dispatched + 1);
-  ASSERT_EQ(mapping_number(after, "main_queued"), before_main_queued);
+  ASSERT_EQ(mapping_number(after, "executor_callback_main_cleanup_queued"), before_cleanup_queued);
+  ASSERT_EQ(mapping_number(after, "executor_callback_main_cleanup_dispatched"), before_cleanup_dispatched);
+  ASSERT_GE(mapping_number(after, "main_queued"), before_main_queued + 1);
   ASSERT_EQ(mapping_number(after, "callout_owner_executor_ready"), 1);
   ASSERT_STREQ(mapping_string(after, "callout_owner_executor_task_type"), "call_out");
-  ASSERT_STREQ(mapping_string(after, "callout_owner_executor_route"), "owner_executor");
+  ASSERT_STREQ(mapping_string(after, "callout_owner_executor_route"), "owner_main_queue_callback_adapter");
   ASSERT_STREQ(mapping_string(after, "callout_owner_executor_fallback_route"),
-               "explicit_fallback_owner_main_queue");
+               "");
   ASSERT_STREQ(mapping_string(after, "callout_owner_executor_policy"),
-               "audit_enforced_owner_thread_normal_path");
+               "main_thread_callback_adapter_after_owner_admission");
   ASSERT_EQ(mapping_number(after, "callout_owner_executor_expired_handle_detach_ready"), 1);
   ASSERT_EQ(mapping_number(after, "callout_owner_executor_cleanup_main_ready"), 1);
   ASSERT_EQ(mapping_number(after, "callout_owner_executor_drop_cleanup_ready"), 1);
-  ASSERT_EQ(mapping_number(after, "callout_owner_executor_fallback_main_ready"), 0);
+  ASSERT_EQ(mapping_number(after, "callout_owner_executor_fallback_main_ready"), 1);
   free_mapping(after);
 }
 
@@ -2223,7 +2273,7 @@ TEST_F(DriverTest, TestVmOwnerCalloutExecutorDropsStaleOwnerEpoch) {
         auto* event = events->u.arr->item[i].u.map;
         if (std::string(mapping_string(event, "task_type")) == "call_out" &&
             std::string(mapping_string(event, "owner_id")) == owner &&
-            std::string(mapping_string(event, "state")) == "thread_executor_callback_stale") {
+            std::string(mapping_string(event, "state")) == "main_executor_callback_stale") {
           found = true;
           break;
         }
@@ -2233,34 +2283,22 @@ TEST_F(DriverTest, TestVmOwnerCalloutExecutorDropsStaleOwnerEpoch) {
     return found;
   };
 
-  std::atomic<int> blocker_started{0};
-  std::atomic<int> release_blocker{0};
   vm_owner_thread_start(1);
   ASSERT_TRUE(vm_owner_executor_available());
-  auto blocker = vm_owner_enqueue_executor_task(obj, "call_out", "callout-stale-blocker", [&] {
-    blocker_started.store(1, std::memory_order_release);
-    for (int i = 0; i < 200 && release_blocker.load(std::memory_order_acquire) == 0; i++) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-  });
-  ASSERT_GT(blocker, 0u);
-  for (int i = 0; i < 100 && blocker_started.load(std::memory_order_acquire) == 0; i++) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
 
   ASSERT_EQ(call_number("get_callout_called", obj), 0);
   auto handle = call_number("start_callout_probe", obj);
   ASSERT_GT(handle, 0);
   ASSERT_TRUE(vm_call_out_test_support_run_handle(static_cast<LPC_INT>(handle)));
   vm_owner_set_id(obj, moved_owner);
-  release_blocker.store(1, std::memory_order_release);
+  ASSERT_GE(vm_owner_drain_main_tasks(64), 1);
 
   for (int i = 0; i < 100 && !trace_has_callout_stale(); i++) {
+    vm_owner_drain_main_tasks(64);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   ASSERT_TRUE(trace_has_callout_stale());
-  vm_owner_drain_main_tasks(64);
+  ASSERT_GE(vm_owner_drain_main_tasks(64), 1);
   ASSERT_EQ(call_number("get_callout_called", obj), 0);
 }
 
@@ -2297,6 +2335,9 @@ TEST_F(DriverTest, TestVmOwnerAsyncDnsCallbacksDispatchThroughOwnerExecutor) {
   auto call_string = [](const char* method, object_t* target) -> std::string {
     auto* ret = safe_apply(method, target, 0, ORIGIN_DRIVER);
     EXPECT_NE(ret, nullptr);
+    if (ret && ret->type == T_NUMBER) {
+      return "";
+    }
     EXPECT_EQ(ret ? ret->type : T_INVALID, T_STRING);
     return ret && ret->type == T_STRING ? ret->u.string : "";
   };
@@ -2350,55 +2391,48 @@ TEST_F(DriverTest, TestVmOwnerAsyncDnsCallbacksDispatchThroughOwnerExecutor) {
   ASSERT_TRUE(vm_async_test_support_dispatch_read_callback(obj, "async_callback_probe", "async owner result"));
   ASSERT_TRUE(vm_dns_test_support_dispatch_callback(obj, "dns_callback_probe", 4242));
 
-  for (int i = 0; i < 100 && !trace_has_state("async_callback", "thread_executor_callback_completed"); i++) {
+  for (int i = 0; i < 100 && !trace_has_state("async_callback", "main_executor_callback_completed"); i++) {
+    vm_owner_drain_main_tasks(64);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  for (int i = 0; i < 100 && !trace_has_state("dns_callback", "thread_executor_callback_completed"); i++) {
+  for (int i = 0; i < 100 && !trace_has_state("dns_callback", "main_executor_callback_completed"); i++) {
+    vm_owner_drain_main_tasks(64);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  ASSERT_TRUE(trace_has_state("async_callback", "thread_executor_callback_dispatched"));
-  ASSERT_TRUE(trace_has_state("async_callback", "thread_executor_callback_completed"));
-  ASSERT_TRUE(trace_has_state("dns_callback", "thread_executor_callback_dispatched"));
-  ASSERT_TRUE(trace_has_state("dns_callback", "thread_executor_callback_completed"));
+  ASSERT_TRUE(trace_has_state("async_callback", "main_executor_callback_dispatched"));
+  ASSERT_TRUE(trace_has_state("async_callback", "main_executor_callback_completed"));
+  ASSERT_TRUE(trace_has_state("dns_callback", "main_executor_callback_dispatched"));
+  ASSERT_TRUE(trace_has_state("dns_callback", "main_executor_callback_completed"));
   ASSERT_EQ(call_number("get_async_callback_called", obj), 1);
-  ASSERT_EQ(call_number("get_async_callback_off_main", obj), 1);
+  ASSERT_EQ(call_number("get_async_callback_off_main", obj), 0);
   ASSERT_EQ(call_string("get_async_callback_value", obj), "async owner result");
   ASSERT_EQ(call_number("get_dns_callback_called", obj), 1);
-  ASSERT_EQ(call_number("get_dns_callback_off_main", obj), 1);
+  ASSERT_EQ(call_number("get_dns_callback_off_main", obj), 0);
   ASSERT_EQ(call_number("get_dns_callback_key", obj), 4242);
-
-  for (int i = 0; i < 100 && !trace_has_state("dns_callback", "executor_callback_main_cleanup_queued"); i++) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  ASSERT_TRUE(trace_has_state("async_callback", "executor_callback_main_cleanup_queued"));
-  ASSERT_TRUE(trace_has_state("dns_callback", "executor_callback_main_cleanup_queued"));
-  ASSERT_GE(vm_owner_drain_main_tasks(64), 2);
-  ASSERT_TRUE(trace_has_state("async_callback", "executor_callback_main_cleanup_dispatched"));
-  ASSERT_TRUE(trace_has_state("dns_callback", "executor_callback_main_cleanup_dispatched"));
 
   auto* after = vm_owner_thread_status();
   ASSERT_GE(mapping_number(after, "executor_callback_queued"), before_callback_queued + 2);
   ASSERT_GE(mapping_number(after, "executor_callback_dispatched"), before_callback_dispatched + 2);
-  ASSERT_GE(mapping_number(after, "executor_callback_main_cleanup_queued"), before_cleanup_queued + 2);
-  ASSERT_GE(mapping_number(after, "executor_callback_main_cleanup_dispatched"), before_cleanup_dispatched + 2);
-  ASSERT_EQ(mapping_number(after, "main_queued"), before_main_queued);
+  ASSERT_EQ(mapping_number(after, "executor_callback_main_cleanup_queued"), before_cleanup_queued);
+  ASSERT_EQ(mapping_number(after, "executor_callback_main_cleanup_dispatched"), before_cleanup_dispatched);
+  ASSERT_GE(mapping_number(after, "main_queued"), before_main_queued + 2);
   ASSERT_EQ(mapping_number(after, "async_owner_executor_ready"), 1);
   ASSERT_STREQ(mapping_string(after, "async_owner_executor_task_type"), "async_callback");
-  ASSERT_STREQ(mapping_string(after, "async_owner_executor_route"), "owner_executor");
+  ASSERT_STREQ(mapping_string(after, "async_owner_executor_route"), "owner_main_queue_callback_adapter");
   ASSERT_STREQ(mapping_string(after, "async_owner_executor_fallback_route"),
-               "explicit_fallback_owner_main_queue");
+               "");
   ASSERT_STREQ(mapping_string(after, "async_owner_executor_policy"),
-               "audit_enforced_owner_thread_normal_path");
+               "main_thread_callback_adapter_after_owner_admission");
   ASSERT_STREQ(mapping_string(after, "async_owner_executor_result_policy"), "frozen_deep_copy_result");
   ASSERT_EQ(mapping_number(after, "async_owner_executor_cleanup_main_ready"), 1);
   ASSERT_EQ(mapping_number(after, "async_owner_executor_drop_cleanup_ready"), 1);
   ASSERT_EQ(mapping_number(after, "dns_owner_executor_ready"), 1);
   ASSERT_STREQ(mapping_string(after, "dns_owner_executor_task_type"), "dns_callback");
-  ASSERT_STREQ(mapping_string(after, "dns_owner_executor_route"), "owner_executor");
+  ASSERT_STREQ(mapping_string(after, "dns_owner_executor_route"), "owner_main_queue_callback_adapter");
   ASSERT_STREQ(mapping_string(after, "dns_owner_executor_fallback_route"),
-               "explicit_fallback_owner_main_queue");
+               "");
   ASSERT_STREQ(mapping_string(after, "dns_owner_executor_policy"),
-               "audit_enforced_owner_thread_normal_path");
+               "main_thread_callback_adapter_after_owner_admission");
   ASSERT_STREQ(mapping_string(after, "dns_owner_executor_result_policy"), "frozen_deep_copy_result");
   ASSERT_EQ(mapping_number(after, "dns_owner_executor_owner_epoch_capture_ready"), 1);
   ASSERT_EQ(mapping_number(after, "dns_owner_executor_cleanup_main_ready"), 1);
@@ -2454,7 +2488,7 @@ TEST_F(DriverTest, TestVmOwnerAsyncCallbackExecutorDropsStaleOwnerEpoch) {
         auto* event = events->u.arr->item[i].u.map;
         if (std::string(mapping_string(event, "task_type")) == "async_callback" &&
             std::string(mapping_string(event, "owner_id")) == owner &&
-            std::string(mapping_string(event, "state")) == "thread_executor_callback_stale") {
+            std::string(mapping_string(event, "state")) == "main_executor_callback_stale") {
           found = true;
           break;
         }
@@ -2464,32 +2498,20 @@ TEST_F(DriverTest, TestVmOwnerAsyncCallbackExecutorDropsStaleOwnerEpoch) {
     return found;
   };
 
-  std::atomic<int> blocker_started{0};
-  std::atomic<int> release_blocker{0};
   vm_owner_thread_start(1);
   ASSERT_TRUE(vm_owner_executor_available());
-  auto blocker = vm_owner_enqueue_executor_task(obj, "async_callback", "async-stale-blocker", [&] {
-    blocker_started.store(1, std::memory_order_release);
-    for (int i = 0; i < 200 && release_blocker.load(std::memory_order_acquire) == 0; i++) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-  });
-  ASSERT_GT(blocker, 0u);
-  for (int i = 0; i < 100 && blocker_started.load(std::memory_order_acquire) == 0; i++) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
 
   safe_apply("reset_async_callback_probe", obj, 0, ORIGIN_DRIVER);
   ASSERT_TRUE(vm_async_test_support_dispatch_read_callback(obj, "async_callback_probe", "stale async result"));
   vm_owner_set_id(obj, moved_owner);
-  release_blocker.store(1, std::memory_order_release);
+  ASSERT_GE(vm_owner_drain_main_tasks(64), 1);
 
   for (int i = 0; i < 100 && !trace_has_async_stale(); i++) {
+    vm_owner_drain_main_tasks(64);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   ASSERT_TRUE(trace_has_async_stale());
-  vm_owner_drain_main_tasks(64);
+  ASSERT_GE(vm_owner_drain_main_tasks(64), 1);
   ASSERT_EQ(call_number("get_async_callback_called", obj), 0);
 }
 
@@ -2547,7 +2569,7 @@ TEST_F(DriverTest, TestVmOwnerSocketCallbacksDispatchThroughOwnerExecutor) {
         if (std::string(mapping_string(event, "task_type")) == "socket_callback" &&
             std::string(mapping_string(event, "owner_id")) == owner &&
             std::string(mapping_string(event, "state")) == state) {
-          if (std::string(state) == "thread_executor_callback_dispatched") {
+          if (std::string(state) == "main_executor_callback_dispatched") {
             EXPECT_EQ(mapping_number(event, "manifest_version"), 2);
             EXPECT_STREQ(mapping_string(event, "manifest_schema"), "owner_task_manifest_v2");
             EXPECT_STREQ(mapping_string(event, "task_kind"), "executor_callback");
@@ -2581,35 +2603,29 @@ TEST_F(DriverTest, TestVmOwnerSocketCallbacksDispatchThroughOwnerExecutor) {
   ASSERT_TRUE(vm_owner_executor_available());
   ASSERT_TRUE(vm_socket_test_support_dispatch_callback(obj, "socket_callback_probe", 9876));
 
-  for (int i = 0; i < 100 && !trace_has_state("thread_executor_callback_completed"); i++) {
+  for (int i = 0; i < 100 && !trace_has_state("main_executor_callback_completed"); i++) {
+    vm_owner_drain_main_tasks(64);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  ASSERT_TRUE(trace_has_state("thread_executor_callback_dispatched"));
-  ASSERT_TRUE(trace_has_state("thread_executor_callback_completed"));
+  ASSERT_TRUE(trace_has_state("main_executor_callback_dispatched"));
+  ASSERT_TRUE(trace_has_state("main_executor_callback_completed"));
   ASSERT_EQ(call_number("get_socket_callback_called", obj), 1);
-  ASSERT_EQ(call_number("get_socket_callback_off_main", obj), 1);
+  ASSERT_EQ(call_number("get_socket_callback_off_main", obj), 0);
   ASSERT_EQ(call_number("get_socket_callback_fd", obj), 9876);
-
-  for (int i = 0; i < 100 && !trace_has_state("executor_callback_main_cleanup_queued"); i++) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  ASSERT_TRUE(trace_has_state("executor_callback_main_cleanup_queued"));
-  ASSERT_GE(vm_owner_drain_main_tasks(64), 1);
-  ASSERT_TRUE(trace_has_state("executor_callback_main_cleanup_dispatched"));
 
   auto* after = vm_owner_thread_status();
   ASSERT_GE(mapping_number(after, "executor_callback_queued"), before_callback_queued + 1);
   ASSERT_GE(mapping_number(after, "executor_callback_dispatched"), before_callback_dispatched + 1);
-  ASSERT_GE(mapping_number(after, "executor_callback_main_cleanup_queued"), before_cleanup_queued + 1);
-  ASSERT_GE(mapping_number(after, "executor_callback_main_cleanup_dispatched"), before_cleanup_dispatched + 1);
-  ASSERT_EQ(mapping_number(after, "main_queued"), before_main_queued);
+  ASSERT_EQ(mapping_number(after, "executor_callback_main_cleanup_queued"), before_cleanup_queued);
+  ASSERT_EQ(mapping_number(after, "executor_callback_main_cleanup_dispatched"), before_cleanup_dispatched);
+  ASSERT_GE(mapping_number(after, "main_queued"), before_main_queued + 1);
   ASSERT_EQ(mapping_number(after, "socket_owner_executor_ready"), 1);
   ASSERT_STREQ(mapping_string(after, "socket_owner_executor_task_type"), "socket_callback");
-  ASSERT_STREQ(mapping_string(after, "socket_owner_executor_route"), "owner_executor");
+  ASSERT_STREQ(mapping_string(after, "socket_owner_executor_route"), "owner_main_queue_callback_adapter");
   ASSERT_STREQ(mapping_string(after, "socket_owner_executor_fallback_route"),
-               "explicit_fallback_owner_main_queue");
+               "");
   ASSERT_STREQ(mapping_string(after, "socket_owner_executor_policy"),
-               "audit_enforced_owner_thread_normal_path");
+               "main_thread_callback_adapter_after_owner_admission");
   ASSERT_STREQ(mapping_string(after, "socket_owner_executor_result_policy"), "frozen_deep_copy_args");
   ASSERT_EQ(mapping_number(after, "socket_owner_executor_cleanup_main_ready"), 1);
   ASSERT_EQ(mapping_number(after, "socket_owner_executor_drop_cleanup_ready"), 1);
@@ -2675,7 +2691,7 @@ TEST_F(DriverTest, TestVmOwnerSocketCallbackExecutorDropsStaleOwnerEpoch) {
         auto* event = events->u.arr->item[i].u.map;
         if (std::string(mapping_string(event, "task_type")) == "socket_callback" &&
             std::string(mapping_string(event, "owner_id")) == owner &&
-            std::string(mapping_string(event, "state")) == "thread_executor_callback_stale") {
+            std::string(mapping_string(event, "state")) == "main_executor_callback_stale") {
           found = true;
           break;
         }
@@ -2685,8 +2701,6 @@ TEST_F(DriverTest, TestVmOwnerSocketCallbackExecutorDropsStaleOwnerEpoch) {
     return found;
   };
 
-  std::atomic<int> blocker_started{0};
-  std::atomic<int> release_blocker{0};
   auto* before = vm_owner_thread_status();
   auto before_callback_dropped = mapping_number(before, "executor_callback_dropped");
   auto before_admission_dropped = mapping_number(before, "owner_executor_admission_dropped");
@@ -2695,28 +2709,18 @@ TEST_F(DriverTest, TestVmOwnerSocketCallbackExecutorDropsStaleOwnerEpoch) {
 
   vm_owner_thread_start(1);
   ASSERT_TRUE(vm_owner_executor_available());
-  auto blocker = vm_owner_enqueue_executor_task(obj, "socket_callback", "socket-stale-blocker", [&] {
-    blocker_started.store(1, std::memory_order_release);
-    for (int i = 0; i < 200 && release_blocker.load(std::memory_order_acquire) == 0; i++) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-  });
-  ASSERT_GT(blocker, 0u);
-  for (int i = 0; i < 100 && blocker_started.load(std::memory_order_acquire) == 0; i++) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
 
   safe_apply("reset_socket_callback_probe", obj, 0, ORIGIN_DRIVER);
   ASSERT_TRUE(vm_socket_test_support_dispatch_callback(obj, "socket_callback_probe", 1234));
   vm_owner_set_id(obj, moved_owner);
-  release_blocker.store(1, std::memory_order_release);
+  ASSERT_GE(vm_owner_drain_main_tasks(64), 1);
 
   for (int i = 0; i < 100 && !trace_has_socket_stale(); i++) {
+    vm_owner_drain_main_tasks(64);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   ASSERT_TRUE(trace_has_socket_stale());
-  vm_owner_drain_main_tasks(64);
+  ASSERT_GE(vm_owner_drain_main_tasks(64), 1);
   ASSERT_EQ(call_number("get_socket_callback_called", obj), 0);
 
   auto* after = vm_owner_thread_status();
@@ -3666,7 +3670,7 @@ TEST_F(DriverTest, TestVmOwnerScheduleRoundsOwnersAndKeepsOwnerFifo) {
   const char* owner_b = "owner/test/schedule/b";
   auto a_first = vm_owner_enqueue_task(owner_a, "command", "a-first");
   auto a_second = vm_owner_enqueue_task(owner_a, "command", "a-second");
-  auto b_first = vm_owner_enqueue_task(owner_b, "heartbeat", "b-first");
+  auto b_first = vm_owner_enqueue_task(owner_b, "executor_probe", "b-first");
 
   auto mapping_number = [](mapping_t* map, const char* key) -> long {
     auto* value = find_string_in_mapping(map, key);
@@ -3988,8 +3992,6 @@ TEST_F(DriverTest, TestVmOwnerExecutorCallbackTaskBoundaryDispatchesAndDropsStal
   auto before_cleanup = mapping_number(before, "executor_callback_main_cleanup_dispatched");
   free_mapping(before);
 
-  std::atomic<int> first_started{0};
-  std::atomic<int> release_first{0};
   std::atomic<int> first_saw_owner_scope{0};
   std::atomic<int> first_saw_execution_scope{0};
   std::atomic<int> second_ran{0};
@@ -4000,21 +4002,15 @@ TEST_F(DriverTest, TestVmOwnerExecutorCallbackTaskBoundaryDispatchesAndDropsStal
   ASSERT_EQ(vm_owner_enqueue_executor_task(probe, "legacy_lpc", "rejected", [] {}), 0u);
 
   auto first_task = vm_owner_enqueue_executor_task(probe, "heartbeat", "unit-first", [&] {
-    first_saw_owner_scope.store(vm_context().owner.current_owner_id == owner && !vm_context_is_main_thread() ? 1 : 0,
+    first_saw_owner_scope.store(vm_context().owner.current_owner_id == owner && vm_context_is_main_thread() ? 1 : 0,
                                 std::memory_order_release);
     first_saw_execution_scope.store(vm_context().execution.current_object == probe ? 1 : 0,
                                     std::memory_order_release);
-    first_started.store(1, std::memory_order_release);
-    for (int i = 0; i < 200 && release_first.load(std::memory_order_acquire) == 0; i++) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
   });
   ASSERT_GT(first_task, 0u);
-
-  for (int i = 0; i < 100 && first_started.load(std::memory_order_acquire) == 0; i++) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  ASSERT_EQ(first_started.load(std::memory_order_acquire), 1);
+  ASSERT_GE(vm_owner_drain_main_tasks(8), 1);
+  ASSERT_EQ(first_saw_owner_scope.load(std::memory_order_acquire), 1);
+  ASSERT_EQ(first_saw_execution_scope.load(std::memory_order_acquire), 1);
 
   auto stale_task = vm_owner_enqueue_executor_task(
       probe, "call_out", "unit-stale", [&] { second_ran.store(1, std::memory_order_release); },
@@ -4023,21 +4019,8 @@ TEST_F(DriverTest, TestVmOwnerExecutorCallbackTaskBoundaryDispatchesAndDropsStal
       });
   ASSERT_GT(stale_task, first_task);
   vm_owner_set_id(probe, moved_owner);
-  release_first.store(1, std::memory_order_release);
-
-  for (int i = 0; i < 100; i++) {
-    auto* status = vm_owner_thread_status();
-    auto dropped = mapping_number(status, "executor_callback_dropped");
-    free_mapping(status);
-    if (dropped >= before_dropped + 1) {
-      break;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-
-  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
-  ASSERT_EQ(first_saw_owner_scope.load(std::memory_order_acquire), 1);
-  ASSERT_EQ(first_saw_execution_scope.load(std::memory_order_acquire), 1);
+  ASSERT_GE(vm_owner_drain_main_tasks(8), 1);
+  ASSERT_GE(vm_owner_drain_main_tasks(8), 1);
   ASSERT_EQ(second_ran.load(std::memory_order_acquire), 0);
   ASSERT_EQ(second_dropped.load(std::memory_order_acquire), 1);
 
@@ -4049,7 +4032,7 @@ TEST_F(DriverTest, TestVmOwnerExecutorCallbackTaskBoundaryDispatchesAndDropsStal
   ASSERT_GE(mapping_number(after, "executor_callback_main_cleanup_dispatched"), before_cleanup + 1);
   ASSERT_EQ(mapping_number(after, "executor_callback_task_boundary_ready"), 1);
   ASSERT_EQ(mapping_number(after, "executor_callback_allowlist_ready"), 1);
-  ASSERT_EQ(mapping_number(after, "executor_callback_allowlist_count"), 7);
+  ASSERT_EQ(mapping_number(after, "executor_callback_allowlist_count"), 6);
   ASSERT_EQ(mapping_number(after, "owner_callback_diagnostics_ready"), 1);
   ASSERT_STREQ(mapping_string(after, "owner_callback_diagnostics_schema"), "owner_callback_diagnostics_v1");
   ASSERT_STREQ(mapping_string(after, "owner_callback_failure_code_schema"), "owner_callback_failure_code_v1");
@@ -4071,7 +4054,7 @@ TEST_F(DriverTest, TestVmOwnerExecutorCallbackTaskBoundaryDispatchesAndDropsStal
     auto* event = events->u.arr->item[i].u.map;
     auto state = std::string(mapping_string(event, "state"));
     if (mapping_number(event, "task_id") == static_cast<long>(first_task) &&
-        state == "thread_executor_callback_dispatched") {
+        state == "main_executor_callback_dispatched") {
       first_dispatched = true;
       ASSERT_STREQ(mapping_string(event, "task_type"), "heartbeat");
       ASSERT_STREQ(mapping_string(event, "owner_id"), owner);
@@ -4079,7 +4062,7 @@ TEST_F(DriverTest, TestVmOwnerExecutorCallbackTaskBoundaryDispatchesAndDropsStal
       ASSERT_STREQ(mapping_string(event, "drop_reason"), "none");
     }
     if (mapping_number(event, "task_id") == static_cast<long>(stale_task) &&
-        state == "thread_executor_callback_stale") {
+        state == "main_executor_callback_stale") {
       stale_dropped = true;
       ASSERT_STREQ(mapping_string(event, "task_type"), "call_out");
       ASSERT_STREQ(mapping_string(event, "owner_id"), owner);
@@ -4654,6 +4637,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "main_fallback_policy_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "main_fallback_classification"), "explicit_policy");
     ASSERT_EQ(mapping_number(status, "session_fifo_contract_ready"), 1);
+    ASSERT_GE(mapping_number(status, "gateway_command_pending_sessions"), 0);
+    ASSERT_GE(mapping_number(status, "gateway_command_tasks_enqueued"), 0);
+    ASSERT_GE(mapping_number(status, "gateway_command_tasks_finished"), 0);
+    ASSERT_GE(mapping_number(status, "gateway_output_fifo_enqueued"), 0);
+    ASSERT_GE(mapping_number(status, "gateway_output_fifo_flushed"), 0);
+    ASSERT_GE(mapping_number(status, "gateway_raw_writes_sent"), 0);
     ASSERT_EQ(mapping_number(status, "gateway_io_adapter_only_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "gateway_io_boundary"), "main_thread_io_adapter");
     ASSERT_EQ(mapping_number(status, "callback_payload_strict_ready"), 1);
@@ -4683,54 +4672,55 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "facade_only_runtime_claims"), 0);
     ASSERT_EQ(mapping_number(status, "executor_callback_task_boundary_ready"), 1);
     ASSERT_EQ(mapping_number(status, "executor_callback_allowlist_ready"), 1);
-    ASSERT_EQ(mapping_number(status, "executor_callback_allowlist_count"), 7);
+    ASSERT_EQ(mapping_number(status, "executor_callback_main_adapter_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "executor_callback_allowlist_count"), 6);
     ASSERT_STREQ(mapping_string(status, "executor_callback_payload_policy"), "frozen_payload_or_owner_handle_only");
     ASSERT_EQ(mapping_number(status, "heartbeat_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "heartbeat_owner_executor_task_type"), "heartbeat");
-    ASSERT_STREQ(mapping_string(status, "heartbeat_owner_executor_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(status, "heartbeat_owner_executor_route"), "owner_main_queue_callback_adapter");
     ASSERT_STREQ(mapping_string(status, "heartbeat_owner_executor_fallback_route"),
-                 "explicit_fallback_owner_main_queue");
+                 "");
     ASSERT_STREQ(mapping_string(status, "heartbeat_owner_executor_policy"),
-                 "audit_enforced_owner_thread_normal_path");
-    ASSERT_EQ(mapping_number(status, "heartbeat_owner_executor_fallback_main_ready"), 0);
-    ASSERT_EQ(mapping_number(status, "heartbeat_current_object_thread_local"), 1);
+                 "main_thread_callback_adapter_after_owner_admission");
+    ASSERT_EQ(mapping_number(status, "heartbeat_owner_executor_fallback_main_ready"), 1);
+    ASSERT_EQ(mapping_number(status, "heartbeat_current_object_thread_local"), 0);
     ASSERT_EQ(mapping_number(status, "callout_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "callout_owner_executor_task_type"), "call_out");
-    ASSERT_STREQ(mapping_string(status, "callout_owner_executor_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(status, "callout_owner_executor_route"), "owner_main_queue_callback_adapter");
     ASSERT_STREQ(mapping_string(status, "callout_owner_executor_fallback_route"),
-                 "explicit_fallback_owner_main_queue");
+                 "");
     ASSERT_STREQ(mapping_string(status, "callout_owner_executor_policy"),
-                 "audit_enforced_owner_thread_normal_path");
+                 "main_thread_callback_adapter_after_owner_admission");
     ASSERT_EQ(mapping_number(status, "callout_owner_executor_expired_handle_detach_ready"), 1);
     ASSERT_EQ(mapping_number(status, "callout_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(status, "callout_owner_executor_drop_cleanup_ready"), 1);
-    ASSERT_EQ(mapping_number(status, "callout_owner_executor_fallback_main_ready"), 0);
+    ASSERT_EQ(mapping_number(status, "callout_owner_executor_fallback_main_ready"), 1);
     ASSERT_EQ(mapping_number(status, "async_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "async_owner_executor_task_type"), "async_callback");
-    ASSERT_STREQ(mapping_string(status, "async_owner_executor_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(status, "async_owner_executor_route"), "owner_main_queue_callback_adapter");
     ASSERT_STREQ(mapping_string(status, "async_owner_executor_fallback_route"),
-                 "explicit_fallback_owner_main_queue");
+                 "");
     ASSERT_STREQ(mapping_string(status, "async_owner_executor_policy"),
-                 "audit_enforced_owner_thread_normal_path");
+                 "main_thread_callback_adapter_after_owner_admission");
     ASSERT_STREQ(mapping_string(status, "async_owner_executor_result_policy"), "frozen_deep_copy_result");
     ASSERT_EQ(mapping_number(status, "async_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(status, "async_owner_executor_drop_cleanup_ready"), 1);
     ASSERT_EQ(mapping_number(status, "dns_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "dns_owner_executor_task_type"), "dns_callback");
-    ASSERT_STREQ(mapping_string(status, "dns_owner_executor_route"), "owner_executor");
-    ASSERT_STREQ(mapping_string(status, "dns_owner_executor_fallback_route"), "explicit_fallback_owner_main_queue");
-    ASSERT_STREQ(mapping_string(status, "dns_owner_executor_policy"), "audit_enforced_owner_thread_normal_path");
+    ASSERT_STREQ(mapping_string(status, "dns_owner_executor_route"), "owner_main_queue_callback_adapter");
+    ASSERT_STREQ(mapping_string(status, "dns_owner_executor_fallback_route"), "");
+    ASSERT_STREQ(mapping_string(status, "dns_owner_executor_policy"), "main_thread_callback_adapter_after_owner_admission");
     ASSERT_STREQ(mapping_string(status, "dns_owner_executor_result_policy"), "frozen_deep_copy_result");
     ASSERT_EQ(mapping_number(status, "dns_owner_executor_owner_epoch_capture_ready"), 1);
     ASSERT_EQ(mapping_number(status, "dns_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(status, "dns_owner_executor_drop_cleanup_ready"), 1);
     ASSERT_EQ(mapping_number(status, "socket_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "socket_owner_executor_task_type"), "socket_callback");
-    ASSERT_STREQ(mapping_string(status, "socket_owner_executor_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(status, "socket_owner_executor_route"), "owner_main_queue_callback_adapter");
     ASSERT_STREQ(mapping_string(status, "socket_owner_executor_fallback_route"),
-                 "explicit_fallback_owner_main_queue");
+                 "");
     ASSERT_STREQ(mapping_string(status, "socket_owner_executor_policy"),
-                 "audit_enforced_owner_thread_normal_path");
+                 "main_thread_callback_adapter_after_owner_admission");
     ASSERT_STREQ(mapping_string(status, "socket_owner_executor_result_policy"), "frozen_deep_copy_args");
     ASSERT_EQ(mapping_number(status, "socket_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(status, "socket_owner_executor_drop_cleanup_ready"), 1);
@@ -4741,11 +4731,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(status, "socket_release_owner_epoch_guard_ready"), 1);
     ASSERT_EQ(mapping_number(status, "gateway_command_execute_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "gateway_command_execute_task_type"), "gateway_command_execute");
-    ASSERT_STREQ(mapping_string(status, "gateway_command_execute_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(status, "gateway_command_execute_route"), "owner_main_queue_io_adapter");
     ASSERT_STREQ(mapping_string(status, "gateway_command_execute_fallback_route"),
-                 "explicit_fallback_owner_main_queue");
+                 "");
     ASSERT_STREQ(mapping_string(status, "gateway_command_execute_policy"),
-                 "audit_enforced_owner_thread_normal_path");
+                 "main_thread_io_adapter_until_interactive_detached");
     ASSERT_STREQ(mapping_string(status, "gateway_command_execute_payload_policy"), "owner_private_command_snapshot");
     ASSERT_EQ(mapping_number(status, "gateway_command_execute_reply_queue_main_ready"), 1);
     ASSERT_EQ(mapping_number(status, "gateway_command_execute_stale_drop_ready"), 1);
@@ -4754,7 +4744,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_GE(mapping_number(status, "executor_callback_main_cleanup_queued"), 0);
     auto* callback_task_contracts = mapping_array(status, "executor_callback_task_contracts");
     ASSERT_NE(callback_task_contracts, nullptr);
-    ASSERT_EQ(callback_task_contracts->size, 7);
+    ASSERT_EQ(callback_task_contracts->size, 6);
     auto* vm_context_contract = mapping_entry(status, "vm_context_contract");
     ASSERT_NE(vm_context_contract, nullptr);
     ASSERT_EQ(mapping_number(vm_context_contract, "contract_version"), 1);
@@ -5106,58 +5096,59 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_supported_kinds"),
                  "heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback");
     ASSERT_EQ(mapping_number(boundary_contract, "executor_callback_cleanup_main_required"), 1);
-    ASSERT_EQ(mapping_number(boundary_contract, "executor_callback_allowlist_count"), 7);
+    ASSERT_EQ(mapping_number(boundary_contract, "executor_callback_main_adapter_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "executor_callback_allowlist_count"), 6);
     ASSERT_STREQ(mapping_string(boundary_contract, "executor_callback_allowlist"),
-                 "heartbeat,call_out,async_callback,dns_callback,socket_callback,gateway_command_execute,ed_callback");
+                 "heartbeat,call_out,async_callback,dns_callback,socket_callback,ed_callback");
     ASSERT_EQ(mapping_number(boundary_contract, "heartbeat_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "heartbeat_owner_executor_task_type"), "heartbeat");
-    ASSERT_STREQ(mapping_string(boundary_contract, "heartbeat_owner_executor_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(boundary_contract, "heartbeat_owner_executor_route"), "owner_main_queue_callback_adapter");
     ASSERT_STREQ(mapping_string(boundary_contract, "heartbeat_owner_executor_fallback_route"),
-                 "explicit_fallback_owner_main_queue");
+                 "");
     ASSERT_STREQ(mapping_string(boundary_contract, "heartbeat_owner_executor_policy"),
-                 "audit_enforced_owner_thread_normal_path");
-    ASSERT_EQ(mapping_number(boundary_contract, "heartbeat_owner_executor_fallback_main_ready"), 0);
-    ASSERT_EQ(mapping_number(boundary_contract, "heartbeat_current_object_thread_local"), 1);
+                 "main_thread_callback_adapter_after_owner_admission");
+    ASSERT_EQ(mapping_number(boundary_contract, "heartbeat_owner_executor_fallback_main_ready"), 1);
+    ASSERT_EQ(mapping_number(boundary_contract, "heartbeat_current_object_thread_local"), 0);
     ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "callout_owner_executor_task_type"), "call_out");
-    ASSERT_STREQ(mapping_string(boundary_contract, "callout_owner_executor_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(boundary_contract, "callout_owner_executor_route"), "owner_main_queue_callback_adapter");
     ASSERT_STREQ(mapping_string(boundary_contract, "callout_owner_executor_fallback_route"),
-                 "explicit_fallback_owner_main_queue");
+                 "");
     ASSERT_STREQ(mapping_string(boundary_contract, "callout_owner_executor_policy"),
-                 "audit_enforced_owner_thread_normal_path");
+                 "main_thread_callback_adapter_after_owner_admission");
     ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_expired_handle_detach_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_drop_cleanup_ready"), 1);
-    ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_fallback_main_ready"), 0);
+    ASSERT_EQ(mapping_number(boundary_contract, "callout_owner_executor_fallback_main_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "async_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "async_owner_executor_task_type"), "async_callback");
-    ASSERT_STREQ(mapping_string(boundary_contract, "async_owner_executor_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(boundary_contract, "async_owner_executor_route"), "owner_main_queue_callback_adapter");
     ASSERT_STREQ(mapping_string(boundary_contract, "async_owner_executor_fallback_route"),
-                 "explicit_fallback_owner_main_queue");
+                 "");
     ASSERT_STREQ(mapping_string(boundary_contract, "async_owner_executor_policy"),
-                 "audit_enforced_owner_thread_normal_path");
+                 "main_thread_callback_adapter_after_owner_admission");
     ASSERT_STREQ(mapping_string(boundary_contract, "async_owner_executor_result_policy"),
                  "frozen_deep_copy_result");
     ASSERT_EQ(mapping_number(boundary_contract, "async_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "async_owner_executor_drop_cleanup_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "dns_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "dns_owner_executor_task_type"), "dns_callback");
-    ASSERT_STREQ(mapping_string(boundary_contract, "dns_owner_executor_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(boundary_contract, "dns_owner_executor_route"), "owner_main_queue_callback_adapter");
     ASSERT_STREQ(mapping_string(boundary_contract, "dns_owner_executor_fallback_route"),
-                 "explicit_fallback_owner_main_queue");
+                 "");
     ASSERT_STREQ(mapping_string(boundary_contract, "dns_owner_executor_policy"),
-                 "audit_enforced_owner_thread_normal_path");
+                 "main_thread_callback_adapter_after_owner_admission");
     ASSERT_STREQ(mapping_string(boundary_contract, "dns_owner_executor_result_policy"), "frozen_deep_copy_result");
     ASSERT_EQ(mapping_number(boundary_contract, "dns_owner_executor_owner_epoch_capture_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "dns_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "dns_owner_executor_drop_cleanup_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "socket_owner_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_task_type"), "socket_callback");
-    ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_route"), "owner_main_queue_callback_adapter");
     ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_fallback_route"),
-                 "explicit_fallback_owner_main_queue");
+                 "");
     ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_policy"),
-                 "audit_enforced_owner_thread_normal_path");
+                 "main_thread_callback_adapter_after_owner_admission");
     ASSERT_STREQ(mapping_string(boundary_contract, "socket_owner_executor_result_policy"), "frozen_deep_copy_args");
     ASSERT_EQ(mapping_number(boundary_contract, "socket_owner_executor_cleanup_main_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "socket_owner_executor_drop_cleanup_ready"), 1);
@@ -5170,11 +5161,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_executor_activation_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_execute_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "gateway_command_execute_task_type"), "gateway_command_execute");
-    ASSERT_STREQ(mapping_string(boundary_contract, "gateway_command_execute_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(boundary_contract, "gateway_command_execute_route"), "owner_main_queue_io_adapter");
     ASSERT_STREQ(mapping_string(boundary_contract, "gateway_command_execute_fallback_route"),
-                 "explicit_fallback_owner_main_queue");
+                 "");
     ASSERT_STREQ(mapping_string(boundary_contract, "gateway_command_execute_policy"),
-                 "audit_enforced_owner_thread_normal_path");
+                 "main_thread_io_adapter_until_interactive_detached");
     ASSERT_STREQ(mapping_string(boundary_contract, "gateway_command_execute_payload_policy"),
                  "owner_private_command_snapshot");
     ASSERT_EQ(mapping_number(boundary_contract, "gateway_command_execute_reply_queue_main_ready"), 1);
@@ -5285,19 +5276,21 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(gateway_contract, "process_input_add_action_parser_frame_ready"), 1);
     ASSERT_EQ(mapping_number(gateway_contract, "process_input_add_action_parser_frame_executor_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "process_input_add_action_parser_blocker"), "");
-    ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_blocker"), "");
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_executor_blocker"),
+                 "interactive_command_requires_main_thread_io_adapter");
     ASSERT_EQ(mapping_number(gateway_contract, "gateway_command_execute_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "gateway_command_execute_task_type"), "gateway_command_execute");
-    ASSERT_STREQ(mapping_string(gateway_contract, "gateway_command_execute_route"), "owner_executor");
+    ASSERT_STREQ(mapping_string(gateway_contract, "gateway_command_execute_route"), "owner_main_queue_io_adapter");
     ASSERT_STREQ(mapping_string(gateway_contract, "gateway_command_execute_fallback_route"),
-                 "explicit_fallback_owner_main_queue");
+                 "");
     ASSERT_STREQ(mapping_string(gateway_contract, "gateway_command_execute_policy"),
-                 "audit_enforced_owner_thread_normal_path");
+                 "main_thread_io_adapter_until_interactive_detached");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_consume_model"),
-                 "owner_owned_snapshot_owner_executor_consume");
+                 "owner_owned_snapshot_main_thread_consume");
     ASSERT_EQ(mapping_number(gateway_contract, "command_consume_snapshot_ready"), 1);
-    ASSERT_EQ(mapping_number(gateway_contract, "command_consume_executor_ready"), 1);
-    ASSERT_STREQ(mapping_string(gateway_contract, "command_consume_blocker"), "");
+    ASSERT_EQ(mapping_number(gateway_contract, "command_consume_executor_ready"), 0);
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_consume_blocker"),
+                 "interactive_command_requires_main_thread_io_adapter");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_reply_queue_model"),
                  "main_reply_queue_after_owner_command");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_reply_queue_task_type"), "command_reply");
@@ -5351,12 +5344,12 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(gateway_contract, "command_execution_frame_policy"),
                  "owner_scope_current_interactive_command_giver");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_execution_frame_restore_policy"),
-                 "owner_executor_vmcontext_restore");
+                 "main_thread_vmcontext_scope");
     ASSERT_EQ(mapping_number(gateway_contract, "command_execution_frame_restore_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_contract, "command_execution_frame_restore_blocker"), "");
-    ASSERT_EQ(mapping_number(gateway_contract, "command_execution_frame_executor_ready"), 1);
+    ASSERT_EQ(mapping_number(gateway_contract, "command_execution_frame_executor_ready"), 0);
     ASSERT_STREQ(mapping_string(gateway_contract, "command_stale_guard"), "owner_epoch_target_handle_guard");
-    ASSERT_STREQ(mapping_string(gateway_contract, "command_stale_trace_state"), "thread_executor_callback_stale");
+    ASSERT_STREQ(mapping_string(gateway_contract, "command_stale_trace_state"), "main_stale");
     ASSERT_STREQ(mapping_string(gateway_contract, "command_stale_target_status"), "owner_epoch_mismatch");
     ASSERT_EQ(mapping_number(gateway_contract, "gateway_command_execute_stale_drop_ready"), 1);
     ASSERT_EQ(mapping_number(gateway_contract, "gateway_command_execute_context_cleanup_ready"), 1);
@@ -5410,7 +5403,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(command_executor_gate("ordinary_lpc_ready"), "satisfied"), 1);
     ASSERT_STREQ(mapping_string(command_executor_gate("ordinary_lpc_ready"), "blocker"), "");
     ASSERT_EQ(mapping_number(command_executor_gate("gateway_command_executor_activation"), "satisfied"), 1);
-    ASSERT_STREQ(mapping_string(command_executor_gate("gateway_command_executor_activation"), "blocker"), "");
+    ASSERT_STREQ(mapping_string(command_executor_gate("gateway_command_executor_activation"), "blocker"),
+                 "interactive_command_requires_main_thread_io_adapter");
     auto* command_side_effect_gates = mapping_array(gateway_contract, "command_side_effect_readiness_gates");
     ASSERT_NE(command_side_effect_gates, nullptr);
     ASSERT_EQ(command_side_effect_gates->size, 5);
@@ -5507,8 +5501,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
       gateway_tasks_by_key.emplace(task_key, task);
       ASSERT_STREQ(mapping_string(task, "task_type"), "gateway");
       if (task_key == "process_user_command") {
-        ASSERT_EQ(mapping_number(task, "main_required"), 0);
-        ASSERT_EQ(mapping_number(task, "executor_safe"), 1);
+        ASSERT_EQ(mapping_number(task, "main_required"), 1);
+        ASSERT_EQ(mapping_number(task, "executor_safe"), 0);
       } else {
         ASSERT_EQ(mapping_number(task, "main_required"), 1);
         ASSERT_EQ(mapping_number(task, "executor_safe"), 0);
@@ -5553,25 +5547,26 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     };
     assert_gateway_task("gateway_receive", "main_required", "owner_main_queue", 1,
                         "owner_scope_and_current_interactive", "owner_epoch_target_guard");
-    assert_gateway_task("process_user_command", "executor_safe_callback", "owner_executor", 0,
-                        "owner_executor_command_frame", "owner_epoch_target_guard");
+    assert_gateway_task("process_user_command", "main_required", "owner_main_queue", 1,
+                        "owner_scope_current_interactive_command_giver", "owner_epoch_target_guard");
     ASSERT_STREQ(mapping_string(gateway_task("process_user_command"), "payload_key"), "gateway_command_input");
     ASSERT_STREQ(mapping_string(gateway_task("process_user_command"), "input_payload_policy"),
                  "buffer_metadata_no_raw_command_text");
     ASSERT_STREQ(mapping_string(gateway_task("process_user_command"), "command_consume_model"),
-                 "owner_owned_snapshot_owner_executor_consume");
+                 "owner_owned_snapshot_main_thread_consume");
     ASSERT_EQ(mapping_number(gateway_task("process_user_command"), "command_consume_snapshot_ready"), 1);
-    ASSERT_EQ(mapping_number(gateway_task("process_user_command"), "command_consume_executor_ready"), 1);
-    ASSERT_STREQ(mapping_string(gateway_task("process_user_command"), "command_consume_blocker"), "");
+    ASSERT_EQ(mapping_number(gateway_task("process_user_command"), "command_consume_executor_ready"), 0);
+    ASSERT_STREQ(mapping_string(gateway_task("process_user_command"), "command_consume_blocker"),
+                 "interactive_command_requires_main_thread_io_adapter");
     ASSERT_STREQ(mapping_string(gateway_task("process_user_command"), "execution_frame_model"),
                  "gateway_command_execution_frame_v1");
     ASSERT_STREQ(mapping_string(gateway_task("process_user_command"), "execution_frame_policy"),
                  "owner_scope_current_interactive_command_giver");
     ASSERT_STREQ(mapping_string(gateway_task("process_user_command"), "execution_frame_restore_policy"),
-                 "owner_executor_vmcontext_restore");
+                 "main_thread_vmcontext_scope");
     ASSERT_EQ(mapping_number(gateway_task("process_user_command"), "execution_frame_restore_ready"), 1);
     ASSERT_STREQ(mapping_string(gateway_task("process_user_command"), "execution_frame_restore_blocker"), "");
-    ASSERT_EQ(mapping_number(gateway_task("process_user_command"), "execution_frame_executor_ready"), 1);
+    ASSERT_EQ(mapping_number(gateway_task("process_user_command"), "execution_frame_executor_ready"), 0);
     ASSERT_EQ(mapping_number(gateway_task("process_user_command"), "requires_target_handle"), 1);
     ASSERT_EQ(mapping_number(gateway_task("process_user_command"), "requires_frozen_payload"), 1);
     assert_gateway_task("gateway_logon", "main_required", "direct_main_owner_scope", 0,
@@ -5616,9 +5611,14 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     for (int i = 0; i < dispatch_contracts->size; i++) {
       ASSERT_EQ(dispatch_contracts->item[i].type, T_MAPPING);
       auto* entry = dispatch_contracts->item[i].u.map;
-      dispatch_by_type.emplace(mapping_string(entry, "task_type"), entry);
-      ASSERT_EQ(mapping_number(entry, "requires_owner_mailbox"), 1);
-      ASSERT_EQ(mapping_number(entry, "requires_owner_main_queue"), 0);
+      auto task_type = std::string(mapping_string(entry, "task_type"));
+      dispatch_by_type.emplace(task_type, entry);
+      auto callback_main_adapter = (task_type == "heartbeat" || task_type == "call_out" ||
+                                    task_type == "async_callback" || task_type == "dns_callback" ||
+                                    task_type == "socket_callback" || task_type == "ed_callback");
+      ASSERT_EQ(mapping_number(entry, "requires_owner_mailbox"), callback_main_adapter ? 0 : 1);
+      ASSERT_EQ(mapping_number(entry, "requires_owner_main_queue"),
+                (task_type == "gateway_command_execute" || callback_main_adapter) ? 1 : 0);
       ASSERT_EQ(mapping_number(entry, "manifest_version"), 2);
       ASSERT_STREQ(mapping_string(entry, "manifest_schema"), "owner_task_manifest_v2");
       ASSERT_STREQ(mapping_string(entry, "admission_policy"), "owner_epoch_payload_allowlist_deadline_guard");
@@ -5641,17 +5641,17 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     };
     auto assert_dispatch = [&](const char* task_type, const char* contract_key, const char* dispatch_kind,
                                const char* executor_mode, long executor_runnable, long executor_safe,
-                               long rejected) {
+                               long rejected, const char* route = "owner_executor", long main_required = 0) {
       auto* entry = dispatch_entry(task_type);
       ASSERT_NE(entry, nullptr);
       ASSERT_STREQ(mapping_string(entry, "contract_key"), contract_key);
       ASSERT_STREQ(mapping_string(entry, "dispatch_kind"), dispatch_kind);
       ASSERT_STREQ(mapping_string(entry, "task_kind"), dispatch_kind);
       ASSERT_STREQ(mapping_string(entry, "executor_mode"), executor_mode);
-      ASSERT_STREQ(mapping_string(entry, "route"), "owner_executor");
+      ASSERT_STREQ(mapping_string(entry, "route"), route);
       ASSERT_EQ(mapping_number(entry, "executor_runnable"), executor_runnable);
       ASSERT_EQ(mapping_number(entry, "executor_safe"), executor_safe);
-      ASSERT_EQ(mapping_number(entry, "main_required"), 0);
+      ASSERT_EQ(mapping_number(entry, "main_required"), main_required);
       ASSERT_EQ(mapping_number(entry, "rejected"), rejected);
     };
     assert_dispatch("executor_probe", "executor_probe", "executor_probe", "executor_safe", 1, 1, 0);
@@ -5666,16 +5666,20 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                     "executor_safe", 1, 1, 0);
     assert_dispatch("gateway_command", "gateway_command_executor_activation", "gateway_command", "executor_safe", 1, 1,
                     0);
-    assert_dispatch("heartbeat", "owner_executor_callback", "executor_callback", "executor_safe_callback", 1, 1, 0);
-    assert_dispatch("call_out", "owner_executor_callback", "executor_callback", "executor_safe_callback", 1, 1, 0);
-    assert_dispatch("async_callback", "owner_executor_callback", "executor_callback", "executor_safe_callback", 1, 1,
-                    0);
-    assert_dispatch("dns_callback", "owner_executor_callback", "executor_callback", "executor_safe_callback", 1, 1, 0);
-    assert_dispatch("socket_callback", "owner_executor_callback", "executor_callback", "executor_safe_callback", 1, 1,
-                    0);
-    assert_dispatch("gateway_command_execute", "owner_executor_callback", "executor_callback",
-                    "executor_safe_callback", 1, 1, 0);
-    assert_dispatch("ed_callback", "owner_executor_callback", "executor_callback", "executor_safe_callback", 1, 1, 0);
+    assert_dispatch("heartbeat", "owner_executor_callback", "executor_callback", "main_required_callback", 0, 0, 0,
+                    "owner_main_queue_callback_adapter", 1);
+    assert_dispatch("call_out", "owner_executor_callback", "executor_callback", "main_required_callback", 0, 0, 0,
+                    "owner_main_queue_callback_adapter", 1);
+    assert_dispatch("async_callback", "owner_executor_callback", "executor_callback", "main_required_callback", 0, 0,
+                    0, "owner_main_queue_callback_adapter", 1);
+    assert_dispatch("dns_callback", "owner_executor_callback", "executor_callback", "main_required_callback", 0, 0, 0,
+                    "owner_main_queue_callback_adapter", 1);
+    assert_dispatch("socket_callback", "owner_executor_callback", "executor_callback", "main_required_callback", 0, 0,
+                    0, "owner_main_queue_callback_adapter", 1);
+    assert_dispatch("gateway_command_execute", "gateway_command_main_queue", "main_thread",
+                    "main_required", 1, 0, 0, "owner_main_queue", 1);
+    assert_dispatch("ed_callback", "owner_executor_callback", "executor_callback", "main_required_callback", 0, 0, 0,
+                    "owner_main_queue_callback_adapter", 1);
     assert_dispatch("compute_result", "compute_result", "compute_result", "executor_safe", 1, 1, 0);
     assert_dispatch("lpc", "lpc", "reject_lpc", "rejected", 1, 0, 1);
     assert_dispatch("owner_state", "owner_state", "guard_owner_state", "rejected", 1, 0, 1);
@@ -5716,17 +5720,18 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(gateway_command, "side_effect_snapshot_ready_count"), 5);
     ASSERT_EQ(mapping_number(gateway_command, "side_effect_observability_ready"), 1);
     ASSERT_EQ(mapping_number(gateway_command, "side_effect_activation_ready"), 1);
-    ASSERT_STREQ(mapping_string(gateway_command, "activation_blocker"), "");
+    ASSERT_STREQ(mapping_string(gateway_command, "activation_blocker"),
+                 "interactive_command_requires_main_thread_io_adapter");
 
     auto* callback_allowlist = mapping_entry(contract, "owner_executor_callback_allowlist");
-    ASSERT_STREQ(mapping_string(callback_allowlist, "executor_mode"), "executor_safe_callback");
-    ASSERT_STREQ(mapping_string(callback_allowlist, "route"), "owner_executor");
-    ASSERT_EQ(mapping_number(callback_allowlist, "executor_safe"), 1);
-    ASSERT_EQ(mapping_number(callback_allowlist, "main_required"), 0);
+    ASSERT_STREQ(mapping_string(callback_allowlist, "executor_mode"), "main_required_callback");
+    ASSERT_STREQ(mapping_string(callback_allowlist, "route"), "owner_main_queue_callback_adapter");
+    ASSERT_EQ(mapping_number(callback_allowlist, "executor_safe"), 0);
+    ASSERT_EQ(mapping_number(callback_allowlist, "main_required"), 1);
     ASSERT_EQ(mapping_number(callback_allowlist, "rejected"), 0);
     auto* callback_contracts = mapping_array(callback_allowlist, "contracts");
     ASSERT_NE(callback_contracts, nullptr);
-    ASSERT_EQ(callback_contracts->size, 7);
+    ASSERT_EQ(callback_contracts->size, 6);
 
     auto* mailbox_message = mapping_entry(contract, "owner_message_mailbox");
     ASSERT_EQ(mapping_number(mailbox_message, "executor_safe"), 1);
@@ -6358,25 +6363,19 @@ TEST_F(DriverTest, TestVmOwnerRuntimePerformanceProbesRecordDiagnostics) {
   ASSERT_FALSE(vm_owner_executor_available());
   ASSERT_EQ(vm_owner_enqueue_executor_task(guard.callback_probe, "ordinary_lpc", "runtime-v3-rejected", [] {}), 0u);
 
-  std::atomic<int> blocker_started{0};
-  std::atomic<int> release_blocker{0};
+  std::atomic<int> adapter_ran{0};
   std::atomic<int> stale_ran{0};
   std::atomic<int> stale_drop_cleanup{0};
   vm_owner_thread_start(1);
   ASSERT_TRUE(vm_owner_executor_available());
   ASSERT_EQ(vm_owner_enqueue_executor_task(guard.callback_probe, "legacy_lpc", "runtime-v3-legacy-rejected", [] {}),
             0u);
-  auto blocker = vm_owner_enqueue_executor_task(guard.callback_probe, "heartbeat", "runtime-v3-blocker", [&] {
-    blocker_started.store(1, std::memory_order_release);
-    for (int i = 0; i < 200 && release_blocker.load(std::memory_order_acquire) == 0; i++) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+  auto adapter_task = vm_owner_enqueue_executor_task(guard.callback_probe, "heartbeat", "runtime-v3-main-adapter", [&] {
+    adapter_ran.store(vm_context_is_main_thread() ? 1 : -1, std::memory_order_release);
   });
-  ASSERT_GT(blocker, 0u);
-  for (int i = 0; i < 100 && blocker_started.load(std::memory_order_acquire) == 0; i++) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-  }
-  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+  ASSERT_GT(adapter_task, 0u);
+  ASSERT_EQ(vm_owner_drain_main_tasks(16), 1);
+  ASSERT_EQ(adapter_ran.load(std::memory_order_acquire), 1);
 
   auto stale_task = vm_owner_enqueue_executor_task(
       guard.callback_probe, "call_out", "runtime-v3-stale", [&] {
@@ -6385,19 +6384,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimePerformanceProbesRecordDiagnostics) {
       [&] {
         stale_drop_cleanup.store(vm_context_is_main_thread() ? 1 : -1, std::memory_order_release);
       });
-  ASSERT_GT(stale_task, blocker);
+  ASSERT_GT(stale_task, adapter_task);
   vm_owner_set_id(guard.callback_probe, moved_owner);
-  release_blocker.store(1, std::memory_order_release);
-
-  for (int i = 0; i < 100; i++) {
-    auto* status = vm_owner_thread_status();
-    auto dropped = mapping_number(status, "owner_executor_admission_dropped");
-    free_mapping(status);
-    if (dropped >= before_admission_dropped + 1) {
-      break;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
+  ASSERT_EQ(vm_owner_drain_main_tasks(16), 1);
   ASSERT_EQ(vm_owner_drain_main_tasks(16), 1);
   ASSERT_EQ(stale_ran.load(std::memory_order_acquire), 0);
   ASSERT_EQ(stale_drop_cleanup.load(std::memory_order_acquire), 1);
@@ -10285,6 +10274,23 @@ TEST_F(DriverTest, TestGatewaySessionDestroyCallsGatewayDisconnected) {
   free_object(&ob, "TestGatewaySessionDestroyCallsGatewayDisconnected");
 }
 
+TEST_F(DriverTest, TestGatewaySessionDestroyAllowsNetDeadSelfDestruct) {
+  auto *ob = create_gateway_session_for_test("gw-test-net-dead-destruct",
+                                             "/clone/gateway_net_dead_destruct_user");
+  ASSERT_NE(ob, nullptr);
+  ASSERT_NE(ob->interactive, nullptr);
+  ASSERT_TRUE(gateway_is_session(ob));
+
+  add_ref(ob, "TestGatewaySessionDestroyAllowsNetDeadSelfDestruct");
+
+  ASSERT_EQ(gateway_destroy_session_internal("gw-test-net-dead-destruct", "client_close", "bye"),
+            1);
+  ASSERT_TRUE(ob->flags & O_DESTRUCTED);
+  ASSERT_EQ(ob->interactive, nullptr);
+
+  free_object(&ob, "TestGatewaySessionDestroyAllowsNetDeadSelfDestruct");
+}
+
 TEST_F(DriverTest, TestGatewayReceiveRunsThroughOwnerMainQueue) {
   auto *ob = create_gateway_session_for_test("gw-test-receive", "/clone/gateway_login_example");
   ASSERT_NE(ob, nullptr);
@@ -10307,6 +10313,7 @@ TEST_F(DriverTest, TestGatewayReceiveRunsThroughOwnerMainQueue) {
 
   ASSERT_TRUE(gateway_dispatch_message_for_test(
       -1, R"({"type":"data","cid":"gw-test-receive","data":{"cmd":"look","seq":7}})"));
+  ASSERT_GE(vm_owner_drain_main_tasks(1), 1);
 
   auto *payload = call_lpc_method(ob, "query_last_gateway_payload");
   ASSERT_NE(payload, nullptr);
@@ -10438,7 +10445,7 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
           mapping_number(event, "owner_epoch") == static_cast<long>(owner_epoch)) {
         found_parser_frame_entered = true;
       }
-      if (std::string(mapping_string(event, "task_type")) == "gateway" &&
+      if (std::string(mapping_string(event, "task_type")) == "gateway_command_execute" &&
           std::string(mapping_string(event, "task_key")) == "process_user_command" &&
           std::string(mapping_string(event, "state")) == "main_queued" &&
           std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
@@ -10456,16 +10463,17 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_STREQ(mapping_string(event, "command_text_snapshot_blocker"), "");
         ASSERT_STREQ(mapping_string(event, "command_consume_model"), "owner_owned_snapshot_main_thread_consume");
         ASSERT_EQ(mapping_number(event, "command_consume_snapshot_ready"), 1);
-        ASSERT_EQ(mapping_number(event, "command_consume_executor_ready"), 1);
-        ASSERT_STREQ(mapping_string(event, "command_consume_blocker"), "");
+        ASSERT_EQ(mapping_number(event, "command_consume_executor_ready"), 0);
+        ASSERT_STREQ(mapping_string(event, "command_consume_blocker"),
+                     "interactive_command_requires_main_thread_io_adapter");
         ASSERT_STREQ(mapping_string(event, "execution_frame_model"), "gateway_command_execution_frame_v1");
         ASSERT_STREQ(mapping_string(event, "execution_frame_policy"), "owner_scope_current_interactive_command_giver");
-        ASSERT_STREQ(mapping_string(event, "execution_frame_restore_policy"), "owner_executor_vmcontext_restore");
+        ASSERT_STREQ(mapping_string(event, "execution_frame_restore_policy"), "main_thread_vmcontext_scope");
         ASSERT_EQ(mapping_number(event, "execution_frame_restore_ready"), 1);
         ASSERT_STREQ(mapping_string(event, "execution_frame_restore_blocker"), "");
         ASSERT_EQ(mapping_number(event, "execution_frame_requires_current_interactive"), 1);
         ASSERT_EQ(mapping_number(event, "execution_frame_requires_command_giver"), 1);
-        ASSERT_EQ(mapping_number(event, "execution_frame_executor_ready"), 1);
+        ASSERT_EQ(mapping_number(event, "execution_frame_executor_ready"), 0);
         ASSERT_EQ(mapping_number(event, "payload_frozen"), 1);
         auto *payload_value = find_string_in_mapping(event, "payload");
         ASSERT_NE(payload_value, nullptr);
@@ -10584,12 +10592,14 @@ TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
         ASSERT_EQ(mapping_number(payload, "telnet_ga_required"), 0);
         ASSERT_EQ(mapping_number(payload, "reschedule_cmd_in_buf"), 1);
         ASSERT_FALSE(mapping_has_string_key(payload, "prompt_text"));
-        ASSERT_STREQ(mapping_string(payload, "command_executor_blocker"), "");
+        ASSERT_STREQ(mapping_string(payload, "command_executor_blocker"),
+                     "interactive_command_requires_main_thread_io_adapter");
         ASSERT_STREQ(mapping_string(payload, "command_consume_model"), "owner_owned_snapshot_main_thread_consume");
         ASSERT_EQ(mapping_number(payload, "command_consume_snapshot_ready"), 1);
-        ASSERT_EQ(mapping_number(payload, "command_consume_executor_ready"), 1);
-        ASSERT_STREQ(mapping_string(payload, "command_consume_blocker"), "");
-        ASSERT_STREQ(mapping_string(payload, "execution_frame_restore_policy"), "owner_executor_vmcontext_restore");
+        ASSERT_EQ(mapping_number(payload, "command_consume_executor_ready"), 0);
+        ASSERT_STREQ(mapping_string(payload, "command_consume_blocker"),
+                     "interactive_command_requires_main_thread_io_adapter");
+        ASSERT_STREQ(mapping_string(payload, "execution_frame_restore_policy"), "main_thread_vmcontext_scope");
         ASSERT_EQ(mapping_number(payload, "execution_frame_restore_ready"), 1);
         ASSERT_STREQ(mapping_string(payload, "execution_frame_restore_blocker"), "");
         ASSERT_FALSE(mapping_has_string_key(payload, "command_text"));
@@ -10657,7 +10667,7 @@ TEST_F(DriverTest, TestGatewayCommandMxpTagFilterFrame) {
           mapping_number(event, "owner_epoch") == static_cast<long>(owner_epoch)) {
         found_mxp_filter_frame = true;
       }
-      if (std::string(mapping_string(event, "task_type")) == "gateway" &&
+      if (std::string(mapping_string(event, "task_type")) == "gateway_command_execute" &&
           std::string(mapping_string(event, "task_key")) == "process_user_command" &&
           std::string(mapping_string(event, "state")) == "main_queued" &&
           std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
@@ -10737,7 +10747,7 @@ TEST_F(DriverTest, TestGatewayCommandEdCommandFrame) {
           mapping_number(event, "owner_epoch") == static_cast<long>(owner_epoch)) {
         found_ed_frame = true;
       }
-      if (std::string(mapping_string(event, "task_type")) == "gateway" &&
+      if (std::string(mapping_string(event, "task_type")) == "gateway_command_execute" &&
           std::string(mapping_string(event, "task_key")) == "process_user_command" &&
           std::string(mapping_string(event, "state")) == "main_queued" &&
           std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
@@ -10860,7 +10870,7 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveInputToState) {
         found_localecho_restore_queued = found_localecho_restore_queued || state == "main_queued";
         found_localecho_restore_dispatched = found_localecho_restore_dispatched || state == "main_dispatched";
       }
-      if (std::string(mapping_string(event, "task_type")) == "gateway" &&
+      if (std::string(mapping_string(event, "task_type")) == "gateway_command_execute" &&
           std::string(mapping_string(event, "task_key")) == "process_user_command" &&
           std::string(mapping_string(event, "state")) == "main_queued" &&
           std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
@@ -11032,7 +11042,7 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveGetCharState) {
         found_linemode_restore_queued = found_linemode_restore_queued || state == "main_queued";
         found_linemode_restore_dispatched = found_linemode_restore_dispatched || state == "main_dispatched";
       }
-      if (std::string(mapping_string(event, "task_type")) == "gateway" &&
+      if (std::string(mapping_string(event, "task_type")) == "gateway_command_execute" &&
           std::string(mapping_string(event, "task_key")) == "process_user_command" &&
           std::string(mapping_string(event, "state")) == "main_queued" &&
           std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
@@ -11102,7 +11112,7 @@ TEST_F(DriverTest, TestGatewayCommandPayloadSnapshotsActiveGetCharState) {
   free_object(&ob, "TestGatewayCommandPayloadSnapshotsActiveGetCharState");
 }
 
-TEST_F(DriverTest, TestGatewayCommandExecutesThroughOwnerExecutor) {
+TEST_F(DriverTest, TestGatewayCommandExecutesThroughOwnerMainQueue) {
   struct RuntimeGuard {
     int saved_mode;
     object_t* ob{nullptr};
@@ -11112,13 +11122,13 @@ TEST_F(DriverTest, TestGatewayCommandExecutesThroughOwnerExecutor) {
       vm_owner_thread_stop();
       vm_owner_drain_main_tasks(64);
       if (ob) {
-        add_ref(ob, "TestGatewayCommandExecutesThroughOwnerExecutor");
+        add_ref(ob, "TestGatewayCommandExecutesThroughOwnerMainQueue");
         if (ob->interactive && session_id) {
           gateway_destroy_session_internal(session_id, "test_done", "done");
         }
         vm_owner_clear_id(ob);
         destruct_object(ob);
-        free_object(&ob, "TestGatewayCommandExecutesThroughOwnerExecutor");
+        free_object(&ob, "TestGatewayCommandExecutesThroughOwnerMainQueue");
       }
       CONFIG_INT(__RC_MULTICORE_MODE__) = saved_mode;
     }
@@ -11132,7 +11142,7 @@ TEST_F(DriverTest, TestGatewayCommandExecutesThroughOwnerExecutor) {
   ASSERT_TRUE(gateway_is_session(ob));
   runtime_guard.ob = ob;
   runtime_guard.session_id = "gw-test-command-executor";
-  vm_owner_set_id(ob, "owner/test/gateway-command-executor");
+  vm_owner_set_id(ob, "owner/test/gateway-command-main-queue");
   const std::string owner_id = vm_owner_id(ob);
   auto owner_epoch = vm_owner_epoch(ob);
 
@@ -11145,6 +11155,9 @@ TEST_F(DriverTest, TestGatewayCommandExecutesThroughOwnerExecutor) {
   auto call_string = [](const char* method, object_t* target) -> std::string {
     auto* ret = safe_apply(method, target, 0, ORIGIN_DRIVER);
     EXPECT_NE(ret, nullptr);
+    if (ret && ret->type == T_NUMBER && ret->u.number == 0) {
+      return "";
+    }
     EXPECT_EQ(ret ? ret->type : T_INVALID, T_STRING);
     return ret && ret->type == T_STRING ? ret->u.string : "";
   };
@@ -11188,34 +11201,26 @@ TEST_F(DriverTest, TestGatewayCommandExecutesThroughOwnerExecutor) {
   auto before_callback_dispatched = mapping_number(before, "executor_callback_dispatched");
   free_mapping(before);
 
-  vm_owner_thread_start(1);
-  ASSERT_TRUE(vm_owner_executor_available());
   ASSERT_EQ(gateway_inject_input_internal(ob, "look"), 1);
   auto task_id = gateway_enqueue_pending_command_internal(ob);
   ASSERT_GT(task_id, 0u);
 
-  for (int i = 0; i < 100 && !trace_has_state("thread_executor_callback_completed", task_id); i++) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  ASSERT_TRUE(trace_has_state("executor_callback_queued", task_id));
-  ASSERT_TRUE(trace_has_state("thread_executor_callback_dispatched", task_id));
-  ASSERT_TRUE(trace_has_state("snapshot_dispatched"));
-  ASSERT_TRUE(trace_has_state("thread_executor_callback_completed", task_id));
-  ASSERT_EQ(call_number("query_last_process_input_off_main", ob), 1);
+  ASSERT_GE(vm_owner_drain_main_tasks(64), 1);
+  ASSERT_TRUE(trace_has_state("main_dispatched", task_id));
+  ASSERT_EQ(call_number("query_last_process_input_off_main", ob), 0);
   ASSERT_EQ(call_string("query_last_process_input_command", ob), "look");
   ASSERT_FALSE(ob->interactive->iflags & CMD_IN_BUF);
-  ASSERT_GE(vm_owner_drain_main_tasks(64), 1);
 
   auto* after = vm_owner_thread_status();
-  ASSERT_GE(mapping_number(after, "executor_callback_queued"), before_callback_queued + 1);
-  ASSERT_GE(mapping_number(after, "executor_callback_dispatched"), before_callback_dispatched + 1);
+  ASSERT_EQ(mapping_number(after, "executor_callback_queued"), before_callback_queued);
+  ASSERT_EQ(mapping_number(after, "executor_callback_dispatched"), before_callback_dispatched);
   ASSERT_EQ(mapping_number(after, "gateway_command_execute_ready"), 1);
   ASSERT_STREQ(mapping_string(after, "gateway_command_execute_task_type"), "gateway_command_execute");
-  ASSERT_STREQ(mapping_string(after, "gateway_command_execute_route"), "owner_executor");
+  ASSERT_STREQ(mapping_string(after, "gateway_command_execute_route"), "owner_main_queue_io_adapter");
   ASSERT_STREQ(mapping_string(after, "gateway_command_execute_fallback_route"),
-               "explicit_fallback_owner_main_queue");
+               "");
   ASSERT_STREQ(mapping_string(after, "gateway_command_execute_policy"),
-               "audit_enforced_owner_thread_normal_path");
+               "main_thread_io_adapter_until_interactive_detached");
   ASSERT_EQ(mapping_number(after, "gateway_command_execute_reply_queue_main_ready"), 1);
   ASSERT_EQ(mapping_number(after, "gateway_command_execute_stale_drop_ready"), 1);
   ASSERT_EQ(mapping_number(after, "gateway_command_execute_context_cleanup_ready"), 1);
@@ -11223,9 +11228,9 @@ TEST_F(DriverTest, TestGatewayCommandExecutesThroughOwnerExecutor) {
   free_mapping(after);
 }
 
-TEST_F(DriverTest, TestGatewayCommandExecutorDropsStaleOwnerEpoch) {
-  const char* owner = "owner/test/gateway-command-executor-stale";
-  const char* moved_owner = "owner/test/gateway-command-executor-stale/moved";
+TEST_F(DriverTest, TestGatewayCommandMainQueueDropsStaleOwnerEpoch) {
+  const char* owner = "owner/test/gateway-command-main-stale";
+  const char* moved_owner = "owner/test/gateway-command-main-stale/moved";
   struct RuntimeGuard {
     int saved_mode;
     object_t* ob{nullptr};
@@ -11235,13 +11240,13 @@ TEST_F(DriverTest, TestGatewayCommandExecutorDropsStaleOwnerEpoch) {
       vm_owner_thread_stop();
       vm_owner_drain_main_tasks(64);
       if (ob) {
-        add_ref(ob, "TestGatewayCommandExecutorDropsStaleOwnerEpoch");
+        add_ref(ob, "TestGatewayCommandMainQueueDropsStaleOwnerEpoch");
         if (ob->interactive && session_id) {
           gateway_destroy_session_internal(session_id, "test_done", "done");
         }
         vm_owner_clear_id(ob);
         destruct_object(ob);
-        free_object(&ob, "TestGatewayCommandExecutorDropsStaleOwnerEpoch");
+        free_object(&ob, "TestGatewayCommandMainQueueDropsStaleOwnerEpoch");
       }
       CONFIG_INT(__RC_MULTICORE_MODE__) = saved_mode;
     }
@@ -11287,7 +11292,7 @@ TEST_F(DriverTest, TestGatewayCommandExecutorDropsStaleOwnerEpoch) {
         if (std::string(mapping_string(event, "task_type")) == "gateway_command_execute" &&
             std::string(mapping_string(event, "task_key")) == "process_user_command" &&
             std::string(mapping_string(event, "owner_id")) == owner &&
-            std::string(mapping_string(event, "state")) == "thread_executor_callback_stale") {
+            std::string(mapping_string(event, "state")) == "main_stale") {
           found = true;
           break;
         }
@@ -11297,27 +11302,11 @@ TEST_F(DriverTest, TestGatewayCommandExecutorDropsStaleOwnerEpoch) {
     return found;
   };
 
-  std::atomic<int> blocker_started{0};
-  std::atomic<int> release_blocker{0};
-  vm_owner_thread_start(1);
-  ASSERT_TRUE(vm_owner_executor_available());
-  auto blocker = vm_owner_enqueue_executor_task(ob, "gateway_command_execute", "gateway-stale-blocker", [&] {
-    blocker_started.store(1, std::memory_order_release);
-    for (int i = 0; i < 200 && release_blocker.load(std::memory_order_acquire) == 0; i++) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-  });
-  ASSERT_GT(blocker, 0u);
-  for (int i = 0; i < 100 && blocker_started.load(std::memory_order_acquire) == 0; i++) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
-
   safe_apply("reset_gateway_command_probe", ob, 0, ORIGIN_DRIVER);
   ASSERT_EQ(gateway_inject_input_internal(ob, "look"), 1);
   ASSERT_GT(gateway_enqueue_pending_command_internal(ob), 0u);
   vm_owner_set_id(ob, moved_owner);
-  release_blocker.store(1, std::memory_order_release);
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
 
   for (int i = 0; i < 100 && !trace_has_gateway_stale(); i++) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -11327,7 +11316,141 @@ TEST_F(DriverTest, TestGatewayCommandExecutorDropsStaleOwnerEpoch) {
   ASSERT_EQ(call_number("query_last_process_input_off_main", ob), 0);
 }
 
-TEST_F(DriverTest, TestGatewayCommandMainQueueDropsStaleOwnerEpoch) {
+TEST_F(DriverTest, TestGatewayCommandMainQueueDropsDisconnectedSession) {
+  const char* owner = "owner/test/gateway-command-main-disconnect";
+  const char* session_id = "gw-test-command-main-disconnect";
+  struct RuntimeGuard {
+    int saved_mode;
+    object_t* ob{nullptr};
+
+    ~RuntimeGuard() {
+      vm_owner_thread_stop();
+      vm_owner_drain_main_tasks(64);
+      if (ob) {
+        vm_owner_clear_id(ob);
+        destruct_object(ob);
+        free_object(&ob, "TestGatewayCommandMainQueueDropsDisconnectedSession");
+      }
+      CONFIG_INT(__RC_MULTICORE_MODE__) = saved_mode;
+    }
+  } runtime_guard{CONFIG_INT(__RC_MULTICORE_MODE__)};
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_AUDIT;
+  vm_owner_thread_stop();
+
+  auto *ob = create_gateway_session_for_test(session_id, "/clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  ASSERT_NE(ob->interactive, nullptr);
+  ASSERT_TRUE(gateway_is_session(ob));
+  runtime_guard.ob = ob;
+  add_ref(ob, "TestGatewayCommandMainQueueDropsDisconnectedSession");
+  vm_owner_set_id(ob, owner);
+
+  auto mapping_number = [](mapping_t *map, const char *key) -> long {
+    auto *value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t *map, const char *key) -> const char * {
+    auto *value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+  auto trace_has_disconnected_stale = [&]() {
+    auto* trace = vm_owner_task_trace(256);
+    auto* events = find_string_in_mapping(trace, "events");
+    bool found = false;
+    EXPECT_NE(events, nullptr);
+    EXPECT_EQ(events ? events->type : T_INVALID, T_ARRAY);
+    if (events && events->type == T_ARRAY) {
+      for (int i = 0; i < events->u.arr->size; i++) {
+        auto* event = events->u.arr->item[i].u.map;
+        if (std::string(mapping_string(event, "task_type")) == "gateway_command_execute" &&
+            std::string(mapping_string(event, "task_key")) == "process_user_command" &&
+            std::string(mapping_string(event, "owner_id")) == owner &&
+            std::string(mapping_string(event, "state")) == "session_stale") {
+          found = true;
+          break;
+        }
+      }
+    }
+    free_mapping(trace);
+    return found;
+  };
+
+  ASSERT_EQ(gateway_inject_input_internal(ob, "look"), 1);
+  ASSERT_GT(gateway_enqueue_pending_command_internal(ob), 0u);
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_disconnect", "disconnect"), 1);
+  ASSERT_EQ(ob->interactive, nullptr);
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+
+  for (int i = 0; i < 100 && !trace_has_disconnected_stale(); i++) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_TRUE(trace_has_disconnected_stale());
+
+  auto* status = vm_owner_thread_status();
+  ASSERT_EQ(mapping_number(status, "gateway_command_execute_stale_drop_ready"), 1);
+  free_mapping(status);
+}
+
+TEST_F(DriverTest, TestGatewayCommandMainQueueReschedulesBufferedCommands) {
+  struct RuntimeGuard {
+    int saved_mode;
+    object_t* ob{nullptr};
+    const char* session_id{nullptr};
+
+    ~RuntimeGuard() {
+      vm_owner_thread_stop();
+      vm_owner_drain_main_tasks(64);
+      if (ob) {
+        add_ref(ob, "TestGatewayCommandMainQueueReschedulesBufferedCommands");
+        if (ob->interactive && session_id) {
+          gateway_destroy_session_internal(session_id, "test_done", "done");
+        }
+        vm_owner_clear_id(ob);
+        destruct_object(ob);
+        free_object(&ob, "TestGatewayCommandMainQueueReschedulesBufferedCommands");
+      }
+      CONFIG_INT(__RC_MULTICORE_MODE__) = saved_mode;
+    }
+  } runtime_guard{CONFIG_INT(__RC_MULTICORE_MODE__)};
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_AUDIT;
+  vm_owner_thread_stop();
+
+  auto *ob = create_gateway_session_for_test("gw-test-command-buffered", "/clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  ASSERT_NE(ob->interactive, nullptr);
+  ASSERT_TRUE(gateway_is_session(ob));
+  runtime_guard.ob = ob;
+  runtime_guard.session_id = "gw-test-command-buffered";
+  vm_owner_set_id(ob, "owner/test/gateway-command-buffered");
+
+  auto call_string = [](const char* method, object_t* target) -> std::string {
+    auto* ret = safe_apply(method, target, 0, ORIGIN_DRIVER);
+    EXPECT_NE(ret, nullptr);
+    if (ret && ret->type == T_NUMBER) {
+      return "";
+    }
+    EXPECT_EQ(ret ? ret->type : T_INVALID, T_STRING);
+    return ret && ret->type == T_STRING ? ret->u.string : "";
+  };
+
+  safe_apply("reset_gateway_command_probe", ob, 0, ORIGIN_DRIVER);
+  ASSERT_EQ(gateway_inject_input_internal(ob, "look\nscore"), 1);
+  ASSERT_GT(gateway_enqueue_pending_command_internal(ob), 0u);
+  ASSERT_EQ(gateway_enqueue_pending_command_internal(ob), 0u);
+
+  ASSERT_GE(vm_owner_drain_main_tasks(8), 1);
+  ASSERT_EQ(call_string("query_last_process_input_command", ob), "look");
+  ASSERT_TRUE(ob->interactive->iflags & CMD_IN_BUF);
+  ASSERT_EQ(gateway_process_pending_command_internal(ob), 1);
+  ASSERT_EQ(call_string("query_last_process_input_command", ob), "score");
+  ASSERT_FALSE(ob->interactive->iflags & CMD_IN_BUF);
+}
+
+TEST_F(DriverTest, TestGatewayCommandMainQueueStaleTraceIncludesFrameMetadata) {
   auto *ob = create_gateway_session_for_test("gw-test-command-stale", "/clone/gateway_login_example");
   ASSERT_NE(ob, nullptr);
   ASSERT_NE(ob->interactive, nullptr);
@@ -11372,7 +11495,7 @@ TEST_F(DriverTest, TestGatewayCommandMainQueueDropsStaleOwnerEpoch) {
   if (events_value && events_value->type == T_ARRAY) {
     for (int i = 0; i < events_value->u.arr->size; i++) {
       auto *event = events_value->u.arr->item[i].u.map;
-      if (std::string(mapping_string(event, "task_type")) == "gateway" &&
+      if (std::string(mapping_string(event, "task_type")) == "gateway_command_execute" &&
           std::string(mapping_string(event, "task_key")) == "process_user_command" &&
           mapping_number(event, "task_id") == static_cast<long>(task_id)) {
         if (std::string(mapping_string(event, "state")) == "main_stale") {
@@ -11390,15 +11513,16 @@ TEST_F(DriverTest, TestGatewayCommandMainQueueDropsStaleOwnerEpoch) {
           ASSERT_STREQ(mapping_string(event, "command_text_snapshot_blocker"), "");
           ASSERT_STREQ(mapping_string(event, "command_consume_model"), "owner_owned_snapshot_main_thread_consume");
           ASSERT_EQ(mapping_number(event, "command_consume_snapshot_ready"), 1);
-          ASSERT_EQ(mapping_number(event, "command_consume_executor_ready"), 1);
-          ASSERT_STREQ(mapping_string(event, "command_consume_blocker"), "");
+          ASSERT_EQ(mapping_number(event, "command_consume_executor_ready"), 0);
+          ASSERT_STREQ(mapping_string(event, "command_consume_blocker"),
+                       "interactive_command_requires_main_thread_io_adapter");
           ASSERT_STREQ(mapping_string(event, "execution_frame_model"), "gateway_command_execution_frame_v1");
           ASSERT_STREQ(mapping_string(event, "execution_frame_policy"),
                        "owner_scope_current_interactive_command_giver");
-          ASSERT_STREQ(mapping_string(event, "execution_frame_restore_policy"), "owner_executor_vmcontext_restore");
+          ASSERT_STREQ(mapping_string(event, "execution_frame_restore_policy"), "main_thread_vmcontext_scope");
           ASSERT_EQ(mapping_number(event, "execution_frame_restore_ready"), 1);
           ASSERT_STREQ(mapping_string(event, "execution_frame_restore_blocker"), "");
-          ASSERT_EQ(mapping_number(event, "execution_frame_executor_ready"), 1);
+          ASSERT_EQ(mapping_number(event, "execution_frame_executor_ready"), 0);
           ASSERT_EQ(mapping_number(event, "payload_frozen"), 1);
         }
       }
@@ -11414,11 +11538,11 @@ TEST_F(DriverTest, TestGatewayCommandMainQueueDropsStaleOwnerEpoch) {
   ASSERT_FALSE(found_interactive_dispatch);
   free_mapping(trace);
 
-  add_ref(ob, "TestGatewayCommandMainQueueDropsStaleOwnerEpoch");
+  add_ref(ob, "TestGatewayCommandMainQueueStaleTraceIncludesFrameMetadata");
   ASSERT_EQ(gateway_destroy_session_internal("gw-test-command-stale", "test_done", "done"), 1);
   ASSERT_EQ(ob->interactive, nullptr);
   destruct_object(ob);
-  free_object(&ob, "TestGatewayCommandMainQueueDropsStaleOwnerEpoch");
+  free_object(&ob, "TestGatewayCommandMainQueueStaleTraceIncludesFrameMetadata");
 }
 
 TEST_F(DriverTest, TestGatewaySessionExecLogonKeepsSessionLookupWorking) {

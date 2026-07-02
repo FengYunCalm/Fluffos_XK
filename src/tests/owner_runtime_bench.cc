@@ -380,39 +380,37 @@ void run_callback_admission_bench(Report &report) {
           "ordinary LPC callback should be rejected while executor is unavailable");
   samples.push_back(elapsed_us(rejected_start));
 
-  std::atomic<int> blocker_started{0};
-  std::atomic<int> release_blocker{0};
+  std::atomic<int> adapter_ran{0};
+  std::atomic<int> stale_ran{0};
   std::atomic<int> stale_drop_cleanup{0};
   vm_owner_thread_start(1);
-  auto blocker_start = Clock::now();
-  auto blocker = vm_owner_enqueue_executor_task(probe, "heartbeat", "bench_blocker", [&] {
-    blocker_started.store(1, std::memory_order_release);
-    for (int i = 0; i < 200 && release_blocker.load(std::memory_order_acquire) == 0; i++) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+  auto adapter_start = Clock::now();
+  auto adapter = vm_owner_enqueue_executor_task(probe, "heartbeat", "bench_main_adapter", [&] {
+    adapter_ran.store(vm_context_is_main_thread() ? 1 : -1, std::memory_order_release);
   });
-  samples.push_back(elapsed_us(blocker_start));
-  require(blocker > 0, "callback blocker enqueue failed");
-  for (int i = 0; i < 100 && blocker_started.load(std::memory_order_acquire) == 0; i++) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-  }
-  require(blocker_started.load(std::memory_order_acquire) == 1, "callback blocker did not start");
+  samples.push_back(elapsed_us(adapter_start));
+  require(adapter > 0, "callback main adapter enqueue failed");
+  require(vm_owner_drain_main_tasks(16) >= 1, "callback main adapter did not drain");
+  require(adapter_ran.load(std::memory_order_acquire) == 1, "callback main adapter did not run on main thread");
 
   auto stale_start = Clock::now();
-  auto stale = vm_owner_enqueue_executor_task(probe, "call_out", "bench_stale", [] {}, [&] {
-    stale_drop_cleanup.store(vm_context_is_main_thread() ? 1 : -1, std::memory_order_release);
-  });
+  auto stale = vm_owner_enqueue_executor_task(
+      probe, "call_out", "bench_stale",
+      [&] {
+        stale_ran.store(1, std::memory_order_release);
+      },
+      [&] {
+        stale_drop_cleanup.store(vm_context_is_main_thread() ? 1 : -1, std::memory_order_release);
+      });
   samples.push_back(elapsed_us(stale_start));
-  require(stale > blocker, "stale callback enqueue failed");
+  require(stale > adapter, "stale callback enqueue failed");
   vm_owner_set_id(probe, "owner/bench/runtime-v4/callback/moved");
-  release_blocker.store(1, std::memory_order_release);
-
-  for (int i = 0; i < 100 && stale_drop_cleanup.load(std::memory_order_acquire) == 0; i++) {
-    vm_owner_drain_main_tasks(16);
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-  }
+  require(vm_owner_drain_main_tasks(16) >= 1, "stale callback main adapter did not drain");
+  require(vm_owner_drain_main_tasks(16) >= 1, "stale callback cleanup did not drain");
+  require(stale_ran.load(std::memory_order_acquire) == 0, "stale callback should not run after owner move");
+  require(stale_drop_cleanup.load(std::memory_order_acquire) == 1,
+          "stale callback cleanup should run on main thread");
   vm_owner_thread_stop();
-  vm_owner_drain_main_tasks(16);
 
   auto *after = vm_owner_runtime_status();
   report.add("callback_admission_api_latency_p50_us", percentile(samples, 0.50));

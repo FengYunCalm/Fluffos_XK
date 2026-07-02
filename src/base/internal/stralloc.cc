@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <climits>
+#include <mutex>
 #include <string>
 #include <sstream>
 
@@ -88,10 +89,12 @@ static block_t *sfindblock(const char * /*s*/, int /*h*/);
 static block_t **base_table = (block_t **)nullptr;
 static int htable_size;
 static int htable_size_minus_one;
+static std::mutex stralloc_mutex;
 
 static block_t *alloc_new_shared_string(const char * /*string*/, int /*h*/, const char * /*why*/);
 
 void init_strings() {
+  std::lock_guard<std::mutex> lock(stralloc_mutex);
   int x, y;
 
   /* ensure that htable size is a power of 2 */
@@ -142,6 +145,7 @@ static block_t *sfindblock(const char *s, int h) {
 }
 
 const char *findstring(const char *s) {
+  std::lock_guard<std::mutex> lock(stralloc_mutex);
   block_t *b;
 
   if ((b = findblock(s))) {
@@ -184,6 +188,7 @@ static block_t *alloc_new_shared_string(const char *string, int h, const char *w
 }
 
 const char *int_make_shared_string(const char *str, const char *desc) {
+  std::lock_guard<std::mutex> lock(stralloc_mutex);
   block_t *b;
   int h;
 
@@ -206,6 +211,7 @@ const char *int_make_shared_string(const char *str, const char *desc) {
 */
 
 const char *int_ref_string(const char *str, const char *desc) {
+  std::lock_guard<std::mutex> lock(stralloc_mutex);
   block_t *b;
 
   b = BLOCK(str);
@@ -227,6 +233,7 @@ const char *int_ref_string(const char *str, const char *desc) {
  */
 
 void int_free_string(const char *str, const char *desc) {
+  std::lock_guard<std::mutex> lock(stralloc_mutex);
   block_t **prev, *b;
   int h;
 
@@ -270,6 +277,7 @@ void int_free_string(const char *str, const char *desc) {
 }
 
 void deallocate_string(char *str) {
+  std::lock_guard<std::mutex> lock(stralloc_mutex);
   int h;
   block_t *b, **prev;
 
@@ -289,6 +297,7 @@ void deallocate_string(char *str) {
 }
 
 uint64_t add_string_status(outbuffer_t *out, int verbose) {
+  std::lock_guard<std::mutex> lock(stralloc_mutex);
   if (verbose == 1) {
     outbuf_add(out, "All strings:\n");
     outbuf_add(out, "-------------------------\t Strings    Bytes\n");
@@ -464,6 +473,7 @@ void stralloc_print_entry(std::stringstream &ss, block_t* entry) {
 }
 
 void dump_stralloc(outbuffer_t *out) {
+  std::lock_guard<std::mutex> lock(stralloc_mutex);
   std::stringstream ss;
 
   ss << "===STRALLOC DUMP: allocd_strings:" << allocd_strings << "\n";

@@ -1556,6 +1556,7 @@ void remove_interactive(object_t *ob, int dested) {
    * so jumping out with an error would be bad.
    */
   interactive_t *ip = ob->interactive;
+  object_t *net_dead_guard = nullptr;
 
   if (!ip) {
     return;
@@ -1586,7 +1587,13 @@ void remove_interactive(object_t *ob, int dested) {
   if (!dested) {
     /*
      * auto-notification of net death
+     *
+     * net_dead() is allowed to save and destruct this_object().  Hold one
+     * temporary reference so the C-side interactive cleanup can finish even
+     * when destruct_object() re-enters remove_interactive() while CLOSING.
      */
+    add_ref(ob, "remove_interactive net_dead");
+    net_dead_guard = ob;
     save_command_giver(ob);
     set_eval(max_eval_cost);
     owner_bound_safe_apply(APPLY_NET_DEAD, ob, 0, ORIGIN_DRIVER, "interactive");
@@ -1668,6 +1675,9 @@ void remove_interactive(object_t *ob, int dested) {
   user_del(ip);
   FREE(ip);
   ob->interactive = nullptr;
+  if (net_dead_guard) {
+    free_object(&net_dead_guard, "remove_interactive net_dead");
+  }
   free_object(&ob, "remove_interactive");
 } /* remove_interactive() */
 

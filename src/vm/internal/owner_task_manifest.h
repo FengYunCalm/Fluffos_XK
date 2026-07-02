@@ -47,6 +47,7 @@ enum class OwnerExecutorDispatchKind {
   CommandFrameRestore,
   GatewayCommand,
   ExecutorCallback,
+  MainThread,
   ComputeResult,
   Generic,
 };

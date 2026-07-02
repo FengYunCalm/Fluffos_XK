@@ -3,6 +3,7 @@
 
 #include "base/package_api.h"
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <string>
@@ -15,6 +16,29 @@ extern int g_gateway_max_masters;
 extern int g_gateway_max_sessions;
 extern int g_gateway_heartbeat_interval;
 extern int g_gateway_heartbeat_timeout;
+
+struct GatewayRuntimeCounters {
+  std::atomic<uint64_t> data_frames_received{0};
+  std::atomic<uint64_t> data_frames_applied{0};
+  std::atomic<uint64_t> data_frames_rejected{0};
+  std::atomic<uint64_t> receive_tasks_enqueued{0};
+  std::atomic<uint64_t> receive_tasks_dispatched{0};
+  std::atomic<uint64_t> receive_tasks_rejected{0};
+  std::atomic<uint64_t> command_callbacks{0};
+  std::atomic<uint64_t> command_tasks_enqueued{0};
+  std::atomic<uint64_t> command_tasks_rejected{0};
+  std::atomic<uint64_t> command_tasks_rejected_pending{0};
+  std::atomic<uint64_t> command_tasks_finished{0};
+  std::atomic<uint64_t> command_tasks_stale{0};
+  std::atomic<uint64_t> command_tasks_cleared{0};
+  std::atomic<uint64_t> output_fifo_enqueued{0};
+  std::atomic<uint64_t> output_fifo_flushed{0};
+  std::atomic<uint64_t> output_fifo_rejected{0};
+  std::atomic<uint64_t> raw_writes_sent{0};
+  std::atomic<uint64_t> raw_writes_failed{0};
+};
+
+extern GatewayRuntimeCounters g_gateway_runtime_counters;
 
 struct GatewayMaster {
   int fd{-1};
@@ -39,6 +63,7 @@ struct GatewaySession {
   time_t last_active{0};
   object_t *user_ob{nullptr};
   int64_t user_ob_load_time{0};
+  std::atomic<bool> command_task_pending{false};
   std::deque<std::string> output_fifo;
   uint64_t output_fifo_enqueued{0};
   uint64_t output_fifo_flushed{0};
@@ -53,6 +78,7 @@ int gateway_listen_internal(int port, int bind_all);
 mapping_t *gateway_status_internal();
 int gateway_get_session_count();
 long gateway_session_fifo_depth_total();
+long gateway_session_command_pending_count();
 uint64_t gateway_session_fifo_enqueued_total();
 uint64_t gateway_session_fifo_flushed_total();
 uint64_t gateway_session_fifo_rejected_total();

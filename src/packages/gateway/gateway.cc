@@ -34,12 +34,14 @@ int g_gateway_max_masters = 16;
 int g_gateway_max_sessions = 4096;
 int g_gateway_heartbeat_interval = 15;
 int g_gateway_heartbeat_timeout = 45;
+GatewayRuntimeCounters g_gateway_runtime_counters;
 
 namespace {
 constexpr int kGatewayDefaultMaxMasters = 16;
 constexpr int kGatewayDefaultHeartbeatInterval = 15;
 constexpr int kGatewayDefaultHeartbeatTimeout = 45;
 constexpr int kGatewayMaxJsonDepth = 20;
+constexpr int kGatewayDeferredMainDrainBudget = 16;
 
 evconnlistener *g_gateway_listener = nullptr;
 event *g_gateway_heartbeat_timer = nullptr;
@@ -47,6 +49,7 @@ std::unordered_map<int, std::unique_ptr<GatewayMaster>> g_gateway_masters;
 int g_gateway_next_fd = 1;
 int g_gateway_listen_port = 0;
 time_t g_gateway_started_at = 0;
+bool g_gateway_main_drain_scheduled = false;
 
 void gateway_handle_hello(int fd, const nlohmann::json &msg);
 void gateway_handle_login(int fd, const nlohmann::json &msg);
@@ -61,17 +64,39 @@ bool gateway_object_valid_local(object_t *ob) {
   return ob && !(ob->flags & O_DESTRUCTED) && ob->obname && ob->obname[0] != '\0';
 }
 
+std::shared_ptr<svalue_t> gateway_copy_svalue(svalue_t *value, const char *tag) {
+  if (!value) {
+    return nullptr;
+  }
+
+  auto payload = std::shared_ptr<svalue_t>(new svalue_t{}, [tag](svalue_t *copied) {
+    free_svalue(copied, tag ? tag : "gateway_payload");
+    delete copied;
+  });
+  assign_svalue_no_free(payload.get(), value);
+  return payload;
+}
+
+void gateway_drain_owner_main_tasks_later() {
+  if (!g_event_base || g_gateway_main_drain_scheduled) {
+    return;
+  }
+  g_gateway_main_drain_scheduled = true;
+  add_walltime_event(std::chrono::milliseconds(0), [] {
+    g_gateway_main_drain_scheduled = false;
+    if (vm_owner_drain_main_tasks(kGatewayDeferredMainDrainBudget) >= kGatewayDeferredMainDrainBudget) {
+      gateway_drain_owner_main_tasks_later();
+    }
+  });
+}
+
 void gateway_apply_receive(object_t *user, svalue_t *data_sv) {
   if (!gateway_object_valid_local(user) || !data_sv) {
+    g_gateway_runtime_counters.receive_tasks_rejected.fetch_add(1, std::memory_order_relaxed);
     return;
   }
 
-  auto payload = std::shared_ptr<svalue_t>(new svalue_t{},
-                                           [](svalue_t *value) {
-                                             free_svalue(value, "gateway_receive_payload");
-                                             delete value;
-                                           });
-  assign_svalue_no_free(payload.get(), data_sv);
+  auto payload = gateway_copy_svalue(data_sv, "gateway_receive_payload");
 
   if (vm_owner_enqueue_main_task(user, "gateway", "gateway_receive", [user, payload] {
         if (!gateway_object_valid_local(user)) {
@@ -82,13 +107,17 @@ void gateway_apply_receive(object_t *user, svalue_t *data_sv) {
           VMCurrentInteractiveScope interactive_scope(vm_context(), user);
           vm_owner_record_task_trace(vm_owner_id(user), "gateway", "gateway_receive", vm_owner_epoch(user),
                                      "dispatched");
+          g_gateway_runtime_counters.receive_tasks_dispatched.fetch_add(1, std::memory_order_relaxed);
           set_eval(max_eval_cost);
           push_svalue(payload.get());
           safe_apply("gateway_receive", user, 1, ORIGIN_DRIVER);
         }
         restore_command_giver();
       }, nullptr, VM_OWNER_MAIN_TASK_IO_ADAPTER) != 0) {
-    vm_owner_drain_main_tasks(64);
+    g_gateway_runtime_counters.receive_tasks_enqueued.fetch_add(1, std::memory_order_relaxed);
+    gateway_drain_owner_main_tasks_later();
+  } else {
+    g_gateway_runtime_counters.receive_tasks_rejected.fetch_add(1, std::memory_order_relaxed);
   }
 }
 
@@ -271,6 +300,7 @@ void gateway_handle_login(int fd, const nlohmann::json &msg) {
   std::string ip;
   int port = 0;
   svalue_t data_sv = {};
+  bool has_data = false;
 
   if (!msg.contains("cid") || !msg["cid"].is_string()) {
     return;
@@ -291,11 +321,25 @@ void gateway_handle_login(int fd, const nlohmann::json &msg) {
       port = data["port"].get<int>();
     }
     data_sv = json_to_gateway_svalue(data);
+    has_data = true;
   }
 
-  gateway_create_session_internal(session_id.c_str(), msg.contains("data") ? &data_sv : nullptr,
-                                  ip.c_str(), port, fd);
-  if (msg.contains("data")) {
+  auto payload = gateway_copy_svalue(has_data ? &data_sv : nullptr, "gateway_login_payload");
+  if (vm_owner_enqueue_main_task(master_ob, "gateway", "gateway_login",
+                                 [session_id, ip, port, fd, payload] {
+                                   if (fd >= 0 && !gateway_has_master(fd)) {
+                                     vm_owner_record_task_trace(vm_owner_id(master_ob), "gateway", "gateway_login",
+                                                                vm_owner_epoch(master_ob), "master_stale");
+                                     return;
+                                   }
+                                   gateway_create_session_internal(session_id.c_str(), payload ? payload.get() : nullptr,
+                                                                   ip.c_str(), port, fd);
+                                 },
+                                 nullptr, VM_OWNER_MAIN_TASK_IO_ADAPTER) != 0) {
+    gateway_drain_owner_main_tasks_later();
+  }
+
+  if (has_data) {
     free_svalue(&data_sv, "gateway_login_data");
   }
 }
@@ -307,18 +351,22 @@ void gateway_handle_data(int fd, const nlohmann::json &msg) {
   svalue_t data_sv = {};
 
   if (!msg.contains("cid") || !msg["cid"].is_string() || !msg.contains("data")) {
+    g_gateway_runtime_counters.data_frames_rejected.fetch_add(1, std::memory_order_relaxed);
     return;
   }
+  g_gateway_runtime_counters.data_frames_received.fetch_add(1, std::memory_order_relaxed);
   if (g_gateway_debug) {
     debug_message("[gateway] data fd=%d cid=%s\n", fd, msg["cid"].get_ref<const std::string &>().c_str());
   }
   session_id = msg["cid"].get<std::string>();
   if (session_id.empty()) {
+    g_gateway_runtime_counters.data_frames_rejected.fetch_add(1, std::memory_order_relaxed);
     return;
   }
   sess = gateway_find_session(session_id.c_str());
   user = sess ? sess->user_ob : nullptr;
   if (!gateway_object_valid_local(user)) {
+    g_gateway_runtime_counters.data_frames_rejected.fetch_add(1, std::memory_order_relaxed);
     return;
   }
   sess->last_active = get_current_time();
@@ -326,6 +374,7 @@ void gateway_handle_data(int fd, const nlohmann::json &msg) {
     user->interactive->last_time = sess->last_active;
   }
   data_sv = json_to_gateway_svalue(msg["data"]);
+  g_gateway_runtime_counters.data_frames_applied.fetch_add(1, std::memory_order_relaxed);
   gateway_apply_receive(user, &data_sv);
   free_svalue(&data_sv, "gateway_data");
 }
@@ -687,25 +736,31 @@ int gateway_send_raw_to_fd(int fd, const char *data, size_t len) {
   auto *output = static_cast<evbuffer *>(nullptr);
 
   if (!data || len == 0 || len > g_gateway_max_packet_size || it == g_gateway_masters.end()) {
+    g_gateway_runtime_counters.raw_writes_failed.fetch_add(1, std::memory_order_relaxed);
     return 0;
   }
   if (!it->second || !it->second->bev || it->second->closing) {
+    g_gateway_runtime_counters.raw_writes_failed.fetch_add(1, std::memory_order_relaxed);
     return 0;
   }
 
   output = bufferevent_get_output(it->second->bev);
   if (!output) {
+    g_gateway_runtime_counters.raw_writes_failed.fetch_add(1, std::memory_order_relaxed);
     return 0;
   }
 
   net_len = htonl(static_cast<uint32_t>(len));
   if (evbuffer_add(output, &net_len, sizeof(net_len)) != 0) {
+    g_gateway_runtime_counters.raw_writes_failed.fetch_add(1, std::memory_order_relaxed);
     return 0;
   }
   if (evbuffer_add(output, data, len) != 0) {
+    g_gateway_runtime_counters.raw_writes_failed.fetch_add(1, std::memory_order_relaxed);
     return 0;
   }
 
+  g_gateway_runtime_counters.raw_writes_sent.fetch_add(1, std::memory_order_relaxed);
   it->second->messages_sent++;
   it->second->last_active = get_current_time();
 
@@ -751,7 +806,7 @@ mapping_t *gateway_status_internal() {
   int uptime;
 
   uptime = g_gateway_started_at ? static_cast<int>(get_current_time() - g_gateway_started_at) : 0;
-  map = allocate_mapping(18);
+  map = allocate_mapping(38);
   add_mapping_pair(map, "listening", g_gateway_listener ? 1 : 0);
   add_mapping_pair(map, "port", g_gateway_listen_port);
   add_mapping_pair(map, "masters", static_cast<int>(g_gateway_masters.size()));
@@ -761,6 +816,54 @@ mapping_t *gateway_status_internal() {
   add_mapping_pair(map, "session_fifo_enqueued", static_cast<long>(gateway_session_fifo_enqueued_total()));
   add_mapping_pair(map, "session_fifo_flushed", static_cast<long>(gateway_session_fifo_flushed_total()));
   add_mapping_pair(map, "session_fifo_rejected", static_cast<long>(gateway_session_fifo_rejected_total()));
+  add_mapping_pair(map, "gateway_data_frames_received",
+                   static_cast<long>(g_gateway_runtime_counters.data_frames_received.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_data_frames_applied",
+                   static_cast<long>(g_gateway_runtime_counters.data_frames_applied.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_data_frames_rejected",
+                   static_cast<long>(g_gateway_runtime_counters.data_frames_rejected.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_receive_tasks_enqueued",
+      static_cast<long>(g_gateway_runtime_counters.receive_tasks_enqueued.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_receive_tasks_dispatched",
+      static_cast<long>(g_gateway_runtime_counters.receive_tasks_dispatched.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_receive_tasks_rejected",
+      static_cast<long>(g_gateway_runtime_counters.receive_tasks_rejected.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_command_callbacks",
+                   static_cast<long>(g_gateway_runtime_counters.command_callbacks.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_command_tasks_enqueued",
+      static_cast<long>(g_gateway_runtime_counters.command_tasks_enqueued.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_command_tasks_rejected",
+      static_cast<long>(g_gateway_runtime_counters.command_tasks_rejected.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_command_tasks_rejected_pending",
+      static_cast<long>(g_gateway_runtime_counters.command_tasks_rejected_pending.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_command_tasks_finished",
+      static_cast<long>(g_gateway_runtime_counters.command_tasks_finished.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_command_tasks_stale",
+                   static_cast<long>(g_gateway_runtime_counters.command_tasks_stale.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_command_tasks_cleared",
+      static_cast<long>(g_gateway_runtime_counters.command_tasks_cleared.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_command_pending_sessions", gateway_session_command_pending_count());
+  add_mapping_pair(
+      map, "gateway_output_fifo_enqueued",
+      static_cast<long>(g_gateway_runtime_counters.output_fifo_enqueued.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_output_fifo_flushed",
+      static_cast<long>(g_gateway_runtime_counters.output_fifo_flushed.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_output_fifo_rejected",
+      static_cast<long>(g_gateway_runtime_counters.output_fifo_rejected.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_raw_writes_sent",
+                   static_cast<long>(g_gateway_runtime_counters.raw_writes_sent.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_raw_writes_failed",
+                   static_cast<long>(g_gateway_runtime_counters.raw_writes_failed.load(std::memory_order_relaxed)));
   add_mapping_string(map, "gateway_io_boundary", "main_thread_io_adapter");
   add_mapping_pair(map, "debug", g_gateway_debug);
   add_mapping_pair(map, "max_packet_size", static_cast<LPC_INT>(g_gateway_max_packet_size));

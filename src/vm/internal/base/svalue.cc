@@ -34,10 +34,14 @@ void assign_svalue_no_free(svalue_t *to, svalue_t *from) {
 
   if (from->type == T_STRING) {
     if (from->subtype & STRING_COUNTED) {
-      INC_COUNTED_REF(to->u.string);
-      md_record_ref_journal(PTR_TO_NODET(to->u.string), true, MSTR_REF(to->u.string), __CURRENT_FILE_LINE__);
-      ADD_STRING(MSTR_SIZE(to->u.string));
-      NDBG(BLOCK(to->u.string));
+      if (from->subtype & STRING_HASHED) {
+        ref_string(to->u.string);
+      } else {
+        INC_COUNTED_REF(to->u.string);
+        md_record_ref_journal(PTR_TO_NODET(to->u.string), true, MSTR_REF(to->u.string), __CURRENT_FILE_LINE__);
+        ADD_STRING(MSTR_SIZE(to->u.string));
+        NDBG(BLOCK(to->u.string));
+      }
     }
   } else if (from->type & T_REFED) {
     if (from->type == T_OBJECT) {
@@ -83,6 +87,11 @@ void int_free_svalue(svalue_t *v)
     const char *str = v->u.string;
 
     if (v->subtype & STRING_COUNTED) {
+      if (v->subtype & STRING_HASHED) {
+        free_string(str);
+        v->type |= T_FREED;
+        return;
+      }
       int size = MSTR_SIZE(str);
       if (DEC_COUNTED_REF(str)) {
 #ifdef DEBUGMALLOC_EXTENSIONS
