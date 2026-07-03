@@ -36,6 +36,28 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> output_fifo_rejected{0};
   std::atomic<uint64_t> raw_writes_sent{0};
   std::atomic<uint64_t> raw_writes_failed{0};
+  std::atomic<uint64_t> main_drain_runs{0};
+  std::atomic<uint64_t> main_drain_tasks_total{0};
+  std::atomic<uint64_t> main_drain_tasks_max{0};
+  std::atomic<uint64_t> main_drain_budget_hits{0};
+  std::atomic<uint64_t> receive_decode_ns_total{0};
+  std::atomic<uint64_t> receive_decode_ns_max{0};
+  std::atomic<uint64_t> receive_decode_samples{0};
+  std::atomic<uint64_t> receive_payload_copy_ns_total{0};
+  std::atomic<uint64_t> receive_payload_copy_ns_max{0};
+  std::atomic<uint64_t> receive_payload_copy_samples{0};
+  std::atomic<uint64_t> receive_enqueue_to_dispatch_ns_total{0};
+  std::atomic<uint64_t> receive_enqueue_to_dispatch_ns_max{0};
+  std::atomic<uint64_t> receive_enqueue_to_dispatch_samples{0};
+  std::atomic<uint64_t> receive_apply_ns_total{0};
+  std::atomic<uint64_t> receive_apply_ns_max{0};
+  std::atomic<uint64_t> receive_apply_samples{0};
+  std::atomic<uint64_t> command_enqueue_to_dispatch_ns_total{0};
+  std::atomic<uint64_t> command_enqueue_to_dispatch_ns_max{0};
+  std::atomic<uint64_t> command_enqueue_to_dispatch_samples{0};
+  std::atomic<uint64_t> command_execute_ns_total{0};
+  std::atomic<uint64_t> command_execute_ns_max{0};
+  std::atomic<uint64_t> command_execute_samples{0};
 };
 
 extern GatewayRuntimeCounters g_gateway_runtime_counters;

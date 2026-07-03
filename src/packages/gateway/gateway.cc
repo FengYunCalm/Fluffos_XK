@@ -21,6 +21,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <cstring>
 #include <ctime>
 #include <memory>
@@ -41,7 +42,7 @@ constexpr int kGatewayDefaultMaxMasters = 16;
 constexpr int kGatewayDefaultHeartbeatInterval = 15;
 constexpr int kGatewayDefaultHeartbeatTimeout = 45;
 constexpr int kGatewayMaxJsonDepth = 20;
-constexpr int kGatewayDeferredMainDrainBudget = 16;
+constexpr int kGatewayDeferredMainDrainBudget = 64;
 
 evconnlistener *g_gateway_listener = nullptr;
 event *g_gateway_heartbeat_timer = nullptr;
@@ -64,6 +65,53 @@ bool gateway_object_valid_local(object_t *ob) {
   return ob && !(ob->flags & O_DESTRUCTED) && ob->obname && ob->obname[0] != '\0';
 }
 
+uint64_t gateway_now_ns() {
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+}
+
+void gateway_record_max(std::atomic<uint64_t> &counter, uint64_t value) {
+  auto current = counter.load(std::memory_order_relaxed);
+  while (value > current && !counter.compare_exchange_weak(current, value, std::memory_order_relaxed)) {
+  }
+}
+
+void gateway_record_latency(std::atomic<uint64_t> &total, std::atomic<uint64_t> &max,
+                            std::atomic<uint64_t> &samples, uint64_t elapsed_ns) {
+  total.fetch_add(elapsed_ns, std::memory_order_relaxed);
+  samples.fetch_add(1, std::memory_order_relaxed);
+  gateway_record_max(max, elapsed_ns);
+}
+
+long gateway_avg_us(const std::atomic<uint64_t> &total, const std::atomic<uint64_t> &samples) {
+  auto sample_count = samples.load(std::memory_order_relaxed);
+  if (sample_count == 0) {
+    return 0;
+  }
+  return static_cast<long>((total.load(std::memory_order_relaxed) / sample_count) / 1000);
+}
+
+long gateway_max_us(const std::atomic<uint64_t> &max) {
+  return static_cast<long>(max.load(std::memory_order_relaxed) / 1000);
+}
+
+void gateway_record_main_drain(int drained, int budget) {
+  g_gateway_runtime_counters.main_drain_runs.fetch_add(1, std::memory_order_relaxed);
+  g_gateway_runtime_counters.main_drain_tasks_total.fetch_add(static_cast<uint64_t>(drained),
+                                                              std::memory_order_relaxed);
+  gateway_record_max(g_gateway_runtime_counters.main_drain_tasks_max, static_cast<uint64_t>(drained));
+  if (drained >= budget) {
+    g_gateway_runtime_counters.main_drain_budget_hits.fetch_add(1, std::memory_order_relaxed);
+  }
+}
+
+int gateway_drain_owner_main_tasks_now(int budget) {
+  auto drained = vm_owner_drain_main_tasks(budget);
+  gateway_record_main_drain(drained, budget);
+  return drained;
+}
+
 std::shared_ptr<svalue_t> gateway_copy_svalue(svalue_t *value, const char *tag) {
   if (!value) {
     return nullptr;
@@ -84,7 +132,8 @@ void gateway_drain_owner_main_tasks_later() {
   g_gateway_main_drain_scheduled = true;
   add_walltime_event(std::chrono::milliseconds(0), [] {
     g_gateway_main_drain_scheduled = false;
-    if (vm_owner_drain_main_tasks(kGatewayDeferredMainDrainBudget) >= kGatewayDeferredMainDrainBudget) {
+    auto drained = gateway_drain_owner_main_tasks_now(kGatewayDeferredMainDrainBudget);
+    if (drained >= kGatewayDeferredMainDrainBudget) {
       gateway_drain_owner_main_tasks_later();
     }
   });
@@ -96,12 +145,22 @@ void gateway_apply_receive(object_t *user, svalue_t *data_sv) {
     return;
   }
 
+  auto copy_started_at = gateway_now_ns();
   auto payload = gateway_copy_svalue(data_sv, "gateway_receive_payload");
+  gateway_record_latency(g_gateway_runtime_counters.receive_payload_copy_ns_total,
+                         g_gateway_runtime_counters.receive_payload_copy_ns_max,
+                         g_gateway_runtime_counters.receive_payload_copy_samples,
+                         gateway_now_ns() - copy_started_at);
 
-  if (vm_owner_enqueue_main_task(user, "gateway", "gateway_receive", [user, payload] {
+  auto enqueued_at = gateway_now_ns();
+  if (vm_owner_enqueue_main_task(user, "gateway", "gateway_receive", [user, payload, enqueued_at] {
         if (!gateway_object_valid_local(user)) {
           return;
         }
+        gateway_record_latency(g_gateway_runtime_counters.receive_enqueue_to_dispatch_ns_total,
+                               g_gateway_runtime_counters.receive_enqueue_to_dispatch_ns_max,
+                               g_gateway_runtime_counters.receive_enqueue_to_dispatch_samples,
+                               gateway_now_ns() - enqueued_at);
         save_command_giver(user);
         {
           VMCurrentInteractiveScope interactive_scope(vm_context(), user);
@@ -110,12 +169,20 @@ void gateway_apply_receive(object_t *user, svalue_t *data_sv) {
           g_gateway_runtime_counters.receive_tasks_dispatched.fetch_add(1, std::memory_order_relaxed);
           set_eval(max_eval_cost);
           push_svalue(payload.get());
+          auto apply_started_at = gateway_now_ns();
           safe_apply("gateway_receive", user, 1, ORIGIN_DRIVER);
+          gateway_record_latency(g_gateway_runtime_counters.receive_apply_ns_total,
+                                 g_gateway_runtime_counters.receive_apply_ns_max,
+                                 g_gateway_runtime_counters.receive_apply_samples,
+                                 gateway_now_ns() - apply_started_at);
         }
         restore_command_giver();
       }, nullptr, VM_OWNER_MAIN_TASK_IO_ADAPTER) != 0) {
     g_gateway_runtime_counters.receive_tasks_enqueued.fetch_add(1, std::memory_order_relaxed);
-    gateway_drain_owner_main_tasks_later();
+    auto drained = gateway_drain_owner_main_tasks_now(kGatewayDeferredMainDrainBudget);
+    if (drained == 0 || drained >= kGatewayDeferredMainDrainBudget) {
+      gateway_drain_owner_main_tasks_later();
+    }
   } else {
     g_gateway_runtime_counters.receive_tasks_rejected.fetch_add(1, std::memory_order_relaxed);
   }
@@ -259,6 +326,20 @@ void gateway_send_json_to_fd(int fd, const nlohmann::json &payload) {
   gateway_send_raw_to_fd(fd, encoded.c_str(), encoded.size());
 }
 
+bool gateway_status_to_json(nlohmann::json *out) {
+  if (!out) {
+    return false;
+  }
+
+  auto *status = gateway_status_internal();
+  svalue_t status_sv = {};
+  status_sv.type = T_MAPPING;
+  status_sv.u.map = status;
+  auto ok = gateway_svalue_to_json_impl(&status_sv, out, 0);
+  free_mapping(status);
+  return ok;
+}
+
 void gateway_remove_master(int fd);
 
 void gateway_handle_heartbeat(int fd) {
@@ -336,7 +417,10 @@ void gateway_handle_login(int fd, const nlohmann::json &msg) {
                                                                    ip.c_str(), port, fd);
                                  },
                                  nullptr, VM_OWNER_MAIN_TASK_IO_ADAPTER) != 0) {
-    gateway_drain_owner_main_tasks_later();
+    auto drained = gateway_drain_owner_main_tasks_now(kGatewayDeferredMainDrainBudget);
+    if (drained == 0 || drained >= kGatewayDeferredMainDrainBudget) {
+      gateway_drain_owner_main_tasks_later();
+    }
   }
 
   if (has_data) {
@@ -373,7 +457,14 @@ void gateway_handle_data(int fd, const nlohmann::json &msg) {
   if (user->interactive) {
     user->interactive->last_time = sess->last_active;
   }
-  data_sv = json_to_gateway_svalue(msg["data"]);
+  {
+    auto decode_started_at = gateway_now_ns();
+    data_sv = json_to_gateway_svalue(msg["data"]);
+    gateway_record_latency(g_gateway_runtime_counters.receive_decode_ns_total,
+                           g_gateway_runtime_counters.receive_decode_ns_max,
+                           g_gateway_runtime_counters.receive_decode_samples,
+                           gateway_now_ns() - decode_started_at);
+  }
   g_gateway_runtime_counters.data_frames_applied.fetch_add(1, std::memory_order_relaxed);
   gateway_apply_receive(user, &data_sv);
   free_svalue(&data_sv, "gateway_data");
@@ -424,6 +515,26 @@ void gateway_handle_sys(int fd, const nlohmann::json &msg) {
     };
     if (msg.contains("ts")) {
       response["ts"] = msg["ts"];
+    }
+    nlohmann::json status;
+    if (gateway_status_to_json(&status)) {
+      response["data"] = std::move(status);
+    }
+    gateway_send_json_to_fd(fd, response);
+    return;
+  }
+
+  if (action == "status") {
+    nlohmann::json response = {
+        {"type", "sys"},
+        {"action", "status"},
+    };
+    if (msg.contains("ts")) {
+      response["ts"] = msg["ts"];
+    }
+    nlohmann::json status;
+    if (gateway_status_to_json(&status)) {
+      response["data"] = std::move(status);
     }
     gateway_send_json_to_fd(fd, response);
     return;
@@ -806,7 +917,7 @@ mapping_t *gateway_status_internal() {
   int uptime;
 
   uptime = g_gateway_started_at ? static_cast<int>(get_current_time() - g_gateway_started_at) : 0;
-  map = allocate_mapping(38);
+  map = allocate_mapping(72);
   add_mapping_pair(map, "listening", g_gateway_listener ? 1 : 0);
   add_mapping_pair(map, "port", g_gateway_listen_port);
   add_mapping_pair(map, "masters", static_cast<int>(g_gateway_masters.size()));
@@ -864,6 +975,67 @@ mapping_t *gateway_status_internal() {
                    static_cast<long>(g_gateway_runtime_counters.raw_writes_sent.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_raw_writes_failed",
                    static_cast<long>(g_gateway_runtime_counters.raw_writes_failed.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_main_drain_runs",
+                   static_cast<long>(g_gateway_runtime_counters.main_drain_runs.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_main_drain_tasks_total",
+      static_cast<long>(g_gateway_runtime_counters.main_drain_tasks_total.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_main_drain_tasks_max",
+      static_cast<long>(g_gateway_runtime_counters.main_drain_tasks_max.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_main_drain_budget_hits",
+      static_cast<long>(g_gateway_runtime_counters.main_drain_budget_hits.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_receive_decode_samples",
+      static_cast<long>(g_gateway_runtime_counters.receive_decode_samples.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_receive_decode_avg_us",
+                   gateway_avg_us(g_gateway_runtime_counters.receive_decode_ns_total,
+                                  g_gateway_runtime_counters.receive_decode_samples));
+  add_mapping_pair(map, "gateway_receive_decode_max_us",
+                   gateway_max_us(g_gateway_runtime_counters.receive_decode_ns_max));
+  add_mapping_pair(
+      map, "gateway_receive_payload_copy_samples",
+      static_cast<long>(g_gateway_runtime_counters.receive_payload_copy_samples.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_receive_payload_copy_avg_us",
+                   gateway_avg_us(g_gateway_runtime_counters.receive_payload_copy_ns_total,
+                                  g_gateway_runtime_counters.receive_payload_copy_samples));
+  add_mapping_pair(map, "gateway_receive_payload_copy_max_us",
+                   gateway_max_us(g_gateway_runtime_counters.receive_payload_copy_ns_max));
+  add_mapping_pair(
+      map, "gateway_receive_enqueue_to_dispatch_samples",
+      static_cast<long>(
+          g_gateway_runtime_counters.receive_enqueue_to_dispatch_samples.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_receive_enqueue_to_dispatch_avg_us",
+                   gateway_avg_us(g_gateway_runtime_counters.receive_enqueue_to_dispatch_ns_total,
+                                  g_gateway_runtime_counters.receive_enqueue_to_dispatch_samples));
+  add_mapping_pair(map, "gateway_receive_enqueue_to_dispatch_max_us",
+                   gateway_max_us(g_gateway_runtime_counters.receive_enqueue_to_dispatch_ns_max));
+  add_mapping_pair(
+      map, "gateway_receive_apply_samples",
+      static_cast<long>(g_gateway_runtime_counters.receive_apply_samples.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_receive_apply_avg_us",
+                   gateway_avg_us(g_gateway_runtime_counters.receive_apply_ns_total,
+                                  g_gateway_runtime_counters.receive_apply_samples));
+  add_mapping_pair(map, "gateway_receive_apply_max_us",
+                   gateway_max_us(g_gateway_runtime_counters.receive_apply_ns_max));
+  add_mapping_pair(
+      map, "gateway_command_enqueue_to_dispatch_samples",
+      static_cast<long>(
+          g_gateway_runtime_counters.command_enqueue_to_dispatch_samples.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_command_enqueue_to_dispatch_avg_us",
+                   gateway_avg_us(g_gateway_runtime_counters.command_enqueue_to_dispatch_ns_total,
+                                  g_gateway_runtime_counters.command_enqueue_to_dispatch_samples));
+  add_mapping_pair(map, "gateway_command_enqueue_to_dispatch_max_us",
+                   gateway_max_us(g_gateway_runtime_counters.command_enqueue_to_dispatch_ns_max));
+  add_mapping_pair(
+      map, "gateway_command_execute_samples",
+      static_cast<long>(g_gateway_runtime_counters.command_execute_samples.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_command_execute_avg_us",
+                   gateway_avg_us(g_gateway_runtime_counters.command_execute_ns_total,
+                                  g_gateway_runtime_counters.command_execute_samples));
+  add_mapping_pair(map, "gateway_command_execute_max_us",
+                   gateway_max_us(g_gateway_runtime_counters.command_execute_ns_max));
   add_mapping_string(map, "gateway_io_boundary", "main_thread_io_adapter");
   add_mapping_pair(map, "debug", g_gateway_debug);
   add_mapping_pair(map, "max_packet_size", static_cast<LPC_INT>(g_gateway_max_packet_size));

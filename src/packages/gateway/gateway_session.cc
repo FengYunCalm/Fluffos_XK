@@ -12,6 +12,7 @@
 #include <event2/event.h>
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <cstdarg>
 #include <cstdio>
 #include <memory>
@@ -27,7 +28,26 @@ std::unordered_map<std::string, std::unique_ptr<GatewaySession>> g_gateway_sessi
 std::unordered_map<object_t *, GatewaySession *> g_gateway_obj_to_session;
 constexpr const char *kGatewayCommandExecutorActivationBlocker =
     "interactive_command_requires_main_thread_io_adapter";
-constexpr int kGatewayCommandMainDrainBudget = 4;
+constexpr int kGatewayCommandMainDrainBudget = 16;
+
+uint64_t gateway_session_now_ns() {
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+}
+
+void gateway_session_record_max(std::atomic<uint64_t> &counter, uint64_t value) {
+  auto current = counter.load(std::memory_order_relaxed);
+  while (value > current && !counter.compare_exchange_weak(current, value, std::memory_order_relaxed)) {
+  }
+}
+
+void gateway_session_record_latency(std::atomic<uint64_t> &total, std::atomic<uint64_t> &max,
+                                    std::atomic<uint64_t> &samples, uint64_t elapsed_ns) {
+  total.fetch_add(elapsed_ns, std::memory_order_relaxed);
+  samples.fetch_add(1, std::memory_order_relaxed);
+  gateway_session_record_max(max, elapsed_ns);
+}
 
 class GatewayControlledLpcScope {
  public:
@@ -267,7 +287,14 @@ void gateway_command_callback(evutil_socket_t /*fd*/, short /*what*/, void *arg)
   if (user->ob && !(user->ob->flags & O_DESTRUCTED)) {
     auto task_id = gateway_enqueue_pending_command_internal(user->ob);
     if (task_id != 0) {
-      vm_owner_drain_main_tasks(kGatewayCommandMainDrainBudget);
+      auto drained = vm_owner_drain_main_tasks(kGatewayCommandMainDrainBudget);
+      g_gateway_runtime_counters.main_drain_runs.fetch_add(1, std::memory_order_relaxed);
+      g_gateway_runtime_counters.main_drain_tasks_total.fetch_add(static_cast<uint64_t>(drained),
+                                                                  std::memory_order_relaxed);
+      gateway_session_record_max(g_gateway_runtime_counters.main_drain_tasks_max, static_cast<uint64_t>(drained));
+      if (drained >= kGatewayCommandMainDrainBudget) {
+        g_gateway_runtime_counters.main_drain_budget_hits.fetch_add(1, std::memory_order_relaxed);
+      }
     }
   } else {
     set_eval(max_eval_cost);
@@ -520,8 +547,13 @@ uint64_t gateway_enqueue_pending_command_internal(object_t *user) {
    * execution is fully detached from interactive/session objects.
    */
   auto main_task_policy = VM_OWNER_MAIN_TASK_IO_ADAPTER;
+  auto enqueued_at = gateway_session_now_ns();
   auto task_id = vm_owner_enqueue_main_task_with_payload(
-      user, "gateway_command_execute", "process_user_command", "gateway_command_input", &payload, [user, session_id, command_snapshot] {
+      user, "gateway_command_execute", "process_user_command", "gateway_command_input", &payload, [user, session_id, command_snapshot, enqueued_at] {
+        gateway_session_record_latency(g_gateway_runtime_counters.command_enqueue_to_dispatch_ns_total,
+                                       g_gateway_runtime_counters.command_enqueue_to_dispatch_ns_max,
+                                       g_gateway_runtime_counters.command_enqueue_to_dispatch_samples,
+                                       gateway_session_now_ns() - enqueued_at);
         auto *active_user = resolve_active_session_owner(session_id.c_str(), user);
         auto *active_ip = active_user ? active_user->interactive : nullptr;
         if (!gateway_executor_session_current(active_user, active_ip)) {
@@ -533,7 +565,12 @@ uint64_t gateway_enqueue_pending_command_internal(object_t *user) {
           return;
         }
         set_eval(max_eval_cost);
+        auto execute_started_at = gateway_session_now_ns();
         process_user_command_snapshot(active_ip, command_snapshot.c_str(), command_snapshot.size());
+        gateway_session_record_latency(g_gateway_runtime_counters.command_execute_ns_total,
+                                       g_gateway_runtime_counters.command_execute_ns_max,
+                                       g_gateway_runtime_counters.command_execute_samples,
+                                       gateway_session_now_ns() - execute_started_at);
         gateway_finish_command_task(session_id, active_user);
         vm_context_set_current_interactive(vm_context(), nullptr);
       }, [session_id] { gateway_clear_command_task_pending(session_id); },
@@ -557,7 +594,14 @@ int gateway_process_pending_command_internal(object_t *user) {
     return 0;
   }
   gateway_command_callback(0, 0, user->interactive);
-  vm_owner_drain_main_tasks(kGatewayCommandMainDrainBudget);
+  auto drained = vm_owner_drain_main_tasks(kGatewayCommandMainDrainBudget);
+  g_gateway_runtime_counters.main_drain_runs.fetch_add(1, std::memory_order_relaxed);
+  g_gateway_runtime_counters.main_drain_tasks_total.fetch_add(static_cast<uint64_t>(drained),
+                                                              std::memory_order_relaxed);
+  gateway_session_record_max(g_gateway_runtime_counters.main_drain_tasks_max, static_cast<uint64_t>(drained));
+  if (drained >= kGatewayCommandMainDrainBudget) {
+    g_gateway_runtime_counters.main_drain_budget_hits.fetch_add(1, std::memory_order_relaxed);
+  }
   return 1;
 }
 

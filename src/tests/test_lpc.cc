@@ -271,6 +271,28 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_rejected"), 0);
   ASSERT_GE(mapping_number(status, "gateway_raw_writes_sent"), 0);
   ASSERT_GE(mapping_number(status, "gateway_raw_writes_failed"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_runs"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_tasks_total"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_tasks_max"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_budget_hits"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_decode_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_decode_avg_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_decode_max_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_payload_copy_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_payload_copy_avg_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_payload_copy_max_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_enqueue_to_dispatch_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_enqueue_to_dispatch_avg_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_enqueue_to_dispatch_max_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_apply_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_apply_avg_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_apply_max_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_enqueue_to_dispatch_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_enqueue_to_dispatch_avg_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_enqueue_to_dispatch_max_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_execute_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_execute_avg_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_execute_max_us"), 0);
   ASSERT_STREQ(mapping_string(status, "gateway_io_boundary"), "main_thread_io_adapter");
   free_mapping(status);
 }
@@ -295,12 +317,11 @@ TEST_F(DriverTest, TestGatewayLoginRunsThroughOwnerMainQueue) {
   safe_apply("set_test_login_ob", master_ob, 1, ORIGIN_DRIVER);
   ASSERT_TRUE(gateway_dispatch_message_for_test(
       -1, R"({"type":"login","cid":"gw-test-login-main-queue","data":{"ip":"127.0.0.1","port":6040}})"));
-  ASSERT_EQ(gateway_find_session(session_id), nullptr);
-  ASSERT_GE(vm_owner_drain_main_tasks(1), 1);
 
   auto* sess = gateway_find_session(session_id);
   ASSERT_NE(sess, nullptr);
   ASSERT_NE(sess->user_ob, nullptr);
+  ASSERT_EQ(vm_owner_drain_main_tasks(1), 0);
   safe_apply("reset_test_login_ob", master_ob, 0, ORIGIN_DRIVER);
   ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
 }
@@ -314,10 +335,9 @@ TEST_F(DriverTest, TestGatewayLoginMainQueueDropsStaleMaster) {
   safe_apply("set_test_login_ob", master_ob, 1, ORIGIN_DRIVER);
   ASSERT_TRUE(gateway_dispatch_message_for_test(
       4040, R"({"type":"login","cid":"gw-test-login-stale-master","data":{"ip":"127.0.0.1","port":6040}})"));
-  ASSERT_EQ(gateway_find_session(session_id), nullptr);
-  ASSERT_GE(vm_owner_drain_main_tasks(1), 1);
 
   ASSERT_EQ(gateway_find_session(session_id), nullptr);
+  ASSERT_EQ(vm_owner_drain_main_tasks(1), 0);
   safe_apply("reset_test_login_ob", master_ob, 0, ORIGIN_DRIVER);
 }
 
@@ -4645,6 +4665,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_GE(mapping_number(status, "gateway_raw_writes_sent"), 0);
     ASSERT_EQ(mapping_number(status, "gateway_io_adapter_only_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "gateway_io_boundary"), "main_thread_io_adapter");
+    ASSERT_EQ(mapping_number(status, "gateway_low_overhead_latency_probe_ready"), 1);
+    ASSERT_STREQ(mapping_string(status, "gateway_latency_probe_source"), "gateway_status_internal");
+    ASSERT_STREQ(mapping_string(status, "gateway_latency_probe_fields"),
+                 "receive_decode,receive_payload_copy,receive_enqueue_to_dispatch,receive_apply,"
+                 "command_enqueue_to_dispatch,command_execute,main_drain");
     ASSERT_EQ(mapping_number(status, "callback_payload_strict_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_callback_payload_strict_diagnostics_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_callback_payload_policy_schema"),
@@ -5208,6 +5233,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_EQ(mapping_number(boundary_contract, "session_fifo_contract_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "gateway_io_adapter_only_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "gateway_io_boundary"), "main_thread_io_adapter");
+    ASSERT_EQ(mapping_number(boundary_contract, "gateway_low_overhead_latency_probe_ready"), 1);
+    ASSERT_STREQ(mapping_string(boundary_contract, "gateway_latency_probe_source"), "gateway_status_internal");
+    ASSERT_STREQ(mapping_string(boundary_contract, "gateway_latency_probe_fields"),
+                 "receive_decode,receive_payload_copy,receive_enqueue_to_dispatch,receive_apply,"
+                 "command_enqueue_to_dispatch,command_execute,main_drain");
     ASSERT_EQ(mapping_number(boundary_contract, "callback_payload_strict_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "owner_callback_payload_strict_diagnostics_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_payload_policy_schema"),
@@ -10313,7 +10343,7 @@ TEST_F(DriverTest, TestGatewayReceiveRunsThroughOwnerMainQueue) {
 
   ASSERT_TRUE(gateway_dispatch_message_for_test(
       -1, R"({"type":"data","cid":"gw-test-receive","data":{"cmd":"look","seq":7}})"));
-  ASSERT_GE(vm_owner_drain_main_tasks(1), 1);
+  ASSERT_EQ(vm_owner_drain_main_tasks(1), 0);
 
   auto *payload = call_lpc_method(ob, "query_last_gateway_payload");
   ASSERT_NE(payload, nullptr);

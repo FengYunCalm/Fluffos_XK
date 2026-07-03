@@ -573,6 +573,11 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "session_fifo_contract_ready", 1);
   add_mapping_pair(map, "gateway_io_adapter_only_ready", 1);
   add_mapping_string(map, "gateway_io_boundary", "main_thread_io_adapter");
+  add_mapping_pair(map, "gateway_low_overhead_latency_probe_ready", 1);
+  add_mapping_string(map, "gateway_latency_probe_source", "gateway_status_internal");
+  add_mapping_string(map, "gateway_latency_probe_fields",
+                     "receive_decode,receive_payload_copy,receive_enqueue_to_dispatch,receive_apply,"
+                     "command_enqueue_to_dispatch,command_execute,main_drain");
   add_mapping_pair(map, "callback_payload_strict_ready", 1);
   add_mapping_pair(map, "service_shard_executor_ready", 1);
   add_mapping_pair(map, "domain_task_registry_mudlib_aligned", 1);
@@ -1589,6 +1594,11 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_pair(contract, "session_fifo_contract_ready", 1);
   add_mapping_pair(contract, "gateway_io_adapter_only_ready", 1);
   add_mapping_string(contract, "gateway_io_boundary", "main_thread_io_adapter");
+  add_mapping_pair(contract, "gateway_low_overhead_latency_probe_ready", 1);
+  add_mapping_string(contract, "gateway_latency_probe_source", "gateway_status_internal");
+  add_mapping_string(contract, "gateway_latency_probe_fields",
+                     "receive_decode,receive_payload_copy,receive_enqueue_to_dispatch,receive_apply,"
+                     "command_enqueue_to_dispatch,command_execute,main_drain");
   add_mapping_pair(contract, "callback_payload_strict_ready", 1);
   add_mapping_pair(contract, "service_shard_executor_ready", 1);
   add_mapping_pair(contract, "domain_task_registry_mudlib_aligned", 1);
