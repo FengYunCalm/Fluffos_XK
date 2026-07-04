@@ -117,11 +117,41 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def git_commit(source: Path) -> str:
+def source_metadata(source: Path) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "source_state": "non_git",
+        "commit": "",
+        "branch": "",
+        "dirty": None,
+        "commit_error": "",
+    }
     try:
-        return run_cmd(["git", "rev-parse", "HEAD"], source).strip()
+        inside = run_cmd(["git", "rev-parse", "--is-inside-work-tree"], source, timeout=10).strip()
+    except Exception as exc:  # noqa: BLE001 - preserve source diagnostics in JSON.
+        metadata["commit_error"] = f"{type(exc).__name__}: {exc}"
+        return metadata
+    if inside != "true":
+        metadata["commit_error"] = f"not a git work tree: {inside}"
+        return metadata
+    metadata["source_state"] = "git_unresolved"
+    try:
+        metadata["commit"] = run_cmd(["git", "rev-parse", "--verify", "HEAD^{commit}"], source, timeout=10).strip()
+        metadata["source_state"] = "git"
+    except Exception as exc:  # noqa: BLE001 - common for tarball imports or broken clones.
+        metadata["commit_error"] = f"{type(exc).__name__}: {exc}"
+    try:
+        metadata["branch"] = run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"], source, timeout=10).strip()
     except Exception:
-        return ""
+        metadata["branch"] = ""
+    try:
+        metadata["dirty"] = bool(run_cmd(["git", "status", "--porcelain"], source, timeout=10).strip())
+    except Exception:
+        metadata["dirty"] = None
+    return metadata
+
+
+def git_commit(source: Path) -> str:
+    return str(source_metadata(source)["commit"])
 
 
 def compiler_info() -> dict[str, str]:
@@ -299,6 +329,7 @@ def lpcc_path(build: Path) -> Path:
 
 def run_target(args: argparse.Namespace, target: Target, port: int) -> dict[str, Any]:
     target_started = time.time()
+    metadata = source_metadata(target.source)
     run_dir = args.bench_dir / "runs" / f"{target.name}-{int(time.time())}"
     run_dir.mkdir(parents=True, exist_ok=True)
     mudlib = prepare_mudlib(run_dir, port, target.config_overrides)
@@ -348,7 +379,7 @@ def run_target(args: argparse.Namespace, target: Target, port: int) -> dict[str,
         "--driver-name",
         target.name,
         "--driver-commit",
-        git_commit(target.source),
+        metadata["commit"],
         "--driver-checksum",
         sha256(driver),
         "--build-config",
@@ -393,7 +424,9 @@ def run_target(args: argparse.Namespace, target: Target, port: int) -> dict[str,
         "target": target.name,
         "requested_ref": target.ref,
         "source": str(target.source),
-        "commit": git_commit(target.source),
+        "commit": metadata["commit"],
+        "source_state": metadata["source_state"],
+        "source_metadata": metadata,
         "cmake_args": target.cmake_args,
         "runtime_config_overrides": target.config_overrides or [],
         "build_type": "Release",

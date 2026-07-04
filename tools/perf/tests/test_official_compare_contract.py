@@ -2,6 +2,7 @@ import json
 import importlib.util
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -106,6 +107,9 @@ class OfficialCompareContractTest(unittest.TestCase):
             '"driver_process_start_snapshot"',
             '"driver_process_end_snapshot"',
             '"driver_log_tail"',
+            '"source_metadata"',
+            '"source_state"',
+            '"commit_error"',
             '"runtime_config_overrides"',
             "multicore mode : off",
             "multicore mode : audit",
@@ -158,8 +162,60 @@ class OfficialCompareContractTest(unittest.TestCase):
             "official_master_common",
             "target_order",
             "portable_mudlib",
+            "source_metadata",
+            "source_state",
+            "commit_error",
         ):
             self.assertIn(token, source)
+
+    def test_source_metadata_reports_git_commit_or_unresolved_state(self):
+        spec = importlib.util.spec_from_file_location(
+            "run_official_vs_xk", OFFICIAL_COMPARE / "run_official_vs_xk.py"
+        )
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["run_official_vs_xk"] = module
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            non_git = root / "non-git"
+            non_git.mkdir()
+            self.assertEqual(module.source_metadata(non_git)["source_state"], "non_git")
+
+            empty_git = root / "empty-git"
+            empty_git.mkdir()
+            subprocess.run(["git", "init"], cwd=empty_git, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=True)
+            empty_meta = module.source_metadata(empty_git)
+            self.assertEqual(empty_meta["source_state"], "git_unresolved")
+            self.assertEqual(empty_meta["commit"], "")
+            self.assertIn("HEAD", empty_meta["commit_error"])
+
+            repo = root / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init"], cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "perf-contract@example.invalid"],
+                cwd=repo,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Perf Contract"],
+                cwd=repo,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=True,
+            )
+            (repo / "file.txt").write_text("ok\n", encoding="utf-8")
+            subprocess.run(["git", "add", "file.txt"], cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=True)
+            committed_meta = module.source_metadata(repo)
+            self.assertEqual(committed_meta["source_state"], "git")
+            self.assertEqual(len(committed_meta["commit"]), 40)
+            self.assertFalse(committed_meta["dirty"])
 
     def test_runner_and_gate_treat_empty_path_defaults_as_unset(self):
         for module_name, file_name in (

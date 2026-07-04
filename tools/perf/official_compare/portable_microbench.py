@@ -163,11 +163,41 @@ def optional_path(path: Path) -> Path | None:
     return None if str(path) in ("", ".") else path
 
 
-def git_commit(source: Path) -> str:
+def source_metadata(source: Path) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "source_state": "non_git",
+        "commit": "",
+        "branch": "",
+        "dirty": None,
+        "commit_error": "",
+    }
     try:
-        return run_cmd(["git", "rev-parse", "HEAD"], source, timeout=20).strip()
+        inside = run_cmd(["git", "rev-parse", "--is-inside-work-tree"], source, timeout=20).strip()
+    except Exception as exc:  # noqa: BLE001 - preserve source diagnostics in JSON.
+        metadata["commit_error"] = f"{type(exc).__name__}: {exc}"
+        return metadata
+    if inside != "true":
+        metadata["commit_error"] = f"not a git work tree: {inside}"
+        return metadata
+    metadata["source_state"] = "git_unresolved"
+    try:
+        metadata["commit"] = run_cmd(["git", "rev-parse", "--verify", "HEAD^{commit}"], source, timeout=20).strip()
+        metadata["source_state"] = "git"
+    except Exception as exc:  # noqa: BLE001 - common for tarball imports or broken clones.
+        metadata["commit_error"] = f"{type(exc).__name__}: {exc}"
+    try:
+        metadata["branch"] = run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"], source, timeout=20).strip()
     except Exception:
-        return ""
+        metadata["branch"] = ""
+    try:
+        metadata["dirty"] = bool(run_cmd(["git", "status", "--porcelain"], source, timeout=20).strip())
+    except Exception:
+        metadata["dirty"] = None
+    return metadata
+
+
+def git_commit(source: Path) -> str:
+    return str(source_metadata(source)["commit"])
 
 
 def driver_path(build: Path) -> Path:
@@ -288,10 +318,13 @@ def main() -> int:
     }
     failed = False
     for target in targets:
+        metadata = source_metadata(target.source)
         report["drivers"][target.name] = {
             "source": str(target.source),
             "build": str(target.build),
-            "commit": git_commit(target.source),
+            "commit": metadata["commit"],
+            "source_state": metadata["source_state"],
+            "source_metadata": metadata,
             "config_overrides": list(target.config_overrides),
             "runs": [],
         }
