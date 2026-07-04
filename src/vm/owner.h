@@ -81,6 +81,7 @@ uint64_t vm_owner_enqueue_main_task_with_payload(object_t *target, const char *t
                                                  VMOwnerMainTaskPolicy policy = VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK);
 int vm_owner_drain_main_tasks(int limit);
 uint64_t vm_owner_record_access(object_t *source, object_t *target, const char *operation);
+bool vm_owner_access_fast_bypass(object_t *source, object_t *target);
 uint64_t vm_owner_record_cross_owner_access(object_t *source, object_t *target, const char *operation);
 bool vm_owner_cross_owner_access_blocked(object_t *source, object_t *target, const char *operation);
 mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit);

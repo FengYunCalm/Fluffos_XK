@@ -53,6 +53,21 @@ class OfficialCompareContractTest(unittest.TestCase):
         ):
             self.assertIn(token, help_text)
 
+    def test_runner_records_progress_resources_and_log_tail(self):
+        source = (OFFICIAL_COMPARE / "run_official_vs_xk.py").read_text(encoding="utf-8")
+        for token in (
+            "[official_compare] configure/build target=",
+            "[official_compare] starting driver target=",
+            "[official_compare] running loadtest target=",
+            "[official_compare] finished target=",
+            '"timing"',
+            '"load_generator_resource"',
+            '"driver_process_start_snapshot"',
+            '"driver_process_end_snapshot"',
+            '"driver_log_tail"',
+        ):
+            self.assertIn(token, source)
+
     def test_portable_mudlib_contains_common_only_entrypoints(self):
         mudlib = OFFICIAL_COMPARE / "portable_mudlib"
         for relative in (

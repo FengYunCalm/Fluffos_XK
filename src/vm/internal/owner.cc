@@ -4241,7 +4241,23 @@ uint64_t vm_owner_record_access(object_t *source, object_t *target, const char *
   return access_id;
 }
 
+bool vm_owner_access_fast_bypass(object_t *source, object_t *target) {
+  if (!source || !target) {
+    return true;
+  }
+  if (source == target) {
+    return true;
+  }
+  if (!vm_multicore_audit_enabled() && !vm_multicore_enforced()) {
+    return true;
+  }
+  return false;
+}
+
 uint64_t vm_owner_record_cross_owner_access(object_t *source, object_t *target, const char *operation) {
+  if (vm_owner_access_fast_bypass(source, target)) {
+    return 0;
+  }
   if (!source || !target || std::strcmp(effective_source_owner_id(source, target), vm_owner_id(target)) == 0) {
     return 0;
   }

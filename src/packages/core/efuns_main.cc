@@ -227,9 +227,11 @@ void f__call_other() {
       error("call_other() couldn't find object '%s'.\n", arg[0].u.string);
     }
   }
-  vm_owner_record_cross_owner_access(current_object, ob, "call_other");
-  if (vm_owner_cross_owner_access_blocked(current_object, ob, "call_other")) {
-    error("call_other(): cross-owner synchronous call requires owner message/future in enforced multicore mode.\n");
+  if (!vm_owner_access_fast_bypass(current_object, ob)) {
+    vm_owner_record_cross_owner_access(current_object, ob, "call_other");
+    if (vm_owner_cross_owner_access_blocked(current_object, ob, "call_other")) {
+      error("call_other(): cross-owner synchronous call requires owner message/future in enforced multicore mode.\n");
+    }
   }
   /* Send the remaining arguments to the function. */
   if (apply(funcname, ob, num_arg - 2, ORIGIN_CALL_OTHER) == nullptr) { /* Function not found */

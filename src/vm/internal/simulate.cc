@@ -2,7 +2,10 @@
 
 #include "vm/internal/simulate.h"
 
+#include <array>
+#include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <fcntl.h>     // for O_RDONLY
 #include <stdlib.h>    // for exit
 #include <sys/stat.h>  // for load_object struct stat
@@ -62,6 +65,98 @@ void db_cleanup(void);  // FIXME
  * This one is called from HUP.
  */
 int MudOS_is_being_shut_down;
+
+namespace {
+enum class ObjectLifecycleStage : size_t {
+  kClonePrototypeLookup = 0,
+  kCloneAllocateObject,
+  kCloneAssignOwner,
+  kCloneObjectListInsert,
+  kCloneObjectStoreRegister,
+  kCloneObjectTableInsert,
+  kCloneInitObject,
+  kCloneCreate,
+  kDestructOwnerAccess,
+  kDestructNotify,
+  kDestructObjectStoreMark,
+  kDestructRemoveStack,
+  kDestructObjectTableRemove,
+  kDestructObjectListRemove,
+  kDestructHeartbeatDisable,
+  kDestructContextSync,
+  kDestructFreeObject,
+};
+
+struct ObjectLifecyclePerfCounters {
+  std::atomic<uint64_t> counts[VM_OBJECT_LIFECYCLE_PERF_STAGE_COUNT]{};
+  std::atomic<uint64_t> total_ns[VM_OBJECT_LIFECYCLE_PERF_STAGE_COUNT]{};
+};
+
+std::atomic<bool> object_lifecycle_perf_enabled{false};
+ObjectLifecyclePerfCounters object_lifecycle_perf;
+
+uint64_t object_lifecycle_now_ns() {
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   std::chrono::steady_clock::now().time_since_epoch())
+                                   .count());
+}
+
+uint64_t object_lifecycle_stage_start() {
+  return object_lifecycle_perf_enabled.load(std::memory_order_relaxed) ? object_lifecycle_now_ns() : 0;
+}
+
+void object_lifecycle_stage_record(ObjectLifecycleStage stage, uint64_t start_ns) {
+  if (start_ns == 0) {
+    return;
+  }
+  auto index = static_cast<size_t>(stage);
+  object_lifecycle_perf.counts[index].fetch_add(1, std::memory_order_relaxed);
+  object_lifecycle_perf.total_ns[index].fetch_add(object_lifecycle_now_ns() - start_ns, std::memory_order_relaxed);
+}
+}  // namespace
+
+void vm_object_lifecycle_perf_set_enabled(bool enabled) {
+  object_lifecycle_perf_enabled.store(enabled, std::memory_order_relaxed);
+}
+
+void vm_object_lifecycle_perf_reset() {
+  for (size_t i = 0; i < VM_OBJECT_LIFECYCLE_PERF_STAGE_COUNT; i++) {
+    object_lifecycle_perf.counts[i].store(0, std::memory_order_relaxed);
+    object_lifecycle_perf.total_ns[i].store(0, std::memory_order_relaxed);
+  }
+}
+
+VMObjectLifecyclePerfSnapshot vm_object_lifecycle_perf_snapshot() {
+  VMObjectLifecyclePerfSnapshot snapshot;
+  for (size_t i = 0; i < VM_OBJECT_LIFECYCLE_PERF_STAGE_COUNT; i++) {
+    snapshot.counts[i] = object_lifecycle_perf.counts[i].load(std::memory_order_relaxed);
+    snapshot.total_ns[i] = object_lifecycle_perf.total_ns[i].load(std::memory_order_relaxed);
+  }
+  return snapshot;
+}
+
+const char *vm_object_lifecycle_perf_stage_name(size_t index) {
+  static constexpr std::array<const char *, VM_OBJECT_LIFECYCLE_PERF_STAGE_COUNT> names = {
+      "clone_prototype_lookup",
+      "clone_allocate_object",
+      "clone_assign_owner",
+      "clone_object_list_insert",
+      "clone_object_store_register",
+      "clone_object_table_insert",
+      "clone_init_object",
+      "clone_create",
+      "destruct_owner_access",
+      "destruct_notify",
+      "destruct_object_store_mark",
+      "destruct_remove_stack",
+      "destruct_object_table_remove",
+      "destruct_object_list_remove",
+      "destruct_heartbeat_disable",
+      "destruct_context_sync",
+      "destruct_free_object",
+  };
+  return index < names.size() ? names[index] : "";
+}
 
 void startshutdownMudOS(int sig) { MudOS_is_being_shut_down = 1; }
 
@@ -669,10 +764,12 @@ object_t *clone_object(const char *str1, int num_arg) {
   save_command_giver(command_giver);
 
   vm_context_set_load_object_depth(vm_context(), 0);
+  auto stage_start = object_lifecycle_stage_start();
   ob = find_object(str1);
   if (ob && !object_visible(ob)) {
     ob = nullptr;
   }
+  object_lifecycle_stage_record(ObjectLifecycleStage::kClonePrototypeLookup, stage_start);
   /*
    * If the object self-destructed...
    */
@@ -700,25 +797,39 @@ object_t *clone_object(const char *str1, int num_arg) {
   if (ob->flags & O_HEART_BEAT) {
     (void)set_heart_beat(ob, 0);
   }
+  stage_start = object_lifecycle_stage_start();
   new_ob = get_empty_object(ob->prog->num_variables_total);
+  object_lifecycle_stage_record(ObjectLifecycleStage::kCloneAllocateObject, stage_start);
   SETOBNAME(new_ob, make_new_name(ob->obname));
   new_ob->flags |= (O_CLONE | (ob->flags & (O_WILL_CLEAN_UP | O_WILL_RESET)));
   new_ob->load_time = ob->load_time;
   new_ob->prog = ob->prog;
+  stage_start = object_lifecycle_stage_start();
   assign_initial_owner(new_ob, ob);
+  object_lifecycle_stage_record(ObjectLifecycleStage::kCloneAssignOwner, stage_start);
   reference_prog(ob->prog, "clone_object");
   DEBUG_CHECK(!current_object, "clone_object() from no current_object !\n");
 
+  stage_start = object_lifecycle_stage_start();
   new_ob->next_all = obj_list;
   obj_list->prev_all = new_ob;
   new_ob->prev_all = nullptr;
   obj_list = new_ob;
   vm_context_sync_object_store(vm_context());
+  object_lifecycle_stage_record(ObjectLifecycleStage::kCloneObjectListInsert, stage_start);
+  stage_start = object_lifecycle_stage_start();
   vm_object_store_register(new_ob);
+  object_lifecycle_stage_record(ObjectLifecycleStage::kCloneObjectStoreRegister, stage_start);
+  stage_start = object_lifecycle_stage_start();
   ObjectTable::instance().insert(new_ob->obname, new_ob); /* Add name to fast object lookup table */
+  object_lifecycle_stage_record(ObjectLifecycleStage::kCloneObjectTableInsert, stage_start);
+  stage_start = object_lifecycle_stage_start();
   init_object(new_ob);
+  object_lifecycle_stage_record(ObjectLifecycleStage::kCloneInitObject, stage_start);
 
+  stage_start = object_lifecycle_stage_start();
   call_create(new_ob, num_arg);
+  object_lifecycle_stage_record(ObjectLifecycleStage::kCloneCreate, stage_start);
   restore_command_giver();
   /* Never know what can happen ! :-( */
   if (new_ob->flags & O_DESTRUCTED) {
@@ -889,10 +1000,14 @@ void destruct_object(object_t *ob) {
   if (ob->flags & O_DESTRUCTED) {
     return;
   }
-  vm_owner_record_cross_owner_access(current_object, ob, "destruct");
-  if (vm_owner_cross_owner_access_blocked(current_object, ob, "destruct")) {
-    error("destruct(): cross-owner destruct requires owner message/future in enforced multicore mode.\n");
+  auto stage_start = object_lifecycle_stage_start();
+  if (!vm_owner_access_fast_bypass(current_object, ob)) {
+    vm_owner_record_cross_owner_access(current_object, ob, "destruct");
+    if (vm_owner_cross_owner_access_blocked(current_object, ob, "destruct")) {
+      error("destruct(): cross-owner destruct requires owner message/future in enforced multicore mode.\n");
+    }
   }
+  object_lifecycle_stage_record(ObjectLifecycleStage::kDestructOwnerAccess, stage_start);
 
 /*
   * Notify object that it is scheduled for destruction
@@ -901,6 +1016,7 @@ void destruct_object(object_t *ob) {
   * in the destructing() function in the mudlib.
   */
   if(ob->flags & O_NOTIFY_DESTRUCT) {
+    stage_start = object_lifecycle_stage_start();
     error_context_t econ;
     save_context(&econ) ;
     try {
@@ -910,6 +1026,7 @@ void destruct_object(object_t *ob) {
       /* condition was restored to where it was when we came in */
     }
     pop_context(&econ);
+    object_lifecycle_stage_record(ObjectLifecycleStage::kDestructNotify, stage_start);
   }
 
 #if defined(PACKAGE_SOCKETS) || defined(PACKAGE_EXTERNAL)
@@ -931,8 +1048,12 @@ void destruct_object(object_t *ob) {
   if (ob->flags & O_DESTRUCTED) {
     return;
   }
+  stage_start = object_lifecycle_stage_start();
   vm_object_store_mark_destructed(ob);
+  object_lifecycle_stage_record(ObjectLifecycleStage::kDestructObjectStoreMark, stage_start);
+  stage_start = object_lifecycle_stage_start();
   remove_object_from_stack(ob);
+  object_lifecycle_stage_record(ObjectLifecycleStage::kDestructRemoveStack, stage_start);
 /*
  * If this is the first object being shadowed by another object, then
  * destruct the whole list of shadows.
@@ -1099,7 +1220,9 @@ void destruct_object(object_t *ob) {
     free_object(&tmp_ob, "vital object reference");
     // still need ob below!
   } else {
+    stage_start = object_lifecycle_stage_start();
     ObjectTable::instance().remove(ob->obname);
+    object_lifecycle_stage_record(ObjectLifecycleStage::kDestructObjectTableRemove, stage_start);
   }
 
   /*
@@ -1107,6 +1230,7 @@ void destruct_object(object_t *ob) {
    * because an error in the above code would halt execution.
    */
   // removed = 0;
+  stage_start = object_lifecycle_stage_start();
   if (ob->prev_all) {
     ob->prev_all->next_all = ob->next_all;
     if (ob->next_all) {
@@ -1116,6 +1240,7 @@ void destruct_object(object_t *ob) {
     obj_list = ob->next_all;
     obj_list->prev_all = nullptr;
   }
+  object_lifecycle_stage_record(ObjectLifecycleStage::kDestructObjectListRemove, stage_start);
   /*
    for (pp = &obj_list; *pp; pp = &(*pp)->next_all) {
    if (*pp != ob)
@@ -1138,7 +1263,9 @@ void destruct_object(object_t *ob) {
   }
   ob->prev_all = nullptr;
   obj_list_destruct = ob;
+  stage_start = object_lifecycle_stage_start();
   set_heart_beat(ob, 0);
+  object_lifecycle_stage_record(ObjectLifecycleStage::kDestructHeartbeatDisable, stage_start);
   ob->flags |= O_DESTRUCTED;
   /* moved this here from destruct2() -- see comments in destruct2() */
   if (ob->interactive) {
@@ -1159,7 +1286,9 @@ void destruct_object(object_t *ob) {
   obj_list_dangling = ob;
   ob->prev_all = 0;
 #endif
+  stage_start = object_lifecycle_stage_start();
   vm_context_sync_object_store(vm_context());
+  object_lifecycle_stage_record(ObjectLifecycleStage::kDestructContextSync, stage_start);
 }
 
 /*
@@ -1212,7 +1341,9 @@ void destruct2(object_t *ob) {
   ob->sent = nullptr;
 #endif
 
+  auto stage_start = object_lifecycle_stage_start();
   free_object(&ob, "destruct_object");
+  object_lifecycle_stage_record(ObjectLifecycleStage::kDestructFreeObject, stage_start);
 }
 
 /*
@@ -1598,9 +1729,11 @@ void move_object(object_t *item, object_t *dest) {
   object_t **pp, *ob;
 
   auto *owner_source = current_object ? current_object : item;
-  vm_owner_record_cross_owner_access(owner_source, dest, "move_object");
-  if (vm_owner_cross_owner_access_blocked(owner_source, dest, "move_object")) {
-    error("move_object(): cross-owner move requires owner message/future in enforced multicore mode.\n");
+  if (!vm_owner_access_fast_bypass(owner_source, dest)) {
+    vm_owner_record_cross_owner_access(owner_source, dest, "move_object");
+    if (vm_owner_cross_owner_access_blocked(owner_source, dest, "move_object")) {
+      error("move_object(): cross-owner move requires owner message/future in enforced multicore mode.\n");
+    }
   }
 
   save_command_giver(command_giver);

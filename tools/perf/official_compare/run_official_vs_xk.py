@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import resource
 import shutil
 import signal
 import subprocess
@@ -42,6 +43,50 @@ def run_cmd(cmd: list[str], cwd: Path | None = None, timeout: int | None = None)
         check=True,
     )
     return result.stdout
+
+
+def child_usage_snapshot() -> dict[str, float]:
+    usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return {
+        "user_cpu_seconds": usage.ru_utime,
+        "system_cpu_seconds": usage.ru_stime,
+        "max_rss_kb": float(usage.ru_maxrss),
+    }
+
+
+def child_usage_delta(before: dict[str, float], after: dict[str, float]) -> dict[str, float]:
+    return {
+        "user_cpu_seconds": max(0.0, after["user_cpu_seconds"] - before["user_cpu_seconds"]),
+        "system_cpu_seconds": max(0.0, after["system_cpu_seconds"] - before["system_cpu_seconds"]),
+        "max_rss_kb": after["max_rss_kb"],
+    }
+
+
+def process_snapshot(pid: int) -> dict[str, Any]:
+    status_path = Path(f"/proc/{pid}/status")
+    stat_path = Path(f"/proc/{pid}/stat")
+    snapshot: dict[str, Any] = {"pid": pid, "available": False}
+    try:
+        for line in status_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith(("VmRSS:", "VmHWM:", "Threads:")):
+                key, value = line.split(":", 1)
+                snapshot[key.lower()] = value.strip()
+        stat = stat_path.read_text(encoding="utf-8", errors="replace").split()
+        ticks = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
+        snapshot["user_cpu_seconds"] = int(stat[13]) / ticks
+        snapshot["system_cpu_seconds"] = int(stat[14]) / ticks
+        snapshot["available"] = True
+    except Exception as exc:  # noqa: BLE001 - best-effort diagnostics only.
+        snapshot["error"] = f"{type(exc).__name__}: {exc}"
+    return snapshot
+
+
+def log_tail(path: Path, lines: int = 80) -> list[str]:
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return content[-lines:]
+    except Exception as exc:  # noqa: BLE001 - preserve report generation.
+        return [f"failed to read log tail: {type(exc).__name__}: {exc}"]
 
 
 def run_cmd_to_file(cmd: list[str], output: Path, timeout: int | None = None) -> str:
@@ -245,6 +290,7 @@ def lpcc_path(build: Path) -> Path:
 
 
 def run_target(args: argparse.Namespace, target: Target, port: int) -> dict[str, Any]:
+    target_started = time.time()
     run_dir = args.bench_dir / "runs" / f"{target.name}-{int(time.time())}"
     run_dir.mkdir(parents=True, exist_ok=True)
     mudlib = prepare_mudlib(run_dir, port)
@@ -252,6 +298,7 @@ def run_target(args: argparse.Namespace, target: Target, port: int) -> dict[str,
     lpcc = lpcc_path(target.build)
     log_path = run_dir / "driver.log"
     with log_path.open("w", encoding="utf-8") as log:
+        print(f"[official_compare] starting driver target={target.name} port={port} log={log_path}", flush=True)
         proc = subprocess.Popen(
             [str(driver), "etc/config"],
             cwd=str(mudlib),
@@ -261,6 +308,8 @@ def run_target(args: argparse.Namespace, target: Target, port: int) -> dict[str,
             preexec_fn=os.setsid,
         )
     time.sleep(args.driver_startup_wait)
+    driver_started = time.time()
+    driver_start_snapshot = process_snapshot(proc.pid)
     report_json = run_dir / "loadtest.json"
     command = [
         str(LOADTEST),
@@ -297,11 +346,21 @@ def run_target(args: argparse.Namespace, target: Target, port: int) -> dict[str,
     if args.sync_start:
         command.append("--sync-start")
     loadtest_status = 0
+    loadtest_started = time.time()
+    usage_before = child_usage_snapshot()
+    print(
+        f"[official_compare] running loadtest target={target.name} users={args.users} "
+        f"duration={args.duration}s ramp={args.ramp_up}s",
+        flush=True,
+    )
     try:
         run_cmd(command, timeout=int(args.duration + args.ramp_up + 120))
     except subprocess.CalledProcessError as exc:
         loadtest_status = exc.returncode
     finally:
+        usage_after = child_usage_snapshot()
+        loadtest_ended = time.time()
+        driver_end_snapshot = process_snapshot(proc.pid)
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
         except ProcessLookupError:
@@ -311,7 +370,13 @@ def run_target(args: argparse.Namespace, target: Target, port: int) -> dict[str,
         except subprocess.TimeoutExpired:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             proc.wait(timeout=10)
+    target_ended = time.time()
     report = json.loads(report_json.read_text(encoding="utf-8")) if report_json.exists() else {}
+    print(
+        f"[official_compare] finished target={target.name} loadtest_status={loadtest_status} "
+        f"driver_status={proc.returncode} elapsed={target_ended - target_started:.1f}s",
+        flush=True,
+    )
     return {
         "target": target.name,
         "requested_ref": target.ref,
@@ -326,7 +391,20 @@ def run_target(args: argparse.Namespace, target: Target, port: int) -> dict[str,
         "compiler": compiler_info(),
         "driver_exit_status": proc.returncode,
         "loadtest_exit_status": loadtest_status,
+        "timing": {
+            "target_started_at": target_started,
+            "driver_started_at": driver_started,
+            "loadtest_started_at": loadtest_started,
+            "loadtest_ended_at": loadtest_ended,
+            "target_ended_at": target_ended,
+            "target_elapsed_seconds": target_ended - target_started,
+            "loadtest_elapsed_seconds": loadtest_ended - loadtest_started,
+        },
+        "load_generator_resource": child_usage_delta(usage_before, usage_after),
+        "driver_process_start_snapshot": driver_start_snapshot,
+        "driver_process_end_snapshot": driver_end_snapshot,
         "driver_log": str(log_path),
+        "driver_log_tail": log_tail(log_path),
         "loadtest_report": str(report_json),
         "summary": report,
     }
@@ -403,8 +481,12 @@ def main() -> int:
             ),
         )
     for target in targets:
+        print(f"[official_compare] configure/build target={target.name} skip_build={args.skip_build}", flush=True)
         configure_and_build(target, args.skip_build)
-    results = [run_target(args, target, args.base_port + index) for index, target in enumerate(targets)]
+    results = []
+    for index, target in enumerate(targets):
+        print(f"[official_compare] target {index + 1}/{len(targets)}: {target.name}", flush=True)
+        results.append(run_target(args, target, args.base_port + index))
     report = {
         "schema": REPORT_SCHEMA,
         "created_at": int(time.time()),

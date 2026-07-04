@@ -2943,6 +2943,48 @@ TEST_F(DriverTest, TestVmMulticoreModeControlsCrossOwnerBlocking) {
   vm_owner_clear_id(target);
 }
 
+TEST_F(DriverTest, TestVmOwnerAccessFastBypassOnlySkipsDefaultModeDiagnostics) {
+  object_t* source = find_object("single/master.c");
+  object_t* target = find_object("single/simul_efun.c");
+  ASSERT_NE(source, nullptr);
+  ASSERT_NE(target, nullptr);
+  vm_owner_set_id(source, "owner/test/fast-bypass/source");
+  vm_owner_set_id(target, "owner/test/fast-bypass/target");
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = map ? find_string_in_mapping(map, key) : nullptr;
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+
+  auto saved_mode = CONFIG_INT(__RC_MULTICORE_MODE__);
+  auto* before = vm_owner_access_trace(0);
+  auto before_total = mapping_number(before, "total_traced");
+  free_mapping(before);
+
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_OFF;
+  ASSERT_TRUE(vm_owner_access_fast_bypass(source, target));
+  ASSERT_EQ(vm_owner_record_cross_owner_access(source, target, "call_other"), 0u);
+  auto* off_trace = vm_owner_access_trace(0);
+  ASSERT_EQ(mapping_number(off_trace, "total_traced"), before_total);
+  free_mapping(off_trace);
+
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_AUDIT;
+  ASSERT_FALSE(vm_owner_access_fast_bypass(source, target));
+  ASSERT_GT(vm_owner_record_cross_owner_access(source, target, "call_other"), 0u);
+  ASSERT_FALSE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+
+  CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_ENFORCED;
+  ASSERT_FALSE(vm_owner_access_fast_bypass(source, target));
+  ASSERT_TRUE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
+  ASSERT_TRUE(vm_owner_access_fast_bypass(source, source));
+
+  CONFIG_INT(__RC_MULTICORE_MODE__) = saved_mode;
+  vm_owner_clear_id(source);
+  vm_owner_clear_id(target);
+}
+
 TEST_F(DriverTest, TestCurrentOwnerScopeControlsCrossOwnerBlocking) {
   object_t* source = find_object("single/master.c");
   object_t* target = find_object("single/simul_efun.c");

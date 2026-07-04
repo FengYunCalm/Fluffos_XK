@@ -3,6 +3,9 @@
 
 #include "vm/internal/base/machine.h"
 
+#include <cstddef>
+#include <cstdint>
+
 #define V_SHORT 1
 #define V_NOSPACE 2
 #define V_FUNCTION 4
@@ -11,6 +14,13 @@
  * simulate.c
  */
 struct object_t;
+
+constexpr size_t VM_OBJECT_LIFECYCLE_PERF_STAGE_COUNT = 17;
+
+struct VMObjectLifecyclePerfSnapshot {
+  uint64_t counts[VM_OBJECT_LIFECYCLE_PERF_STAGE_COUNT]{};
+  uint64_t total_ns[VM_OBJECT_LIFECYCLE_PERF_STAGE_COUNT]{};
+};
 
 extern object_t *obj_list;
 extern object_t *obj_list_destruct;
@@ -42,6 +52,10 @@ object_t *find_object2(const char *);
 void move_object(object_t *, object_t *);
 void destruct_object(object_t *);
 void destruct2(object_t *);
+void vm_object_lifecycle_perf_set_enabled(bool enabled);
+void vm_object_lifecycle_perf_reset();
+VMObjectLifecyclePerfSnapshot vm_object_lifecycle_perf_snapshot();
+const char *vm_object_lifecycle_perf_stage_name(size_t index);
 
 void print_svalue(svalue_t *);
 void do_write(svalue_t *);

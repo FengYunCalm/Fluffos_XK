@@ -3,6 +3,7 @@
 #include "backend.h"
 #include "mainlib.h"
 #include "vm/internal/base/object.h"
+#include "vm/internal/simulate.h"
 #include "vm/object_handle.h"
 #include "vm/owner.h"
 
@@ -227,6 +228,54 @@ void run_object_handle_resolve_bench(Report &report) {
   }
 }
 
+void add_samples(Report &report, const std::string &prefix, const std::vector<long long> &samples) {
+  report.add(prefix + "_count", static_cast<long long>(samples.size()));
+  report.add(prefix + "_p50_ns", percentile(samples, 0.50));
+  report.add(prefix + "_p95_ns", percentile(samples, 0.95));
+  report.add(prefix + "_p99_ns", percentile(samples, 0.99));
+}
+
+void run_clone_destruct_lifecycle_bench(Report &report) {
+  constexpr long iterations = 512;
+  std::vector<long long> clone_samples;
+  std::vector<long long> destruct_samples;
+  clone_samples.reserve(iterations);
+  destruct_samples.reserve(iterations);
+
+  vm_object_lifecycle_perf_reset();
+  vm_object_lifecycle_perf_set_enabled(true);
+  auto total_start = Clock::now();
+  for (long i = 0; i < iterations; i++) {
+    auto clone_start = Clock::now();
+    auto *object = clone_object_for_bench("single/void");
+    clone_samples.push_back(elapsed_ns(clone_start));
+    require(object != nullptr, "clone/destruct lifecycle bench clone failed");
+
+    auto destruct_start = Clock::now();
+    destruct_object_for_bench(object);
+    destruct_samples.push_back(elapsed_ns(destruct_start));
+  }
+  auto total_elapsed = elapsed_ns(total_start);
+  vm_object_lifecycle_perf_set_enabled(false);
+  auto snapshot = vm_object_lifecycle_perf_snapshot();
+
+  report.add("clone_destruct_iterations", iterations);
+  report.add("clone_destruct_elapsed_ns", total_elapsed);
+  add_samples(report, "clone_latency", clone_samples);
+  add_samples(report, "destruct_latency", destruct_samples);
+  for (size_t i = 0; i < VM_OBJECT_LIFECYCLE_PERF_STAGE_COUNT; i++) {
+    std::string stage = vm_object_lifecycle_perf_stage_name(i);
+    if (stage.empty()) {
+      continue;
+    }
+    auto count = static_cast<long long>(snapshot.counts[i]);
+    auto total_ns = static_cast<long long>(snapshot.total_ns[i]);
+    report.add("lifecycle_stage_" + stage + "_count", count);
+    report.add("lifecycle_stage_" + stage + "_total_ns", total_ns);
+    report.add("lifecycle_stage_" + stage + "_avg_ns", count > 0 ? total_ns / count : 0);
+  }
+}
+
 void print_text_report(const Report &report, const std::string &json_path) {
   std::cout << "object_store_bench: schema=" << kObjectStoreBenchSchemaV1 << "\n";
   for (const auto &metric : report.metrics) {
@@ -271,6 +320,7 @@ int main(int argc, char **argv) {
     report.add_string("owner_fast_path", "owner_shard_resolve_without_global_fallback");
 
     run_object_handle_resolve_bench(report);
+    run_clone_destruct_lifecycle_bench(report);
 
     auto json = report_json(report);
     write_json_report(json_path, json);
