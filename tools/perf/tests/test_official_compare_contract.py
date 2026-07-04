@@ -27,10 +27,24 @@ class OfficialCompareContractTest(unittest.TestCase):
             "--sync-start",
             "--think-min",
             "--think-max",
+            "--sample-interval",
+            "--token-mode",
             "--report-json",
             "--driver-checksum",
         ):
             self.assertIn(token, help_text)
+
+    def test_loadtest_records_per_kind_latency_diagnostics(self):
+        source = (OFFICIAL_COMPARE / "portable_fluffos_loadtest.py").read_text(encoding="utf-8")
+        for token in (
+            "commands_by_kind",
+            "latencies_by_kind_ms",
+            "latency_by_kind_ms",
+            "latency_timeline_ms",
+            "latency_summary",
+            "token_mode",
+        ):
+            self.assertIn(token, source)
 
     def test_runner_help_exposes_fixed_comparison_surface(self):
         result = subprocess.run(
@@ -51,6 +65,8 @@ class OfficialCompareContractTest(unittest.TestCase):
             "--skip-build",
             "--report-json",
             "--base-port",
+            "--sample-interval",
+            "--token-mode",
         ):
             self.assertIn(token, help_text)
 
@@ -69,8 +85,12 @@ class OfficialCompareContractTest(unittest.TestCase):
             "--report-json",
             "--skip-build",
             "--microbench-summary",
+            "--microbench-runs",
+            "--skip-microbench",
             "--skip-stable",
             "--evaluate-only",
+            "--sample-interval",
+            "--token-mode",
         ):
             self.assertIn(token, help_text)
 
@@ -103,6 +123,41 @@ class OfficialCompareContractTest(unittest.TestCase):
             "call_other_self",
             "xk_common_p99_vs_official",
             "xk_common_cps_vs_official",
+            "portable_microbench.py",
+            "skip_microbench",
+        ):
+            self.assertIn(token, source)
+
+    def test_portable_microbench_contract(self):
+        result = subprocess.run(
+            [sys.executable, str(OFFICIAL_COMPARE / "portable_microbench.py"), "--help"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=True,
+        )
+        help_text = result.stdout
+        for token in (
+            "--official-master-source",
+            "--official-master-build",
+            "--xk-common-build",
+            "--xk-production-build",
+            "--runs",
+            "--target-order",
+            "--report-json",
+            "--skip-production",
+        ):
+            self.assertIn(token, help_text)
+        source = (OFFICIAL_COMPARE / "portable_microbench.py").read_text(encoding="utf-8")
+        for token in (
+            "fluffos_portable_bench_v1",
+            "BENCH|",
+            "call_other_self",
+            "clone_destruct",
+            "xk_common_gateway_off",
+            "official_master_common",
+            "target_order",
+            "portable_mudlib",
         ):
             self.assertIn(token, source)
 

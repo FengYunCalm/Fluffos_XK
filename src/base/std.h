@@ -30,6 +30,7 @@
 
 /* all options and configuration */
 #include "base/internal/options_incl.h"
+#include "base/internal/vm_thread_local.h"
 
 // These shall be moved.
 #define EXTRACT_UCHAR(p) (*(unsigned char *)(p))

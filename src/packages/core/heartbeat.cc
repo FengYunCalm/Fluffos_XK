@@ -25,7 +25,7 @@ struct heart_beat_t {
 };
 
 // Thread-local pointer to current object executing heartbeat.
-thread_local object_t *g_current_heartbeat_obj;
+FLUFFOS_VM_THREAD_LOCAL object_t *g_current_heartbeat_obj;
 
 namespace {
 class CurrentHeartbeatScope {

@@ -7,6 +7,7 @@
 
 #include "base/internal/tracing.h"
 #include "vm/context.h"
+#include "vm/owner.h"
 #include "vm/internal/base/apply_cache.h"
 #include "vm/internal/base/machine.h"
 #include "vm/internal/base/debug.h"
@@ -16,9 +17,9 @@
 #include "applies_table.autogen.h"
 
 // global static result
-thread_local svalue_t apply_ret_value;
+FLUFFOS_VM_THREAD_LOCAL svalue_t apply_ret_value;
 
-bool vm_apply_return_thread_local_storage_ready() { return true; }
+bool vm_apply_return_thread_local_storage_ready() { return FLUFFOS_OWNER_THREAD_VM != 0; }
 
 int vm_apply_return_value_type() { return apply_ret_value.type; }
 
@@ -175,8 +176,11 @@ void check_co_args(int num_arg, const program_t *prog, function_t *fun, int find
  * manually !  (Look towards end of this function.)
  */
 
-int apply_low(const char *fun, object_t *ob, int num_arg) {
-  ScopedTracer _tracer(__PRETTY_FUNCTION__);
+template <bool context_tracking_enabled, bool funcname_shared = false>
+static int apply_low_impl(const char *fun, object_t *ob, int num_arg) {
+#if FLUFFOS_OWNER_THREAD_VM
+  ScopedTracer _tracer("apply_low");
+#endif
 
   int local_call_origin = call_origin;
 
@@ -187,10 +191,17 @@ int apply_low(const char *fun, object_t *ob, int num_arg) {
   if (!local_call_origin) {
     local_call_origin = ORIGIN_DRIVER;
   }
-  vm_context_set_call_origin(vm_context(), 0);
-  auto owner_controlled_lpc =
-      !vm_context_is_main_thread() &&
-      (vm_context().owner.lpc_canary_active || vm_context().owner.controlled_lpc_active);
+  if constexpr (context_tracking_enabled) {
+    vm_context_set_call_origin(vm_context(), 0);
+  } else {
+    call_origin = 0;
+  }
+  bool owner_controlled_lpc = false;
+  if constexpr (context_tracking_enabled) {
+    owner_controlled_lpc = !vm_context_is_main_thread() &&
+                           (vm_context().owner.lpc_canary_active ||
+                            vm_context().owner.controlled_lpc_active);
+  }
   if (!owner_controlled_lpc) {
     ob->time_of_ref = g_current_gametick; /* Used by the swapper */
                                           /*
@@ -221,7 +232,8 @@ retry_for_shadow:
 #endif
   DEBUG_CHECK(ob->flags & O_DESTRUCTED, "apply() on destructed object\n");
 
-  auto entry = apply_cache_lookup(fun, ob->prog);
+  auto entry = funcname_shared ? apply_cache_lookup_shared(fun, ob->prog)
+                               : apply_cache_lookup(fun, ob->prog);
 
 #ifndef NO_SHADOWS
   if (!entry.progp && ob->shadowing) {
@@ -294,10 +306,18 @@ retry_for_shadow:
             // will be called in the context of the caller
             fp = sp + 1; // zero args
             push_control_stack(FRAME_FUNCTION);
-            vm_context_set_caller_type(vm_context(), ORIGIN_LOCAL);
+            if constexpr (context_tracking_enabled) {
+              vm_context_set_caller_type(vm_context(), ORIGIN_LOCAL);
+            } else {
+              caller_type = ORIGIN_LOCAL;
+            }
             csp->pc = pc;
             csp->num_local_variables = 0;
-            vm_context_set_current_program(vm_context(), progp);
+            if constexpr (context_tracking_enabled) {
+              vm_context_set_current_program(vm_context(), progp);
+            } else {
+              current_prog = progp;
+            }
             call_program(progp, default_funcp->address);
 
             if (sp - current_sp != 1 || sp->type != T_FUNCTION) {
@@ -330,11 +350,21 @@ retry_for_shadow:
     }
     /* Setup new call frame */
     push_control_stack(FRAME_FUNCTION | FRAME_OB_CHANGE);
-    vm_context_set_current_program(vm_context(), entry.progp);
-    vm_context_set_caller_type(vm_context(), local_call_origin);
+    if constexpr (context_tracking_enabled) {
+      vm_context_set_current_program(vm_context(), entry.progp);
+      vm_context_set_caller_type(vm_context(), local_call_origin);
+    } else {
+      current_prog = entry.progp;
+      caller_type = local_call_origin;
+    }
     csp->num_local_variables = num_arg;
-    vm_context_set_inherit_offsets(vm_context(), entry.function_index_offset,
-                                   entry.variable_index_offset);
+    if constexpr (context_tracking_enabled) {
+      vm_context_set_inherit_offsets(vm_context(), entry.function_index_offset,
+                                     entry.variable_index_offset);
+    } else {
+      function_index_offset = entry.function_index_offset;
+      variable_index_offset = entry.variable_index_offset;
+    }
     csp->fr.table_index = findex;
 #ifdef PROFILE_FUNCTIONS
     get_cpu_times(&(csp->entry_secs), &(csp->entry_usecs));
@@ -347,7 +377,12 @@ retry_for_shadow:
       setup_variables(csp->num_local_variables, funp->num_local, funp->num_arg);
     }
     /* Call the program */
-    vm_context_set_execution_frame(vm_context(), ob, current_prog, current_object, caller_type);
+    if constexpr (context_tracking_enabled) {
+      vm_context_set_execution_frame(vm_context(), ob, current_prog, current_object, caller_type);
+    } else {
+      previous_ob = current_object;
+      current_object = ob;
+    }
 #ifdef DEBUG
     save_csp = csp;
 #endif
@@ -355,6 +390,28 @@ retry_for_shadow:
     DEBUG_CHECK(save_csp - 1 != csp, "Bad csp after execution in apply_low.\n");
     return 1;
   }
+}
+
+int apply_low(const char *fun, object_t *ob, int num_arg) {
+#if !FLUFFOS_OWNER_THREAD_VM
+  return apply_low_impl<false>(fun, ob, num_arg);
+#else
+  if (vm_multicore_audit_enabled_fast()) {
+    return apply_low_impl<true>(fun, ob, num_arg);
+  }
+  return apply_low_impl<false>(fun, ob, num_arg);
+#endif
+}
+
+int apply_low_shared(const char *fun, object_t *ob, int num_arg) {
+#if !FLUFFOS_OWNER_THREAD_VM
+  return apply_low_impl<false, true>(fun, ob, num_arg);
+#else
+  if (vm_multicore_audit_enabled_fast()) {
+    return apply_low_impl<true, true>(fun, ob, num_arg);
+  }
+  return apply_low_impl<false, true>(fun, ob, num_arg);
+#endif
 }
 
 /*
@@ -367,23 +424,65 @@ retry_for_shadow:
  * are deallocated.
  */
 
+svalue_t *apply_with_context_tracking(const char *fun, object_t *ob, int num_arg, int where,
+                                      bool context_tracking_enabled) {
+  if (!context_tracking_enabled) {
+    return apply_without_context_tracking(fun, ob, num_arg, where);
+  }
+#ifdef DEBUG
+  svalue_t *expected_sp;
+  expected_sp = sp - num_arg;
+#endif
+
+  vm_context_set_call_origin(vm_context(), where);
+  if (apply_low_impl<true>(fun, ob, num_arg) == 0) {
+    return nullptr;
+  }
+
+  free_svalue(&apply_ret_value, "sapply");
+  apply_ret_value = *sp--;
+  DEBUG_CHECK(expected_sp != sp, "Corrupt stack pointer.\n");
+  return &apply_ret_value;
+}
+
+svalue_t *apply_without_context_tracking(const char *fun, object_t *ob, int num_arg, int where) {
+#ifdef DEBUG
+  svalue_t *expected_sp;
+  expected_sp = sp - num_arg;
+#endif
+
+  call_origin = where;
+  if (apply_low_impl<false>(fun, ob, num_arg) == 0) {
+    return nullptr;
+  }
+
+  free_svalue(&apply_ret_value, "sapply");
+  apply_ret_value = *sp--;
+  DEBUG_CHECK(expected_sp != sp, "Corrupt stack pointer.\n");
+  return &apply_ret_value;
+}
+
 svalue_t *apply(const char *fun, object_t *ob, int num_arg, int where) {
+#if !FLUFFOS_OWNER_THREAD_VM
 #ifdef DEBUG
   svalue_t *expected_sp;
 #endif
 
-  vm_context_set_call_origin(vm_context(), where);
+  call_origin = where;
 
 #ifdef DEBUG
   expected_sp = sp - num_arg;
 #endif
-  if (apply_low(fun, ob, num_arg) == 0) {
+  if (apply_low_impl<false>(fun, ob, num_arg) == 0) {
     return nullptr;
   }
   free_svalue(&apply_ret_value, "sapply");
   apply_ret_value = *sp--;
   DEBUG_CHECK(expected_sp != sp, "Corrupt stack pointer.\n");
   return &apply_ret_value;
+#else
+  return apply_with_context_tracking(fun, ob, num_arg, where, vm_multicore_audit_enabled_fast());
+#endif
 }
 
 /*

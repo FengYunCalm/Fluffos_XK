@@ -11,6 +11,8 @@
 #include <chrono>
 #include <sys/types.h>
 
+#include "base/internal/vm_thread_local.h"
+
 // FIXME: make this more obvious
 #include "efuns.autogen.h"
 
@@ -31,12 +33,12 @@
 #include "vm/internal/base/interpret.h"
 
 // TODO: in interpret.cc
-extern thread_local int call_origin;
+extern FLUFFOS_VM_THREAD_LOCAL int call_origin;
 // TODO: defined in simulate.cc
 [[noreturn]] void error(const char *const, ...);
-extern thread_local object_t *current_object;
-extern thread_local object_t *command_giver;
-extern thread_local object_t *current_interactive;
+extern FLUFFOS_VM_THREAD_LOCAL object_t *current_object;
+extern FLUFFOS_VM_THREAD_LOCAL object_t *command_giver;
+extern FLUFFOS_VM_THREAD_LOCAL object_t *current_interactive;
 
 // TODO: defined in backend.cc
 extern uint64_t g_current_gametick;
@@ -45,7 +47,7 @@ int time_to_next_gametick(std::chrono::milliseconds msec);
 std::chrono::milliseconds gametick_to_time(int ticks);
 
 // TODO: defined in interpret.cc
-extern thread_local struct error_context_t *current_error_context;
+extern FLUFFOS_VM_THREAD_LOCAL struct error_context_t *current_error_context;
 
 void transfer_push_some_svalues(svalue_t *, int);
 void push_some_svalues(svalue_t *, int);

@@ -188,8 +188,14 @@ void f__call_other() {
   const char *funcname;
   int num_arg = st_num_arg;
   object_t *ob;
+  bool funcname_shared = false;
 
-  lpc_vm_profile_record_call_other_dispatch();
+#if FLUFFOS_OWNER_THREAD_VM
+  const bool owner_audit_enabled = vm_multicore_audit_enabled_fast();
+  if (owner_audit_enabled) {
+    lpc_vm_profile_record_call_other_dispatch();
+  }
+#endif
 
   if (current_object->flags & O_DESTRUCTED) { /* No external calls allowed */
     pop_n_elems(num_arg);
@@ -199,6 +205,7 @@ void f__call_other() {
   arg = sp - num_arg + 1;
   if (arg[1].type == T_STRING) {
     funcname = arg[1].u.string;
+    funcname_shared = arg[1].subtype == STRING_SHARED;
   } else { /* must be T_ARRAY then */
     array_t *v = arg[1].u.arr;
     svalue_t *sv = nullptr;
@@ -208,6 +215,7 @@ void f__call_other() {
     }
     check_for_destr(v);
     funcname = sv->u.string;
+    funcname_shared = sv->subtype == STRING_SHARED;
     num_arg = 2 + merge_arg_lists(num_arg - 2, v, 1);
   }
 
@@ -227,18 +235,35 @@ void f__call_other() {
       error("call_other() couldn't find object '%s'.\n", arg[0].u.string);
     }
   }
-  if (!vm_owner_access_fast_bypass(current_object, ob)) {
+#if FLUFFOS_OWNER_THREAD_VM
+  if (owner_audit_enabled && !vm_owner_access_fast_bypass(current_object, ob)) {
     vm_owner_record_cross_owner_access(current_object, ob, "call_other");
     if (vm_owner_cross_owner_access_blocked(current_object, ob, "call_other")) {
       error("call_other(): cross-owner synchronous call requires owner message/future in enforced multicore mode.\n");
     }
   }
+#endif
   /* Send the remaining arguments to the function. */
-  if (apply(funcname, ob, num_arg - 2, ORIGIN_CALL_OTHER) == nullptr) { /* Function not found */
+#if FLUFFOS_OWNER_THREAD_VM
+  auto *result = owner_audit_enabled
+                     ? apply_with_context_tracking(funcname, ob, num_arg - 2, ORIGIN_CALL_OTHER, true)
+                     : apply_without_context_tracking(funcname, ob, num_arg - 2, ORIGIN_CALL_OTHER);
+  if (result == nullptr) { /* Function not found */
     pop_2_elems();
     push_undefined();
     return;
   }
+#else
+  call_origin = ORIGIN_CALL_OTHER;
+  if ((funcname_shared ? apply_low_shared(funcname, ob, num_arg - 2)
+                       : apply_low(funcname, ob, num_arg - 2)) == 0) { /* Function not found */
+    pop_2_elems();
+    push_undefined();
+    return;
+  }
+  free_svalue(&apply_ret_value, "sapply");
+  apply_ret_value = *sp--;
+#endif
   pop_n_elems(2);
   push_some_svalues(&apply_ret_value, 1);
 }

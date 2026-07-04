@@ -705,7 +705,7 @@ const char *check_valid_path(const char *path, object_t *call_object, const char
   if (v && v->type == T_STRING) {
     path = v->u.string;
   } else {
-    extern thread_local svalue_t apply_ret_value;
+    extern FLUFFOS_VM_THREAD_LOCAL svalue_t apply_ret_value;
 
     free_svalue(&apply_ret_value, "check_valid_path");
     apply_ret_value.type = T_STRING;
@@ -894,7 +894,7 @@ int do_rename(const char *fr, const char *t, int flag) {
   const char *to;
   char newfrom[MAX_FNAME_SIZE + MAX_PATH_LEN + 2];
   int flen;
-  extern thread_local svalue_t apply_ret_value;
+  extern FLUFFOS_VM_THREAD_LOCAL svalue_t apply_ret_value;
 
   /*
    * important that the same write access checks are done for link() as are
@@ -956,7 +956,7 @@ int do_rename(const char *fr, const char *t, int flag) {
 #endif /* F_RENAME */
 
 int copy_file(const char *from, const char *to) {
-  extern thread_local svalue_t apply_ret_value;
+  extern FLUFFOS_VM_THREAD_LOCAL svalue_t apply_ret_value;
   struct stat from_stats, to_stats;
 
   from = check_valid_path(from, current_object, "move_file", 0);

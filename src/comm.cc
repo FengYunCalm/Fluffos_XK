@@ -20,6 +20,7 @@
 #include <cstring>            // for NULL, memcpy, strlen, etc
 #include <unistd.h>           // for gethostname
 #include <memory>             // for unique_ptr
+#include <optional>           // for optional
 #include <string>             // for string
 #include <vector>             // for vector
 // Network stuff
@@ -82,6 +83,9 @@ svalue_t *owner_bound_safe_apply(const char *fun, object_t *ob, int num_arg, int
                                  const char *task_type) {
   if (!ob) {
     return nullptr;
+  }
+  if (vm_multicore_mode() == VM_MULTICORE_MODE_OFF) {
+    return safe_apply(fun, ob, num_arg, origin);
   }
   VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob), vm_owner_epoch(ob));
   vm_owner_record_task_trace(vm_owner_id(ob), task_type, fun, vm_owner_epoch(ob), "dispatched");
@@ -162,6 +166,10 @@ void enqueue_user_terminal_mode_delta(interactive_t *ip, object_t *reply_command
   if (!IP_VALID(ip, reply_command_giver)) {
     return;
   }
+  if (vm_multicore_mode() == VM_MULTICORE_MODE_OFF) {
+    run_user_terminal_mode_delta(ip, reply_command_giver, mode_delta);
+    return;
+  }
 
   auto task_id = vm_owner_enqueue_main_task(reply_command_giver, "command_mode_delta", task_key,
                                             [ip, reply_command_giver, mode_delta] {
@@ -200,6 +208,10 @@ void enqueue_user_command_reply_side_effects(interactive_t *ip, object_t *reply_
   if (!IP_VALID(ip, reply_command_giver)) {
     return;
   }
+  if (vm_multicore_mode() == VM_MULTICORE_MODE_OFF) {
+    run_user_command_reply_side_effects(ip, reply_command_giver);
+    return;
+  }
 
   auto task_id = vm_owner_enqueue_main_task(
       reply_command_giver, "command_reply", "prompt_telnet_reschedule_io",
@@ -223,7 +235,8 @@ void on_user_command(evutil_socket_t fd, short what, void *arg) {
     return;
   }
 
-  if (user->ob && !(user->ob->flags & O_DESTRUCTED)) {
+  if (user->ob && !(user->ob->flags & O_DESTRUCTED) &&
+      vm_multicore_mode() != VM_MULTICORE_MODE_OFF) {
     vm_owner_enqueue_main_task(user->ob, "input", "process_user_command", [user] {
       set_eval(max_eval_cost);
       process_user_command(user);
@@ -1338,7 +1351,7 @@ static int escape_command(interactive_t *ip, const char *user_command) {
 }
 
 static void parse_user_command_in_owner_frame(char *user_command, object_t *parser_command_giver) {
-  if (!parser_command_giver) {
+  if (!parser_command_giver || vm_multicore_mode() == VM_MULTICORE_MODE_OFF) {
     safe_parse_command(user_command, parser_command_giver);
     return;
   }
@@ -1445,9 +1458,12 @@ static int process_user_command_text(interactive_t *ip, char *user_command) {
   }
 
   vm_context_set_current_interactive(vm_context(), command_giver); /* this is yuck phooey, sigh */
-  VMOwnerScope owner_scope(vm_context(), vm_owner_id(command_giver), vm_owner_epoch(command_giver));
-  vm_owner_record_task_trace(vm_owner_id(command_giver), "interactive", "process_user_command",
-                             vm_owner_epoch(command_giver), "dispatched");
+  std::optional<VMOwnerScope> owner_scope;
+  if (vm_multicore_mode() != VM_MULTICORE_MODE_OFF) {
+    owner_scope.emplace(vm_context(), vm_owner_id(command_giver), vm_owner_epoch(command_giver));
+    vm_owner_record_task_trace(vm_owner_id(command_giver), "interactive", "process_user_command",
+                               vm_owner_epoch(command_giver), "dispatched");
+  }
   if (ip) {
     clear_notify(ip->ob);
   }

@@ -35,7 +35,9 @@
 // init vm layer.
 void vm_init();
 
-#include <ctime>  // for time_t
+#include <cstddef>  // for size_t
+#include <cstdint>  // for uint64_t
+#include <ctime>    // for time_t
 // VM boot time, inited in vm_init().
 extern time_t boot_time;
 
@@ -47,5 +49,10 @@ void clear_state(void);
 
 // Remove destructed objects
 void remove_destructed_objects(void);
+size_t remove_destructed_objects_bounded(size_t max_count);
+size_t vm_destructed_object_backlog_size(void);
+uint64_t vm_destructed_object_cleanup_total(void);
+uint64_t vm_destructed_object_cleanup_batches(void);
+uint64_t vm_destructed_object_cleanup_last_removed(void);
 
 #endif /* SRC_VM_INCL_H_ */

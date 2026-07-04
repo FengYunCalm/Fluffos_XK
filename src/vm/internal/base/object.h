@@ -1,6 +1,8 @@
 #ifndef OBJECT_H
 #define OBJECT_H
 
+#include "base/internal/vm_thread_local.h"
+
 #include <cstdint>  // for uint32_t
 
 #ifdef PACKAGE_MUDLIB_STATS
@@ -140,9 +142,9 @@ typedef int (*get_objectsfn_t)(object_t *, void *);
 
 #define SETOBNAME(ob, name) (*(const char **)&(ob->obname) = (char *)name)
 
-extern thread_local object_t *previous_ob;
-extern thread_local int save_svalue_depth;
-extern thread_local object_t **cgsp;
+extern FLUFFOS_VM_THREAD_LOCAL object_t *previous_ob;
+extern FLUFFOS_VM_THREAD_LOCAL int save_svalue_depth;
+extern FLUFFOS_VM_THREAD_LOCAL object_t **cgsp;
 #ifdef F_SET_HIDE
 extern int num_hidden;
 #endif

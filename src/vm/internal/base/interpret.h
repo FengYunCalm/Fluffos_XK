@@ -6,6 +6,7 @@
 #ifndef INTERPRET_H
 #define INTERPRET_H
 
+#include "base/internal/vm_thread_local.h"
 #include "vm/internal/base/program.h"
 #include "vm/internal/base/svalue.h"
 #include "vm/context.h"
@@ -112,32 +113,32 @@ struct function_lookup_info_t {
 #define put_shared_string(x) \
   SAFE(sp->type = T_STRING; sp->subtype = STRING_SHARED; sp->u.string = (x);)
 
-extern thread_local program_t *current_prog;
-extern thread_local short caller_type;
-extern thread_local char *pc;
-extern thread_local svalue_t *sp;
-extern thread_local svalue_t *fp;
-extern thread_local svalue_t *end_of_stack;
-extern thread_local svalue_t catch_value;
-extern thread_local control_stack_t *control_stack;
-extern thread_local control_stack_t *csp;
-extern thread_local int too_deep_error;
-extern thread_local int max_eval_error;
-extern thread_local int function_index_offset;
-extern thread_local int variable_index_offset;
+extern FLUFFOS_VM_THREAD_LOCAL program_t *current_prog;
+extern FLUFFOS_VM_THREAD_LOCAL short caller_type;
+extern FLUFFOS_VM_THREAD_LOCAL char *pc;
+extern FLUFFOS_VM_THREAD_LOCAL svalue_t *sp;
+extern FLUFFOS_VM_THREAD_LOCAL svalue_t *fp;
+extern FLUFFOS_VM_THREAD_LOCAL svalue_t *end_of_stack;
+extern FLUFFOS_VM_THREAD_LOCAL svalue_t catch_value;
+extern FLUFFOS_VM_THREAD_LOCAL control_stack_t *control_stack;
+extern FLUFFOS_VM_THREAD_LOCAL control_stack_t *csp;
+extern FLUFFOS_VM_THREAD_LOCAL int too_deep_error;
+extern FLUFFOS_VM_THREAD_LOCAL int max_eval_error;
+extern FLUFFOS_VM_THREAD_LOCAL int function_index_offset;
+extern FLUFFOS_VM_THREAD_LOCAL int variable_index_offset;
 #ifdef DEBUG
-extern thread_local int stack_in_use_as_temporary;
+extern FLUFFOS_VM_THREAD_LOCAL int stack_in_use_as_temporary;
 #endif
 extern int simul_efun_is_loading;
 extern program_t fake_prog;
-extern thread_local svalue_t global_lvalue_byte;
-extern thread_local int num_varargs;
-extern thread_local int st_num_arg;
+extern FLUFFOS_VM_THREAD_LOCAL svalue_t global_lvalue_byte;
+extern FLUFFOS_VM_THREAD_LOCAL int num_varargs;
+extern FLUFFOS_VM_THREAD_LOCAL int st_num_arg;
 
-extern thread_local ref_t *global_ref_list;
-extern thread_local int lv_owner_type;
-extern thread_local refed_t *lv_owner;
-extern thread_local const char *lv_owner_str;
+extern FLUFFOS_VM_THREAD_LOCAL ref_t *global_ref_list;
+extern FLUFFOS_VM_THREAD_LOCAL int lv_owner_type;
+extern FLUFFOS_VM_THREAD_LOCAL refed_t *lv_owner;
+extern FLUFFOS_VM_THREAD_LOCAL const char *lv_owner_str;
 
 void kill_ref(ref_t *);
 ref_t *make_ref(void);

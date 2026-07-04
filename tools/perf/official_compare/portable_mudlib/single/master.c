@@ -7,9 +7,30 @@ object connect()
 
 void flag(string str)
 {
+    string file;
+    object ob;
+    mixed err;
+
     if (str == "shutdown") {
         shutdown(0);
+        return;
     }
+    file = str || "";
+    if (sscanf(file, "test:%s", file) != 1) {
+        write("unsupported portable flag: " + file + "\n");
+        shutdown(-1);
+        return;
+    }
+    err = catch(ob = load_object("/" + file));
+    if (!err && ob) {
+        err = catch(call_other(ob, "do_tests"));
+    }
+    if (err || !ob) {
+        write(sprintf("portable benchmark failed: err=%O ob=%O file=%O\n", err, ob, file));
+        shutdown(-1);
+        return;
+    }
+    shutdown(0);
 }
 
 string *epilog(int load_empty)

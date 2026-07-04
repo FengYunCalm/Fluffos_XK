@@ -41,7 +41,7 @@ namespace fs = ghc::filesystem;
 #define too_deep_save_error() \
   error("Mappings and/or arrays nested too deep (%d) for save_object\n", MAX_SAVE_SVALUE_DEPTH);
 
-thread_local object_t *previous_ob;
+FLUFFOS_VM_THREAD_LOCAL object_t *previous_ob;
 
 static int restore_array(char **str, svalue_t * /*ret*/);
 static int restore_class(char **str, svalue_t * /*ret*/);
@@ -61,9 +61,9 @@ int valid_hide(object_t *obj) {
 }
 #endif
 
-thread_local int save_svalue_depth = 0;
-thread_local int max_depth = 0;
-thread_local int *sizes = nullptr;
+FLUFFOS_VM_THREAD_LOCAL int save_svalue_depth = 0;
+FLUFFOS_VM_THREAD_LOCAL int max_depth = 0;
+FLUFFOS_VM_THREAD_LOCAL int *sizes = nullptr;
 
 int svalue_save_size(svalue_t *v) {
   switch (v->type) {
@@ -2093,8 +2093,8 @@ void get_objects(object_t ***list, int *size, get_objectsfn_t callback, void *da
   }
 }
 
-static thread_local object_t *command_giver_stack[CFG_MAX_CALL_DEPTH];
-thread_local object_t **cgsp = command_giver_stack;
+static FLUFFOS_VM_THREAD_LOCAL object_t *command_giver_stack[CFG_MAX_CALL_DEPTH];
+FLUFFOS_VM_THREAD_LOCAL object_t **cgsp = command_giver_stack;
 
 #ifdef DEBUGMALLOC_EXTENSIONS
 void mark_command_giver_stack(void) {

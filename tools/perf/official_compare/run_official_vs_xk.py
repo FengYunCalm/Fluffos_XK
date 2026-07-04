@@ -339,6 +339,10 @@ def run_target(args: argparse.Namespace, target: Target, port: int) -> dict[str,
         str(args.think_max),
         "--command-timeout",
         str(args.command_timeout),
+        "--sample-interval",
+        str(args.sample_interval),
+        "--token-mode",
+        args.token_mode,
         "--report-json",
         str(report_json),
         "--driver-name",
@@ -440,6 +444,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--think-min", type=float, default=0.02)
     parser.add_argument("--think-max", type=float, default=0.12)
     parser.add_argument("--command-timeout", type=float, default=3.0)
+    parser.add_argument("--sample-interval", type=float, default=5.0)
+    parser.add_argument("--token-mode", choices=("unique", "fixed"), default="unique")
     parser.add_argument("--driver-startup-wait", type=float, default=3.0)
     parser.add_argument("--base-port", type=int, default=4210)
     parser.add_argument("--report-json", type=Path, default=Path(""))
@@ -466,7 +472,7 @@ def main() -> int:
             name="xk_common_gateway_off",
             source=args.xk_source,
             build=xk_common_build,
-            cmake_args=["-DPACKAGE_GATEWAY=OFF"],
+            cmake_args=["-DPACKAGE_GATEWAY=OFF", "-DENABLE_OWNER_THREAD_VM=OFF"],
             config_overrides=["multicore mode : off"],
         ),
         Target(

@@ -7,6 +7,9 @@
 
 #include "base/std.h"
 
+#include <atomic>
+#include <cstddef>
+#include <limits>
 #include <cstdlib>
 
 #include "applies_table.autogen.h"
@@ -28,6 +31,10 @@
 time_t boot_time;
 
 namespace {
+std::atomic<uint64_t> destructed_object_cleanup_total{0};
+std::atomic<uint64_t> destructed_object_cleanup_batches{0};
+std::atomic<uint64_t> destructed_object_cleanup_last_removed{0};
+
 /* The epilog() in master.c is supposed to return an array of files to load.
  * The preload() in master object called to do the actual loading.
  */
@@ -145,18 +152,58 @@ void clear_state() {
  * and deallocated after program execution.  */
 // TODO: find where they are
 extern object_t *obj_list_destruct;
-void remove_destructed_objects() {
+size_t remove_destructed_objects_bounded(size_t max_count) {
+  if (max_count == 0) {
+    destructed_object_cleanup_last_removed.store(0, std::memory_order_relaxed);
+    return 0;
+  }
+
   if (obj_list_replace) {
     replace_programs();
   }
 
-  if (obj_list_destruct) {
-    object_t *ob, *next;
-    for (ob = obj_list_destruct; ob; ob = next) {
-      next = ob->next_all;
-      destruct2(ob);
+  size_t removed = 0;
+  while (obj_list_destruct && removed < max_count) {
+    auto *ob = obj_list_destruct;
+    obj_list_destruct = ob->next_all;
+    if (obj_list_destruct) {
+      obj_list_destruct->prev_all = nullptr;
     }
-    obj_list_destruct = nullptr;
+    ob->next_all = nullptr;
+    ob->prev_all = nullptr;
+    destruct2(ob);
+    removed++;
+  }
+
+  destructed_object_cleanup_last_removed.store(removed, std::memory_order_relaxed);
+  if (removed > 0) {
+    destructed_object_cleanup_total.fetch_add(removed, std::memory_order_relaxed);
+    destructed_object_cleanup_batches.fetch_add(1, std::memory_order_relaxed);
     vm_context_sync_object_store(vm_context());
   }
+  return removed;
+}
+
+void remove_destructed_objects() {
+  (void)remove_destructed_objects_bounded(std::numeric_limits<size_t>::max());
 } /* remove_destructed_objects() */
+
+size_t vm_destructed_object_backlog_size() {
+  size_t count = 0;
+  for (auto *ob = obj_list_destruct; ob; ob = ob->next_all) {
+    count++;
+  }
+  return count;
+}
+
+uint64_t vm_destructed_object_cleanup_total() {
+  return destructed_object_cleanup_total.load(std::memory_order_relaxed);
+}
+
+uint64_t vm_destructed_object_cleanup_batches() {
+  return destructed_object_cleanup_batches.load(std::memory_order_relaxed);
+}
+
+uint64_t vm_destructed_object_cleanup_last_removed() {
+  return destructed_object_cleanup_last_removed.load(std::memory_order_relaxed);
+}

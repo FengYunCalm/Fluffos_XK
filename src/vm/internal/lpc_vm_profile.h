@@ -31,6 +31,7 @@ struct LpcVmProfileSnapshot {
 };
 
 void lpc_vm_profile_reset();
+bool lpc_vm_profile_recording_enabled();
 void lpc_vm_profile_record_apply_cache_lookup(bool hit);
 void lpc_vm_profile_record_apply_cache_table_build(std::size_t items, uint64_t elapsed_ns);
 void lpc_vm_profile_record_apply_dispatch_cache_lookup(bool hit);

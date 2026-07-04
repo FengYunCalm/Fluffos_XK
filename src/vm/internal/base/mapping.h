@@ -7,6 +7,8 @@
 #ifndef _MAPPING_H
 #define _MAPPING_H
 
+#include "base/internal/vm_thread_local.h"
+
 // TODO: remove this.
 #define MAX_MAPPING_SIZE CONFIG_INT(__MAX_MAPPING_SIZE__)
 
@@ -74,7 +76,7 @@ typedef struct minfo_s {
 /*
  * mapping.c
  */
-extern thread_local mapping_node_t *locked_map_nodes;
+extern FLUFFOS_VM_THREAD_LOCAL mapping_node_t *locked_map_nodes;
 
 int msameval(const svalue_t *, const svalue_t *);
 int mapping_save_size(mapping_t *);

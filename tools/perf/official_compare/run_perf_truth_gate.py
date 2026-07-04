@@ -18,6 +18,7 @@ SCHEMA = "fluffos_perf_truth_gate_v1"
 HERE = Path(__file__).resolve().parent
 RUNNER = HERE / "run_official_vs_xk.py"
 ANALYZER = HERE / "analyze_official_vs_xk.py"
+MICROBENCH = HERE / "portable_microbench.py"
 DEFAULT_BENCH_DIR = Path("/home/mechrevo/projects/_bench/fluffos-official-vs-xk")
 
 
@@ -325,12 +326,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--think-min", type=float, default=0.02)
     parser.add_argument("--think-max", type=float, default=0.12)
     parser.add_argument("--command-timeout", type=float, default=3.0)
+    parser.add_argument("--sample-interval", type=float, default=5.0)
+    parser.add_argument("--token-mode", choices=("unique", "fixed"), default="unique")
     parser.add_argument("--driver-startup-wait", type=float, default=3.0)
     parser.add_argument("--base-port", type=int, default=4210)
     parser.add_argument("--runner-json", type=Path, default=Path(""))
     parser.add_argument("--report-json", type=Path, default=Path(""))
     parser.add_argument("--report-md", type=Path, default=Path(""))
     parser.add_argument("--microbench-summary", type=Path, default=Path(""))
+    parser.add_argument("--microbench-runs", type=int, default=5)
+    parser.add_argument("--skip-microbench", action="store_true")
     parser.add_argument("--evaluate-only", action="store_true")
     return parser.parse_args()
 
@@ -349,6 +354,26 @@ def main() -> int:
     if stable_ref == "auto":
         stable_ref, stable_resolution_error = latest_stable_release()
 
+    microbench_cmd = [
+        sys.executable,
+        str(MICROBENCH),
+        "--bench-dir",
+        str(args.bench_dir),
+        "--official-master-source",
+        str(optional_path(args.official_master_source) or args.bench_dir / "official-master-src"),
+        "--official-master-build",
+        str(optional_path(args.official_master_build) or args.bench_dir / "official-master-src" / "build-release"),
+        "--xk-source",
+        str(args.xk_source),
+        "--xk-common-build",
+        str(optional_path(args.xk_common_build) or args.bench_dir / "xk-common-build"),
+        "--xk-production-build",
+        str(optional_path(args.xk_production_build) or args.xk_source / "build"),
+        "--runs",
+        str(args.microbench_runs),
+        "--report-json",
+        str(microbench_summary),
+    ]
     runner_cmd = [
         sys.executable,
         str(RUNNER),
@@ -372,6 +397,10 @@ def main() -> int:
         str(args.think_max),
         "--command-timeout",
         str(args.command_timeout),
+        "--sample-interval",
+        str(args.sample_interval),
+        "--token-mode",
+        args.token_mode,
         "--driver-startup-wait",
         str(args.driver_startup_wait),
         "--base-port",
@@ -402,6 +431,13 @@ def main() -> int:
         print(f"[perf_truth_gate] evaluate-only runner_json={runner_json}", flush=True)
         runner_result = subprocess.CompletedProcess(runner_cmd, 0)
     else:
+        if not args.skip_microbench:
+            print(
+                f"[perf_truth_gate] running portable microbench runs={args.microbench_runs} "
+                f"summary={microbench_summary}",
+                flush=True,
+            )
+            subprocess.run(microbench_cmd, text=True, check=False)
         print(
             f"[perf_truth_gate] matrix={args.matrix} users={config.users} "
             f"duration={config.duration}s ramp={config.ramp_up}s",

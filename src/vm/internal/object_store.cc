@@ -28,6 +28,10 @@ constexpr const char *kOwnerLocalStoreCompleteBlockerNotMarkedComplete = "owner_
 constexpr const char *kOwnerLocalDeferredDestructBlocker = "deferred_destruct_main_thread_list";
 constexpr const char *kGlobalIndexPhysicalRetirementBlocker = "global_object_records_compatibility_index";
 
+bool object_store_lifecycle_tracking_enabled() {
+  return vm_multicore_mode_fast() != VM_MULTICORE_MODE_OFF;
+}
+
 struct ObjectRecord {
   uint64_t object_id{0};
   std::string owner_id;
@@ -1260,7 +1264,10 @@ ObjectRecord &write_owner_local_lifecycle_record_locked(object_t *object, bool f
   auto previous_record = compat_record;
   auto had_previous_record = previous_record.object_id != 0;
   auto object_already_destructed = object && (object->flags & O_DESTRUCTED) != 0;
-  auto object_pending_destruct = object_is_pending_destruct(object);
+  auto object_pending_destruct = object_already_destructed || force_destructed;
+  if (!object_pending_destruct && had_previous_record && previous_record.destructed) {
+    object_pending_destruct = object_is_pending_destruct(object);
+  }
   auto live_destructed =
       object_already_destructed || force_destructed ||
       (had_previous_record && previous_record.destructed && object_pending_destruct);
@@ -1661,6 +1668,9 @@ void vm_object_store_register(object_t *object) {
   if (!object) {
     return;
   }
+  if (!object_store_lifecycle_tracking_enabled()) {
+    return;
+  }
   ObjectStoreWriteLock lock(object_store_directory_mutex);
   write_owner_local_lifecycle_record_locked(object);
 }
@@ -1780,12 +1790,18 @@ void vm_object_store_update_owner(object_t *object) {
   if (!object) {
     return;
   }
+  if (!object_store_lifecycle_tracking_enabled()) {
+    return;
+  }
   ObjectStoreWriteLock lock(object_store_directory_mutex);
   write_owner_local_lifecycle_record_locked(object);
 }
 
 void vm_object_store_mark_destructed(object_t *object) {
   if (!object) {
+    return;
+  }
+  if (!object_store_lifecycle_tracking_enabled()) {
     return;
   }
   ObjectStoreWriteLock lock(object_store_directory_mutex);
@@ -1802,6 +1818,9 @@ void vm_object_store_record_callout(object_t *object, uint64_t callout_id) {
   if (!object) {
     return;
   }
+  if (!object_store_lifecycle_tracking_enabled()) {
+    return;
+  }
   ObjectStoreWriteLock lock(object_store_directory_mutex);
   auto &record = write_owner_local_lifecycle_record_locked(object);
   auto &shard = shard_for_owner(record.owner_id);
@@ -1815,12 +1834,18 @@ void vm_object_store_remove_callout(const char *owner_id, uint64_t callout_id) {
   if (callout_id == 0) {
     return;
   }
+  if (!object_store_lifecycle_tracking_enabled()) {
+    return;
+  }
   ObjectStoreWriteLock lock(object_store_directory_mutex);
   shard_for_owner(safe_owner_id(owner_id)).execution.pending_callouts.erase(callout_id);
 }
 
 void vm_object_store_record_heartbeat(object_t *object) {
   if (!object) {
+    return;
+  }
+  if (!object_store_lifecycle_tracking_enabled()) {
     return;
   }
   ObjectStoreWriteLock lock(object_store_directory_mutex);
@@ -1836,12 +1861,18 @@ void vm_object_store_remove_heartbeat(object_t *object) {
   if (!object) {
     return;
   }
+  if (!object_store_lifecycle_tracking_enabled()) {
+    return;
+  }
   ObjectStoreWriteLock lock(object_store_directory_mutex);
   auto &record = write_owner_local_lifecycle_record_locked(object);
   shard_for_owner(record.owner_id).execution.active_heartbeats.erase(record.object_id);
 }
 
 void vm_object_store_record_message(const char *owner_id, uint64_t task_id) {
+  if (!object_store_lifecycle_tracking_enabled()) {
+    return;
+  }
   ObjectStoreWriteLock lock(object_store_directory_mutex);
   auto &shard = shard_for_owner(safe_owner_id(owner_id));
   shard.status.messages++;
@@ -1852,6 +1883,9 @@ void vm_object_store_record_message(const char *owner_id, uint64_t task_id) {
 
 void vm_object_store_remove_message(const char *owner_id, uint64_t task_id) {
   if (task_id == 0) {
+    return;
+  }
+  if (!object_store_lifecycle_tracking_enabled()) {
     return;
   }
   ObjectStoreWriteLock lock(object_store_directory_mutex);

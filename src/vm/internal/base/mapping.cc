@@ -11,7 +11,7 @@
 #include "vm/internal/base/machine.h"
 #include "vm/internal/lpc_vm_profile.h"
 
-thread_local mapping_node_t *locked_map_nodes = nullptr;
+FLUFFOS_VM_THREAD_LOCAL mapping_node_t *locked_map_nodes = nullptr;
 
 /*
  * LPC mapping (associative arrays) module.  Contains routines for
@@ -166,8 +166,8 @@ void free_mapping(mapping_t *m) {
   dealloc_mapping(m);
 }
 
-static thread_local mapping_node_t *free_nodes = nullptr;
-static thread_local mapping_node_block_t *thread_mapping_node_blocks = nullptr;
+static FLUFFOS_VM_THREAD_LOCAL mapping_node_t *free_nodes = nullptr;
+static FLUFFOS_VM_THREAD_LOCAL mapping_node_block_t *thread_mapping_node_blocks = nullptr;
 static std::atomic<uint64_t> total_free_nodes{0};
 mapping_node_block_t *mapping_node_blocks = nullptr;
 std::mutex mapping_node_blocks_mutex;

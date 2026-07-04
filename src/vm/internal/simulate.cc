@@ -205,10 +205,10 @@ void shutdownMudOS(int exit_code) {
 
 /* prevents infinite inherit loops.
  No, mark-and-sweep solution won't work.  Exercise for reader.  */
-static thread_local int num_objects_this_thread = 0;
+static FLUFFOS_VM_THREAD_LOCAL int num_objects_this_thread = 0;
 
 #ifndef NO_ENVIRONMENT
-static thread_local object_t *restrict_destruct;
+static FLUFFOS_VM_THREAD_LOCAL object_t *restrict_destruct;
 #endif
 
 void vm_context_set_load_object_depth(VMContext &context, int depth) {
@@ -231,9 +231,9 @@ object_t *obj_list, *obj_list_destruct;
 #ifdef DEBUG
 object_t *obj_list_dangling = 0;
 #endif
-thread_local object_t *current_object;      /* The object interpreting a function. */
-thread_local object_t *command_giver;       /* Where the current command came from. */
-thread_local object_t *current_interactive; /* The user who caused this execution */
+FLUFFOS_VM_THREAD_LOCAL object_t *current_object;      /* The object interpreting a function. */
+FLUFFOS_VM_THREAD_LOCAL object_t *command_giver;       /* Where the current command came from. */
+FLUFFOS_VM_THREAD_LOCAL object_t *current_interactive; /* The user who caused this execution */
 
 #ifdef PRIVS
 static void init_privs_for_object(object_t *);
@@ -1938,8 +1938,8 @@ void free_sentence(sentence_t *p) {
   std::abort();
 }
 
-static thread_local int num_error = 0;
-static thread_local int num_mudlib_error = 0;
+static FLUFFOS_VM_THREAD_LOCAL int num_error = 0;
+static FLUFFOS_VM_THREAD_LOCAL int num_mudlib_error = 0;
 
 void vm_context_set_error_depths(VMContext &context, int error_depth, int mudlib_error_depth) {
   num_error = error_depth;

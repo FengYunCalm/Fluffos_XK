@@ -1,6 +1,8 @@
 #ifndef SRC_VM_OWNER_H_
 #define SRC_VM_OWNER_H_
 
+#include "base/internal/rc.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -34,6 +36,35 @@ int vm_multicore_mode();
 const char *vm_multicore_mode_name(int mode);
 bool vm_multicore_audit_enabled();
 bool vm_multicore_enforced();
+
+inline int vm_multicore_mode_fast() {
+#if !FLUFFOS_OWNER_THREAD_VM
+  return VM_MULTICORE_MODE_OFF;
+#else
+  auto mode = CONFIG_INT(__RC_MULTICORE_MODE__);
+  if (mode < VM_MULTICORE_MODE_OFF || mode > VM_MULTICORE_MODE_ENFORCED) {
+    return VM_MULTICORE_MODE_AUDIT;
+  }
+  return mode;
+#endif
+}
+
+inline bool vm_multicore_audit_enabled_fast() {
+#if !FLUFFOS_OWNER_THREAD_VM
+  return false;
+#else
+  return CONFIG_INT(__RC_MULTICORE_MODE__) != VM_MULTICORE_MODE_OFF;
+#endif
+}
+
+inline bool vm_multicore_enforced_fast() {
+#if !FLUFFOS_OWNER_THREAD_VM
+  return false;
+#else
+  return CONFIG_INT(__RC_MULTICORE_MODE__) == VM_MULTICORE_MODE_ENFORCED;
+#endif
+}
+
 const char *vm_owner_id(object_t *object);
 bool vm_owner_has_explicit_id(object_t *object);
 uint64_t vm_owner_epoch(object_t *object);

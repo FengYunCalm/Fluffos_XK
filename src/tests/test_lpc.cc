@@ -36,6 +36,7 @@
 #include "vm/internal/simulate.h"
 #include "vm/object_handle.h"
 #include "vm/owner.h"
+#include "vm/vm.h"
 #include "vm/worker.h"
 
 extern uint64_t vm_owner_enqueue_test_main_required_message(const char* owner_id, const char* task_key);
@@ -962,6 +963,47 @@ TEST_F(DriverTest, TestVmContextObjectStoreRemainsMainThreadOwned) {
   ASSERT_EQ(vm_context_object_store_sync_rejections(), before_rejections + 1);
   ASSERT_TRUE(main_context->object_store.main_thread_owned);
   ASSERT_EQ(main_context->object_store.objects, obj_list);
+}
+
+TEST_F(DriverTest, TestRemoveDestructedObjectsBoundedDrainsIncrementally) {
+  remove_destructed_objects();
+  ASSERT_EQ(vm_destructed_object_backlog_size(), 0u);
+  ASSERT_NE(load_object_for_test("single/void"), nullptr);
+
+  std::vector<object_t*> objects;
+  for (int i = 0; i < 3; i++) {
+    auto* object = clone_object_for_test("single/void");
+    ASSERT_NE(object, nullptr);
+    objects.push_back(object);
+  }
+  for (auto* object : objects) {
+    destruct_object_for_test(object);
+  }
+
+  ASSERT_EQ(vm_destructed_object_backlog_size(), 3u);
+  auto cleanup_total_before = vm_destructed_object_cleanup_total();
+
+  ASSERT_EQ(remove_destructed_objects_bounded(2), 2u);
+  ASSERT_EQ(vm_destructed_object_backlog_size(), 1u);
+  ASSERT_EQ(vm_context().object_store.destructed_objects, obj_list_destruct);
+
+  ASSERT_EQ(remove_destructed_objects_bounded(2), 1u);
+  ASSERT_EQ(vm_destructed_object_backlog_size(), 0u);
+  ASSERT_EQ(vm_destructed_object_cleanup_total(), cleanup_total_before + 3);
+  ASSERT_GE(vm_destructed_object_cleanup_batches(), 2u);
+  ASSERT_EQ(vm_destructed_object_cleanup_last_removed(), 1u);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    svalue_t* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr) << key;
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER) << key;
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto* runtime = vm_owner_runtime_status();
+  ASSERT_EQ(mapping_number(runtime, "destructed_object_backlog"), 0);
+  ASSERT_GE(mapping_number(runtime, "destructed_object_cleanup_total"), 3);
+  ASSERT_EQ(mapping_number(runtime, "destructed_object_incremental_cleanup_ready"), 1);
+  free_mapping(runtime);
 }
 
 TEST_F(DriverTest, TestVmOwnerScopeBindsAndRestoresCurrentOwner) {
@@ -2962,17 +3004,29 @@ TEST_F(DriverTest, TestVmOwnerAccessFastBypassOnlySkipsDefaultModeDiagnostics) {
   auto* before = vm_owner_access_trace(0);
   auto before_total = mapping_number(before, "total_traced");
   free_mapping(before);
+  auto* before_task_trace = vm_owner_task_trace(0);
+  auto before_task_total = mapping_number(before_task_trace, "total_traced");
+  free_mapping(before_task_trace);
 
   CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_OFF;
   ASSERT_TRUE(vm_owner_access_fast_bypass(source, target));
   ASSERT_EQ(vm_owner_record_cross_owner_access(source, target, "call_other"), 0u);
+  ASSERT_EQ(vm_owner_record_task_trace("owner/test/fast-bypass/source", "interactive", "look", 1,
+                                       "off_mode_probe"),
+            0u);
   auto* off_trace = vm_owner_access_trace(0);
   ASSERT_EQ(mapping_number(off_trace, "total_traced"), before_total);
   free_mapping(off_trace);
+  auto* off_task_trace = vm_owner_task_trace(0);
+  ASSERT_EQ(mapping_number(off_task_trace, "total_traced"), before_task_total);
+  free_mapping(off_task_trace);
 
   CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_AUDIT;
   ASSERT_FALSE(vm_owner_access_fast_bypass(source, target));
   ASSERT_GT(vm_owner_record_cross_owner_access(source, target, "call_other"), 0u);
+  ASSERT_GT(vm_owner_record_task_trace("owner/test/fast-bypass/source", "interactive", "look", 1,
+                                       "audit_mode_probe"),
+            0u);
   ASSERT_FALSE(vm_owner_cross_owner_access_blocked(source, target, "call_other"));
 
   CONFIG_INT(__RC_MULTICORE_MODE__) = VM_MULTICORE_MODE_ENFORCED;

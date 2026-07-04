@@ -8,6 +8,7 @@
 #include <event2/event.h>   // for event_add, etc
 #include <event2/thread.h>  // for thread support
 #include <cmath>            // for exp
+#include <cstddef>          // for size_t
 #include <cstdio>           // for NULL, sprintf
 #ifdef TIME_WITH_SYS_TIME
 #include <sys/time.h>
@@ -42,6 +43,8 @@
 struct event_base *g_event_base = nullptr;
 
 namespace {
+constexpr size_t kDestructedObjectCleanupTickBudget = 1024;
+
 void libevent_log(int severity, const char *msg) {
   if (severity == EVENT_LOG_ERR) {
     debug(all, "libevent:%d:%s\n", severity, msg);
@@ -146,6 +149,7 @@ inline void call_tick_events() {
 void on_game_tick(evutil_socket_t /*fd*/, short /*what*/, void *arg) {
   call_tick_events();
   vm_owner_drain_main_tasks(1024);
+  remove_destructed_objects_bounded(kDestructedObjectCleanupTickBudget);
   g_current_gametick++;
   vm_context_set_current_gametick(vm_context(), g_current_gametick);
 

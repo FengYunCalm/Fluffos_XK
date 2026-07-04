@@ -4,6 +4,7 @@ option(STATIC "Build static version of driver" OFF)
 option(USE_JEMALLOC "Build driver with jemalloc support" ON)
 option(ENABLE_SANITIZER "Build driver with sanitizer support" OFF)
 option(ENABLE_LTO "Enable interprocedural optimization/LTO on supported release builds" ON)
+option(ENABLE_OWNER_THREAD_VM "Enable thread-local VM state required by owner executor threads" ON)
 # Packages
 option(PACKAGE_ASYNC "async package" ON)
 option(PACKAGE_COMPRESS "compress package" ON)
@@ -43,6 +44,12 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if (ENABLE_OWNER_THREAD_VM)
+  add_compile_definitions(FLUFFOS_OWNER_THREAD_VM=1)
+else ()
+  add_compile_definitions(FLUFFOS_OWNER_THREAD_VM=0)
+endif ()
 
 # Setup include directoires
 include_directories("${CMAKE_CURRENT_BINARY_DIR}")

@@ -470,7 +470,7 @@ void check_all_blocks(int flag) {
   char *ptr;
   block_t *ssbl;
   malloc_block_t *msbl;
-  extern thread_local svalue_t apply_ret_value;
+  extern FLUFFOS_VM_THREAD_LOCAL svalue_t apply_ret_value;
 
   outbuf_zero(&out);
   if (!(flag & 2)) {

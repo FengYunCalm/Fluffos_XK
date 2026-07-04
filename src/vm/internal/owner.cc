@@ -4,6 +4,7 @@
 #include "vm/frozen_value.h"
 #include "vm/object_handle.h"
 #include "vm/owner.h"
+#include "vm/vm.h"
 #include "vm/internal/owner_executor.h"
 #include "vm/internal/owner_future_store.h"
 #include "vm/internal/owner_runtime_coordinator.h"
@@ -1286,8 +1287,10 @@ long vm_context_satisfied_readiness_gate_count() {
 
 mapping_t *vm_context_contract_mapping() {
   auto *contract = allocate_mapping(71);
+  const int owner_thread_vm_enabled = FLUFFOS_OWNER_THREAD_VM != 0;
   add_mapping_pair(contract, "contract_version", 1);
-  add_mapping_string(contract, "context_model", "thread_local_vm_context");
+  add_mapping_string(contract, "context_model",
+                     owner_thread_vm_enabled ? "thread_local_vm_context" : "single_thread_vm_context");
   add_mapping_string(contract, "execution_state_model", "vm_context_execution_snapshot");
   add_mapping_string(contract, "owner_state_model", "vm_context_owner_scope");
   add_mapping_string(contract, "error_state_model", "vm_context_error_snapshot");
@@ -1297,28 +1300,36 @@ mapping_t *vm_context_contract_mapping() {
   add_mapping_string(contract, "ordinary_lpc_blocker", "");
   add_mapping_pair(contract, "controlled_lpc_ready", 1);
   add_mapping_string(contract, "controlled_lpc_policy", "descriptor_manifest_only");
-  add_mapping_string(contract, "eval_stack_model", "thread_local_owner_execution_stack");
-  add_mapping_pair(contract, "eval_stack_thread_local", 1);
+  add_mapping_string(contract, "eval_stack_model",
+                     owner_thread_vm_enabled ? "thread_local_owner_execution_stack"
+                                             : "single_thread_execution_stack");
+  add_mapping_pair(contract, "eval_stack_thread_local", owner_thread_vm_enabled);
   add_mapping_pair(contract, "eval_stack_owner_bound_on_executor", 1);
   add_mapping_pair(contract, "eval_stack_cleared_after_task", 1);
   add_mapping_pair(contract, "eval_stack_owner_local", 1);
-  add_mapping_string(contract, "control_stack_model", "thread_local_owner_control_stack");
-  add_mapping_pair(contract, "control_stack_thread_local", 1);
+  add_mapping_string(contract, "control_stack_model",
+                     owner_thread_vm_enabled ? "thread_local_owner_control_stack"
+                                             : "single_thread_control_stack");
+  add_mapping_pair(contract, "control_stack_thread_local", owner_thread_vm_enabled);
   add_mapping_pair(contract, "control_stack_owner_bound_on_executor", 1);
   add_mapping_pair(contract, "control_stack_cleared_after_task", 1);
   add_mapping_pair(contract, "control_stack_owner_local", 1);
-  add_mapping_string(contract, "value_stack_model", "thread_local_owner_value_stack");
-  add_mapping_pair(contract, "value_stack_thread_local", 1);
+  add_mapping_string(contract, "value_stack_model",
+                     owner_thread_vm_enabled ? "thread_local_owner_value_stack"
+                                             : "single_thread_value_stack");
+  add_mapping_pair(contract, "value_stack_thread_local", owner_thread_vm_enabled);
   add_mapping_pair(contract, "value_stack_lvalue_refs_cleared_after_task", 1);
   add_mapping_pair(contract, "value_stack_owner_bound_on_executor", 1);
   add_mapping_pair(contract, "value_stack_cleared_after_task", 1);
   add_mapping_pair(contract, "value_stack_owner_local", 1);
-  add_mapping_string(contract, "apply_return_model", "thread_local_owner_apply_return");
-  add_mapping_pair(contract, "apply_return_thread_local", 1);
+  add_mapping_string(contract, "apply_return_model",
+                     owner_thread_vm_enabled ? "thread_local_owner_apply_return"
+                                             : "single_thread_apply_return");
+  add_mapping_pair(contract, "apply_return_thread_local", owner_thread_vm_enabled);
   add_mapping_pair(contract, "apply_return_owner_bound_on_executor", 1);
   add_mapping_pair(contract, "apply_return_cleared_after_task", 1);
   add_mapping_pair(contract, "apply_return_owner_local", 1);
-  add_mapping_pair(contract, "sprintf_state_thread_local", 1);
+  add_mapping_pair(contract, "sprintf_state_thread_local", owner_thread_vm_enabled);
   add_mapping_pair(contract, "sprintf_format_buffers_static_free", 1);
   add_mapping_string(contract, "object_refs_model", "object_handle_boundary");
   add_mapping_pair(contract, "object_refs_owner_local", 1);
@@ -3956,6 +3967,9 @@ mapping_t *vm_owner_ordinary_lpc_task(object_t *target, const char *owner_id, co
 
 uint64_t vm_owner_record_task_trace(const char *owner_id, const char *task_type, const char *task_key,
                                      uint64_t owner_epoch, const char *state) {
+  if (!vm_multicore_audit_enabled()) {
+    return 0;
+  }
   auto sequence = owner_trace_store.total_task_traced() + 1;
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
   return append_owner_task_trace(0, sequence, normalize_owner_id(owner_id), owner_epoch,
@@ -5147,7 +5161,7 @@ mapping_t *vm_owner_thread_status() {
 
 mapping_t *vm_owner_runtime_status() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto *map = allocate_mapping(182);
+  auto *map = allocate_mapping(190);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
   add_mapping_string(map, "multicore_mode_name", vm_multicore_mode_name(vm_multicore_mode()));
@@ -5171,6 +5185,14 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_pair(map, "main_budget_yields", static_cast<long>(owner_main_budget_yields.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "main_owner_claims", static_cast<long>(owner_main_owner_claims.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "main_owner_releases", static_cast<long>(owner_main_owner_releases.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "destructed_object_backlog", static_cast<long>(vm_destructed_object_backlog_size()));
+  add_mapping_pair(map, "destructed_object_cleanup_total",
+                   static_cast<long>(vm_destructed_object_cleanup_total()));
+  add_mapping_pair(map, "destructed_object_cleanup_batches",
+                   static_cast<long>(vm_destructed_object_cleanup_batches()));
+  add_mapping_pair(map, "destructed_object_cleanup_last_removed",
+                   static_cast<long>(vm_destructed_object_cleanup_last_removed()));
+  add_mapping_pair(map, "destructed_object_incremental_cleanup_ready", 1);
   add_mapping_pair(map, "active_owners", owner_scheduler_state.active_owner_count());
   add_mapping_pair(map, "owner_threads", static_cast<long>(owner_threads.size()));
   add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));

@@ -12,7 +12,7 @@
 
 namespace {
 VMContext main_vm_context;
-thread_local VMContext *thread_vm_context = &main_vm_context;
+FLUFFOS_VM_THREAD_LOCAL VMContext *thread_vm_context = &main_vm_context;
 const std::thread::id main_vm_thread_id = std::this_thread::get_id();
 std::atomic<uint64_t> object_store_sync_rejections{0};
 

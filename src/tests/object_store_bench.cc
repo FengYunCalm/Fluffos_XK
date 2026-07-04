@@ -6,6 +6,7 @@
 #include "vm/internal/simulate.h"
 #include "vm/object_handle.h"
 #include "vm/owner.h"
+#include "vm/vm.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -258,9 +259,18 @@ void run_clone_destruct_lifecycle_bench(Report &report) {
   auto total_elapsed = elapsed_ns(total_start);
   vm_object_lifecycle_perf_set_enabled(false);
   auto snapshot = vm_object_lifecycle_perf_snapshot();
+  auto backlog_after_loop = vm_destructed_object_backlog_size();
+  auto cleanup_total_before = vm_destructed_object_cleanup_total();
+  auto cleanup_removed = remove_destructed_objects_bounded(backlog_after_loop);
+  auto backlog_after_cleanup = vm_destructed_object_backlog_size();
 
   report.add("clone_destruct_iterations", iterations);
   report.add("clone_destruct_elapsed_ns", total_elapsed);
+  report.add("destructed_backlog_after_clone_destruct", static_cast<long long>(backlog_after_loop));
+  report.add("destructed_cleanup_removed_after_clone_destruct", static_cast<long long>(cleanup_removed));
+  report.add("destructed_backlog_after_cleanup", static_cast<long long>(backlog_after_cleanup));
+  report.add("destructed_cleanup_total_delta",
+             static_cast<long long>(vm_destructed_object_cleanup_total() - cleanup_total_before));
   add_samples(report, "clone_latency", clone_samples);
   add_samples(report, "destruct_latency", destruct_samples);
   for (size_t i = 0; i < VM_OBJECT_LIFECYCLE_PERF_STAGE_COUNT; i++) {

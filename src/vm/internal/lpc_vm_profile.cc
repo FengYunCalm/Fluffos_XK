@@ -1,5 +1,8 @@
 #include "vm/internal/lpc_vm_profile.h"
 
+#include "base/internal/vm_thread_local.h"
+#include "vm/owner.h"
+
 #include <atomic>
 
 namespace {
@@ -26,7 +29,7 @@ struct LpcVmProfileState {
   std::atomic<uint64_t> string_push_count{0};
 };
 
-thread_local uint64_t opcode_dispatch_batch = 0;
+FLUFFOS_VM_THREAD_LOCAL uint64_t opcode_dispatch_batch = 0;
 
 LpcVmProfileState &state() {
   static LpcVmProfileState profile;
@@ -42,7 +45,12 @@ void reset_counter(std::atomic<uint64_t> &value) { value.store(0, std::memory_or
 void add_counter(std::atomic<uint64_t> &value, uint64_t delta = 1) {
   value.fetch_add(delta, std::memory_order_relaxed);
 }
+
 }  // namespace
+
+bool lpc_vm_profile_recording_enabled() {
+  return vm_multicore_audit_enabled();
+}
 
 void lpc_vm_profile_reset() {
   lpc_vm_profile_flush_opcode_dispatch();
@@ -71,6 +79,9 @@ void lpc_vm_profile_reset() {
 }
 
 void lpc_vm_profile_record_apply_cache_lookup(bool hit) {
+  if (!lpc_vm_profile_recording_enabled()) {
+    return;
+  }
   auto &profile = state();
   add_counter(profile.apply_cache_lookup_count);
   if (hit) {
@@ -81,6 +92,9 @@ void lpc_vm_profile_record_apply_cache_lookup(bool hit) {
 }
 
 void lpc_vm_profile_record_apply_cache_table_build(std::size_t items, uint64_t elapsed_ns) {
+  if (!lpc_vm_profile_recording_enabled()) {
+    return;
+  }
   auto &profile = state();
   add_counter(profile.apply_cache_table_build_count);
   add_counter(profile.apply_cache_table_item_count, static_cast<uint64_t>(items));
@@ -88,6 +102,9 @@ void lpc_vm_profile_record_apply_cache_table_build(std::size_t items, uint64_t e
 }
 
 void lpc_vm_profile_record_apply_dispatch_cache_lookup(bool hit) {
+  if (!lpc_vm_profile_recording_enabled()) {
+    return;
+  }
   auto &profile = state();
   add_counter(profile.apply_dispatch_cache_lookup_count);
   if (hit) {
@@ -96,10 +113,16 @@ void lpc_vm_profile_record_apply_dispatch_cache_lookup(bool hit) {
 }
 
 void lpc_vm_profile_record_apply_dispatch_cache_epoch_invalidation() {
+  if (!lpc_vm_profile_recording_enabled()) {
+    return;
+  }
   add_counter(state().apply_dispatch_cache_epoch_invalidation_count);
 }
 
 void lpc_vm_profile_record_opcode_dispatch() {
+  if (!lpc_vm_profile_recording_enabled()) {
+    return;
+  }
   opcode_dispatch_batch++;
   if (opcode_dispatch_batch >= 1024) {
     lpc_vm_profile_flush_opcode_dispatch();
@@ -115,16 +138,25 @@ void lpc_vm_profile_flush_opcode_dispatch() {
 }
 
 void lpc_vm_profile_record_efun_dispatch(uint64_t elapsed_ns) {
+  if (!lpc_vm_profile_recording_enabled()) {
+    return;
+  }
   auto &profile = state();
   add_counter(profile.efun_dispatch_count);
   add_counter(profile.efun_dispatch_ns, elapsed_ns);
 }
 
 void lpc_vm_profile_record_call_other_dispatch() {
+  if (!lpc_vm_profile_recording_enabled()) {
+    return;
+  }
   add_counter(state().call_other_dispatch_count);
 }
 
 void lpc_vm_profile_record_function_pointer_dispatch(bool efun_pointer) {
+  if (!lpc_vm_profile_recording_enabled()) {
+    return;
+  }
   auto &profile = state();
   add_counter(profile.function_pointer_dispatch_count);
   if (efun_pointer) {
@@ -133,6 +165,9 @@ void lpc_vm_profile_record_function_pointer_dispatch(bool efun_pointer) {
 }
 
 void lpc_vm_profile_record_parser_action_lookup(bool matched) {
+  if (!lpc_vm_profile_recording_enabled()) {
+    return;
+  }
   auto &profile = state();
   add_counter(profile.parser_action_lookup_count);
   if (matched) {
@@ -141,14 +176,23 @@ void lpc_vm_profile_record_parser_action_lookup(bool matched) {
 }
 
 void lpc_vm_profile_record_mapping_lookup() {
+  if (!lpc_vm_profile_recording_enabled()) {
+    return;
+  }
   add_counter(state().mapping_lookup_count);
 }
 
 void lpc_vm_profile_record_mapping_insert_lookup() {
+  if (!lpc_vm_profile_recording_enabled()) {
+    return;
+  }
   add_counter(state().mapping_insert_lookup_count);
 }
 
 void lpc_vm_profile_record_string_push() {
+  if (!lpc_vm_profile_recording_enabled()) {
+    return;
+  }
   add_counter(state().string_push_count);
 }
 
