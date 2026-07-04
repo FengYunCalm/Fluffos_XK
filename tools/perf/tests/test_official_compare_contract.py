@@ -86,6 +86,9 @@ class OfficialCompareContractTest(unittest.TestCase):
             '"driver_process_start_snapshot"',
             '"driver_process_end_snapshot"',
             '"driver_log_tail"',
+            '"runtime_config_overrides"',
+            "multicore mode : off",
+            "multicore mode : audit",
         ):
             self.assertIn(token, source)
 
@@ -102,6 +105,21 @@ class OfficialCompareContractTest(unittest.TestCase):
             "xk_common_cps_vs_official",
         ):
             self.assertIn(token, source)
+
+    def test_runner_and_gate_treat_empty_path_defaults_as_unset(self):
+        for module_name, file_name in (
+            ("run_official_vs_xk", "run_official_vs_xk.py"),
+            ("run_perf_truth_gate", "run_perf_truth_gate.py"),
+        ):
+            spec = importlib.util.spec_from_file_location(module_name, OFFICIAL_COMPARE / file_name)
+            self.assertIsNotNone(spec)
+            self.assertIsNotNone(spec.loader)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+            self.assertIsNone(module.optional_path(Path("")))
+            self.assertIsNone(module.optional_path(Path(".")))
+            self.assertEqual(module.optional_path(Path("/tmp/fluffos-xk")), Path("/tmp/fluffos-xk"))
 
     def test_portable_mudlib_contains_common_only_entrypoints(self):
         mudlib = OFFICIAL_COMPARE / "portable_mudlib"

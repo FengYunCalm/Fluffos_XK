@@ -30,6 +30,7 @@ class Target:
     build: Path
     cmake_args: list[str]
     ref: str = ""
+    config_overrides: list[str] | None = None
 
 
 def run_cmd(cmd: list[str], cwd: Path | None = None, timeout: int | None = None) -> str:
@@ -43,6 +44,10 @@ def run_cmd(cmd: list[str], cwd: Path | None = None, timeout: int | None = None)
         check=True,
     )
     return result.stdout
+
+
+def optional_path(path: Path) -> Path | None:
+    return None if str(path) in ("", ".") else path
 
 
 def child_usage_snapshot() -> dict[str, float]:
@@ -263,13 +268,16 @@ def configure_and_build(target: Target, skip_build: bool) -> None:
     run_cmd(["cmake", "--build", str(target.build), "--target", "driver", "lpcc", "-j2"], timeout=1800)
 
 
-def prepare_mudlib(run_dir: Path, port: int) -> Path:
+def prepare_mudlib(run_dir: Path, port: int, config_overrides: list[str] | None = None) -> Path:
     mudlib = run_dir / "mudlib"
     if mudlib.exists():
         shutil.rmtree(mudlib)
     shutil.copytree(MUDLIB_TEMPLATE, mudlib)
     config_template = (mudlib / "etc" / "config.template").read_text(encoding="utf-8")
-    (mudlib / "etc" / "config").write_text(config_template.replace("@PORT@", str(port)), encoding="utf-8")
+    config = config_template.replace("@PORT@", str(port))
+    if config_overrides:
+        config += "\n" + "\n".join(config_overrides) + "\n"
+    (mudlib / "etc" / "config").write_text(config, encoding="utf-8")
     for dirname in ("log", "data"):
         (mudlib / dirname).mkdir(exist_ok=True)
     return mudlib
@@ -293,7 +301,7 @@ def run_target(args: argparse.Namespace, target: Target, port: int) -> dict[str,
     target_started = time.time()
     run_dir = args.bench_dir / "runs" / f"{target.name}-{int(time.time())}"
     run_dir.mkdir(parents=True, exist_ok=True)
-    mudlib = prepare_mudlib(run_dir, port)
+    mudlib = prepare_mudlib(run_dir, port, target.config_overrides)
     driver = driver_path(target.build)
     lpcc = lpcc_path(target.build)
     log_path = run_dir / "driver.log"
@@ -383,6 +391,7 @@ def run_target(args: argparse.Namespace, target: Target, port: int) -> dict[str,
         "source": str(target.source),
         "commit": git_commit(target.source),
         "cmake_args": target.cmake_args,
+        "runtime_config_overrides": target.config_overrides or [],
         "build_type": "Release",
         "lto": True,
         "driver": str(driver),
@@ -440,44 +449,46 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     args.bench_dir.mkdir(parents=True, exist_ok=True)
-    official_master_source = args.official_master_source or ensure_official_source(
+    official_master_source = optional_path(args.official_master_source) or ensure_official_source(
         args, args.bench_dir, args.official_master_ref, "official-master"
     )
-    xk_common_build = args.xk_common_build or (args.bench_dir / "build" / "xk-common-gateway-off")
-    xk_production_build = args.xk_production_build or (args.bench_dir / "build" / "xk-production")
+    xk_common_build = optional_path(args.xk_common_build) or (args.bench_dir / "build" / "xk-common-gateway-off")
+    xk_production_build = optional_path(args.xk_production_build) or (args.bench_dir / "build" / "xk-production")
     targets = [
         Target(
-            "official_master",
-            official_master_source,
-            args.official_master_build or (args.bench_dir / "build" / "official-master"),
-            [],
-            args.official_master_ref,
+            name="official_master",
+            source=official_master_source,
+            build=optional_path(args.official_master_build) or (args.bench_dir / "build" / "official-master"),
+            cmake_args=[],
+            ref=args.official_master_ref,
         ),
         Target(
-            "xk_common_gateway_off",
-            args.xk_source,
-            xk_common_build,
-            ["-DPACKAGE_GATEWAY=OFF"],
+            name="xk_common_gateway_off",
+            source=args.xk_source,
+            build=xk_common_build,
+            cmake_args=["-DPACKAGE_GATEWAY=OFF"],
+            config_overrides=["multicore mode : off"],
         ),
         Target(
-            "xk_production",
-            args.xk_source,
-            xk_production_build,
-            [],
+            name="xk_production",
+            source=args.xk_source,
+            build=xk_production_build,
+            cmake_args=[],
+            config_overrides=["multicore mode : audit"],
         ),
     ]
     if args.official_stable_ref:
-        official_stable_source = args.official_stable_source or ensure_official_source(
+        official_stable_source = optional_path(args.official_stable_source) or ensure_official_source(
             args, args.bench_dir, args.official_stable_ref, "official-stable"
         )
         targets.insert(
             1,
             Target(
-                "official_stable",
-                official_stable_source,
-                args.official_stable_build or (args.bench_dir / "build" / "official-stable"),
-                [],
-                args.official_stable_ref,
+                name="official_stable",
+                source=official_stable_source,
+                build=optional_path(args.official_stable_build) or (args.bench_dir / "build" / "official-stable"),
+                cmake_args=[],
+                ref=args.official_stable_ref,
             ),
         )
     for target in targets:

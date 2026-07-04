@@ -67,6 +67,10 @@ def latest_stable_release() -> tuple[str, str]:
         return "", f"{type(exc).__name__}: {exc}"
 
 
+def optional_path(path: Path) -> Path | None:
+    return None if str(path) in ("", ".") else path
+
+
 def median_metric(summary: dict[str, Any], driver: str, metric: str) -> float | None:
     runs = summary.get("drivers", {}).get(driver, {}).get("runs", [])
     values: list[float] = []
@@ -101,8 +105,15 @@ def commands_per_second(item: dict[str, Any] | None) -> float:
     return float(load_summary(item).get("commands_per_second", 0.0) or 0.0)
 
 
-def p99_ms(item: dict[str, Any] | None) -> float:
-    return float(load_summary(item).get("latency_ms", {}).get("p99", 0.0) or 0.0)
+def p99_ms(item: dict[str, Any] | None) -> float | None:
+    latency = load_summary(item).get("latency_ms", {})
+    if not isinstance(latency, dict):
+        return None
+    if int(latency.get("count", 1) or 0) == 0:
+        return None
+    if "p99" not in latency:
+        return None
+    return float(latency.get("p99", 0.0) or 0.0)
 
 
 def add_ratio_check(
@@ -328,10 +339,10 @@ def main() -> int:
     args = parse_args()
     config = MATRIX[args.matrix]
     args.bench_dir.mkdir(parents=True, exist_ok=True)
-    runner_json = args.runner_json or (args.bench_dir / f"perf-truth-{args.matrix}-runner.json")
-    report_json = args.report_json or (args.bench_dir / f"perf-truth-{args.matrix}-gate.json")
-    report_md = args.report_md or (args.bench_dir / f"perf-truth-{args.matrix}.md")
-    microbench_summary = args.microbench_summary or (args.bench_dir / "portable-bench-summary.json")
+    runner_json = optional_path(args.runner_json) or (args.bench_dir / f"perf-truth-{args.matrix}-runner.json")
+    report_json = optional_path(args.report_json) or (args.bench_dir / f"perf-truth-{args.matrix}-gate.json")
+    report_md = optional_path(args.report_md) or (args.bench_dir / f"perf-truth-{args.matrix}.md")
+    microbench_summary = optional_path(args.microbench_summary) or (args.bench_dir / "portable-bench-summary.json")
 
     stable_ref = "" if args.skip_stable else args.official_stable_ref
     stable_resolution_error = ""
@@ -378,8 +389,9 @@ def main() -> int:
         ("--xk-production-build", args.xk_production_build),
     )
     for flag, path in optional_paths:
-        if str(path) not in ("", "."):
-            runner_cmd += [flag, str(path)]
+        normalized_path = optional_path(path)
+        if normalized_path:
+            runner_cmd += [flag, str(normalized_path)]
     if stable_ref:
         runner_cmd += ["--official-stable-ref", stable_ref]
     if args.skip_build:
