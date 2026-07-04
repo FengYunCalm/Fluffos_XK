@@ -538,7 +538,6 @@ object_t *load_object(const char *lname, int callcreate) {
   restore_command_giver();
   update_compile_av(total_lines);
   total_lines = 0;
-  close(f);
 
   /* Sorry, can't handle objects without programs yet. */
   if (inherit_file == nullptr && (num_parse_error > 0 || prog == nullptr)) {

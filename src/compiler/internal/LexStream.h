@@ -22,12 +22,20 @@ class LexStream {
 class FileLexStream : public LexStream {
  public:
   FileLexStream(int fd) : fd_(fd) {}
-  ~FileLexStream() override {}
+  ~FileLexStream() override { close(); }
 
-  size_t read(char* buffer, size_t size) override { return ::read(fd_, buffer, size); }
+  size_t read(char* buffer, size_t size) override {
+    if (fd_ < 0) {
+      return 0;
+    }
+    auto bytes = ::read(fd_, buffer, size);
+    return bytes > 0 ? static_cast<size_t>(bytes) : 0;
+  }
   void close() override {
-    ::close(fd_);
-    fd_ = 0;
+    if (fd_ >= 0) {
+      ::close(fd_);
+      fd_ = -1;
+    }
   };
 
  private:

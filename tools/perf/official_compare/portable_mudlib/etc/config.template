@@ -1,0 +1,38 @@
+name : PortableBench
+mud ip : 127.0.0.1
+port number : @PORT@
+mudlib directory : ./
+log directory : /log
+include directories : /include
+master file : /single/master
+simulated efun file : /single/simul_efun
+debug log file : debug.log
+default fail message : What?
+time to clean up : 1200
+time to reset : 1800
+time to swap : 0
+maximum bits in a bitfield : 1200
+maximum local variables : 64
+maximum call depth : 100
+maximum evaluation cost : 300000000
+maximum array size : 100000
+maximum buffer size : 400000
+maximum mapping size : 100000
+maximum string length : 1000000
+maximum read file size : 200000
+maximum byte transfer : 100000
+hash table size : 7001
+object table size : 1501
+living hash table size : 256
+gametick msec : 100
+heartbeat interval msec : 1000
+mudlib error handler : 1
+no resets : 1
+lazy resets : 1
+sane explode string : 1
+reversible explode string : 0
+sane sorting : 1
+warn tab : 0
+wombles : 0
+call other type check : 0
+call other warn : 0

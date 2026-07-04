@@ -13,6 +13,8 @@
 /docs/Gemfile.lock
 /docs/vendor
 /venv/
+__pycache__/
+*.py[cod]
 /testsuite/trace_lpcc.json
 **/Testing/Temporary
 /.internal/
