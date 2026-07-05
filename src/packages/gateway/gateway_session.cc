@@ -502,8 +502,9 @@ void gateway_unbind_session_object(object_t *ob) {
   if (!sess) {
     return;
   }
+  std::string session_id = sess->session_id;
   g_gateway_obj_to_session.erase(ob);
-  g_gateway_sessions.erase(sess->session_id);
+  g_gateway_sessions.erase(session_id);
 }
 
 void gateway_cleanup_master_sessions(int master_fd) {
