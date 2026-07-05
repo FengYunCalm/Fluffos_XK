@@ -219,6 +219,100 @@ void wait_for_probe_count(long expected_probe_count) {
   throw std::runtime_error("timed out waiting for owner executor probe tasks");
 }
 
+std::string metric_key(const std::string &prefix, const std::string &case_name, int workers,
+                       const std::string &suffix) {
+  std::ostringstream key;
+  key << prefix << "_" << case_name << "_" << workers << "w_" << suffix;
+  return key.str();
+}
+
+long long run_probe_matrix_case(Report &report, const std::string &case_name,
+                                const std::vector<std::string> &owners, long tasks_per_owner,
+                                int workers, int probe_delay_ms) {
+  const auto total_tasks = static_cast<long>(owners.size()) * tasks_per_owner;
+  auto *before = vm_owner_thread_status();
+  auto before_probe = mapping_number(before, "executor_probe_executed");
+  auto before_claim_conflicts = mapping_number(before, "executor_same_owner_claim_conflicts");
+  auto before_dispatched = mapping_number(before, "thread_dispatched");
+  free_mapping(before);
+
+  bench_set_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", std::to_string(probe_delay_ms).c_str());
+  auto start = Clock::now();
+  for (long i = 0; i < tasks_per_owner; i++) {
+    for (const auto &owner : owners) {
+      require(vm_owner_enqueue_task(owner.c_str(), "executor_probe", case_name.c_str()) > 0,
+              case_name + " enqueue failed");
+    }
+  }
+
+  vm_owner_thread_start(workers);
+  wait_for_probe_count(before_probe + total_tasks);
+  auto elapsed = elapsed_us(start);
+  auto *running = vm_owner_thread_status();
+  auto completed = mapping_number(running, "executor_probe_executed") - before_probe;
+  auto dispatched = mapping_number(running, "thread_dispatched") - before_dispatched;
+  auto claim_conflicts =
+      mapping_number(running, "executor_same_owner_claim_conflicts") - before_claim_conflicts;
+  auto throughput = elapsed > 0 ? completed * 1000000LL / elapsed : 0;
+
+  report.add(metric_key("thread_matrix", case_name, workers, "tasks"), total_tasks);
+  report.add(metric_key("thread_matrix", case_name, workers, "completed"), completed);
+  report.add(metric_key("thread_matrix", case_name, workers, "elapsed_us"), elapsed);
+  report.add(metric_key("thread_matrix", case_name, workers, "throughput_per_sec"), throughput);
+  report.add(metric_key("thread_matrix", case_name, workers, "observed_thread_count"),
+             mapping_number(running, "thread_count"));
+  report.add(metric_key("thread_matrix", case_name, workers, "thread_dispatched"), dispatched);
+  report.add(metric_key("thread_matrix", case_name, workers, "runtime_max_parallel_owners_seen"),
+             mapping_number(running, "executor_max_parallel_owners"));
+  report.add(metric_key("thread_matrix", case_name, workers, "claim_conflicts"), claim_conflicts);
+  free_mapping(running);
+  vm_owner_thread_stop();
+  bench_unset_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
+  return throughput;
+}
+
+void run_probe_thread_matrix(Report &report) {
+  const long tasks_per_owner = 16;
+  const int probe_delay_ms = 5;
+  const std::vector<int> worker_counts{1, 2, 4};
+  const std::vector<std::string> same_owner{
+      "owner/bench/runtime-v4/thread-matrix/same",
+  };
+  const std::vector<std::string> different_owners{
+      "owner/bench/runtime-v4/thread-matrix/different-a",
+      "owner/bench/runtime-v4/thread-matrix/different-b",
+      "owner/bench/runtime-v4/thread-matrix/different-c",
+      "owner/bench/runtime-v4/thread-matrix/different-d",
+  };
+  const std::vector<std::string> service_shards{
+      "owner/service/bench/runtime-v4/shard-a",
+      "owner/service/bench/runtime-v4/shard-b",
+      "owner/service/bench/runtime-v4/shard-c",
+      "owner/service/bench/runtime-v4/shard-d",
+  };
+
+  auto run_case = [&](const std::string &case_name, const std::vector<std::string> &owners) {
+    long long one_worker = 0;
+    long long four_worker = 0;
+    for (auto workers : worker_counts) {
+      vm_owner_thread_stop();
+      auto throughput =
+          run_probe_matrix_case(report, case_name, owners, tasks_per_owner, workers, probe_delay_ms);
+      if (workers == 1) {
+        one_worker = throughput;
+      } else if (workers == 4) {
+        four_worker = throughput;
+      }
+    }
+    report.add("thread_matrix_" + case_name + "_4w_speedup_x100",
+               one_worker > 0 ? four_worker * 100LL / one_worker : 0);
+  };
+
+  run_case("same_owner", same_owner);
+  run_case("different_owner", different_owners);
+  run_case("service_shard", service_shards);
+}
+
 void run_same_owner_bench(Report &report) {
   const char *owner = "owner/bench/runtime-v4/same";
   const long tasks = 32;
@@ -485,6 +579,7 @@ int main(int argc, char **argv) {
     report.add_string("task_model", "owner_executor_manifest_v4");
 
     vm_owner_thread_stop();
+    run_probe_thread_matrix(report);
     run_same_owner_bench(report);
     run_different_owner_bench(report);
     run_future_bench(report);
