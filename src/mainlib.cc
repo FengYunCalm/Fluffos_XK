@@ -48,15 +48,6 @@ extern void print_all_predefines();
 namespace {
 inline void print_sep() { debug_message("%s\n", std::string(72, '=').c_str()); }
 
-bool has_driver_flag(int argc, char **argv) {
-  for (int i = 1; i < argc; i++) {
-    if (argv[i][0] == '-' && argv[i][1] == 'f') {
-      return true;
-    }
-  }
-  return false;
-}
-
 void incrase_fd_rlimit() {
 #ifndef _WIN32
   // try to bump FD limits.
@@ -197,6 +188,8 @@ void attempt_shutdown(int sig) {
   p.color_mode = ColorMode::automatic;
   p.address = true;
   p.print(st, stderr);
+
+  vm_owner_thread_stop();
 
   // Attempt to call crash()
   fatal(msg);
@@ -445,11 +438,9 @@ int driver_main(int argc, char **argv) {
     exit(1);
   }
 
-  auto driver_flag_mode = has_driver_flag(argc, argv);
-  if (!driver_flag_mode && vm_multicore_audit_enabled()) {
-    vm_owner_thread_start(4);
-  }
-
+  // Owner worker threads are an explicit runtime profile.  Audit/enforced
+  // config enables owner checks and routing, but must not make the legacy
+  // single-thread mudlib profile look threaded at boot.
   // Initialize user connection socket
   if (!init_user_conn()) {
     exit(1);

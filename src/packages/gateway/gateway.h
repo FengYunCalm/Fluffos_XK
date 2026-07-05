@@ -84,6 +84,7 @@ struct GatewaySession {
   time_t connected_at{0};
   time_t last_active{0};
   object_t *user_ob{nullptr};
+  std::string user_ob_name;
   int64_t user_ob_load_time{0};
   std::atomic<bool> command_task_pending{false};
   std::deque<std::string> output_fifo;

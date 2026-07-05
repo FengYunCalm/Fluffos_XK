@@ -7,6 +7,7 @@
 #include "packages/core/dns.h"
 #include "user.h"
 #include "vm/context.h"
+#include "vm/internal/otable.h"
 #include "vm/owner.h"
 
 #include <event2/event.h>
@@ -62,6 +63,20 @@ class GatewayControlledLpcScope {
 
 bool gateway_object_valid(object_t *ob) {
   return ob && !(ob->flags & O_DESTRUCTED) && ob->obname && ob->obname[0] != '\0';
+}
+
+object_t *gateway_resolve_session_object(GatewaySession *sess) {
+  if (!sess || sess->user_ob_name.empty()) {
+    return nullptr;
+  }
+
+  auto *current = ObjectTable::instance().find(sess->user_ob_name);
+  if (!gateway_object_valid(current) || current != sess->user_ob ||
+      current->load_time != sess->user_ob_load_time) {
+    sess->user_ob = nullptr;
+    return nullptr;
+  }
+  return current;
 }
 
 void gateway_debugf(const char *fmt, ...) {
@@ -349,9 +364,9 @@ void gateway_finish_command_task(const std::string &session_id, object_t *fallba
 
 object_t *resolve_active_session_owner(const char *session_id, object_t *fallback) {
   auto *sess = gateway_find_session(session_id);
-  if (sess && gateway_object_valid(sess->user_ob) && sess->user_ob->interactive &&
-      sess->user_ob->interactive->ob == sess->user_ob) {
-    return sess->user_ob;
+  auto *session_ob = gateway_resolve_session_object(sess);
+  if (session_ob && session_ob->interactive && session_ob->interactive->ob == session_ob) {
+    return session_ob;
   }
   if (gateway_object_valid(fallback) && fallback->interactive &&
       fallback->interactive->ob == fallback) {
@@ -381,8 +396,7 @@ GatewaySession *gateway_find_session_by_object(object_t *ob) {
   }
 
   auto *sess = it->second;
-  if (!sess || !gateway_object_valid(sess->user_ob) || sess->user_ob != ob ||
-      sess->user_ob_load_time != ob->load_time) {
+  if (!sess || gateway_resolve_session_object(sess) != ob) {
     g_gateway_obj_to_session.erase(it);
     return nullptr;
   }
@@ -491,6 +505,7 @@ int gateway_bind_session_object(const char *session_id, object_t *ob, const char
   sess->real_port = port;
   sess->master_fd = master_fd;
   sess->user_ob = ob;
+  sess->user_ob_name = ob->obname ? ob->obname : "";
   sess->user_ob_load_time = ob->load_time;
   sess->last_active = get_current_time();
   g_gateway_obj_to_session[ob] = sess;
@@ -616,6 +631,7 @@ void gateway_session_exec_update(object_t *new_ob, object_t *old_ob) {
   g_gateway_obj_to_session.erase(old_ob);
   g_gateway_obj_to_session[new_ob] = sess;
   sess->user_ob = new_ob;
+  sess->user_ob_name = new_ob->obname ? new_ob->obname : "";
   sess->user_ob_load_time = new_ob->load_time;
 }
 
@@ -760,7 +776,7 @@ object_t *gateway_create_session_internal(const char *session_id, svalue_t *data
 int gateway_destroy_session_internal(const char *session_id, const char *reason_code,
                                      const char *reason_text) {
   auto *sess = gateway_find_session(session_id);
-  auto *ob = sess ? sess->user_ob : nullptr;
+  auto *ob = gateway_resolve_session_object(sess);
   const char *reason_code_str = reason_code && reason_code[0] ? reason_code : "client_disconnected";
   const char *reason_text_str = reason_text && reason_text[0] ? reason_text : reason_code_str;
 
@@ -786,8 +802,9 @@ int gateway_destroy_session_internal(const char *session_id, const char *reason_
     }
     ob = resolve_active_session_owner(session_id, ob);
     if (!ob || !ob->interactive) {
-      if (sess && gateway_object_valid(sess->user_ob)) {
-        gateway_unbind_session_object(sess->user_ob);
+      auto *session_ob = gateway_resolve_session_object(sess);
+      if (session_ob) {
+        gateway_unbind_session_object(session_ob);
       } else {
         g_gateway_sessions.erase(session_id);
       }
@@ -857,7 +874,8 @@ void gateway_check_session_timeouts() {
       to_remove.push_back(entry.first);
       continue;
     }
-    if (!gateway_object_valid(sess->user_ob) || !sess->user_ob->interactive) {
+    auto *session_ob = gateway_resolve_session_object(sess);
+    if (!session_ob || !session_ob->interactive) {
       to_remove.push_back(entry.first);
     }
   }
@@ -955,10 +973,11 @@ void f_gateway_sessions() {
 
   arr = allocate_array(gateway_get_session_count());
   for (const auto &entry : g_gateway_sessions) {
-    if (gateway_object_valid(entry.second->user_ob)) {
+    auto *session_ob = gateway_resolve_session_object(entry.second.get());
+    if (session_ob) {
       arr->item[index].type = T_OBJECT;
-      arr->item[index].u.ob = entry.second->user_ob;
-      add_ref(entry.second->user_ob, "gateway_sessions");
+      arr->item[index].u.ob = session_ob;
+      add_ref(session_ob, "gateway_sessions");
       index++;
     }
   }
@@ -984,9 +1003,10 @@ void f_gateway_session_info() {
   add_mapping_pair(map, "master_fd", sess->master_fd);
   add_mapping_pair(map, "connected_at", sess->connected_at);
   add_mapping_pair(map, "last_active", sess->last_active);
-  add_mapping_string(map, "object_name", sess->user_ob->obname);
-  add_mapping_string(map, "owner_id", vm_owner_id(sess->user_ob));
-  add_mapping_pair(map, "owner_epoch", static_cast<long>(vm_owner_epoch(sess->user_ob)));
+  auto *session_ob = gateway_resolve_session_object(sess);
+  add_mapping_string(map, "object_name", session_ob ? session_ob->obname : "");
+  add_mapping_string(map, "owner_id", session_ob ? vm_owner_id(session_ob) : "");
+  add_mapping_pair(map, "owner_epoch", session_ob ? static_cast<long>(vm_owner_epoch(session_ob)) : 0);
   add_mapping_pair(map, "session_fifo_contract_ready", 1);
   add_mapping_pair(map, "session_fifo_depth", static_cast<long>(sess->output_fifo.size()));
   add_mapping_pair(map, "session_fifo_max_depth", static_cast<long>(sess->output_fifo_max_depth));
