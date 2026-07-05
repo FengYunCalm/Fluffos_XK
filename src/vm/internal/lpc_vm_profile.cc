@@ -48,10 +48,6 @@ void add_counter(std::atomic<uint64_t> &value, uint64_t delta = 1) {
 
 }  // namespace
 
-bool lpc_vm_profile_recording_enabled() {
-  return vm_multicore_audit_enabled();
-}
-
 void lpc_vm_profile_reset() {
   lpc_vm_profile_flush_opcode_dispatch();
   opcode_dispatch_batch = 0;
@@ -76,6 +72,11 @@ void lpc_vm_profile_reset() {
   reset_counter(profile.mapping_lookup_count);
   reset_counter(profile.mapping_insert_lookup_count);
   reset_counter(profile.string_push_count);
+}
+
+#if FLUFFOS_OWNER_THREAD_VM
+bool lpc_vm_profile_recording_enabled() {
+  return vm_multicore_audit_enabled_fast();
 }
 
 void lpc_vm_profile_record_apply_cache_lookup(bool hit) {
@@ -195,6 +196,7 @@ void lpc_vm_profile_record_string_push() {
   }
   add_counter(state().string_push_count);
 }
+#endif
 
 LpcVmProfileSnapshot lpc_vm_profile_snapshot() {
   lpc_vm_profile_flush_opcode_dispatch();
