@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <event2/event.h>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -10488,6 +10489,114 @@ TEST_F(DriverTest, TestGatewayReceiveRunsThroughOwnerMainQueue) {
   ASSERT_EQ(ob->interactive, nullptr);
   destruct_object(ob);
   free_object(&ob, "TestGatewayReceiveRunsThroughOwnerMainQueue");
+}
+
+TEST_F(DriverTest, TestGatewayReceiveDefersMainDrainWhenOwnerThreadsAvailable) {
+  auto *ob = create_gateway_session_for_test("gw-test-receive-threaded", "/clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  ASSERT_NE(ob->interactive, nullptr);
+  ASSERT_TRUE(gateway_is_session(ob));
+  auto owner_epoch = vm_owner_epoch(ob);
+
+  auto mapping_number = [](mapping_t *map, const char *key) -> long {
+    auto *value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t *map, const char *key) -> const char * {
+    auto *value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto *before_status = gateway_status_internal();
+  ASSERT_NE(before_status, nullptr);
+  auto before_receive_enqueued = mapping_number(before_status, "gateway_receive_tasks_enqueued");
+  auto before_receive_dispatched = mapping_number(before_status, "gateway_receive_tasks_dispatched");
+  auto before_main_drain_runs = mapping_number(before_status, "gateway_main_drain_runs");
+  free_mapping(before_status);
+
+  vm_owner_thread_start(1);
+  ASSERT_TRUE(vm_owner_executor_available());
+
+  auto *initial_payload = call_lpc_method(ob, "query_last_gateway_payload");
+  ASSERT_NE(initial_payload, nullptr);
+  ASSERT_EQ(initial_payload->type, T_NUMBER);
+  ASSERT_EQ(initial_payload->u.number, 0);
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1, R"({"type":"data","cid":"gw-test-receive-threaded","data":{"cmd":"look","seq":9}})"));
+
+  auto *pending_payload = call_lpc_method(ob, "query_last_gateway_payload");
+  ASSERT_NE(pending_payload, nullptr);
+  ASSERT_EQ(pending_payload->type, T_NUMBER);
+  ASSERT_EQ(pending_payload->u.number, 0);
+
+  bool applied = false;
+  for (int i = 0; i < 8; i++) {
+    ASSERT_EQ(event_base_loop(g_event_base, EVLOOP_ONCE | EVLOOP_NONBLOCK), 0);
+    auto *payload = call_lpc_method(ob, "query_last_gateway_payload");
+    ASSERT_NE(payload, nullptr);
+    if (payload->type == T_MAPPING) {
+      ASSERT_STREQ(mapping_string(payload->u.map, "cmd"), "look");
+      ASSERT_EQ(mapping_number(payload->u.map, "seq"), 9);
+      applied = true;
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_TRUE(applied);
+
+  auto *context = call_lpc_method(ob, "query_last_gateway_receive_context");
+  ASSERT_NE(context, nullptr);
+  ASSERT_EQ(context->type, T_MAPPING);
+  ASSERT_STREQ(mapping_string(context->u.map, "owner_id"), vm_owner_id(ob));
+  ASSERT_EQ(mapping_number(context->u.map, "owner_epoch"), static_cast<long>(owner_epoch));
+  ASSERT_NE(std::string(mapping_string(context->u.map, "this_player")).find(ob->obname), std::string::npos);
+
+  auto *after_status = gateway_status_internal();
+  ASSERT_NE(after_status, nullptr);
+  ASSERT_GE(mapping_number(after_status, "gateway_receive_tasks_enqueued"), before_receive_enqueued + 1);
+  ASSERT_GE(mapping_number(after_status, "gateway_receive_tasks_dispatched"), before_receive_dispatched + 1);
+  ASSERT_GE(mapping_number(after_status, "gateway_main_drain_runs"), before_main_drain_runs + 1);
+  free_mapping(after_status);
+
+  auto *trace = vm_owner_task_trace(32);
+  ASSERT_NE(trace, nullptr);
+  ASSERT_EQ(mapping_number(trace, "success"), 1);
+  auto *events_value = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events_value, nullptr);
+  ASSERT_EQ(events_value ? events_value->type : T_INVALID, T_ARRAY);
+  bool found_queued = false;
+  bool found_main_dispatched = false;
+  bool found_dispatched = false;
+  if (events_value && events_value->type == T_ARRAY) {
+    for (int i = 0; i < events_value->u.arr->size; i++) {
+      auto *event = events_value->u.arr->item[i].u.map;
+      if (std::string(mapping_string(event, "task_type")) == "gateway" &&
+          std::string(mapping_string(event, "task_key")) == "gateway_receive" &&
+          std::string(mapping_string(event, "owner_id")) == vm_owner_id(ob) &&
+          mapping_number(event, "owner_epoch") == static_cast<long>(owner_epoch)) {
+        auto state = std::string(mapping_string(event, "state"));
+        found_queued = found_queued || state == "main_queued";
+        found_main_dispatched = found_main_dispatched || state == "main_dispatched";
+        found_dispatched = found_dispatched || state == "dispatched";
+      }
+    }
+  }
+  ASSERT_TRUE(found_queued);
+  ASSERT_TRUE(found_main_dispatched);
+  ASSERT_TRUE(found_dispatched);
+  free_mapping(trace);
+  ASSERT_EQ(vm_owner_drain_main_tasks(1), 0);
+
+  add_ref(ob, "TestGatewayReceiveDefersMainDrainWhenOwnerThreadsAvailable");
+  ASSERT_EQ(gateway_destroy_session_internal("gw-test-receive-threaded", "test_done", "done"), 1);
+  ASSERT_EQ(ob->interactive, nullptr);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayReceiveDefersMainDrainWhenOwnerThreadsAvailable");
 }
 
 TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {

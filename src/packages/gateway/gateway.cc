@@ -179,9 +179,13 @@ void gateway_apply_receive(object_t *user, svalue_t *data_sv) {
         restore_command_giver();
       }, nullptr, VM_OWNER_MAIN_TASK_IO_ADAPTER) != 0) {
     g_gateway_runtime_counters.receive_tasks_enqueued.fetch_add(1, std::memory_order_relaxed);
-    auto drained = gateway_drain_owner_main_tasks_now(kGatewayDeferredMainDrainBudget);
-    if (drained == 0 || drained >= kGatewayDeferredMainDrainBudget) {
+    if (vm_owner_executor_available() && g_event_base) {
       gateway_drain_owner_main_tasks_later();
+    } else {
+      auto drained = gateway_drain_owner_main_tasks_now(kGatewayDeferredMainDrainBudget);
+      if (drained == 0 || drained >= kGatewayDeferredMainDrainBudget) {
+        gateway_drain_owner_main_tasks_later();
+      }
     }
   } else {
     g_gateway_runtime_counters.receive_tasks_rejected.fetch_add(1, std::memory_order_relaxed);
