@@ -89,6 +89,7 @@ uint64_t vm_owner_enqueue_main_task(object_t *target, const char *task_type, con
                                     std::function<void()> drop_callback = nullptr,
                                     VMOwnerMainTaskPolicy policy = VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK);
 bool vm_owner_executor_available();
+long vm_owner_main_queue_total_depth();
 uint64_t vm_owner_enqueue_executor_task(object_t *target, const char *task_type, const char *task_key,
                                         std::function<void()> callback,
                                         std::function<void()> drop_callback = nullptr);

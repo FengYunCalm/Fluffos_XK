@@ -15,6 +15,7 @@
 #include <event2/event.h>     // for EV_TIMEOUT, etc
 #include <event2/listener.h>  // for evconnlistener_free, etc
 #include <event2/util.h>      // for evutil_closesocket, etc
+#include <chrono>             // for steady_clock, duration_cast, etc
 #include <cstdarg>            // for va_end, va_list, va_copy, etc
 #include <cstdio>             // for snprintf, vsnprintf, fwrite, etc
 #include <cstring>            // for NULL, memcpy, strlen, etc
@@ -35,6 +36,7 @@
 
 #include "backend.h"
 #include "interactive.h"
+#include "packages/gateway/gateway.h"
 #include "thirdparty/libtelnet/libtelnet.h"
 #include "net/telnet.h"
 #include "net/websocket.h"
@@ -90,6 +92,31 @@ svalue_t *owner_bound_safe_apply(const char *fun, object_t *ob, int num_arg, int
   VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob), vm_owner_epoch(ob));
   vm_owner_record_task_trace(vm_owner_id(ob), task_type, fun, vm_owner_epoch(ob), "dispatched");
   return safe_apply(fun, ob, num_arg, origin);
+}
+
+bool gateway_runtime_probe_enabled(interactive_t *ip) {
+  return ip && (ip->iflags & GATEWAY_SESSION) && ip->gateway_session_id;
+}
+
+uint64_t gateway_runtime_probe_now_ns() {
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   std::chrono::steady_clock::now().time_since_epoch())
+                                   .count());
+}
+
+void gateway_runtime_record_max(std::atomic<uint64_t> &counter, uint64_t value) {
+  auto current = counter.load(std::memory_order_relaxed);
+  while (value > current &&
+         !counter.compare_exchange_weak(current, value, std::memory_order_relaxed)) {
+  }
+}
+
+void gateway_runtime_record_latency(std::atomic<uint64_t> &total, std::atomic<uint64_t> &max,
+                                    std::atomic<uint64_t> &samples,
+                                    uint64_t elapsed_ns) {
+  total.fetch_add(elapsed_ns, std::memory_order_relaxed);
+  samples.fetch_add(1, std::memory_order_relaxed);
+  gateway_runtime_record_max(max, elapsed_ns);
 }
 
 void maybe_schedule_user_command(interactive_t *user) {
@@ -187,6 +214,8 @@ void run_user_command_reply_side_effects(interactive_t *ip, object_t *reply_comm
     return;
   }
 
+  auto gateway_probe = gateway_runtime_probe_enabled(ip);
+  auto execute_started_at = gateway_probe ? gateway_runtime_probe_now_ns() : 0;
   save_command_giver(reply_command_giver);
   VMCurrentInteractiveScope interactive_scope(vm_context(), reply_command_giver);
   if (IP_VALID(ip, command_giver)) {
@@ -198,10 +227,20 @@ void run_user_command_reply_side_effects(interactive_t *ip, object_t *reply_comm
       telnet_send_ga(ip->telnet);
     }
     if (IP_VALID(ip, command_giver)) {
+      if (gateway_probe && (ip->iflags & CMD_IN_BUF)) {
+        g_gateway_runtime_counters.reply_reschedule_cmd_in_buf.fetch_add(1,
+                                                                         std::memory_order_relaxed);
+      }
       maybe_schedule_user_command(ip);
     }
   }
   restore_command_giver();
+  if (gateway_probe) {
+    gateway_runtime_record_latency(g_gateway_runtime_counters.reply_execute_ns_total,
+                                   g_gateway_runtime_counters.reply_execute_ns_max,
+                                   g_gateway_runtime_counters.reply_execute_samples,
+                                   gateway_runtime_probe_now_ns() - execute_started_at);
+  }
 }
 
 void enqueue_user_command_reply_side_effects(interactive_t *ip, object_t *reply_command_giver) {
@@ -213,13 +252,32 @@ void enqueue_user_command_reply_side_effects(interactive_t *ip, object_t *reply_
     return;
   }
 
+  auto gateway_probe = gateway_runtime_probe_enabled(ip);
+  auto enqueued_at = gateway_probe ? gateway_runtime_probe_now_ns() : 0;
   auto task_id = vm_owner_enqueue_main_task(
       reply_command_giver, "command_reply", "prompt_telnet_reschedule_io",
-      [ip, reply_command_giver] { run_user_command_reply_side_effects(ip, reply_command_giver); }, nullptr,
+      [ip, reply_command_giver, gateway_probe, enqueued_at] {
+        if (gateway_probe) {
+          gateway_runtime_record_latency(
+              g_gateway_runtime_counters.reply_enqueue_to_dispatch_ns_total,
+              g_gateway_runtime_counters.reply_enqueue_to_dispatch_ns_max,
+              g_gateway_runtime_counters.reply_enqueue_to_dispatch_samples,
+              gateway_runtime_probe_now_ns() - enqueued_at);
+        }
+        run_user_command_reply_side_effects(ip, reply_command_giver);
+      },
+      nullptr,
       VM_OWNER_MAIN_TASK_IO_ADAPTER);
   if (task_id == 0) {
+    if (gateway_probe) {
+      g_gateway_runtime_counters.reply_tasks_inline_fallbacks.fetch_add(
+          1, std::memory_order_relaxed);
+    }
     run_user_command_reply_side_effects(ip, reply_command_giver);
     return;
+  }
+  if (gateway_probe) {
+    g_gateway_runtime_counters.reply_tasks_enqueued.fetch_add(1, std::memory_order_relaxed);
   }
   vm_owner_drain_main_tasks(64);
 }
@@ -722,14 +780,40 @@ void add_message(object_t *who, const char *data, int len) {
 #ifdef PACKAGE_GATEWAY
   if ((ip->iflags & GATEWAY_SESSION) && ip->gateway_session_id) {
     extern int gateway_send_to_session(const char *session_id, const char *data, size_t len);
+    auto gateway_probe = gateway_runtime_probe_enabled(ip);
     if (vm_context_is_main_thread()) {
+      auto execute_started_at = gateway_probe ? gateway_runtime_probe_now_ns() : 0;
       gateway_send_to_session(ip->gateway_session_id, data, len);
+      if (gateway_probe) {
+        gateway_runtime_record_latency(g_gateway_runtime_counters.output_execute_ns_total,
+                                       g_gateway_runtime_counters.output_execute_ns_max,
+                                       g_gateway_runtime_counters.output_execute_samples,
+                                       gateway_runtime_probe_now_ns() - execute_started_at);
+      }
     } else {
       auto session_id = std::string(ip->gateway_session_id);
       auto payload = std::string(data, len);
-      vm_owner_enqueue_main_task(who, "gateway", "gateway_output", [session_id, payload] {
-        gateway_send_to_session(session_id.c_str(), payload.data(), payload.size());
-      }, nullptr, VM_OWNER_MAIN_TASK_IO_ADAPTER);
+      auto enqueued_at = gateway_probe ? gateway_runtime_probe_now_ns() : 0;
+      vm_owner_enqueue_main_task(who, "gateway", "gateway_output",
+                                 [session_id, payload, gateway_probe, enqueued_at] {
+                                   if (gateway_probe) {
+                                     gateway_runtime_record_latency(
+                                         g_gateway_runtime_counters.output_enqueue_to_dispatch_ns_total,
+                                         g_gateway_runtime_counters.output_enqueue_to_dispatch_ns_max,
+                                         g_gateway_runtime_counters.output_enqueue_to_dispatch_samples,
+                                         gateway_runtime_probe_now_ns() - enqueued_at);
+                                   }
+                                   auto execute_started_at = gateway_probe ? gateway_runtime_probe_now_ns() : 0;
+                                   gateway_send_to_session(session_id.c_str(), payload.data(), payload.size());
+                                   if (gateway_probe) {
+                                     gateway_runtime_record_latency(
+                                         g_gateway_runtime_counters.output_execute_ns_total,
+                                         g_gateway_runtime_counters.output_execute_ns_max,
+                                         g_gateway_runtime_counters.output_execute_samples,
+                                         gateway_runtime_probe_now_ns() - execute_started_at);
+                                   }
+                                 },
+                                 nullptr, VM_OWNER_MAIN_TASK_IO_ADAPTER);
     }
 #ifdef SHADOW_CATCH_MESSAGE
     if (shadow_catch_message(who, data)) {

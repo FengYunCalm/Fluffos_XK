@@ -268,6 +268,9 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_command_tasks_stale"), 0);
   ASSERT_GE(mapping_number(status, "gateway_command_tasks_cleared"), 0);
   ASSERT_GE(mapping_number(status, "gateway_command_pending_sessions"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_reply_tasks_enqueued"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_reply_tasks_inline_fallbacks"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_reply_reschedule_cmd_in_buf"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_enqueued"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_flushed"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_rejected"), 0);
@@ -277,6 +280,19 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_main_drain_tasks_total"), 0);
   ASSERT_GE(mapping_number(status, "gateway_main_drain_tasks_max"), 0);
   ASSERT_GE(mapping_number(status, "gateway_main_drain_budget_hits"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_scheduled"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_coalesced"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_executed"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_inline_drain_calls"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_deferred_drain_requests"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_main_queue_depth_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_main_queue_depth_total"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_main_queue_depth_avg"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_main_queue_depth_max"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_wait_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_wait_total_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_wait_avg_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_wait_max_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_decode_samples"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_decode_avg_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_decode_max_us"), 0);
@@ -295,6 +311,18 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_command_execute_samples"), 0);
   ASSERT_GE(mapping_number(status, "gateway_command_execute_avg_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_command_execute_max_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_reply_enqueue_to_dispatch_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_reply_enqueue_to_dispatch_avg_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_reply_enqueue_to_dispatch_max_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_reply_execute_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_reply_execute_avg_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_reply_execute_max_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_enqueue_to_dispatch_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_enqueue_to_dispatch_avg_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_enqueue_to_dispatch_max_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_execute_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_execute_avg_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_execute_max_us"), 0);
   ASSERT_STREQ(mapping_string(status, "gateway_io_boundary"), "main_thread_io_adapter");
   free_mapping(status);
 }
@@ -4764,9 +4792,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(status, "gateway_io_boundary"), "main_thread_io_adapter");
     ASSERT_EQ(mapping_number(status, "gateway_low_overhead_latency_probe_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "gateway_latency_probe_source"), "gateway_status_internal");
-    ASSERT_STREQ(mapping_string(status, "gateway_latency_probe_fields"),
-                 "receive_decode,receive_payload_copy,receive_enqueue_to_dispatch,receive_apply,"
-                 "command_enqueue_to_dispatch,command_execute,main_drain");
+  ASSERT_STREQ(mapping_string(status, "gateway_latency_probe_fields"),
+               "receive_decode,receive_payload_copy,receive_enqueue_to_dispatch,receive_apply,"
+               "command_enqueue_to_dispatch,command_execute,"
+               "receive_main_queue_depth,deferred_main_drain_wait,"
+               "reply_enqueue_to_dispatch,reply_execute,output_enqueue_to_dispatch,output_execute,main_drain");
     ASSERT_EQ(mapping_number(status, "callback_payload_strict_ready"), 1);
     ASSERT_EQ(mapping_number(status, "owner_callback_payload_strict_diagnostics_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "owner_callback_payload_policy_schema"),
@@ -5332,9 +5362,11 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(boundary_contract, "gateway_io_boundary"), "main_thread_io_adapter");
     ASSERT_EQ(mapping_number(boundary_contract, "gateway_low_overhead_latency_probe_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "gateway_latency_probe_source"), "gateway_status_internal");
-    ASSERT_STREQ(mapping_string(boundary_contract, "gateway_latency_probe_fields"),
-                 "receive_decode,receive_payload_copy,receive_enqueue_to_dispatch,receive_apply,"
-                 "command_enqueue_to_dispatch,command_execute,main_drain");
+  ASSERT_STREQ(mapping_string(boundary_contract, "gateway_latency_probe_fields"),
+               "receive_decode,receive_payload_copy,receive_enqueue_to_dispatch,receive_apply,"
+               "command_enqueue_to_dispatch,command_execute,"
+               "receive_main_queue_depth,deferred_main_drain_wait,"
+               "reply_enqueue_to_dispatch,reply_execute,output_enqueue_to_dispatch,output_execute,main_drain");
     ASSERT_EQ(mapping_number(boundary_contract, "callback_payload_strict_ready"), 1);
     ASSERT_EQ(mapping_number(boundary_contract, "owner_callback_payload_strict_diagnostics_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "owner_callback_payload_policy_schema"),
@@ -10516,6 +10548,11 @@ TEST_F(DriverTest, TestGatewayReceiveDefersMainDrainWhenOwnerThreadsAvailable) {
   auto before_receive_enqueued = mapping_number(before_status, "gateway_receive_tasks_enqueued");
   auto before_receive_dispatched = mapping_number(before_status, "gateway_receive_tasks_dispatched");
   auto before_main_drain_runs = mapping_number(before_status, "gateway_main_drain_runs");
+  auto before_deferred_scheduled = mapping_number(before_status, "gateway_main_drain_deferred_scheduled");
+  auto before_deferred_executed = mapping_number(before_status, "gateway_main_drain_deferred_executed");
+  auto before_deferred_wait_samples = mapping_number(before_status, "gateway_main_drain_deferred_wait_samples");
+  auto before_receive_deferred_requests = mapping_number(before_status, "gateway_receive_deferred_drain_requests");
+  auto before_queue_depth_samples = mapping_number(before_status, "gateway_receive_main_queue_depth_samples");
   free_mapping(before_status);
 
   vm_owner_thread_start(1);
@@ -10561,6 +10598,14 @@ TEST_F(DriverTest, TestGatewayReceiveDefersMainDrainWhenOwnerThreadsAvailable) {
   ASSERT_GE(mapping_number(after_status, "gateway_receive_tasks_enqueued"), before_receive_enqueued + 1);
   ASSERT_GE(mapping_number(after_status, "gateway_receive_tasks_dispatched"), before_receive_dispatched + 1);
   ASSERT_GE(mapping_number(after_status, "gateway_main_drain_runs"), before_main_drain_runs + 1);
+  ASSERT_GE(mapping_number(after_status, "gateway_main_drain_deferred_scheduled"), before_deferred_scheduled + 1);
+  ASSERT_GE(mapping_number(after_status, "gateway_main_drain_deferred_executed"), before_deferred_executed + 1);
+  ASSERT_GE(mapping_number(after_status, "gateway_main_drain_deferred_wait_samples"),
+            before_deferred_wait_samples + 1);
+  ASSERT_GE(mapping_number(after_status, "gateway_receive_deferred_drain_requests"),
+            before_receive_deferred_requests + 1);
+  ASSERT_GE(mapping_number(after_status, "gateway_receive_main_queue_depth_samples"),
+            before_queue_depth_samples + 1);
   free_mapping(after_status);
 
   auto *trace = vm_owner_task_trace(32);

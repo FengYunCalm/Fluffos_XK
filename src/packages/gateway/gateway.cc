@@ -21,6 +21,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <ctime>
@@ -43,6 +44,9 @@ constexpr int kGatewayDefaultHeartbeatInterval = 15;
 constexpr int kGatewayDefaultHeartbeatTimeout = 45;
 constexpr int kGatewayMaxJsonDepth = 20;
 constexpr int kGatewayDeferredMainDrainBudget = 64;
+constexpr int kGatewayFirstInlineDrainBudget = 1;
+constexpr int kGatewayBackpressureInlineDrainBudget = 8;
+constexpr long kGatewayBackpressureInlineDrainQueueDepth = 2;
 
 evconnlistener *g_gateway_listener = nullptr;
 event *g_gateway_heartbeat_timer = nullptr;
@@ -92,6 +96,14 @@ long gateway_avg_us(const std::atomic<uint64_t> &total, const std::atomic<uint64
   return static_cast<long>((total.load(std::memory_order_relaxed) / sample_count) / 1000);
 }
 
+long gateway_avg_value(const std::atomic<uint64_t> &total, const std::atomic<uint64_t> &samples) {
+  auto sample_count = samples.load(std::memory_order_relaxed);
+  if (sample_count == 0) {
+    return 0;
+  }
+  return static_cast<long>(total.load(std::memory_order_relaxed) / sample_count);
+}
+
 long gateway_max_us(const std::atomic<uint64_t> &max) {
   return static_cast<long>(max.load(std::memory_order_relaxed) / 1000);
 }
@@ -126,13 +138,26 @@ std::shared_ptr<svalue_t> gateway_copy_svalue(svalue_t *value, const char *tag) 
 }
 
 void gateway_drain_owner_main_tasks_later() {
-  if (!g_event_base || g_gateway_main_drain_scheduled) {
+  if (!g_event_base) {
+    return;
+  }
+  if (g_gateway_main_drain_scheduled) {
+    g_gateway_runtime_counters.main_drain_deferred_coalesced.fetch_add(1, std::memory_order_relaxed);
     return;
   }
   g_gateway_main_drain_scheduled = true;
-  add_walltime_event(std::chrono::milliseconds(0), [] {
+  g_gateway_runtime_counters.main_drain_deferred_scheduled.fetch_add(1, std::memory_order_relaxed);
+  auto scheduled_at = gateway_now_ns();
+  add_walltime_event(std::chrono::milliseconds(0), [scheduled_at] {
     g_gateway_main_drain_scheduled = false;
+    g_gateway_runtime_counters.main_drain_deferred_executed.fetch_add(1, std::memory_order_relaxed);
     auto drained = gateway_drain_owner_main_tasks_now(kGatewayDeferredMainDrainBudget);
+    if (drained > 0) {
+      gateway_record_latency(g_gateway_runtime_counters.main_drain_deferred_wait_ns_total,
+                             g_gateway_runtime_counters.main_drain_deferred_wait_ns_max,
+                             g_gateway_runtime_counters.main_drain_deferred_wait_samples,
+                             gateway_now_ns() - scheduled_at);
+    }
     if (drained >= kGatewayDeferredMainDrainBudget) {
       gateway_drain_owner_main_tasks_later();
     }
@@ -179,9 +204,36 @@ void gateway_apply_receive(object_t *user, svalue_t *data_sv) {
         restore_command_giver();
       }, nullptr, VM_OWNER_MAIN_TASK_IO_ADAPTER) != 0) {
     g_gateway_runtime_counters.receive_tasks_enqueued.fetch_add(1, std::memory_order_relaxed);
+    auto main_queue_depth = std::max<long>(0, vm_owner_main_queue_total_depth());
+    gateway_record_latency(g_gateway_runtime_counters.receive_main_queue_depth_total,
+                           g_gateway_runtime_counters.receive_main_queue_depth_max,
+                           g_gateway_runtime_counters.receive_main_queue_depth_samples,
+                           static_cast<uint64_t>(main_queue_depth));
     if (vm_owner_executor_available() && g_event_base) {
-      gateway_drain_owner_main_tasks_later();
+      g_gateway_runtime_counters.receive_deferred_drain_requests.fetch_add(1, std::memory_order_relaxed);
+      if (!g_gateway_main_drain_scheduled && main_queue_depth > 0) {
+        auto inline_budget =
+            main_queue_depth >= kGatewayBackpressureInlineDrainQueueDepth
+                ? kGatewayBackpressureInlineDrainBudget
+                : kGatewayFirstInlineDrainBudget;
+        g_gateway_runtime_counters.receive_inline_drain_calls.fetch_add(1, std::memory_order_relaxed);
+        auto drained = gateway_drain_owner_main_tasks_now(inline_budget);
+        if (drained == 0 || vm_owner_main_queue_total_depth() > 0 ||
+            (inline_budget > kGatewayFirstInlineDrainBudget && drained >= inline_budget)) {
+          gateway_drain_owner_main_tasks_later();
+        }
+      } else if (main_queue_depth >= kGatewayBackpressureInlineDrainQueueDepth) {
+        g_gateway_runtime_counters.receive_inline_drain_calls.fetch_add(1, std::memory_order_relaxed);
+        auto drained = gateway_drain_owner_main_tasks_now(kGatewayBackpressureInlineDrainBudget);
+        if (drained == 0 || drained >= kGatewayBackpressureInlineDrainBudget ||
+            vm_owner_main_queue_total_depth() > 0) {
+          gateway_drain_owner_main_tasks_later();
+        }
+      } else if (!g_gateway_main_drain_scheduled) {
+        gateway_drain_owner_main_tasks_later();
+      }
     } else {
+      g_gateway_runtime_counters.receive_inline_drain_calls.fetch_add(1, std::memory_order_relaxed);
       auto drained = gateway_drain_owner_main_tasks_now(kGatewayDeferredMainDrainBudget);
       if (drained == 0 || drained >= kGatewayDeferredMainDrainBudget) {
         gateway_drain_owner_main_tasks_later();
@@ -966,6 +1018,15 @@ mapping_t *gateway_status_internal() {
       map, "gateway_command_tasks_cleared",
       static_cast<long>(g_gateway_runtime_counters.command_tasks_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_command_pending_sessions", gateway_session_command_pending_count());
+  add_mapping_pair(map, "gateway_reply_tasks_enqueued",
+                   static_cast<long>(g_gateway_runtime_counters.reply_tasks_enqueued.load(
+                       std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_reply_tasks_inline_fallbacks",
+                   static_cast<long>(g_gateway_runtime_counters.reply_tasks_inline_fallbacks.load(
+                       std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_reply_reschedule_cmd_in_buf",
+                   static_cast<long>(g_gateway_runtime_counters.reply_reschedule_cmd_in_buf.load(
+                       std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_enqueued",
       static_cast<long>(g_gateway_runtime_counters.output_fifo_enqueued.load(std::memory_order_relaxed)));
@@ -990,6 +1051,48 @@ mapping_t *gateway_status_internal() {
   add_mapping_pair(
       map, "gateway_main_drain_budget_hits",
       static_cast<long>(g_gateway_runtime_counters.main_drain_budget_hits.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_main_drain_deferred_scheduled",
+      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_scheduled.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_main_drain_deferred_coalesced",
+      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_coalesced.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_main_drain_deferred_executed",
+      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_executed.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_receive_inline_drain_calls",
+      static_cast<long>(g_gateway_runtime_counters.receive_inline_drain_calls.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_receive_deferred_drain_requests",
+      static_cast<long>(g_gateway_runtime_counters.receive_deferred_drain_requests.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_receive_main_queue_depth_samples",
+      static_cast<long>(g_gateway_runtime_counters.receive_main_queue_depth_samples.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_receive_main_queue_depth_total",
+      static_cast<long>(g_gateway_runtime_counters.receive_main_queue_depth_total.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_receive_main_queue_depth_avg",
+      gateway_avg_value(g_gateway_runtime_counters.receive_main_queue_depth_total,
+                        g_gateway_runtime_counters.receive_main_queue_depth_samples));
+  add_mapping_pair(
+      map, "gateway_receive_main_queue_depth_max",
+      static_cast<long>(g_gateway_runtime_counters.receive_main_queue_depth_max.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_main_drain_deferred_wait_samples",
+      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_wait_samples.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_main_drain_deferred_wait_total_us",
+      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_wait_ns_total.load(std::memory_order_relaxed) /
+                        1000));
+  add_mapping_pair(
+      map, "gateway_main_drain_deferred_wait_avg_us",
+      gateway_avg_us(g_gateway_runtime_counters.main_drain_deferred_wait_ns_total,
+                     g_gateway_runtime_counters.main_drain_deferred_wait_samples));
+  add_mapping_pair(
+      map, "gateway_main_drain_deferred_wait_max_us",
+      gateway_max_us(g_gateway_runtime_counters.main_drain_deferred_wait_ns_max));
   add_mapping_pair(
       map, "gateway_receive_decode_samples",
       static_cast<long>(g_gateway_runtime_counters.receive_decode_samples.load(std::memory_order_relaxed)));
@@ -1040,6 +1143,42 @@ mapping_t *gateway_status_internal() {
                                   g_gateway_runtime_counters.command_execute_samples));
   add_mapping_pair(map, "gateway_command_execute_max_us",
                    gateway_max_us(g_gateway_runtime_counters.command_execute_ns_max));
+  add_mapping_pair(
+      map, "gateway_reply_enqueue_to_dispatch_samples",
+      static_cast<long>(g_gateway_runtime_counters.reply_enqueue_to_dispatch_samples.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_reply_enqueue_to_dispatch_avg_us",
+                   gateway_avg_us(g_gateway_runtime_counters.reply_enqueue_to_dispatch_ns_total,
+                                  g_gateway_runtime_counters.reply_enqueue_to_dispatch_samples));
+  add_mapping_pair(map, "gateway_reply_enqueue_to_dispatch_max_us",
+                   gateway_max_us(g_gateway_runtime_counters.reply_enqueue_to_dispatch_ns_max));
+  add_mapping_pair(
+      map, "gateway_reply_execute_samples",
+      static_cast<long>(
+          g_gateway_runtime_counters.reply_execute_samples.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_reply_execute_avg_us",
+                   gateway_avg_us(g_gateway_runtime_counters.reply_execute_ns_total,
+                                  g_gateway_runtime_counters.reply_execute_samples));
+  add_mapping_pair(map, "gateway_reply_execute_max_us",
+                   gateway_max_us(g_gateway_runtime_counters.reply_execute_ns_max));
+  add_mapping_pair(
+      map, "gateway_output_enqueue_to_dispatch_samples",
+      static_cast<long>(g_gateway_runtime_counters.output_enqueue_to_dispatch_samples.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_output_enqueue_to_dispatch_avg_us",
+                   gateway_avg_us(g_gateway_runtime_counters.output_enqueue_to_dispatch_ns_total,
+                                  g_gateway_runtime_counters.output_enqueue_to_dispatch_samples));
+  add_mapping_pair(map, "gateway_output_enqueue_to_dispatch_max_us",
+                   gateway_max_us(g_gateway_runtime_counters.output_enqueue_to_dispatch_ns_max));
+  add_mapping_pair(
+      map, "gateway_output_execute_samples",
+      static_cast<long>(
+          g_gateway_runtime_counters.output_execute_samples.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_output_execute_avg_us",
+                   gateway_avg_us(g_gateway_runtime_counters.output_execute_ns_total,
+                                  g_gateway_runtime_counters.output_execute_samples));
+  add_mapping_pair(map, "gateway_output_execute_max_us",
+                   gateway_max_us(g_gateway_runtime_counters.output_execute_ns_max));
   add_mapping_string(map, "gateway_io_boundary", "main_thread_io_adapter");
   add_mapping_pair(map, "debug", g_gateway_debug);
   add_mapping_pair(map, "max_packet_size", static_cast<LPC_INT>(g_gateway_max_packet_size));

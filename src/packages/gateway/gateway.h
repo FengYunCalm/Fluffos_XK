@@ -31,6 +31,9 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> command_tasks_finished{0};
   std::atomic<uint64_t> command_tasks_stale{0};
   std::atomic<uint64_t> command_tasks_cleared{0};
+  std::atomic<uint64_t> reply_tasks_enqueued{0};
+  std::atomic<uint64_t> reply_tasks_inline_fallbacks{0};
+  std::atomic<uint64_t> reply_reschedule_cmd_in_buf{0};
   std::atomic<uint64_t> output_fifo_enqueued{0};
   std::atomic<uint64_t> output_fifo_flushed{0};
   std::atomic<uint64_t> output_fifo_rejected{0};
@@ -40,6 +43,17 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> main_drain_tasks_total{0};
   std::atomic<uint64_t> main_drain_tasks_max{0};
   std::atomic<uint64_t> main_drain_budget_hits{0};
+  std::atomic<uint64_t> main_drain_deferred_scheduled{0};
+  std::atomic<uint64_t> main_drain_deferred_coalesced{0};
+  std::atomic<uint64_t> main_drain_deferred_executed{0};
+  std::atomic<uint64_t> receive_inline_drain_calls{0};
+  std::atomic<uint64_t> receive_deferred_drain_requests{0};
+  std::atomic<uint64_t> receive_main_queue_depth_total{0};
+  std::atomic<uint64_t> receive_main_queue_depth_max{0};
+  std::atomic<uint64_t> receive_main_queue_depth_samples{0};
+  std::atomic<uint64_t> main_drain_deferred_wait_ns_total{0};
+  std::atomic<uint64_t> main_drain_deferred_wait_ns_max{0};
+  std::atomic<uint64_t> main_drain_deferred_wait_samples{0};
   std::atomic<uint64_t> receive_decode_ns_total{0};
   std::atomic<uint64_t> receive_decode_ns_max{0};
   std::atomic<uint64_t> receive_decode_samples{0};
@@ -58,6 +72,18 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> command_execute_ns_total{0};
   std::atomic<uint64_t> command_execute_ns_max{0};
   std::atomic<uint64_t> command_execute_samples{0};
+  std::atomic<uint64_t> reply_enqueue_to_dispatch_ns_total{0};
+  std::atomic<uint64_t> reply_enqueue_to_dispatch_ns_max{0};
+  std::atomic<uint64_t> reply_enqueue_to_dispatch_samples{0};
+  std::atomic<uint64_t> reply_execute_ns_total{0};
+  std::atomic<uint64_t> reply_execute_ns_max{0};
+  std::atomic<uint64_t> reply_execute_samples{0};
+  std::atomic<uint64_t> output_enqueue_to_dispatch_ns_total{0};
+  std::atomic<uint64_t> output_enqueue_to_dispatch_ns_max{0};
+  std::atomic<uint64_t> output_enqueue_to_dispatch_samples{0};
+  std::atomic<uint64_t> output_execute_ns_total{0};
+  std::atomic<uint64_t> output_execute_ns_max{0};
+  std::atomic<uint64_t> output_execute_samples{0};
 };
 
 extern GatewayRuntimeCounters g_gateway_runtime_counters;

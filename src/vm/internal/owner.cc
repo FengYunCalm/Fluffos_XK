@@ -578,7 +578,9 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_string(map, "gateway_latency_probe_source", "gateway_status_internal");
   add_mapping_string(map, "gateway_latency_probe_fields",
                      "receive_decode,receive_payload_copy,receive_enqueue_to_dispatch,receive_apply,"
-                     "command_enqueue_to_dispatch,command_execute,main_drain");
+                     "command_enqueue_to_dispatch,command_execute,"
+                     "receive_main_queue_depth,deferred_main_drain_wait,"
+                     "reply_enqueue_to_dispatch,reply_execute,output_enqueue_to_dispatch,output_execute,main_drain");
   add_mapping_pair(map, "callback_payload_strict_ready", 1);
   add_mapping_pair(map, "service_shard_executor_ready", 1);
   add_mapping_pair(map, "domain_task_registry_mudlib_aligned", 1);
@@ -1609,7 +1611,9 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "gateway_latency_probe_source", "gateway_status_internal");
   add_mapping_string(contract, "gateway_latency_probe_fields",
                      "receive_decode,receive_payload_copy,receive_enqueue_to_dispatch,receive_apply,"
-                     "command_enqueue_to_dispatch,command_execute,main_drain");
+                     "command_enqueue_to_dispatch,command_execute,"
+                     "receive_main_queue_depth,deferred_main_drain_wait,"
+                     "reply_enqueue_to_dispatch,reply_execute,output_enqueue_to_dispatch,output_execute,main_drain");
   add_mapping_pair(contract, "callback_payload_strict_ready", 1);
   add_mapping_pair(contract, "service_shard_executor_ready", 1);
   add_mapping_pair(contract, "domain_task_registry_mudlib_aligned", 1);
@@ -3519,6 +3523,10 @@ bool vm_owner_executor_available() {
   }
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
   return !owner_threads.empty();
+}
+
+long vm_owner_main_queue_total_depth() {
+  return owner_main_queue_total_depth();
 }
 
 uint64_t vm_owner_enqueue_executor_task(object_t *target, const char *task_type, const char *task_key,
