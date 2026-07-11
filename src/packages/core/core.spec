@@ -365,6 +365,8 @@ void trace_end();
 
 // return highest resolution clock in platform dependent unit
 int perf_counter_ns();
+// Return current thread user+kernel CPU time in nanoseconds, or -1 if unavailable.
+int thread_cpu_time_ns();
 // Return nanosecond time
 int time_ns();
 
@@ -408,6 +410,8 @@ mapping vm_object_store_owner_status(string);
 mapping owner_send(string, mapping);
 mapping owner_call_async(object, string, mapping);
 mapping owner_future_poll(int);
+mapping owner_future_take(int);
+mapping owner_future_cancel(int, string default:0);
 mapping owner_snapshot(object default: F__THIS_OBJECT);
 mapping owner_publish_snapshot(mapping);
 mapping owner_query_object_snapshot(object);

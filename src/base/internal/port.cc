@@ -8,6 +8,11 @@
 #include <random>
 #include <unistd.h>
 #include <cstring>
+#include <limits>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 // Returns a pseudo-random number in the range 0 .. n-1
 int64_t random_number(int64_t n) {
@@ -73,6 +78,51 @@ long get_cpu_times(unsigned long *secs, unsigned long *usecs) {
   *usecs = rus.ru_utime.tv_usec + rus.ru_stime.tv_usec;
 
   return 1;
+}
+
+int64_t get_current_thread_cpu_time_ns() {
+#ifdef _WIN32
+  FILETIME created{};
+  FILETIME exited{};
+  FILETIME kernel{};
+  FILETIME user{};
+  if (!GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user)) {
+    return -1;
+  }
+
+  ULARGE_INTEGER kernel_ticks{};
+  ULARGE_INTEGER user_ticks{};
+  kernel_ticks.LowPart = kernel.dwLowDateTime;
+  kernel_ticks.HighPart = kernel.dwHighDateTime;
+  user_ticks.LowPart = user.dwLowDateTime;
+  user_ticks.HighPart = user.dwHighDateTime;
+
+  constexpr uint64_t kNanosecondsPerFiletimeTick = 100;
+  const auto max_ticks = static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) /
+                         kNanosecondsPerFiletimeTick;
+  if (user_ticks.QuadPart > max_ticks || kernel_ticks.QuadPart > max_ticks - user_ticks.QuadPart) {
+    return -1;
+  }
+  return static_cast<int64_t>((kernel_ticks.QuadPart + user_ticks.QuadPart) *
+                              kNanosecondsPerFiletimeTick);
+#elif defined(CLOCK_THREAD_CPUTIME_ID)
+  struct timespec ts {};
+  if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) != 0 || ts.tv_nsec < 0 ||
+      ts.tv_nsec >= 1000000000L) {
+    return -1;
+  }
+
+  constexpr uint64_t kNanosecondsPerSecond = 1000000000ULL;
+  const auto seconds = static_cast<uint64_t>(ts.tv_sec);
+  const auto max_seconds = static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) /
+                           kNanosecondsPerSecond;
+  if (seconds > max_seconds) {
+    return -1;
+  }
+  return static_cast<int64_t>(seconds * kNanosecondsPerSecond + ts.tv_nsec);
+#else
+  return -1;
+#endif
 }
 
 /* return the current working directory */

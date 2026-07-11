@@ -24,6 +24,7 @@ struct OwnerFutureRecord {
   std::string error;
   uint64_t created_at_ms{0};
   uint64_t deadline_ms{0};
+  uint64_t terminal_at_ns{0};
   bool cancelled{false};
   bool timed_out{false};
   bool terminal_cleanup_required{false};
@@ -44,10 +45,25 @@ struct OwnerFutureTerminalResult {
   VMObjectHandleResolveStatus target_status{VMObjectHandleResolveStatus::kCurrent};
 };
 
+struct OwnerFutureTakeResult {
+  bool found{false};
+  bool consumed{false};
+  OwnerFutureRecord record;
+};
+
+enum class OwnerFutureState {
+  kUnknown,
+  kPending,
+  kCompleted,
+  kFailed,
+};
+
 class OwnerFutureStore {
  public:
   void insert(OwnerFutureRecord record);
   std::optional<OwnerFutureRecord> poll(uint64_t future_id) const;
+  OwnerFutureState state(uint64_t future_id) const;
+  OwnerFutureTakeResult take(uint64_t future_id);
   std::optional<OwnerFutureCompletion> complete(uint64_t future_id, const char *state, const char *result_key,
                                                 const char *error,
                                                 std::shared_ptr<VMFrozenValue> result = nullptr);

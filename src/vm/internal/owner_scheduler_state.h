@@ -27,6 +27,7 @@ struct OwnerMailboxTask {
   uint64_t future_target_task_id{0};
   uint64_t sequence;
   uint64_t owner_epoch;
+  uint64_t enqueued_at_ns{0};
   VMObjectHandle target_handle;
   std::string owner_id;
   std::string task_type;

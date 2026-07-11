@@ -55,6 +55,15 @@
   X(owner_thread_lpc_task_succeeded, 0)                           \
   X(owner_thread_lpc_task_failed, 0)                              \
   X(owner_thread_lpc_task_rejected, 0)                            \
+  X(owner_async_queue_wait_ns_total, 0)                           \
+  X(owner_async_queue_wait_ns_max, 0)                             \
+  X(owner_async_queue_wait_samples, 0)                            \
+  X(owner_async_lpc_execute_ns_total, 0)                          \
+  X(owner_async_lpc_execute_ns_max, 0)                            \
+  X(owner_async_lpc_execute_samples, 0)                           \
+  X(owner_async_result_completion_ns_total, 0)                    \
+  X(owner_async_result_completion_ns_max, 0)                      \
+  X(owner_async_result_completion_samples, 0)                     \
   X(owner_thread_ordinary_lpc_executed, 0)                        \
   X(owner_thread_ordinary_lpc_succeeded, 0)                       \
   X(owner_thread_ordinary_lpc_failed, 0)                          \

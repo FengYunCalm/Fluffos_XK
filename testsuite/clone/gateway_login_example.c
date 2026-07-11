@@ -11,6 +11,9 @@ private string last_get_char_value = 0;
 private string last_get_char_token = 0;
 private string last_process_input_command = 0;
 private int last_process_input_off_main = 0;
+private mapping last_owner_future = ([]);
+private int last_owner_future_reservation_id = 0;
+private int last_owner_future_callback_off_main = 0;
 
 void logon() {
   write("Normal login path reached.\n");
@@ -93,6 +96,45 @@ void gateway_disconnected(string reason_code, string reason_text) {
   last_disconnect_code = reason_code;
   last_disconnect_text = reason_text;
 }
+
+mapping gateway_owner_future_echo(mapping payload) {
+  return ([
+    "value": payload["value"] + 1,
+    "payload_key": payload["payload_key"],
+  ]);
+}
+
+mapping submit_gateway_owner_future(int value) {
+  return owner_call_async(this_object(), "gateway_owner_future_echo", ([
+    "payload_key": "gateway/future/v1",
+    "value": value,
+  ]));
+}
+
+int watch_gateway_owner_future(int reservation_id, int future_id, int timeout_ms) {
+  return gateway_session_watch_future(this_object(), reservation_id, future_id, timeout_ms);
+}
+
+mapping cancel_gateway_owner_future(int future_id, string reason) {
+  return owner_future_cancel(future_id, reason);
+}
+
+mapping take_gateway_owner_future(int future_id) {
+  return owner_future_take(future_id);
+}
+
+int gateway_owner_future_completed(int reservation_id, mapping future) {
+  last_owner_future_reservation_id = reservation_id;
+  last_owner_future = mapp(future) ? copy(future) : ([]);
+  last_owner_future_callback_off_main = !vm_context_is_main_thread();
+  if (mapp(future) && future["state"] == "completed")
+    return gateway_session_fill(this_object(), reservation_id, "owner-future-completed");
+  return gateway_session_release(this_object(), reservation_id);
+}
+
+mapping query_last_owner_future() { return copy(last_owner_future); }
+int query_last_owner_future_reservation_id() { return last_owner_future_reservation_id; }
+int query_last_owner_future_callback_off_main() { return last_owner_future_callback_off_main; }
 
 void net_dead() {
   if (!last_disconnect_code) {

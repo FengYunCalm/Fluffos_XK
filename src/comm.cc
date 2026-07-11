@@ -95,7 +95,8 @@ svalue_t *owner_bound_safe_apply(const char *fun, object_t *ob, int num_arg, int
 }
 
 bool gateway_runtime_probe_enabled(interactive_t *ip) {
-  return ip && (ip->iflags & GATEWAY_SESSION) && ip->gateway_session_id;
+  return ip && (ip->iflags & GATEWAY_SESSION) && ip->gateway_session_id &&
+         !gateway_probe_suppressed_for_object(ip->ob);
 }
 
 uint64_t gateway_runtime_probe_now_ns() {
@@ -241,6 +242,7 @@ void run_user_command_reply_side_effects(interactive_t *ip, object_t *reply_comm
                                    g_gateway_runtime_counters.reply_execute_samples,
                                    gateway_runtime_probe_now_ns() - execute_started_at);
   }
+  gateway_probe_finish_suppressed_command_for_object(reply_command_giver);
 }
 
 void enqueue_user_command_reply_side_effects(interactive_t *ip, object_t *reply_command_giver) {

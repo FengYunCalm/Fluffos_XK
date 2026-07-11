@@ -31,6 +31,15 @@ enum VMOwnerMainTaskPolicy {
   VM_OWNER_MAIN_TASK_NORMAL_PATH_FALLBACK = 4,
 };
 
+enum VMOwnerFutureState {
+  VM_OWNER_FUTURE_UNKNOWN = 0,
+  VM_OWNER_FUTURE_PENDING = 1,
+  VM_OWNER_FUTURE_COMPLETED = 2,
+  VM_OWNER_FUTURE_FAILED = 3,
+};
+
+using VMOwnerFutureTerminalNotifier = void (*)();
+
 const char *vm_owner_default_id();
 int vm_multicore_mode();
 const char *vm_multicore_mode_name(int mode);
@@ -138,6 +147,11 @@ uint64_t vm_owner_enqueue_compute_result_fields(const char *owner_id, uint64_t w
 uint64_t vm_owner_enqueue_command_frame_restore(object_t *target);
 mapping_t *vm_owner_message_trace(int limit);
 mapping_t *vm_owner_future_poll(uint64_t future_id);
+mapping_t *vm_owner_future_take(uint64_t future_id);
+mapping_t *vm_owner_future_take(uint64_t future_id, uint64_t *terminal_at_ns);
+void vm_owner_set_future_terminal_notifier(VMOwnerFutureTerminalNotifier notifier);
+VMOwnerFutureState vm_owner_future_state(uint64_t future_id);
+bool vm_owner_future_targets_object(uint64_t future_id, object_t *target);
 mapping_t *vm_owner_future_cancel(uint64_t future_id, const char *reason);
 mapping_t *vm_owner_future_timeout(uint64_t future_id, const char *reason);
 mapping_t *vm_owner_record_commit_boundary(const char *source_owner_id, const char *target_owner_id,

@@ -10,6 +10,8 @@
 
 #include <event2/listener.h>
 
+using GatewayOutputWriter = int (*)(int fd, const char *data, size_t len);
+
 extern int g_gateway_debug;
 extern size_t g_gateway_max_packet_size;
 extern int g_gateway_max_masters;
@@ -37,8 +39,46 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> output_fifo_enqueued{0};
   std::atomic<uint64_t> output_fifo_flushed{0};
   std::atomic<uint64_t> output_fifo_rejected{0};
+  std::atomic<uint64_t> output_fifo_reserved{0};
+  std::atomic<uint64_t> output_fifo_filled{0};
+  std::atomic<uint64_t> output_fifo_released{0};
+  std::atomic<uint64_t> output_fifo_reservation_misses{0};
+  std::atomic<uint64_t> output_reserve_ns_total{0};
+  std::atomic<uint64_t> output_reserve_ns_max{0};
+  std::atomic<uint64_t> output_reserve_samples{0};
+  std::atomic<uint64_t> future_watches_registered{0};
+  std::atomic<uint64_t> future_watches_rejected{0};
+  std::atomic<uint64_t> future_watches_completed{0};
+  std::atomic<uint64_t> future_watches_failed{0};
+  std::atomic<uint64_t> future_watches_timed_out{0};
+  std::atomic<uint64_t> future_watches_cancelled{0};
+  std::atomic<uint64_t> future_watch_callbacks{0};
+  std::atomic<uint64_t> future_watch_callback_failures{0};
+  std::atomic<uint64_t> future_watch_poll_runs{0};
+  std::atomic<uint64_t> future_watch_poll_items{0};
+  std::atomic<uint64_t> future_watch_poll_budget_hits{0};
+  std::atomic<uint64_t> future_watch_completion_notifications{0};
+  std::atomic<uint64_t> future_watch_completion_wakeups{0};
+  std::atomic<uint64_t> future_watch_timer_wakeups{0};
+  std::atomic<uint64_t> future_watch_register_ns_total{0};
+  std::atomic<uint64_t> future_watch_register_ns_max{0};
+  std::atomic<uint64_t> future_watch_register_samples{0};
+  std::atomic<uint64_t> future_watch_terminal_lag_ns_total{0};
+  std::atomic<uint64_t> future_watch_terminal_lag_ns_max{0};
+  std::atomic<uint64_t> future_watch_terminal_lag_samples{0};
+  std::atomic<uint64_t> future_watch_take_ns_total{0};
+  std::atomic<uint64_t> future_watch_take_ns_max{0};
+  std::atomic<uint64_t> future_watch_take_samples{0};
+  std::atomic<uint64_t> future_watch_callback_ns_total{0};
+  std::atomic<uint64_t> future_watch_callback_ns_max{0};
+  std::atomic<uint64_t> future_watch_callback_samples{0};
+  std::atomic<uint64_t> future_watch_end_to_end_ns_total{0};
+  std::atomic<uint64_t> future_watch_end_to_end_ns_max{0};
+  std::atomic<uint64_t> future_watch_end_to_end_samples{0};
   std::atomic<uint64_t> raw_writes_sent{0};
   std::atomic<uint64_t> raw_writes_failed{0};
+  std::atomic<uint64_t> master_tcp_nodelay_enabled{0};
+  std::atomic<uint64_t> master_tcp_nodelay_failed{0};
   std::atomic<uint64_t> main_drain_runs{0};
   std::atomic<uint64_t> main_drain_tasks_total{0};
   std::atomic<uint64_t> main_drain_tasks_max{0};
@@ -102,6 +142,12 @@ struct GatewayMaster {
   ~GatewayMaster();
 };
 
+struct GatewayOutputEntry {
+  uint64_t reservation_id{0};
+  bool ready{true};
+  std::string encoded;
+};
+
 struct GatewaySession {
   std::string session_id;
   std::string real_ip;
@@ -113,7 +159,8 @@ struct GatewaySession {
   std::string user_ob_name;
   int64_t user_ob_load_time{0};
   std::atomic<bool> command_task_pending{false};
-  std::deque<std::string> output_fifo;
+  bool probe_suppressed_once{false};
+  std::deque<GatewayOutputEntry> output_fifo;
   uint64_t output_fifo_enqueued{0};
   uint64_t output_fifo_flushed{0};
   uint64_t output_fifo_rejected{0};
@@ -127,10 +174,28 @@ int gateway_listen_internal(int port, int bind_all);
 mapping_t *gateway_status_internal();
 int gateway_get_session_count();
 long gateway_session_fifo_depth_total();
+long gateway_session_fifo_pending_reservations_total();
 long gateway_session_command_pending_count();
 uint64_t gateway_session_fifo_enqueued_total();
 uint64_t gateway_session_fifo_flushed_total();
 uint64_t gateway_session_fifo_rejected_total();
+int gateway_flush_session_output_fifo_with_writer(GatewaySession *sess, GatewayOutputWriter writer);
+int gateway_flush_session_output_fifo(GatewaySession *sess);
+int gateway_enqueue_session_output(GatewaySession *sess, std::string encoded);
+uint64_t gateway_reserve_session_output(GatewaySession *sess);
+int gateway_fill_session_output_with_writer(GatewaySession *sess, uint64_t reservation_id,
+                                            std::string encoded, GatewayOutputWriter writer);
+int gateway_fill_session_output(GatewaySession *sess, uint64_t reservation_id, std::string encoded);
+int gateway_release_session_output_with_writer(GatewaySession *sess, uint64_t reservation_id,
+                                               GatewayOutputWriter writer);
+int gateway_release_session_output(GatewaySession *sess, uint64_t reservation_id);
+uint64_t gateway_reserve_session_output_for_object(object_t *ob);
+int gateway_fill_session_output_for_object(object_t *ob, uint64_t reservation_id, const char *data, size_t len);
+int gateway_release_session_output_for_object(object_t *ob, uint64_t reservation_id);
+int gateway_watch_session_future_for_object(object_t *ob, uint64_t reservation_id,
+                                            uint64_t future_id, int timeout_ms);
+int gateway_process_session_future_watches_at(uint64_t now_ms);
+long gateway_session_future_watch_count();
 int gateway_send_raw_to_fd(int fd, const char *data, size_t len);
 int gateway_svalue_to_json_string(const svalue_t *sv, std::string *out);
 int gateway_ping_master_internal(int fd);
@@ -157,5 +222,8 @@ void cleanup_gateway_sessions();
 void gateway_session_exec_update(object_t *new_ob, object_t *old_ob);
 void gateway_handle_remove_interactive(interactive_t *ip);
 bool gateway_is_session(object_t *ob);
+int gateway_probe_suppress_once_for_object(object_t *ob);
+bool gateway_probe_suppressed_for_object(object_t *ob);
+void gateway_probe_finish_suppressed_command_for_object(object_t *ob);
 
 #endif /* PACKAGES_GATEWAY_H */

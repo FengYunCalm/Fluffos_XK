@@ -510,6 +510,25 @@ void f_owner_future_poll() {
 }
 #endif
 
+#ifdef F_OWNER_FUTURE_TAKE
+void f_owner_future_take() {
+  auto future_id = sp->u.number;
+  pop_stack();
+  push_refed_mapping(vm_owner_future_take(static_cast<uint64_t>(future_id)));
+}
+#endif
+
+#ifdef F_OWNER_FUTURE_CANCEL
+void f_owner_future_cancel() {
+  auto *reason = sp;
+  auto future_id = static_cast<uint64_t>((sp - 1)->u.number);
+  auto *result = vm_owner_future_cancel(
+      future_id, reason->type == T_STRING ? reason->u.string : "future cancelled");
+  pop_2_elems();
+  push_refed_mapping(result);
+}
+#endif
+
 #ifdef F_OWNER_SNAPSHOT
 void f_owner_snapshot() {
   auto *result = vm_object_handle_status_with_intent(sp->u.ob, "owner_snapshot_payload");

@@ -18,10 +18,14 @@ void f_perf_counter_ns() {
 
   push_number(t.QuadPart * 1000000000 / Frequency.QuadPart);
 #else
-  auto now = std::chrono::high_resolution_clock::now();
+  auto now = std::chrono::steady_clock::now();
   push_number(std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count());
 #endif
 }
+#endif
+
+#ifdef F_THREAD_CPU_TIME_NS
+void f_thread_cpu_time_ns() { push_number(get_current_thread_cpu_time_ns()); }
 #endif
 
 #ifdef F_TIME

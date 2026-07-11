@@ -1,5 +1,15 @@
 #include "vm/internal/owner_future_store.h"
 
+#include <chrono>
+
+namespace {
+uint64_t owner_future_now_ns() {
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   std::chrono::steady_clock::now().time_since_epoch())
+                                   .count());
+}
+}  // namespace
+
 void OwnerFutureStore::insert(OwnerFutureRecord record) {
   std::lock_guard<std::mutex> lock(mutex_);
   futures_[record.future_id] = std::move(record);
@@ -12,6 +22,38 @@ std::optional<OwnerFutureRecord> OwnerFutureStore::poll(uint64_t future_id) cons
     return std::nullopt;
   }
   return it->second;
+}
+
+OwnerFutureState OwnerFutureStore::state(uint64_t future_id) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = futures_.find(future_id);
+  if (it == futures_.end()) {
+    return OwnerFutureState::kUnknown;
+  }
+  if (it->second.state == "pending") {
+    return OwnerFutureState::kPending;
+  }
+  if (it->second.state == "completed") {
+    return OwnerFutureState::kCompleted;
+  }
+  return OwnerFutureState::kFailed;
+}
+
+OwnerFutureTakeResult OwnerFutureStore::take(uint64_t future_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  OwnerFutureTakeResult result;
+  auto it = futures_.find(future_id);
+  if (it == futures_.end()) {
+    return result;
+  }
+
+  result.found = true;
+  result.record = it->second;
+  if (it->second.state != "pending") {
+    futures_.erase(it);
+    result.consumed = true;
+  }
+  return result;
 }
 
 std::optional<OwnerFutureCompletion> OwnerFutureStore::complete(uint64_t future_id, const char *state,
@@ -55,6 +97,7 @@ OwnerFutureTerminalResult OwnerFutureStore::fail_terminal(uint64_t future_id, co
     future.cancelled = cancelled;
     future.timed_out = timed_out;
     future.terminal_cleanup_required = false;
+    future.terminal_at_ns = owner_future_now_ns();
     failed_.fetch_add(1, std::memory_order_relaxed);
     result.changed = true;
   }
@@ -111,6 +154,7 @@ OwnerFutureCompletion OwnerFutureStore::complete_record(OwnerFutureRecord &recor
   record.state = normalize_text(state, "completed");
   record.result_key = normalize_text(result_key, "");
   record.error = normalize_text(error, "");
+  record.terminal_at_ns = owner_future_now_ns();
   auto completed_with_frozen_result = record.state == "completed" && result != nullptr;
   record.result = std::move(result);
   if (record.state == "failed") {

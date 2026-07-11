@@ -13,6 +13,7 @@
 #else
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #endif
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
@@ -88,6 +89,21 @@ void gateway_record_latency(std::atomic<uint64_t> &total, std::atomic<uint64_t> 
   gateway_record_max(max, elapsed_ns);
 }
 
+void gateway_enable_master_tcp_nodelay(evutil_socket_t fd) {
+  int one = 1;
+  if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
+#ifndef _WIN32
+                 &one,
+#else
+                 reinterpret_cast<const char *>(&one),
+#endif
+                 sizeof(one)) == 0) {
+    g_gateway_runtime_counters.master_tcp_nodelay_enabled.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+  g_gateway_runtime_counters.master_tcp_nodelay_failed.fetch_add(1, std::memory_order_relaxed);
+}
+
 long gateway_avg_us(const std::atomic<uint64_t> &total, const std::atomic<uint64_t> &samples) {
   auto sample_count = samples.load(std::memory_order_relaxed);
   if (sample_count == 0) {
@@ -106,6 +122,18 @@ long gateway_avg_value(const std::atomic<uint64_t> &total, const std::atomic<uin
 
 long gateway_max_us(const std::atomic<uint64_t> &max) {
   return static_cast<long>(max.load(std::memory_order_relaxed) / 1000);
+}
+
+void gateway_add_latency_fields(mapping_t *map, const char *prefix,
+                                const std::atomic<uint64_t> &total,
+                                const std::atomic<uint64_t> &max,
+                                const std::atomic<uint64_t> &samples) {
+  auto field_prefix = std::string(prefix);
+  add_mapping_pair(map, (field_prefix + "_samples").c_str(),
+                   static_cast<long>(samples.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, (field_prefix + "_total_us").c_str(),
+                   static_cast<long>(total.load(std::memory_order_relaxed) / 1000));
+  add_mapping_pair(map, (field_prefix + "_max_us").c_str(), gateway_max_us(max));
 }
 
 void gateway_record_main_drain(int drained, int budget) {
@@ -770,6 +798,7 @@ void gateway_listener_cb(evconnlistener *listener, evutil_socket_t fd,
     return;
   }
 
+  gateway_enable_master_tcp_nodelay(fd);
   auto *base = evconnlistener_get_base(listener);
   auto bev = bufferevent_socket_new(base, fd, BEV_OPT_CLOSE_ON_FREE);
   if (!bev) {
@@ -973,13 +1002,15 @@ mapping_t *gateway_status_internal() {
   int uptime;
 
   uptime = g_gateway_started_at ? static_cast<int>(get_current_time() - g_gateway_started_at) : 0;
-  map = allocate_mapping(72);
+  map = allocate_mapping(104);
   add_mapping_pair(map, "listening", g_gateway_listener ? 1 : 0);
   add_mapping_pair(map, "port", g_gateway_listen_port);
   add_mapping_pair(map, "masters", static_cast<int>(g_gateway_masters.size()));
   add_mapping_pair(map, "sessions", gateway_get_session_count());
   add_mapping_pair(map, "session_fifo_contract_ready", 1);
   add_mapping_pair(map, "session_fifo_depth", gateway_session_fifo_depth_total());
+  add_mapping_pair(map, "session_fifo_pending_reservations",
+                   gateway_session_fifo_pending_reservations_total());
   add_mapping_pair(map, "session_fifo_enqueued", static_cast<long>(gateway_session_fifo_enqueued_total()));
   add_mapping_pair(map, "session_fifo_flushed", static_cast<long>(gateway_session_fifo_flushed_total()));
   add_mapping_pair(map, "session_fifo_rejected", static_cast<long>(gateway_session_fifo_rejected_total()));
@@ -1036,10 +1067,98 @@ mapping_t *gateway_status_internal() {
   add_mapping_pair(
       map, "gateway_output_fifo_rejected",
       static_cast<long>(g_gateway_runtime_counters.output_fifo_rejected.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_output_fifo_reserved",
+      static_cast<long>(g_gateway_runtime_counters.output_fifo_reserved.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_output_fifo_filled",
+      static_cast<long>(g_gateway_runtime_counters.output_fifo_filled.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_output_fifo_released",
+      static_cast<long>(g_gateway_runtime_counters.output_fifo_released.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_output_fifo_reservation_misses",
+      static_cast<long>(g_gateway_runtime_counters.output_fifo_reservation_misses.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_future_watch_pending", gateway_session_future_watch_count());
+  add_mapping_pair(
+      map, "gateway_future_watches_registered",
+      static_cast<long>(g_gateway_runtime_counters.future_watches_registered.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_future_watches_rejected",
+      static_cast<long>(g_gateway_runtime_counters.future_watches_rejected.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_future_watches_completed",
+      static_cast<long>(g_gateway_runtime_counters.future_watches_completed.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_future_watches_failed",
+      static_cast<long>(g_gateway_runtime_counters.future_watches_failed.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_future_watches_timed_out",
+      static_cast<long>(g_gateway_runtime_counters.future_watches_timed_out.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_future_watches_cancelled",
+      static_cast<long>(g_gateway_runtime_counters.future_watches_cancelled.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_future_watch_callbacks",
+      static_cast<long>(g_gateway_runtime_counters.future_watch_callbacks.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_future_watch_callback_failures",
+      static_cast<long>(g_gateway_runtime_counters.future_watch_callback_failures.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_future_watch_poll_runs",
+      static_cast<long>(g_gateway_runtime_counters.future_watch_poll_runs.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_future_watch_poll_items",
+      static_cast<long>(g_gateway_runtime_counters.future_watch_poll_items.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_future_watch_poll_budget_hits",
+      static_cast<long>(g_gateway_runtime_counters.future_watch_poll_budget_hits.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_future_watch_completion_event_ready", 1);
+  add_mapping_pair(
+      map, "gateway_future_watch_completion_notifications",
+      static_cast<long>(g_gateway_runtime_counters.future_watch_completion_notifications.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_future_watch_completion_wakeups",
+      static_cast<long>(g_gateway_runtime_counters.future_watch_completion_wakeups.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_future_watch_timer_wakeups",
+                   static_cast<long>(g_gateway_runtime_counters.future_watch_timer_wakeups.load(
+                       std::memory_order_relaxed)));
+  gateway_add_latency_fields(map, "gateway_output_reserve",
+                             g_gateway_runtime_counters.output_reserve_ns_total,
+                             g_gateway_runtime_counters.output_reserve_ns_max,
+                             g_gateway_runtime_counters.output_reserve_samples);
+  gateway_add_latency_fields(map, "gateway_future_watch_register",
+                             g_gateway_runtime_counters.future_watch_register_ns_total,
+                             g_gateway_runtime_counters.future_watch_register_ns_max,
+                             g_gateway_runtime_counters.future_watch_register_samples);
+  gateway_add_latency_fields(map, "gateway_future_watch_terminal_lag",
+                             g_gateway_runtime_counters.future_watch_terminal_lag_ns_total,
+                             g_gateway_runtime_counters.future_watch_terminal_lag_ns_max,
+                             g_gateway_runtime_counters.future_watch_terminal_lag_samples);
+  gateway_add_latency_fields(map, "gateway_future_watch_take",
+                             g_gateway_runtime_counters.future_watch_take_ns_total,
+                             g_gateway_runtime_counters.future_watch_take_ns_max,
+                             g_gateway_runtime_counters.future_watch_take_samples);
+  gateway_add_latency_fields(map, "gateway_future_watch_callback",
+                             g_gateway_runtime_counters.future_watch_callback_ns_total,
+                             g_gateway_runtime_counters.future_watch_callback_ns_max,
+                             g_gateway_runtime_counters.future_watch_callback_samples);
+  gateway_add_latency_fields(map, "gateway_future_watch_end_to_end",
+                             g_gateway_runtime_counters.future_watch_end_to_end_ns_total,
+                             g_gateway_runtime_counters.future_watch_end_to_end_ns_max,
+                             g_gateway_runtime_counters.future_watch_end_to_end_samples);
   add_mapping_pair(map, "gateway_raw_writes_sent",
                    static_cast<long>(g_gateway_runtime_counters.raw_writes_sent.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_raw_writes_failed",
                    static_cast<long>(g_gateway_runtime_counters.raw_writes_failed.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_tcp_nodelay_enabled",
+      static_cast<long>(g_gateway_runtime_counters.master_tcp_nodelay_enabled.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_tcp_nodelay_failed",
+      static_cast<long>(g_gateway_runtime_counters.master_tcp_nodelay_failed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_main_drain_runs",
                    static_cast<long>(g_gateway_runtime_counters.main_drain_runs.load(std::memory_order_relaxed)));
   add_mapping_pair(
@@ -1150,6 +1269,10 @@ mapping_t *gateway_status_internal() {
   add_mapping_pair(map, "gateway_reply_enqueue_to_dispatch_avg_us",
                    gateway_avg_us(g_gateway_runtime_counters.reply_enqueue_to_dispatch_ns_total,
                                   g_gateway_runtime_counters.reply_enqueue_to_dispatch_samples));
+  add_mapping_pair(map, "gateway_reply_enqueue_to_dispatch_total_us",
+                   static_cast<long>(g_gateway_runtime_counters.reply_enqueue_to_dispatch_ns_total.load(
+                                         std::memory_order_relaxed) /
+                                     1000));
   add_mapping_pair(map, "gateway_reply_enqueue_to_dispatch_max_us",
                    gateway_max_us(g_gateway_runtime_counters.reply_enqueue_to_dispatch_ns_max));
   add_mapping_pair(
@@ -1159,6 +1282,10 @@ mapping_t *gateway_status_internal() {
   add_mapping_pair(map, "gateway_reply_execute_avg_us",
                    gateway_avg_us(g_gateway_runtime_counters.reply_execute_ns_total,
                                   g_gateway_runtime_counters.reply_execute_samples));
+  add_mapping_pair(map, "gateway_reply_execute_total_us",
+                   static_cast<long>(g_gateway_runtime_counters.reply_execute_ns_total.load(
+                                         std::memory_order_relaxed) /
+                                     1000));
   add_mapping_pair(map, "gateway_reply_execute_max_us",
                    gateway_max_us(g_gateway_runtime_counters.reply_execute_ns_max));
   add_mapping_pair(
@@ -1168,6 +1295,10 @@ mapping_t *gateway_status_internal() {
   add_mapping_pair(map, "gateway_output_enqueue_to_dispatch_avg_us",
                    gateway_avg_us(g_gateway_runtime_counters.output_enqueue_to_dispatch_ns_total,
                                   g_gateway_runtime_counters.output_enqueue_to_dispatch_samples));
+  add_mapping_pair(map, "gateway_output_enqueue_to_dispatch_total_us",
+                   static_cast<long>(g_gateway_runtime_counters.output_enqueue_to_dispatch_ns_total.load(
+                                         std::memory_order_relaxed) /
+                                     1000));
   add_mapping_pair(map, "gateway_output_enqueue_to_dispatch_max_us",
                    gateway_max_us(g_gateway_runtime_counters.output_enqueue_to_dispatch_ns_max));
   add_mapping_pair(
@@ -1177,6 +1308,10 @@ mapping_t *gateway_status_internal() {
   add_mapping_pair(map, "gateway_output_execute_avg_us",
                    gateway_avg_us(g_gateway_runtime_counters.output_execute_ns_total,
                                   g_gateway_runtime_counters.output_execute_samples));
+  add_mapping_pair(map, "gateway_output_execute_total_us",
+                   static_cast<long>(g_gateway_runtime_counters.output_execute_ns_total.load(
+                                         std::memory_order_relaxed) /
+                                     1000));
   add_mapping_pair(map, "gateway_output_execute_max_us",
                    gateway_max_us(g_gateway_runtime_counters.output_execute_ns_max));
   add_mapping_string(map, "gateway_io_boundary", "main_thread_io_adapter");

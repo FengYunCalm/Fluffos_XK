@@ -2,6 +2,7 @@
 
 #include "gateway.h"
 
+#include "backend.h"
 #include "base/internal/external_port.h"
 #include "comm.h"
 #include "packages/core/dns.h"
@@ -16,6 +17,8 @@
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
+#include <limits>
+#include <list>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -27,13 +30,39 @@ uint64_t gateway_enqueue_pending_command_internal(object_t *user);
 namespace {
 std::unordered_map<std::string, std::unique_ptr<GatewaySession>> g_gateway_sessions;
 std::unordered_map<object_t *, GatewaySession *> g_gateway_obj_to_session;
+std::atomic<uint64_t> g_gateway_next_output_reservation_id{1};
+struct GatewaySessionFutureWatch {
+  std::string session_id;
+  std::string user_ob_name;
+  int64_t user_ob_load_time{0};
+  uint64_t reservation_id{0};
+  uint64_t future_id{0};
+  uint64_t deadline_ms{0};
+  uint64_t registered_at_ns{0};
+};
+std::unordered_map<uint64_t, GatewaySessionFutureWatch> g_gateway_session_future_watches;
+std::unordered_map<uint64_t, uint64_t> g_gateway_future_to_reservation;
+std::list<uint64_t> g_gateway_future_watch_queue;
+std::unordered_map<uint64_t, std::list<uint64_t>::iterator> g_gateway_future_watch_queue_positions;
+event *g_gateway_future_watch_timer = nullptr;
+event *g_gateway_future_watch_completion_event = nullptr;
 constexpr const char *kGatewayCommandExecutorActivationBlocker =
     "interactive_command_requires_main_thread_io_adapter";
 constexpr int kGatewayCommandMainDrainBudget = 16;
+constexpr size_t kGatewayMaxFutureWatches = 65536;
+constexpr int kGatewayFutureWatchPollIntervalMs = 1;
+constexpr size_t kGatewayFutureWatchPollBudget = 64;
 
 uint64_t gateway_session_now_ns() {
   return static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+}
+
+uint64_t gateway_session_now_ms() {
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
           .count());
 }
 
@@ -77,6 +106,166 @@ object_t *gateway_resolve_session_object(GatewaySession *sess) {
     return nullptr;
   }
   return current;
+}
+
+bool gateway_session_has_pending_reservation(GatewaySession *sess, uint64_t reservation_id) {
+  if (!sess || reservation_id == 0) {
+    return false;
+  }
+  for (const auto &entry : sess->output_fifo) {
+    if (entry.reservation_id == reservation_id && !entry.ready) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string gateway_future_mapping_state(mapping_t *future) {
+  auto *state = future ? find_string_in_mapping(future, "state") : nullptr;
+  return state && state->type == T_STRING && state->u.string ? state->u.string : "unknown";
+}
+
+void gateway_stop_future_watch_timer() {
+  vm_owner_set_future_terminal_notifier(nullptr);
+  if (g_gateway_future_watch_timer) {
+    evtimer_del(g_gateway_future_watch_timer);
+  }
+}
+
+void gateway_future_watch_timer_cb(evutil_socket_t /*fd*/, short /*what*/, void * /*ctx*/);
+void gateway_future_watch_completion_event_cb(evutil_socket_t /*fd*/, short /*what*/, void * /*ctx*/);
+
+void gateway_owner_future_terminal_notified() {
+  if (!g_gateway_future_watch_completion_event) {
+    return;
+  }
+  g_gateway_runtime_counters.future_watch_completion_notifications.fetch_add(1,
+                                                                              std::memory_order_relaxed);
+  event_active(g_gateway_future_watch_completion_event, EV_TIMEOUT, 0);
+}
+
+bool gateway_enable_future_watch_completion_event() {
+  if (!g_event_base) {
+    return false;
+  }
+  if (!g_gateway_future_watch_completion_event) {
+    g_gateway_future_watch_completion_event =
+        event_new(g_event_base, -1, EV_PERSIST, gateway_future_watch_completion_event_cb, nullptr);
+    if (!g_gateway_future_watch_completion_event ||
+        event_add(g_gateway_future_watch_completion_event, nullptr) != 0) {
+      if (g_gateway_future_watch_completion_event) {
+        event_free(g_gateway_future_watch_completion_event);
+        g_gateway_future_watch_completion_event = nullptr;
+      }
+      return false;
+    }
+  }
+  vm_owner_set_future_terminal_notifier(gateway_owner_future_terminal_notified);
+  return true;
+}
+
+void gateway_schedule_future_watch_timer() {
+  if (!g_event_base || g_gateway_session_future_watches.empty()) {
+    return;
+  }
+  if (!g_gateway_future_watch_timer) {
+    g_gateway_future_watch_timer = evtimer_new(g_event_base, gateway_future_watch_timer_cb, nullptr);
+  }
+  if (!g_gateway_future_watch_timer || event_pending(g_gateway_future_watch_timer, EV_TIMEOUT, nullptr)) {
+    return;
+  }
+  timeval delay{0, kGatewayFutureWatchPollIntervalMs * 1000};
+  evtimer_add(g_gateway_future_watch_timer, &delay);
+}
+
+void gateway_future_watch_timer_cb(evutil_socket_t /*fd*/, short /*what*/, void * /*ctx*/) {
+  g_gateway_runtime_counters.future_watch_timer_wakeups.fetch_add(1, std::memory_order_relaxed);
+  gateway_process_session_future_watches_at(gateway_session_now_ms());
+  gateway_schedule_future_watch_timer();
+}
+
+void gateway_future_watch_completion_event_cb(evutil_socket_t /*fd*/, short /*what*/, void * /*ctx*/) {
+  g_gateway_runtime_counters.future_watch_completion_wakeups.fetch_add(1, std::memory_order_relaxed);
+  gateway_process_session_future_watches_at(gateway_session_now_ms());
+  gateway_schedule_future_watch_timer();
+}
+
+void gateway_cleanup_future_watch_timer() {
+  vm_owner_set_future_terminal_notifier(nullptr);
+  if (g_gateway_future_watch_completion_event) {
+    event_del(g_gateway_future_watch_completion_event);
+    event_free(g_gateway_future_watch_completion_event);
+    g_gateway_future_watch_completion_event = nullptr;
+  }
+  if (!g_gateway_future_watch_timer) {
+    return;
+  }
+  evtimer_del(g_gateway_future_watch_timer);
+  event_free(g_gateway_future_watch_timer);
+  g_gateway_future_watch_timer = nullptr;
+}
+
+void gateway_consume_cancelled_future(uint64_t future_id, const char *reason) {
+  auto *cancelled = vm_owner_future_cancel(future_id, reason);
+  free_mapping(cancelled);
+  auto *consumed = vm_owner_future_take(future_id);
+  free_mapping(consumed);
+}
+
+void gateway_cancel_session_future_watches(const std::string &session_id, GatewaySession *sess,
+                                           const char *reason, bool release_reservations) {
+  std::vector<GatewaySessionFutureWatch> cancelled;
+  for (auto it = g_gateway_session_future_watches.begin();
+       it != g_gateway_session_future_watches.end();) {
+    if (it->second.session_id != session_id) {
+      ++it;
+      continue;
+    }
+    cancelled.push_back(it->second);
+    g_gateway_future_to_reservation.erase(it->second.future_id);
+    auto queue_it = g_gateway_future_watch_queue_positions.find(it->second.reservation_id);
+    if (queue_it != g_gateway_future_watch_queue_positions.end()) {
+      g_gateway_future_watch_queue.erase(queue_it->second);
+      g_gateway_future_watch_queue_positions.erase(queue_it);
+    }
+    it = g_gateway_session_future_watches.erase(it);
+  }
+
+  for (const auto &watch : cancelled) {
+    gateway_consume_cancelled_future(watch.future_id, reason);
+    if (release_reservations && sess) {
+      gateway_release_session_output(sess, watch.reservation_id);
+    }
+    g_gateway_runtime_counters.future_watches_cancelled.fetch_add(1, std::memory_order_relaxed);
+  }
+  if (g_gateway_session_future_watches.empty()) {
+    g_gateway_future_watch_queue.clear();
+    g_gateway_future_watch_queue_positions.clear();
+    gateway_stop_future_watch_timer();
+  }
+}
+
+bool gateway_dispatch_future_watch_callback(object_t *ob, uint64_t reservation_id,
+                                            mapping_t *future) {
+  if (!gateway_object_valid(ob) || !future ||
+      !function_exists("gateway_owner_future_completed", ob, 0)) {
+    return false;
+  }
+
+  bool callback_ok = false;
+  save_command_giver(ob);
+  {
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob), vm_owner_epoch(ob));
+    VMCurrentInteractiveScope interactive_scope(vm_context(), ob);
+    GatewayControlledLpcScope controlled_scope;
+    set_eval(max_eval_cost);
+    push_number(static_cast<LPC_INT>(reservation_id));
+    push_mapping(future);
+    auto *ret = safe_apply("gateway_owner_future_completed", ob, 2, ORIGIN_DRIVER);
+    callback_ok = ret && ret->type == T_NUMBER && ret->u.number != 0;
+  }
+  restore_command_giver();
+  return callback_ok;
 }
 
 void gateway_debugf(const char *fmt, ...) {
@@ -403,12 +592,206 @@ GatewaySession *gateway_find_session_by_object(object_t *ob) {
   return sess;
 }
 
+int gateway_watch_session_future_for_object(object_t *ob, uint64_t reservation_id,
+                                            uint64_t future_id, int timeout_ms) {
+  auto register_started_ns = gateway_session_now_ns();
+  if (!vm_context_is_main_thread() || reservation_id == 0 || future_id == 0 || timeout_ms <= 0 ||
+      g_gateway_session_future_watches.size() >= kGatewayMaxFutureWatches) {
+    g_gateway_runtime_counters.future_watches_rejected.fetch_add(1, std::memory_order_relaxed);
+    return 0;
+  }
+
+  auto *sess = gateway_find_session_by_object(ob);
+  if (!sess || !gateway_session_has_pending_reservation(sess, reservation_id) ||
+      g_gateway_session_future_watches.find(reservation_id) !=
+          g_gateway_session_future_watches.end() ||
+      g_gateway_future_to_reservation.find(future_id) != g_gateway_future_to_reservation.end()) {
+    g_gateway_runtime_counters.future_watches_rejected.fetch_add(1, std::memory_order_relaxed);
+    return 0;
+  }
+  if (vm_owner_future_state(future_id) == VM_OWNER_FUTURE_UNKNOWN ||
+      !vm_owner_future_targets_object(future_id, ob)) {
+    g_gateway_runtime_counters.future_watches_rejected.fetch_add(1, std::memory_order_relaxed);
+    return 0;
+  }
+
+  auto now_ms = gateway_session_now_ms();
+  auto completion_event_ready = gateway_enable_future_watch_completion_event();
+  auto timeout = static_cast<uint64_t>(timeout_ms);
+  auto deadline_ms = timeout > std::numeric_limits<uint64_t>::max() - now_ms
+                         ? std::numeric_limits<uint64_t>::max()
+                         : now_ms + timeout;
+  GatewaySessionFutureWatch watch;
+  watch.session_id = sess->session_id;
+  watch.user_ob_name = sess->user_ob_name;
+  watch.user_ob_load_time = sess->user_ob_load_time;
+  watch.reservation_id = reservation_id;
+  watch.future_id = future_id;
+  watch.deadline_ms = deadline_ms;
+  watch.registered_at_ns = register_started_ns;
+  g_gateway_session_future_watches.emplace(reservation_id, std::move(watch));
+  g_gateway_future_to_reservation.emplace(future_id, reservation_id);
+  g_gateway_future_watch_queue.push_back(reservation_id);
+  g_gateway_future_watch_queue_positions.emplace(
+      reservation_id, std::prev(g_gateway_future_watch_queue.end()));
+  g_gateway_runtime_counters.future_watches_registered.fetch_add(1, std::memory_order_relaxed);
+  if (completion_event_ready && vm_owner_future_state(future_id) != VM_OWNER_FUTURE_PENDING) {
+    gateway_owner_future_terminal_notified();
+  }
+  gateway_schedule_future_watch_timer();
+  gateway_session_record_latency(g_gateway_runtime_counters.future_watch_register_ns_total,
+                                 g_gateway_runtime_counters.future_watch_register_ns_max,
+                                 g_gateway_runtime_counters.future_watch_register_samples,
+                                 gateway_session_now_ns() - register_started_ns);
+  return 1;
+}
+
+int gateway_process_session_future_watches_at(uint64_t now_ms) {
+  if (!vm_context_is_main_thread()) {
+    return 0;
+  }
+
+  g_gateway_runtime_counters.future_watch_poll_runs.fetch_add(1, std::memory_order_relaxed);
+  auto queued_at_start = g_gateway_future_watch_queue.size();
+  auto poll_count = std::min(queued_at_start, kGatewayFutureWatchPollBudget);
+  if (queued_at_start > kGatewayFutureWatchPollBudget) {
+    g_gateway_runtime_counters.future_watch_poll_budget_hits.fetch_add(1, std::memory_order_relaxed);
+  }
+  int processed = 0;
+  for (size_t index = 0; index < poll_count; index++) {
+    auto reservation_id = g_gateway_future_watch_queue.front();
+    g_gateway_future_watch_queue.pop_front();
+    g_gateway_future_watch_queue_positions.erase(reservation_id);
+    auto watch_it = g_gateway_session_future_watches.find(reservation_id);
+    if (watch_it == g_gateway_session_future_watches.end()) {
+      continue;
+    }
+    g_gateway_runtime_counters.future_watch_poll_items.fetch_add(1, std::memory_order_relaxed);
+    auto watch = watch_it->second;
+    auto *sess = gateway_find_session(watch.session_id.c_str());
+    auto *ob = gateway_resolve_session_object(sess);
+    auto session_current = sess && ob && sess->user_ob_name == watch.user_ob_name &&
+                           sess->user_ob_load_time == watch.user_ob_load_time;
+    if (!session_current) {
+      g_gateway_future_to_reservation.erase(watch.future_id);
+      g_gateway_session_future_watches.erase(watch_it);
+      gateway_consume_cancelled_future(watch.future_id, "gateway session stale");
+      if (sess) {
+        gateway_release_session_output(sess, watch.reservation_id);
+      }
+      g_gateway_runtime_counters.future_watches_cancelled.fetch_add(1, std::memory_order_relaxed);
+      processed++;
+      continue;
+    }
+
+    auto future_state = vm_owner_future_state(watch.future_id);
+    if (future_state == VM_OWNER_FUTURE_PENDING && now_ms < watch.deadline_ms) {
+      g_gateway_future_watch_queue.push_back(reservation_id);
+      g_gateway_future_watch_queue_positions.emplace(
+          reservation_id, std::prev(g_gateway_future_watch_queue.end()));
+      continue;
+    }
+
+    mapping_t *future = nullptr;
+    uint64_t terminal_at_ns = 0;
+    uint64_t take_started_ns = 0;
+    uint64_t take_finished_ns = 0;
+    if (future_state == VM_OWNER_FUTURE_PENDING) {
+      auto *timed_out = vm_owner_future_timeout(watch.future_id, "gateway owner future timed out");
+      free_mapping(timed_out);
+      take_started_ns = gateway_session_now_ns();
+      future = vm_owner_future_take(watch.future_id, &terminal_at_ns);
+      take_finished_ns = gateway_session_now_ns();
+      g_gateway_runtime_counters.future_watches_timed_out.fetch_add(1, std::memory_order_relaxed);
+    } else if (future_state == VM_OWNER_FUTURE_COMPLETED ||
+               future_state == VM_OWNER_FUTURE_FAILED) {
+      take_started_ns = gateway_session_now_ns();
+      future = vm_owner_future_take(watch.future_id, &terminal_at_ns);
+      take_finished_ns = gateway_session_now_ns();
+    } else {
+      future = vm_owner_future_poll(watch.future_id);
+    }
+    if (take_finished_ns >= take_started_ns && take_started_ns > 0) {
+      gateway_session_record_latency(g_gateway_runtime_counters.future_watch_take_ns_total,
+                                     g_gateway_runtime_counters.future_watch_take_ns_max,
+                                     g_gateway_runtime_counters.future_watch_take_samples,
+                                     take_finished_ns - take_started_ns);
+    }
+    if (terminal_at_ns > 0 && take_started_ns >= terminal_at_ns) {
+      gateway_session_record_latency(g_gateway_runtime_counters.future_watch_terminal_lag_ns_total,
+                                     g_gateway_runtime_counters.future_watch_terminal_lag_ns_max,
+                                     g_gateway_runtime_counters.future_watch_terminal_lag_samples,
+                                     take_started_ns - terminal_at_ns);
+    }
+    auto state = gateway_future_mapping_state(future);
+
+    g_gateway_future_to_reservation.erase(watch.future_id);
+    g_gateway_session_future_watches.erase(watch_it);
+    processed++;
+    if (state == "completed") {
+      g_gateway_runtime_counters.future_watches_completed.fetch_add(1, std::memory_order_relaxed);
+    } else {
+      g_gateway_runtime_counters.future_watches_failed.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    g_gateway_runtime_counters.future_watch_callbacks.fetch_add(1, std::memory_order_relaxed);
+    auto callback_started_ns = gateway_session_now_ns();
+    auto callback_ok = gateway_dispatch_future_watch_callback(ob, watch.reservation_id, future);
+    auto callback_finished_ns = gateway_session_now_ns();
+    gateway_session_record_latency(g_gateway_runtime_counters.future_watch_callback_ns_total,
+                                   g_gateway_runtime_counters.future_watch_callback_ns_max,
+                                   g_gateway_runtime_counters.future_watch_callback_samples,
+                                   callback_finished_ns - callback_started_ns);
+    if (watch.registered_at_ns > 0 && callback_finished_ns >= watch.registered_at_ns) {
+      gateway_session_record_latency(g_gateway_runtime_counters.future_watch_end_to_end_ns_total,
+                                     g_gateway_runtime_counters.future_watch_end_to_end_ns_max,
+                                     g_gateway_runtime_counters.future_watch_end_to_end_samples,
+                                     callback_finished_ns - watch.registered_at_ns);
+    }
+    free_mapping(future);
+
+    sess = gateway_find_session(watch.session_id.c_str());
+    ob = gateway_resolve_session_object(sess);
+    session_current = sess && ob && sess->user_ob_name == watch.user_ob_name &&
+                      sess->user_ob_load_time == watch.user_ob_load_time;
+    if (!callback_ok) {
+      g_gateway_runtime_counters.future_watch_callback_failures.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (session_current && gateway_session_has_pending_reservation(sess, watch.reservation_id)) {
+      gateway_release_session_output(sess, watch.reservation_id);
+    }
+  }
+
+  if (g_gateway_session_future_watches.empty()) {
+    g_gateway_future_watch_queue.clear();
+    g_gateway_future_watch_queue_positions.clear();
+    gateway_stop_future_watch_timer();
+  }
+  return processed;
+}
+
+long gateway_session_future_watch_count() {
+  return static_cast<long>(g_gateway_session_future_watches.size());
+}
+
 long gateway_session_fifo_depth_total() {
   long depth = 0;
   for (const auto &entry : g_gateway_sessions) {
     depth += static_cast<long>(entry.second->output_fifo.size());
   }
   return depth;
+}
+
+long gateway_session_fifo_pending_reservations_total() {
+  long pending = 0;
+  for (const auto &session_entry : g_gateway_sessions) {
+    for (const auto &output_entry : session_entry.second->output_fifo) {
+      if (!output_entry.ready) {
+        pending++;
+      }
+    }
+  }
+  return pending;
 }
 
 long gateway_session_command_pending_count() {
@@ -445,14 +828,17 @@ uint64_t gateway_session_fifo_rejected_total() {
   return total;
 }
 
-int gateway_flush_session_output_fifo(GatewaySession *sess) {
+int gateway_flush_session_output_fifo_with_writer(GatewaySession *sess, GatewayOutputWriter writer) {
   int flushed = 0;
-  if (!sess || sess->master_fd < 0) {
+  if (!sess || sess->master_fd < 0 || !writer) {
     return 0;
   }
   while (!sess->output_fifo.empty()) {
-    const auto &encoded = sess->output_fifo.front();
-    if (!gateway_send_raw_to_fd(sess->master_fd, encoded.c_str(), encoded.size())) {
+    const auto &entry = sess->output_fifo.front();
+    if (!entry.ready) {
+      break;
+    }
+    if (!writer(sess->master_fd, entry.encoded.c_str(), entry.encoded.size())) {
       break;
     }
     sess->output_fifo.pop_front();
@@ -461,6 +847,10 @@ int gateway_flush_session_output_fifo(GatewaySession *sess) {
     flushed = 1;
   }
   return flushed;
+}
+
+int gateway_flush_session_output_fifo(GatewaySession *sess) {
+  return gateway_flush_session_output_fifo_with_writer(sess, gateway_send_raw_to_fd);
 }
 
 int gateway_enqueue_session_output(GatewaySession *sess, std::string encoded) {
@@ -472,11 +862,131 @@ int gateway_enqueue_session_output(GatewaySession *sess, std::string encoded) {
     g_gateway_runtime_counters.output_fifo_rejected.fetch_add(1, std::memory_order_relaxed);
     return 0;
   }
-  sess->output_fifo.push_back(std::move(encoded));
+  GatewayOutputEntry entry;
+  entry.encoded = std::move(encoded);
+  sess->output_fifo.push_back(std::move(entry));
   sess->output_fifo_enqueued++;
   g_gateway_runtime_counters.output_fifo_enqueued.fetch_add(1, std::memory_order_relaxed);
   sess->last_active = get_current_time();
   gateway_flush_session_output_fifo(sess);
+  return 1;
+}
+
+uint64_t gateway_reserve_session_output(GatewaySession *sess) {
+  auto reserve_started_ns = gateway_session_now_ns();
+  if (!sess || sess->master_fd < 0) {
+    return 0;
+  }
+  if (sess->output_fifo.size() >= sess->output_fifo_max_depth) {
+    sess->output_fifo_rejected++;
+    g_gateway_runtime_counters.output_fifo_rejected.fetch_add(1, std::memory_order_relaxed);
+    return 0;
+  }
+
+  auto reservation_id = g_gateway_next_output_reservation_id.fetch_add(1, std::memory_order_relaxed);
+  if (reservation_id == 0 ||
+      reservation_id > static_cast<uint64_t>(std::numeric_limits<LPC_INT>::max())) {
+    sess->output_fifo_rejected++;
+    g_gateway_runtime_counters.output_fifo_rejected.fetch_add(1, std::memory_order_relaxed);
+    return 0;
+  }
+  GatewayOutputEntry entry;
+  entry.reservation_id = reservation_id;
+  entry.ready = false;
+  sess->output_fifo.push_back(std::move(entry));
+  sess->output_fifo_enqueued++;
+  g_gateway_runtime_counters.output_fifo_enqueued.fetch_add(1, std::memory_order_relaxed);
+  g_gateway_runtime_counters.output_fifo_reserved.fetch_add(1, std::memory_order_relaxed);
+  sess->last_active = get_current_time();
+  gateway_session_record_latency(g_gateway_runtime_counters.output_reserve_ns_total,
+                                 g_gateway_runtime_counters.output_reserve_ns_max,
+                                 g_gateway_runtime_counters.output_reserve_samples,
+                                 gateway_session_now_ns() - reserve_started_ns);
+  return reservation_id;
+}
+
+int gateway_fill_session_output_with_writer(GatewaySession *sess, uint64_t reservation_id,
+                                            std::string encoded, GatewayOutputWriter writer) {
+  if (!sess || reservation_id == 0 || encoded.empty() || !writer) {
+    return 0;
+  }
+  for (auto &entry : sess->output_fifo) {
+    if (entry.reservation_id != reservation_id || entry.ready) {
+      continue;
+    }
+    entry.encoded = std::move(encoded);
+    entry.ready = true;
+    g_gateway_runtime_counters.output_fifo_filled.fetch_add(1, std::memory_order_relaxed);
+    sess->last_active = get_current_time();
+    gateway_flush_session_output_fifo_with_writer(sess, writer);
+    return 1;
+  }
+  g_gateway_runtime_counters.output_fifo_reservation_misses.fetch_add(1, std::memory_order_relaxed);
+  return 0;
+}
+
+int gateway_fill_session_output(GatewaySession *sess, uint64_t reservation_id, std::string encoded) {
+  return gateway_fill_session_output_with_writer(sess, reservation_id, std::move(encoded),
+                                                 gateway_send_raw_to_fd);
+}
+
+int gateway_release_session_output_with_writer(GatewaySession *sess, uint64_t reservation_id,
+                                               GatewayOutputWriter writer) {
+  if (!sess || reservation_id == 0 || !writer) {
+    return 0;
+  }
+  for (auto it = sess->output_fifo.begin(); it != sess->output_fifo.end(); ++it) {
+    if (it->reservation_id != reservation_id || it->ready) {
+      continue;
+    }
+    sess->output_fifo.erase(it);
+    g_gateway_runtime_counters.output_fifo_released.fetch_add(1, std::memory_order_relaxed);
+    gateway_flush_session_output_fifo_with_writer(sess, writer);
+    return 1;
+  }
+  g_gateway_runtime_counters.output_fifo_reservation_misses.fetch_add(1, std::memory_order_relaxed);
+  return 0;
+}
+
+int gateway_release_session_output(GatewaySession *sess, uint64_t reservation_id) {
+  return gateway_release_session_output_with_writer(sess, reservation_id, gateway_send_raw_to_fd);
+}
+
+uint64_t gateway_reserve_session_output_for_object(object_t *ob) {
+  if (!vm_context_is_main_thread()) {
+    return 0;
+  }
+  return gateway_reserve_session_output(gateway_find_session_by_object(ob));
+}
+
+int gateway_fill_session_output_for_object(object_t *ob, uint64_t reservation_id, const char *data, size_t len) {
+  if (!vm_context_is_main_thread() || !data) {
+    return 0;
+  }
+  auto *sess = gateway_find_session_by_object(ob);
+  if (!sess) {
+    return 0;
+  }
+
+  nlohmann::json payload{
+      {"type", "output"},
+      {"cid", sess->session_id},
+      {"data", std::string(data, len)},
+  };
+  if (!gateway_fill_session_output(sess, reservation_id, payload.dump())) {
+    return 0;
+  }
+  return 1;
+}
+
+int gateway_release_session_output_for_object(object_t *ob, uint64_t reservation_id) {
+  if (!vm_context_is_main_thread()) {
+    return 0;
+  }
+  auto *sess = gateway_find_session_by_object(ob);
+  if (!sess || !gateway_release_session_output(sess, reservation_id)) {
+    return 0;
+  }
   return 1;
 }
 
@@ -518,6 +1028,7 @@ void gateway_unbind_session_object(object_t *ob) {
     return;
   }
   std::string session_id = sess->session_id;
+  gateway_cancel_session_future_watches(session_id, sess, "gateway session unbound", false);
   g_gateway_obj_to_session.erase(ob);
   g_gateway_sessions.erase(session_id);
 }
@@ -538,6 +1049,27 @@ void gateway_cleanup_master_sessions(int master_fd) {
 
 bool gateway_is_session(object_t *ob) {
   return ob && ob->interactive && (ob->interactive->iflags & GATEWAY_SESSION);
+}
+
+int gateway_probe_suppress_once_for_object(object_t *ob) {
+  auto *sess = gateway_find_session_by_object(ob);
+  if (!sess) {
+    return 0;
+  }
+  sess->probe_suppressed_once = true;
+  return 1;
+}
+
+bool gateway_probe_suppressed_for_object(object_t *ob) {
+  auto *sess = gateway_find_session_by_object(ob);
+  return sess && sess->probe_suppressed_once;
+}
+
+void gateway_probe_finish_suppressed_command_for_object(object_t *ob) {
+  auto *sess = gateway_find_session_by_object(ob);
+  if (sess) {
+    sess->probe_suppressed_once = false;
+  }
 }
 
 uint64_t gateway_enqueue_pending_command_internal(object_t *user) {
@@ -627,6 +1159,7 @@ void gateway_session_exec_update(object_t *new_ob, object_t *old_ob) {
   if (!sess || !new_ob || !old_ob || !new_ob->interactive) {
     return;
   }
+  gateway_cancel_session_future_watches(sess->session_id, sess, "gateway session exec", true);
   new_ob->interactive->ob = new_ob;
   g_gateway_obj_to_session.erase(old_ob);
   g_gateway_obj_to_session[new_ob] = sess;
@@ -783,6 +1316,7 @@ int gateway_destroy_session_internal(const char *session_id, const char *reason_
   if (!sess) {
     return 0;
   }
+  gateway_cancel_session_future_watches(session_id, sess, "gateway session destroyed", false);
   if (gateway_object_valid(ob) && ob->interactive) {
     save_command_giver(ob);
     {
@@ -899,6 +1433,7 @@ void cleanup_gateway_sessions() {
 
   g_gateway_sessions.clear();
   g_gateway_obj_to_session.clear();
+  gateway_cleanup_future_watch_timer();
 }
 
 void f_gateway_session_send() {
@@ -939,6 +1474,55 @@ void f_gateway_session_send() {
   result = gateway_enqueue_session_output(sess, std::move(encoded));
 
   pop_n_elems(num_args);
+  push_number(result);
+}
+
+void f_gateway_probe_suppress_once() {
+  auto *ob = sp->u.ob;
+  if (sp->type != T_OBJECT || !ob || (ob->flags & O_DESTRUCTED)) {
+    if (sp->type == T_OBJECT) {
+      free_object(&sp->u.ob, "f_gateway_probe_suppress_once");
+    } else {
+      pop_stack();
+    }
+    put_number(0);
+    return;
+  }
+  free_object(&sp->u.ob, "f_gateway_probe_suppress_once");
+  put_number(gateway_probe_suppress_once_for_object(ob));
+}
+
+void f_gateway_session_reserve() {
+  auto *ob = sp->u.ob;
+  auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  pop_stack();
+  push_number(static_cast<LPC_INT>(reservation_id));
+}
+
+void f_gateway_session_fill() {
+  auto *data = sp;
+  auto reservation_id = static_cast<uint64_t>((sp - 1)->u.number);
+  auto *ob = (sp - 2)->u.ob;
+  auto result = gateway_fill_session_output_for_object(ob, reservation_id, data->u.string, SVALUE_STRLEN(data));
+  pop_n_elems(3);
+  push_number(result);
+}
+
+void f_gateway_session_release() {
+  auto reservation_id = static_cast<uint64_t>(sp->u.number);
+  auto *ob = (sp - 1)->u.ob;
+  auto result = gateway_release_session_output_for_object(ob, reservation_id);
+  pop_2_elems();
+  push_number(result);
+}
+
+void f_gateway_session_watch_future() {
+  auto timeout_ms = static_cast<int>(sp->u.number);
+  auto future_id = static_cast<uint64_t>((sp - 1)->u.number);
+  auto reservation_id = static_cast<uint64_t>((sp - 2)->u.number);
+  auto *ob = (sp - 3)->u.ob;
+  auto result = gateway_watch_session_future_for_object(ob, reservation_id, future_id, timeout_ms);
+  pop_n_elems(4);
   push_number(result);
 }
 
@@ -1009,6 +1593,13 @@ void f_gateway_session_info() {
   add_mapping_pair(map, "owner_epoch", session_ob ? static_cast<long>(vm_owner_epoch(session_ob)) : 0);
   add_mapping_pair(map, "session_fifo_contract_ready", 1);
   add_mapping_pair(map, "session_fifo_depth", static_cast<long>(sess->output_fifo.size()));
+  long pending_reservations = 0;
+  for (const auto &entry : sess->output_fifo) {
+    if (!entry.ready) {
+      pending_reservations++;
+    }
+  }
+  add_mapping_pair(map, "session_fifo_pending_reservations", pending_reservations);
   add_mapping_pair(map, "session_fifo_max_depth", static_cast<long>(sess->output_fifo_max_depth));
   add_mapping_pair(map, "session_fifo_enqueued", static_cast<long>(sess->output_fifo_enqueued));
   add_mapping_pair(map, "session_fifo_flushed", static_cast<long>(sess->output_fifo_flushed));
