@@ -16,6 +16,7 @@ int gateway_session_reserve(object);
 int gateway_session_fill(object, int, string);
 int gateway_session_release(object, int);
 int gateway_session_watch_future(object, int, int, int);
+int gateway_future_watch(object, int, int, int);
 int gateway_inject_input(object, string);
 int is_gateway_user(object);
 int gateway_probe_suppress_once(object);

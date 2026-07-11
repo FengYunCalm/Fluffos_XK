@@ -75,6 +75,14 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> future_watch_end_to_end_ns_total{0};
   std::atomic<uint64_t> future_watch_end_to_end_ns_max{0};
   std::atomic<uint64_t> future_watch_end_to_end_samples{0};
+  std::atomic<uint64_t> generic_future_watches_registered{0};
+  std::atomic<uint64_t> generic_future_watches_rejected{0};
+  std::atomic<uint64_t> generic_future_watches_completed{0};
+  std::atomic<uint64_t> generic_future_watches_failed{0};
+  std::atomic<uint64_t> generic_future_watches_timed_out{0};
+  std::atomic<uint64_t> generic_future_watches_cancelled{0};
+  std::atomic<uint64_t> generic_future_watch_callbacks{0};
+  std::atomic<uint64_t> generic_future_watch_callback_failures{0};
   std::atomic<uint64_t> raw_writes_sent{0};
   std::atomic<uint64_t> raw_writes_failed{0};
   std::atomic<uint64_t> master_tcp_nodelay_enabled{0};
@@ -194,8 +202,12 @@ int gateway_fill_session_output_for_object(object_t *ob, uint64_t reservation_id
 int gateway_release_session_output_for_object(object_t *ob, uint64_t reservation_id);
 int gateway_watch_session_future_for_object(object_t *ob, uint64_t reservation_id,
                                             uint64_t future_id, int timeout_ms);
+int gateway_watch_future_for_object(object_t *ob, uint64_t context_id,
+                                    uint64_t future_id, int timeout_ms);
 int gateway_process_session_future_watches_at(uint64_t now_ms);
+int gateway_process_future_watches_at(uint64_t now_ms);
 long gateway_session_future_watch_count();
+long gateway_future_watch_count();
 int gateway_send_raw_to_fd(int fd, const char *data, size_t len);
 int gateway_svalue_to_json_string(const svalue_t *sv, std::string *out);
 int gateway_ping_master_internal(int fd);

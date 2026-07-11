@@ -280,6 +280,15 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_released"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_reservation_misses"), 0);
   ASSERT_GE(mapping_number(status, "gateway_future_watch_pending"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_generic_future_watch_pending"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_generic_future_watches_registered"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_generic_future_watches_rejected"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_generic_future_watches_completed"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_generic_future_watches_failed"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_generic_future_watches_timed_out"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_generic_future_watches_cancelled"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_generic_future_watch_callbacks"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_generic_future_watch_callback_failures"), 0);
   ASSERT_GE(mapping_number(status, "gateway_future_watches_registered"), 0);
   ASSERT_GE(mapping_number(status, "gateway_future_watches_rejected"), 0);
   ASSERT_GE(mapping_number(status, "gateway_future_watches_completed"), 0);
@@ -10927,6 +10936,168 @@ TEST_F(DriverTest, TestGatewayFutureWatchRejectsAnotherSessionFuture) {
   destruct_object(target);
   free_object(&source, "TestGatewayFutureWatchRejectsAnotherSessionFuture/source");
   free_object(&target, "TestGatewayFutureWatchRejectsAnotherSessionFuture/target");
+}
+
+TEST_F(DriverTest, TestGatewayGenericFutureWatchDispatchesNonSessionObjectOnMain) {
+  auto *ob = clone_object_for_test("clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayGenericFutureWatchDispatchesNonSessionObjectOnMain");
+  ASSERT_FALSE(gateway_is_session(ob));
+  vm_owner_set_id(ob, "owner/test/gateway/generic-future-completed");
+
+  push_number(41);
+  auto *submitted = call_lpc_method(ob, "submit_gateway_owner_future", 1);
+  ASSERT_NE(submitted, nullptr);
+  ASSERT_EQ(submitted->type, T_MAPPING);
+  auto future_id = gateway_test_mapping_number(submitted->u.map, "future_id");
+  ASSERT_GT(future_id, 0);
+  push_number(701);
+  push_number(future_id);
+  push_number(1000);
+  auto *watched = call_lpc_method(ob, "watch_generic_owner_future", 3);
+  ASSERT_NE(watched, nullptr);
+  ASSERT_EQ(watched->type, T_NUMBER);
+  ASSERT_EQ(watched->u.number, 1);
+  ASSERT_EQ(gateway_future_watch_count(), 1);
+
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 200; i++) {
+    auto *future = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+    auto completed = std::string(gateway_test_mapping_string(future, "state")) == "completed";
+    free_mapping(future);
+    if (completed) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  vm_owner_thread_stop();
+
+  for (int i = 0; i < 200; i++) {
+    event_base_loop(g_event_base, EVLOOP_ONCE | EVLOOP_NONBLOCK);
+    if (gateway_test_call_number("query_last_generic_owner_future_context_id", ob) == 701) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+
+  ASSERT_EQ(gateway_future_watch_count(), 0);
+  ASSERT_EQ(gateway_test_call_number("query_last_generic_owner_future_context_id", ob), 701);
+  ASSERT_EQ(gateway_test_call_number("query_last_generic_owner_future_callback_off_main", ob), 0);
+  auto *future = call_lpc_method(ob, "query_last_generic_owner_future");
+  ASSERT_NE(future, nullptr);
+  ASSERT_EQ(future->type, T_MAPPING);
+  ASSERT_STREQ(gateway_test_mapping_string(future->u.map, "state"), "completed");
+  auto *result = find_string_in_mapping(future->u.map, "result");
+  ASSERT_NE(result, nullptr);
+  ASSERT_EQ(result->type, T_MAPPING);
+  ASSERT_EQ(gateway_test_mapping_number(result->u.map, "value"), 42);
+  auto *consumed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+  ASSERT_STREQ(gateway_test_mapping_string(consumed, "state"), "unknown");
+  free_mapping(consumed);
+
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayGenericFutureWatchDispatchesNonSessionObjectOnMain");
+}
+
+TEST_F(DriverTest, TestGatewayGenericFutureWatchRejectsAnotherObjectFuture) {
+  auto *source = clone_object_for_test("clone/gateway_login_example");
+  auto *target = clone_object_for_test("clone/gateway_login_example");
+  ASSERT_NE(source, nullptr);
+  ASSERT_NE(target, nullptr);
+  vm_owner_set_id(source, "owner/test/gateway/generic-future-source");
+  vm_owner_set_id(target, "owner/test/gateway/generic-future-target");
+
+  push_number(41);
+  auto *submitted = call_lpc_method(source, "submit_gateway_owner_future", 1);
+  ASSERT_NE(submitted, nullptr);
+  ASSERT_EQ(submitted->type, T_MAPPING);
+  auto future_id = gateway_test_mapping_number(submitted->u.map, "future_id");
+  ASSERT_GT(future_id, 0);
+  ASSERT_EQ(gateway_watch_future_for_object(target, 702, static_cast<uint64_t>(future_id), 1000), 0);
+  ASSERT_EQ(gateway_future_watch_count(), 0);
+
+  auto *cancelled = vm_owner_future_cancel(static_cast<uint64_t>(future_id), "test cleanup");
+  free_mapping(cancelled);
+  auto *consumed = vm_owner_future_take(static_cast<uint64_t>(future_id));
+  free_mapping(consumed);
+  destruct_object(source);
+  destruct_object(target);
+}
+
+TEST_F(DriverTest, TestGatewayGenericFutureWatchTimesOutAndConsumesFuture) {
+  auto *ob = clone_object_for_test("clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  vm_owner_set_id(ob, "owner/test/gateway/generic-future-timeout");
+
+  push_number(41);
+  auto *submitted = call_lpc_method(ob, "submit_gateway_owner_future", 1);
+  ASSERT_NE(submitted, nullptr);
+  ASSERT_EQ(submitted->type, T_MAPPING);
+  auto future_id = gateway_test_mapping_number(submitted->u.map, "future_id");
+  ASSERT_GT(future_id, 0);
+  ASSERT_EQ(gateway_watch_future_for_object(ob, 703, static_cast<uint64_t>(future_id), 1), 1);
+  ASSERT_EQ(gateway_process_future_watches_at(std::numeric_limits<uint64_t>::max()), 1);
+  ASSERT_EQ(gateway_future_watch_count(), 0);
+
+  auto *future = call_lpc_method(ob, "query_last_generic_owner_future");
+  ASSERT_NE(future, nullptr);
+  ASSERT_EQ(future->type, T_MAPPING);
+  ASSERT_STREQ(gateway_test_mapping_string(future->u.map, "state"), "failed");
+  ASSERT_EQ(gateway_test_mapping_number(future->u.map, "timed_out"), 1);
+  auto *consumed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+  ASSERT_STREQ(gateway_test_mapping_string(consumed, "state"), "unknown");
+  free_mapping(consumed);
+  destruct_object(ob);
+}
+
+TEST_F(DriverTest, TestGatewayGenericFutureWatchTargetDestructCancelsAndConsumesFuture) {
+  auto *ob = clone_object_for_test("clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  vm_owner_set_id(ob, "owner/test/gateway/generic-future-destruct");
+
+  push_number(41);
+  auto *submitted = call_lpc_method(ob, "submit_gateway_owner_future", 1);
+  ASSERT_NE(submitted, nullptr);
+  ASSERT_EQ(submitted->type, T_MAPPING);
+  auto future_id = gateway_test_mapping_number(submitted->u.map, "future_id");
+  ASSERT_GT(future_id, 0);
+  ASSERT_EQ(gateway_watch_future_for_object(ob, 704, static_cast<uint64_t>(future_id), 1000), 1);
+  destruct_object(ob);
+
+  ASSERT_EQ(gateway_process_future_watches_at(0), 1);
+  ASSERT_EQ(gateway_future_watch_count(), 0);
+  auto *consumed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
+  ASSERT_STREQ(gateway_test_mapping_string(consumed, "state"), "unknown");
+  free_mapping(consumed);
+}
+
+TEST_F(DriverTest, TestGatewayGenericAndSessionWatchCannotConsumeSameFuture) {
+  auto *ob = create_gateway_session_for_test("gw-test-generic-future-exclusive",
+                                             "/clone/gateway_login_example", 99);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayGenericAndSessionWatchCannotConsumeSameFuture");
+  vm_owner_set_id(ob, "owner/test/gateway/generic-future-exclusive");
+
+  push_number(41);
+  auto *submitted = call_lpc_method(ob, "submit_gateway_owner_future", 1);
+  ASSERT_NE(submitted, nullptr);
+  ASSERT_EQ(submitted->type, T_MAPPING);
+  auto future_id = gateway_test_mapping_number(submitted->u.map, "future_id");
+  ASSERT_GT(future_id, 0);
+  ASSERT_EQ(gateway_watch_future_for_object(ob, 705, static_cast<uint64_t>(future_id), 1000), 1);
+
+  auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  ASSERT_EQ(gateway_watch_session_future_for_object(
+                ob, reservation_id, static_cast<uint64_t>(future_id), 1000),
+            0);
+  ASSERT_EQ(gateway_release_session_output_for_object(ob, reservation_id), 1);
+  ASSERT_EQ(gateway_process_future_watches_at(std::numeric_limits<uint64_t>::max()), 1);
+  ASSERT_EQ(gateway_future_watch_count(), 0);
+
+  ASSERT_EQ(gateway_destroy_session_internal("gw-test-generic-future-exclusive",
+                                             "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayGenericAndSessionWatchCannotConsumeSameFuture");
 }
 
 TEST_F(DriverTest, TestOwnerFutureCancelEfunSupportsSubmitRollback) {

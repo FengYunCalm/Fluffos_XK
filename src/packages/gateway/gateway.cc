@@ -1080,6 +1080,39 @@ mapping_t *gateway_status_internal() {
       map, "gateway_output_fifo_reservation_misses",
       static_cast<long>(g_gateway_runtime_counters.output_fifo_reservation_misses.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_future_watch_pending", gateway_session_future_watch_count());
+  add_mapping_pair(map, "gateway_generic_future_watch_pending", gateway_future_watch_count());
+  add_mapping_pair(
+      map, "gateway_generic_future_watches_registered",
+      static_cast<long>(g_gateway_runtime_counters.generic_future_watches_registered.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_generic_future_watches_rejected",
+      static_cast<long>(g_gateway_runtime_counters.generic_future_watches_rejected.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_generic_future_watches_completed",
+      static_cast<long>(g_gateway_runtime_counters.generic_future_watches_completed.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_generic_future_watches_failed",
+      static_cast<long>(g_gateway_runtime_counters.generic_future_watches_failed.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_generic_future_watches_timed_out",
+      static_cast<long>(g_gateway_runtime_counters.generic_future_watches_timed_out.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_generic_future_watches_cancelled",
+      static_cast<long>(g_gateway_runtime_counters.generic_future_watches_cancelled.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_generic_future_watch_callbacks",
+      static_cast<long>(g_gateway_runtime_counters.generic_future_watch_callbacks.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_generic_future_watch_callback_failures",
+      static_cast<long>(g_gateway_runtime_counters.generic_future_watch_callback_failures.load(
+          std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_future_watches_registered",
       static_cast<long>(g_gateway_runtime_counters.future_watches_registered.load(std::memory_order_relaxed)));

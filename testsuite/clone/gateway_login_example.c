@@ -14,6 +14,9 @@ private int last_process_input_off_main = 0;
 private mapping last_owner_future = ([]);
 private int last_owner_future_reservation_id = 0;
 private int last_owner_future_callback_off_main = 0;
+private mapping last_generic_owner_future = ([]);
+private int last_generic_owner_future_context_id = 0;
+private int last_generic_owner_future_callback_off_main = 0;
 
 void logon() {
   write("Normal login path reached.\n");
@@ -115,6 +118,10 @@ int watch_gateway_owner_future(int reservation_id, int future_id, int timeout_ms
   return gateway_session_watch_future(this_object(), reservation_id, future_id, timeout_ms);
 }
 
+int watch_generic_owner_future(int context_id, int future_id, int timeout_ms) {
+  return gateway_future_watch(this_object(), context_id, future_id, timeout_ms);
+}
+
 mapping cancel_gateway_owner_future(int future_id, string reason) {
   return owner_future_cancel(future_id, reason);
 }
@@ -135,6 +142,19 @@ int gateway_owner_future_completed(int reservation_id, mapping future) {
 mapping query_last_owner_future() { return copy(last_owner_future); }
 int query_last_owner_future_reservation_id() { return last_owner_future_reservation_id; }
 int query_last_owner_future_callback_off_main() { return last_owner_future_callback_off_main; }
+
+int owner_future_watch_completed(int context_id, mapping future) {
+  last_generic_owner_future_context_id = context_id;
+  last_generic_owner_future = mapp(future) ? copy(future) : ([]);
+  last_generic_owner_future_callback_off_main = !vm_context_is_main_thread();
+  return 1;
+}
+
+mapping query_last_generic_owner_future() { return copy(last_generic_owner_future); }
+int query_last_generic_owner_future_context_id() { return last_generic_owner_future_context_id; }
+int query_last_generic_owner_future_callback_off_main() {
+  return last_generic_owner_future_callback_off_main;
+}
 
 void net_dead() {
   if (!last_disconnect_code) {
