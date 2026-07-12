@@ -4938,6 +4938,35 @@ mapping_t *vm_owner_future_take(uint64_t future_id, uint64_t *terminal_at_ns) {
   return map;
 }
 
+VMOwnerFutureStringTakeResult vm_owner_future_take_string(uint64_t future_id) {
+  VMOwnerFutureStringTakeResult output;
+  if (!vm_context_is_main_thread()) {
+    return output;
+  }
+  auto result = owner_future_store.take(future_id);
+  output.found = result.found;
+  output.consumed = result.consumed;
+  if (!result.found) {
+    return output;
+  }
+
+  output.terminal_at_ns = result.record.terminal_at_ns;
+  if (result.record.state == "pending") {
+    output.state = VM_OWNER_FUTURE_PENDING;
+  } else if (result.record.state == "completed") {
+    output.state = VM_OWNER_FUTURE_COMPLETED;
+  } else {
+    output.state = VM_OWNER_FUTURE_FAILED;
+  }
+  if (result.record.result && result.record.result->value.type == T_STRING &&
+      result.record.result->value.u.string) {
+    output.string_result = true;
+    output.value.assign(result.record.result->value.u.string,
+                        SVALUE_STRLEN(&result.record.result->value));
+  }
+  return output;
+}
+
 mapping_t *vm_owner_future_cancel(uint64_t future_id, const char *reason) {
   return mark_owner_future_failed_terminal(future_id, normalize_task_text(reason, "future cancelled"), true, false);
 }

@@ -202,6 +202,8 @@ int gateway_fill_session_output_for_object(object_t *ob, uint64_t reservation_id
 int gateway_release_session_output_for_object(object_t *ob, uint64_t reservation_id);
 int gateway_watch_session_future_for_object(object_t *ob, uint64_t reservation_id,
                                             uint64_t future_id, int timeout_ms);
+int gateway_watch_session_future_output_for_object(object_t *ob, uint64_t reservation_id,
+                                                   uint64_t future_id, int timeout_ms);
 int gateway_watch_future_for_object(object_t *ob, uint64_t context_id,
                                     uint64_t future_id, int timeout_ms);
 int gateway_process_session_future_watches_at(uint64_t now_ms);

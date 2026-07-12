@@ -569,6 +569,13 @@ long query_lpc_number_for_bench(object_t *target, const char *method) {
   return value->u.number;
 }
 
+std::string query_lpc_string_for_bench(object_t *target, const char *method) {
+  auto *value = safe_apply(method, target, 0, ORIGIN_DRIVER);
+  require(value != nullptr && value->type == T_STRING,
+          std::string("missing string LPC benchmark result: ") + method);
+  return std::string(value->u.string, SVALUE_STRLEN(value));
+}
+
 void run_submit_watch_current_path_case(Report &report, object_t *target,
                                         const std::string &case_name, int item_count,
                                         int iterations) {
@@ -730,8 +737,9 @@ void wait_for_owner_future_terminal(uint64_t future_id, const std::string &case_
 }
 
 void run_session_publish_case(Report &report, const std::string &case_name,
-                              int frame_bytes, int iterations) {
+                              int frame_bytes, int iterations, bool native_output = false) {
   auto *payload = make_owner_frame_bench_payload(frame_bytes);
+  auto frame = std::string(static_cast<size_t>(frame_bytes), 'x');
   std::vector<long long> process_samples;
   process_samples.reserve(iterations);
   auto *before = gateway_status_internal();
@@ -742,7 +750,9 @@ void run_session_publish_case(Report &report, const std::string &case_name,
   free_mapping(before);
 
   for (int i = 0; i < iterations; i++) {
-    auto session_id = "gw-bench-session-publish-" + case_name + "-" + std::to_string(i);
+    auto session_id = "gw-bench-session-publish-" +
+                      std::string(native_output ? "native-" : "lpc-") + case_name + "-" +
+                      std::to_string(i);
     auto *target = create_gateway_session_for_bench(session_id.c_str(), 99);
     require(target != nullptr, case_name + " failed to create publish session");
     add_ref(target, "owner runtime session publish benchmark");
@@ -750,14 +760,24 @@ void run_session_publish_case(Report &report, const std::string &case_name,
 
     auto reservation_id = gateway_reserve_session_output_for_object(target);
     require(reservation_id > 0, case_name + " publish reservation failed");
-    push_mapping(payload);
-    auto *submitted = safe_apply("submit_gateway_owner_frame", target, 1, ORIGIN_DRIVER);
+    if (native_output) {
+      copy_and_push_string(frame.c_str());
+    } else {
+      push_mapping(payload);
+    }
+    auto *submitted = safe_apply(native_output ? "submit_gateway_owner_frame_string"
+                                               : "submit_gateway_owner_frame",
+                                 target, 1, ORIGIN_DRIVER);
     require(submitted != nullptr && submitted->type == T_MAPPING,
             case_name + " owner frame submit failed");
     auto future_id = mapping_number(submitted->u.map, "future_id");
     require(future_id > 0, case_name + " owner frame future id missing");
-    require(gateway_watch_session_future_for_object(
-                target, reservation_id, static_cast<uint64_t>(future_id), 1000) == 1,
+    auto watched = native_output
+                       ? gateway_watch_session_future_output_for_object(
+                             target, reservation_id, static_cast<uint64_t>(future_id), 1000)
+                       : gateway_watch_session_future_for_object(
+                             target, reservation_id, static_cast<uint64_t>(future_id), 1000);
+    require(watched == 1,
             case_name + " owner frame watch failed");
 
     wait_for_owner_future_terminal(static_cast<uint64_t>(future_id), case_name);
@@ -770,10 +790,24 @@ void run_session_publish_case(Report &report, const std::string &case_name,
     require(query_lpc_number_for_bench(target,
                                        "query_last_owner_future_callback_off_main") == 0,
             case_name + " owner frame callback ran off main");
-    require(query_lpc_number_for_bench(target,
-                                       "query_last_owner_future_reservation_id") ==
-                static_cast<long>(reservation_id),
-            case_name + " owner frame callback used wrong reservation");
+    auto callback_reservation = query_lpc_number_for_bench(
+        target, "query_last_owner_future_reservation_id");
+    require(callback_reservation ==
+                (native_output ? 0 : static_cast<long>(reservation_id)),
+            case_name + " owner frame callback mode mismatch");
+    if (native_output) {
+      require(query_lpc_number_for_bench(
+                  target, "query_last_owner_future_output_reservation_id") ==
+                  static_cast<long>(reservation_id),
+              case_name + " owner frame output notification used wrong reservation");
+      require(query_lpc_string_for_bench(target,
+                                         "query_last_owner_future_output_state") ==
+                  "completed",
+              case_name + " owner frame output notification used wrong state");
+      require(query_lpc_number_for_bench(
+                  target, "query_last_owner_future_output_callback_off_main") == 0,
+              case_name + " owner frame output notification ran off main");
+    }
     require(vm_owner_future_state(static_cast<uint64_t>(future_id)) ==
                 VM_OWNER_FUTURE_UNKNOWN,
             case_name + " owner frame future was not consumed");
@@ -800,7 +834,9 @@ void run_session_publish_case(Report &report, const std::string &case_name,
           case_name + " publish timing sample count mismatch");
 
   auto process_total_ns = std::accumulate(process_samples.begin(), process_samples.end(), 0LL);
-  auto prefix = "session_publish_" + case_name;
+  auto prefix = std::string(native_output ? "session_publish_native_"
+                                          : "session_publish_") +
+                case_name;
   report.add(prefix + "_frame_bytes", frame_bytes);
   report.add(prefix + "_iterations", iterations);
   report.add(prefix + "_process_avg_ns", process_total_ns / iterations);
@@ -817,6 +853,8 @@ void run_session_publish_bench(Report &report) {
   vm_owner_thread_start(1);
   run_session_publish_case(report, "frame_512b", 512, iterations);
   run_session_publish_case(report, "frame_2k", 2048, iterations);
+  run_session_publish_case(report, "frame_512b", 512, iterations, true);
+  run_session_publish_case(report, "frame_2k", 2048, iterations, true);
   vm_owner_thread_stop();
 }
 

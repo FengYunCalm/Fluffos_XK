@@ -18,6 +18,9 @@ private mapping last_generic_owner_future = ([]);
 private int last_generic_owner_future_context_id = 0;
 private int last_generic_owner_future_callback_off_main = 0;
 private int last_submit_watch_future_id = 0;
+private int last_owner_future_output_reservation_id = 0;
+private int last_owner_future_output_callback_off_main = 0;
+private string last_owner_future_output_state = "";
 
 void logon() {
   write("Normal login path reached.\n");
@@ -115,6 +118,10 @@ mapping gateway_owner_future_frame(mapping payload) {
   ]);
 }
 
+string gateway_owner_future_frame_string(mapping payload) {
+  return payload["frame"];
+}
+
 mapping submit_gateway_owner_future(int value) {
   return owner_call_async(this_object(), "gateway_owner_future_echo", ([
     "payload_key": "gateway/future/v1",
@@ -130,8 +137,19 @@ mapping submit_gateway_owner_frame(mapping payload) {
   return owner_call_async(this_object(), "gateway_owner_future_frame", payload);
 }
 
+mapping submit_gateway_owner_frame_string(string frame) {
+  return owner_call_async(this_object(), "gateway_owner_future_frame_string", ([
+    "payload_key": "gateway/future/frame-string/v1",
+    "frame": frame,
+  ]));
+}
+
 int watch_gateway_owner_future(int reservation_id, int future_id, int timeout_ms) {
   return gateway_session_watch_future(this_object(), reservation_id, future_id, timeout_ms);
+}
+
+int watch_gateway_owner_future_output(int reservation_id, int future_id, int timeout_ms) {
+  return gateway_session_watch_future_output(this_object(), reservation_id, future_id, timeout_ms);
 }
 
 int watch_generic_owner_future(int context_id, int future_id, int timeout_ms) {
@@ -179,9 +197,23 @@ int gateway_owner_future_completed(int reservation_id, mapping future) {
   return gateway_session_release(this_object(), reservation_id);
 }
 
+int gateway_owner_future_output_completed(int reservation_id, string state) {
+  last_owner_future_output_reservation_id = reservation_id;
+  last_owner_future_output_state = state;
+  last_owner_future_output_callback_off_main = !vm_context_is_main_thread();
+  return 1;
+}
+
 mapping query_last_owner_future() { return copy(last_owner_future); }
 int query_last_owner_future_reservation_id() { return last_owner_future_reservation_id; }
 int query_last_owner_future_callback_off_main() { return last_owner_future_callback_off_main; }
+int query_last_owner_future_output_reservation_id() {
+  return last_owner_future_output_reservation_id;
+}
+string query_last_owner_future_output_state() { return last_owner_future_output_state; }
+int query_last_owner_future_output_callback_off_main() {
+  return last_owner_future_output_callback_off_main;
+}
 
 int owner_future_watch_completed(int context_id, mapping future) {
   last_generic_owner_future_context_id = context_id;

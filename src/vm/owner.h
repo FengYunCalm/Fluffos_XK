@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <string>
 
 struct mapping_t;
 struct VMObjectHandle;
@@ -36,6 +37,15 @@ enum VMOwnerFutureState {
   VM_OWNER_FUTURE_PENDING = 1,
   VM_OWNER_FUTURE_COMPLETED = 2,
   VM_OWNER_FUTURE_FAILED = 3,
+};
+
+struct VMOwnerFutureStringTakeResult {
+  bool found{false};
+  bool consumed{false};
+  bool string_result{false};
+  VMOwnerFutureState state{VM_OWNER_FUTURE_UNKNOWN};
+  uint64_t terminal_at_ns{0};
+  std::string value;
 };
 
 using VMOwnerFutureTerminalNotifier = void (*)();
@@ -149,6 +159,7 @@ mapping_t *vm_owner_message_trace(int limit);
 mapping_t *vm_owner_future_poll(uint64_t future_id);
 mapping_t *vm_owner_future_take(uint64_t future_id);
 mapping_t *vm_owner_future_take(uint64_t future_id, uint64_t *terminal_at_ns);
+VMOwnerFutureStringTakeResult vm_owner_future_take_string(uint64_t future_id);
 void vm_owner_set_future_terminal_notifier(VMOwnerFutureTerminalNotifier notifier);
 VMOwnerFutureState vm_owner_future_state(uint64_t future_id);
 bool vm_owner_future_targets_object(uint64_t future_id, object_t *target);

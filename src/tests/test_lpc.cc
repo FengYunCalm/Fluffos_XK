@@ -10721,6 +10721,13 @@ long gateway_test_call_number(const char *method, object_t *target) {
   return ret && ret->type == T_NUMBER ? ret->u.number : -1;
 }
 
+const char *gateway_test_call_string(const char *method, object_t *target) {
+  auto *ret = safe_apply(method, target, 0, ORIGIN_DRIVER);
+  EXPECT_NE(ret, nullptr) << method;
+  EXPECT_EQ(ret ? ret->type : T_INVALID, T_STRING) << method;
+  return ret && ret->type == T_STRING ? ret->u.string : "";
+}
+
 }  // namespace
 
 TEST_F(DriverTest, TestGatewayOutputReservationPublicWrappersAreMainOnly) {
@@ -10955,6 +10962,154 @@ TEST_F(DriverTest, TestGatewayFutureWatchDispatchesCompletedFutureOnMain) {
   ASSERT_EQ(gateway_destroy_session_internal("gw-test-future-watch-completed", "test_done", "done"), 1);
   destruct_object(ob);
   free_object(&ob, "TestGatewayFutureWatchDispatchesCompletedFutureOnMain");
+}
+
+TEST_F(DriverTest, TestGatewayEncodedOutputFutureFillsReservationWithoutLpcCallback) {
+  auto *ob = create_gateway_session_for_test("gw-test-future-output-completed",
+                                             "/clone/gateway_login_example", 96);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayEncodedOutputFutureFillsReservationWithoutLpcCallback");
+  vm_owner_set_id(ob, "owner/test/gateway/future-output-completed");
+
+  auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  copy_and_push_string("native-frame-payload");
+  auto *submitted = call_lpc_method(ob, "submit_gateway_owner_frame_string", 1);
+  ASSERT_NE(submitted, nullptr);
+  ASSERT_EQ(submitted->type, T_MAPPING);
+  auto future_id = gateway_test_mapping_number(submitted->u.map, "future_id");
+  ASSERT_GT(future_id, 0);
+  push_number(static_cast<LPC_INT>(reservation_id));
+  push_number(future_id);
+  push_number(1000);
+  auto *watched = call_lpc_method(ob, "watch_gateway_owner_future_output", 3);
+  ASSERT_NE(watched, nullptr);
+  ASSERT_EQ(watched->type, T_NUMBER);
+  ASSERT_EQ(watched->u.number, 1);
+
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 200; i++) {
+    auto state = vm_owner_future_state(static_cast<uint64_t>(future_id));
+    if (state == VM_OWNER_FUTURE_COMPLETED || state == VM_OWNER_FUTURE_FAILED) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  vm_owner_thread_stop();
+  ASSERT_EQ(vm_owner_future_state(static_cast<uint64_t>(future_id)),
+            VM_OWNER_FUTURE_COMPLETED);
+  std::atomic<int> off_main_take_found{1};
+  std::thread off_main_take([&] {
+    VMContext worker_context;
+    VMContextThreadScope scope(worker_context);
+    auto taken = vm_owner_future_take_string(static_cast<uint64_t>(future_id));
+    off_main_take_found.store(taken.found ? 1 : 0, std::memory_order_release);
+  });
+  off_main_take.join();
+  ASSERT_EQ(off_main_take_found.load(std::memory_order_acquire), 0);
+  ASSERT_EQ(vm_owner_future_state(static_cast<uint64_t>(future_id)),
+            VM_OWNER_FUTURE_COMPLETED);
+  ASSERT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+  ASSERT_EQ(session->output_fifo.size(), 1u);
+  ASSERT_TRUE(session->output_fifo.front().ready);
+  ASSERT_NE(session->output_fifo.front().encoded.find("native-frame-payload"),
+            std::string::npos);
+  ASSERT_EQ(gateway_test_call_number("query_last_owner_future_reservation_id", ob), 0);
+  ASSERT_EQ(gateway_test_call_number("query_last_owner_future_output_reservation_id", ob),
+            static_cast<long>(reservation_id));
+  ASSERT_STREQ(gateway_test_call_string("query_last_owner_future_output_state", ob),
+               "completed");
+  ASSERT_EQ(gateway_test_call_number("query_last_owner_future_output_callback_off_main", ob),
+            0);
+  ASSERT_EQ(vm_owner_future_state(static_cast<uint64_t>(future_id)),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+
+  ASSERT_EQ(gateway_destroy_session_internal("gw-test-future-output-completed",
+                                             "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayEncodedOutputFutureFillsReservationWithoutLpcCallback");
+}
+
+TEST_F(DriverTest, TestGatewayEncodedOutputFutureReleasesNonStringResult) {
+  auto *ob = create_gateway_session_for_test("gw-test-future-output-non-string",
+                                             "/clone/gateway_login_example", 97);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayEncodedOutputFutureReleasesNonStringResult");
+  vm_owner_set_id(ob, "owner/test/gateway/future-output-non-string");
+
+  auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  push_number(41);
+  auto *submitted = call_lpc_method(ob, "submit_gateway_owner_future", 1);
+  auto future_id = gateway_test_mapping_number(submitted->u.map, "future_id");
+  ASSERT_EQ(gateway_watch_session_future_output_for_object(
+                ob, reservation_id, static_cast<uint64_t>(future_id), 1000),
+            1);
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 200; i++) {
+    auto state = vm_owner_future_state(static_cast<uint64_t>(future_id));
+    if (state == VM_OWNER_FUTURE_COMPLETED || state == VM_OWNER_FUTURE_FAILED) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  vm_owner_thread_stop();
+  ASSERT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+  ASSERT_TRUE(session->output_fifo.empty());
+  ASSERT_EQ(gateway_test_call_number("query_last_owner_future_output_reservation_id", ob),
+            static_cast<long>(reservation_id));
+  ASSERT_STREQ(gateway_test_call_string("query_last_owner_future_output_state", ob),
+               "released");
+  ASSERT_EQ(vm_owner_future_state(static_cast<uint64_t>(future_id)),
+            VM_OWNER_FUTURE_UNKNOWN);
+
+  ASSERT_EQ(gateway_destroy_session_internal("gw-test-future-output-non-string",
+                                             "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayEncodedOutputFutureReleasesNonStringResult");
+}
+
+TEST_F(DriverTest, TestGatewayEncodedOutputFutureTimeoutReleasesReservation) {
+  auto *ob = create_gateway_session_for_test("gw-test-future-output-timeout",
+                                             "/clone/gateway_login_example", 98);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayEncodedOutputFutureTimeoutReleasesReservation");
+  vm_owner_set_id(ob, "owner/test/gateway/future-output-timeout");
+
+  auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  copy_and_push_string("never-completed-frame");
+  auto *submitted = call_lpc_method(ob, "submit_gateway_owner_frame_string", 1);
+  auto future_id = gateway_test_mapping_number(submitted->u.map, "future_id");
+  ASSERT_EQ(gateway_watch_session_future_output_for_object(
+                ob, reservation_id, static_cast<uint64_t>(future_id), 1),
+            1);
+  ASSERT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+  ASSERT_TRUE(session->output_fifo.empty());
+  ASSERT_EQ(gateway_test_call_number("query_last_owner_future_output_reservation_id", ob),
+            static_cast<long>(reservation_id));
+  ASSERT_STREQ(gateway_test_call_string("query_last_owner_future_output_state", ob),
+               "released");
+  ASSERT_EQ(vm_owner_future_state(static_cast<uint64_t>(future_id)),
+            VM_OWNER_FUTURE_UNKNOWN);
+
+  ASSERT_EQ(gateway_destroy_session_internal("gw-test-future-output-timeout",
+                                             "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayEncodedOutputFutureTimeoutReleasesReservation");
 }
 
 TEST_F(DriverTest, TestGatewayFutureWatchTimesOutAndReleasesReservation) {

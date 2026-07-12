@@ -39,6 +39,7 @@ struct GatewaySessionFutureWatch {
   uint64_t future_id{0};
   uint64_t deadline_ms{0};
   uint64_t registered_at_ns{0};
+  bool encoded_output{false};
 };
 struct GatewayFutureWatch {
   std::string target_ob_name;
@@ -278,6 +279,32 @@ bool gateway_dispatch_future_watch_callback(object_t *ob, uint64_t reservation_i
     push_number(static_cast<LPC_INT>(reservation_id));
     push_mapping(future);
     auto *ret = safe_apply("gateway_owner_future_completed", ob, 2, ORIGIN_DRIVER);
+    callback_ok = ret && ret->type == T_NUMBER && ret->u.number != 0;
+  }
+  restore_command_giver();
+  return callback_ok;
+}
+
+bool gateway_dispatch_future_output_notification(object_t *ob, uint64_t reservation_id,
+                                                 const char *state) {
+  if (!gateway_object_valid(ob)) {
+    return false;
+  }
+  if (!function_exists("gateway_owner_future_output_completed", ob, 0)) {
+    return true;
+  }
+
+  bool callback_ok = false;
+  save_command_giver(ob);
+  {
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob), vm_owner_epoch(ob));
+    VMCurrentInteractiveScope interactive_scope(vm_context(), ob);
+    GatewayControlledLpcScope controlled_scope;
+    set_eval(max_eval_cost);
+    push_number(static_cast<LPC_INT>(reservation_id));
+    copy_and_push_string(state && state[0] ? state : "released");
+    auto *ret = safe_apply("gateway_owner_future_output_completed", ob, 2,
+                           ORIGIN_DRIVER);
     callback_ok = ret && ret->type == T_NUMBER && ret->u.number != 0;
   }
   restore_command_giver();
@@ -639,8 +666,9 @@ GatewaySession *gateway_find_session_by_object(object_t *ob) {
   return sess;
 }
 
-int gateway_watch_session_future_for_object(object_t *ob, uint64_t reservation_id,
-                                            uint64_t future_id, int timeout_ms) {
+int gateway_watch_session_future_for_object_internal(object_t *ob, uint64_t reservation_id,
+                                                     uint64_t future_id, int timeout_ms,
+                                                     bool encoded_output) {
   auto register_started_ns = gateway_session_now_ns();
   if (!vm_context_is_main_thread() || reservation_id == 0 || future_id == 0 || timeout_ms <= 0 ||
       g_gateway_session_future_watches.size() >= kGatewayMaxFutureWatches) {
@@ -677,6 +705,7 @@ int gateway_watch_session_future_for_object(object_t *ob, uint64_t reservation_i
   watch.future_id = future_id;
   watch.deadline_ms = deadline_ms;
   watch.registered_at_ns = register_started_ns;
+  watch.encoded_output = encoded_output;
   g_gateway_session_future_watches.emplace(reservation_id, std::move(watch));
   g_gateway_future_to_reservation.emplace(future_id, reservation_id);
   g_gateway_future_watch_queue.push_back(reservation_id);
@@ -692,6 +721,18 @@ int gateway_watch_session_future_for_object(object_t *ob, uint64_t reservation_i
                                  g_gateway_runtime_counters.future_watch_register_samples,
                                  gateway_session_now_ns() - register_started_ns);
   return 1;
+}
+
+int gateway_watch_session_future_for_object(object_t *ob, uint64_t reservation_id,
+                                            uint64_t future_id, int timeout_ms) {
+  return gateway_watch_session_future_for_object_internal(ob, reservation_id, future_id,
+                                                          timeout_ms, false);
+}
+
+int gateway_watch_session_future_output_for_object(object_t *ob, uint64_t reservation_id,
+                                                   uint64_t future_id, int timeout_ms) {
+  return gateway_watch_session_future_for_object_internal(ob, reservation_id, future_id,
+                                                          timeout_ms, true);
 }
 
 int gateway_process_session_future_watches_at(uint64_t now_ms) {
@@ -741,6 +782,7 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
     }
 
     mapping_t *future = nullptr;
+    VMOwnerFutureStringTakeResult output_future;
     uint64_t terminal_at_ns = 0;
     uint64_t take_started_ns = 0;
     uint64_t take_finished_ns = 0;
@@ -748,16 +790,30 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
       auto *timed_out = vm_owner_future_timeout(watch.future_id, "gateway owner future timed out");
       free_mapping(timed_out);
       take_started_ns = gateway_session_now_ns();
-      future = vm_owner_future_take(watch.future_id, &terminal_at_ns);
+      if (watch.encoded_output) {
+        output_future = vm_owner_future_take_string(watch.future_id);
+        terminal_at_ns = output_future.terminal_at_ns;
+      } else {
+        future = vm_owner_future_take(watch.future_id, &terminal_at_ns);
+      }
       take_finished_ns = gateway_session_now_ns();
       g_gateway_runtime_counters.future_watches_timed_out.fetch_add(1, std::memory_order_relaxed);
     } else if (future_state == VM_OWNER_FUTURE_COMPLETED ||
                future_state == VM_OWNER_FUTURE_FAILED) {
       take_started_ns = gateway_session_now_ns();
-      future = vm_owner_future_take(watch.future_id, &terminal_at_ns);
+      if (watch.encoded_output) {
+        output_future = vm_owner_future_take_string(watch.future_id);
+        terminal_at_ns = output_future.terminal_at_ns;
+      } else {
+        future = vm_owner_future_take(watch.future_id, &terminal_at_ns);
+      }
       take_finished_ns = gateway_session_now_ns();
     } else {
-      future = vm_owner_future_poll(watch.future_id);
+      if (watch.encoded_output) {
+        output_future = vm_owner_future_take_string(watch.future_id);
+      } else {
+        future = vm_owner_future_poll(watch.future_id);
+      }
     }
     if (take_finished_ns >= take_started_ns && take_started_ns > 0) {
       gateway_session_record_latency(g_gateway_runtime_counters.future_watch_take_ns_total,
@@ -771,7 +827,20 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
                                      g_gateway_runtime_counters.future_watch_terminal_lag_samples,
                                      take_started_ns - terminal_at_ns);
     }
-    auto state = gateway_future_mapping_state(future);
+    std::string state;
+    if (watch.encoded_output) {
+      if (output_future.state == VM_OWNER_FUTURE_COMPLETED && output_future.string_result) {
+        state = "completed";
+      } else if (output_future.state == VM_OWNER_FUTURE_PENDING) {
+        state = "pending";
+      } else if (output_future.state == VM_OWNER_FUTURE_UNKNOWN) {
+        state = "unknown";
+      } else {
+        state = "failed";
+      }
+    } else {
+      state = gateway_future_mapping_state(future);
+    }
 
     g_gateway_future_to_reservation.erase(watch.future_id);
     g_gateway_session_future_watches.erase(watch_it);
@@ -784,7 +853,21 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
 
     g_gateway_runtime_counters.future_watch_callbacks.fetch_add(1, std::memory_order_relaxed);
     auto callback_started_ns = gateway_session_now_ns();
-    auto callback_ok = gateway_dispatch_future_watch_callback(ob, watch.reservation_id, future);
+    bool callback_ok = false;
+    if (watch.encoded_output) {
+      if (state == "completed") {
+        callback_ok = gateway_fill_session_output_for_object(
+            ob, watch.reservation_id, output_future.value.data(), output_future.value.size()) != 0;
+      } else {
+        callback_ok = gateway_release_session_output_for_object(ob, watch.reservation_id) != 0;
+      }
+      auto *output_state = state == "completed" && callback_ok ? "completed" : "released";
+      callback_ok = gateway_dispatch_future_output_notification(
+                        ob, watch.reservation_id, output_state) &&
+                    callback_ok;
+    } else {
+      callback_ok = gateway_dispatch_future_watch_callback(ob, watch.reservation_id, future);
+    }
     auto callback_finished_ns = gateway_session_now_ns();
     gateway_session_record_latency(g_gateway_runtime_counters.future_watch_callback_ns_total,
                                    g_gateway_runtime_counters.future_watch_callback_ns_max,
@@ -796,7 +879,9 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
                                      g_gateway_runtime_counters.future_watch_end_to_end_samples,
                                      callback_finished_ns - watch.registered_at_ns);
     }
-    free_mapping(future);
+    if (future) {
+      free_mapping(future);
+    }
 
     sess = gateway_find_session(watch.session_id.c_str());
     ob = gateway_resolve_session_object(sess);
@@ -1702,6 +1787,17 @@ void f_gateway_session_watch_future() {
   auto reservation_id = static_cast<uint64_t>((sp - 2)->u.number);
   auto *ob = (sp - 3)->u.ob;
   auto result = gateway_watch_session_future_for_object(ob, reservation_id, future_id, timeout_ms);
+  pop_n_elems(4);
+  push_number(result);
+}
+
+void f_gateway_session_watch_future_output() {
+  auto timeout_ms = static_cast<int>(sp->u.number);
+  auto future_id = static_cast<uint64_t>((sp - 1)->u.number);
+  auto reservation_id = static_cast<uint64_t>((sp - 2)->u.number);
+  auto *ob = (sp - 3)->u.ob;
+  auto result = gateway_watch_session_future_output_for_object(
+      ob, reservation_id, future_id, timeout_ms);
   pop_n_elems(4);
   push_number(result);
 }
