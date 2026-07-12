@@ -710,6 +710,116 @@ void run_session_submit_watch_upfront_bench(Report &report) {
   free_object(&target, "owner runtime session submit-watch benchmark");
 }
 
+mapping_t *make_owner_frame_bench_payload(int frame_bytes) {
+  auto *payload = allocate_mapping(2);
+  add_mapping_string(payload, "payload_key", "bench/session-frame/v1");
+  auto frame = std::string(static_cast<size_t>(frame_bytes), 'x');
+  add_mapping_string(payload, "frame", frame.c_str());
+  return payload;
+}
+
+void wait_for_owner_future_terminal(uint64_t future_id, const std::string &case_name) {
+  for (int i = 0; i < 1000; i++) {
+    auto state = vm_owner_future_state(future_id);
+    if (state == VM_OWNER_FUTURE_COMPLETED || state == VM_OWNER_FUTURE_FAILED) {
+      return;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  throw std::runtime_error(case_name + " owner future did not reach terminal state");
+}
+
+void run_session_publish_case(Report &report, const std::string &case_name,
+                              int frame_bytes, int iterations) {
+  auto *payload = make_owner_frame_bench_payload(frame_bytes);
+  std::vector<long long> process_samples;
+  process_samples.reserve(iterations);
+  auto *before = gateway_status_internal();
+  auto before_take_samples = mapping_number(before, "gateway_future_watch_take_samples");
+  auto before_take_total_us = mapping_number(before, "gateway_future_watch_take_total_us");
+  auto before_callback_samples = mapping_number(before, "gateway_future_watch_callback_samples");
+  auto before_callback_total_us = mapping_number(before, "gateway_future_watch_callback_total_us");
+  free_mapping(before);
+
+  for (int i = 0; i < iterations; i++) {
+    auto session_id = "gw-bench-session-publish-" + case_name + "-" + std::to_string(i);
+    auto *target = create_gateway_session_for_bench(session_id.c_str(), 99);
+    require(target != nullptr, case_name + " failed to create publish session");
+    add_ref(target, "owner runtime session publish benchmark");
+    vm_owner_set_id(target, "owner/bench/runtime-v4/session-publish");
+
+    auto reservation_id = gateway_reserve_session_output_for_object(target);
+    require(reservation_id > 0, case_name + " publish reservation failed");
+    push_mapping(payload);
+    auto *submitted = safe_apply("submit_gateway_owner_frame", target, 1, ORIGIN_DRIVER);
+    require(submitted != nullptr && submitted->type == T_MAPPING,
+            case_name + " owner frame submit failed");
+    auto future_id = mapping_number(submitted->u.map, "future_id");
+    require(future_id > 0, case_name + " owner frame future id missing");
+    require(gateway_watch_session_future_for_object(
+                target, reservation_id, static_cast<uint64_t>(future_id), 1000) == 1,
+            case_name + " owner frame watch failed");
+
+    wait_for_owner_future_terminal(static_cast<uint64_t>(future_id), case_name);
+    auto process_started_at = Clock::now();
+    require(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()) == 1,
+            case_name + " owner frame publish did not process");
+    process_samples.push_back(elapsed_ns(process_started_at));
+
+    require(query_lpc_number_for_bench(target,
+                                       "query_last_owner_future_callback_off_main") == 0,
+            case_name + " owner frame callback ran off main");
+    require(query_lpc_number_for_bench(target,
+                                       "query_last_owner_future_reservation_id") ==
+                static_cast<long>(reservation_id),
+            case_name + " owner frame callback used wrong reservation");
+    require(vm_owner_future_state(static_cast<uint64_t>(future_id)) ==
+                VM_OWNER_FUTURE_UNKNOWN,
+            case_name + " owner frame future was not consumed");
+    require(gateway_session_future_watch_count() == 0,
+            case_name + " owner frame watcher leaked");
+
+    require(gateway_destroy_session_internal(session_id.c_str(), "bench_done", "bench done") == 1,
+            case_name + " failed to destroy publish session");
+    destruct_object_for_bench(target);
+    free_object(&target, "owner runtime session publish benchmark");
+  }
+
+  auto *after = gateway_status_internal();
+  auto take_samples = mapping_number(after, "gateway_future_watch_take_samples") -
+                      before_take_samples;
+  auto take_total_us = mapping_number(after, "gateway_future_watch_take_total_us") -
+                       before_take_total_us;
+  auto callback_samples = mapping_number(after, "gateway_future_watch_callback_samples") -
+                          before_callback_samples;
+  auto callback_total_us = mapping_number(after, "gateway_future_watch_callback_total_us") -
+                           before_callback_total_us;
+  free_mapping(after);
+  require(take_samples == iterations && callback_samples == iterations,
+          case_name + " publish timing sample count mismatch");
+
+  auto process_total_ns = std::accumulate(process_samples.begin(), process_samples.end(), 0LL);
+  auto prefix = "session_publish_" + case_name;
+  report.add(prefix + "_frame_bytes", frame_bytes);
+  report.add(prefix + "_iterations", iterations);
+  report.add(prefix + "_process_avg_ns", process_total_ns / iterations);
+  report.add(prefix + "_process_p50_ns", percentile(process_samples, 0.50));
+  report.add(prefix + "_process_p95_ns", percentile(process_samples, 0.95));
+  report.add(prefix + "_process_p99_ns", percentile(process_samples, 0.99));
+  report.add(prefix + "_take_avg_us", take_total_us / take_samples);
+  report.add(prefix + "_callback_avg_us", callback_total_us / callback_samples);
+  free_mapping(payload);
+}
+
+void run_session_publish_bench(Report &report) {
+  constexpr int iterations = 64;
+  vm_owner_thread_start(1);
+  run_session_publish_case(report, "frame_512b", 512, iterations);
+  run_session_publish_case(report, "frame_2k", 2048, iterations);
+  vm_owner_thread_stop();
+}
+
 void run_object_resolve_bench(Report &report) {
   const long iterations = 256;
   object_t *probe = clone_object_for_bench("single/void");
@@ -878,6 +988,7 @@ int main(int argc, char **argv) {
     run_future_completion_lookup_bench(report);
     run_submit_watch_current_path_bench(report);
     run_session_submit_watch_upfront_bench(report);
+    run_session_publish_bench(report);
     run_object_resolve_bench(report);
     run_callback_admission_bench(report);
     add_final_status(report);

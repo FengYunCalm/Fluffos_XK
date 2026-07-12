@@ -108,6 +108,13 @@ mapping gateway_owner_future_echo(mapping payload) {
   ]);
 }
 
+mapping gateway_owner_future_frame(mapping payload) {
+  return ([
+    "frame": payload["frame"],
+    "payload_key": payload["payload_key"],
+  ]);
+}
+
 mapping submit_gateway_owner_future(int value) {
   return owner_call_async(this_object(), "gateway_owner_future_echo", ([
     "payload_key": "gateway/future/v1",
@@ -117,6 +124,10 @@ mapping submit_gateway_owner_future(int value) {
 
 mapping submit_gateway_owner_future_payload(mapping payload) {
   return owner_call_async(this_object(), "gateway_owner_future_echo", payload);
+}
+
+mapping submit_gateway_owner_frame(mapping payload) {
+  return owner_call_async(this_object(), "gateway_owner_future_frame", payload);
 }
 
 int watch_gateway_owner_future(int reservation_id, int future_id, int timeout_ms) {
@@ -155,9 +166,14 @@ mapping take_gateway_owner_future(int future_id) {
 }
 
 int gateway_owner_future_completed(int reservation_id, mapping future) {
+  mapping result;
+
   last_owner_future_reservation_id = reservation_id;
   last_owner_future = mapp(future) ? copy(future) : ([]);
   last_owner_future_callback_off_main = !vm_context_is_main_thread();
+  result = mapp(future) && mapp(future["result"]) ? future["result"] : 0;
+  if (mapp(result) && stringp(result["frame"]))
+    return gateway_session_fill(this_object(), reservation_id, result["frame"]);
   if (mapp(future) && future["state"] == "completed")
     return gateway_session_fill(this_object(), reservation_id, "owner-future-completed");
   return gateway_session_release(this_object(), reservation_id);
