@@ -628,6 +628,88 @@ void run_submit_watch_current_path_bench(Report &report) {
   destruct_object_for_bench(target);
 }
 
+object_t *create_gateway_session_for_bench(const char *session_id, int master_fd) {
+  svalue_t data{T_MAPPING, 0, {0}};
+  data.u.map = allocate_mapping(1);
+  add_mapping_string(data.u.map, "ip", "127.0.0.1");
+  copy_and_push_string("/clone/gateway_login_example");
+  safe_apply("set_test_login_ob", master_ob, 1, ORIGIN_DRIVER);
+  auto *target = gateway_create_session_internal(session_id, &data, "127.0.0.1",
+                                                 6040, master_fd);
+  safe_apply("reset_test_login_ob", master_ob, 0, ORIGIN_DRIVER);
+  free_svalue(&data, "owner runtime gateway session benchmark");
+  return target;
+}
+
+void run_session_submit_watch_upfront_case(Report &report, object_t *target,
+                                           const std::string &case_name, int item_count,
+                                           int iterations) {
+  constexpr int timeout_ms = 1000;
+  const char *owner_id = "owner/bench/runtime-v4/session-submit-watch";
+  auto *payload = make_frozen_payload_bench_value(item_count);
+  std::vector<long long> samples;
+  samples.reserve(iterations);
+
+  for (int i = 0; i < iterations; i++) {
+    auto started_at = Clock::now();
+    auto reservation_id = gateway_reserve_session_output_for_object(target);
+    require(reservation_id > 0, case_name + " session reservation failed");
+    push_mapping(payload);
+    auto *submitted = safe_apply("submit_gateway_owner_future_payload", target, 1,
+                                 ORIGIN_DRIVER);
+    require(submitted != nullptr && submitted->type == T_MAPPING,
+            case_name + " session owner submit failed");
+    auto future_id = mapping_number(submitted->u.map, "future_id");
+    require(future_id > 0, case_name + " session future id missing");
+    require(gateway_watch_session_future_for_object(
+                target, reservation_id, static_cast<uint64_t>(future_id), timeout_ms) == 1,
+            case_name + " session future watch failed");
+    samples.push_back(elapsed_ns(started_at));
+
+    auto *cancelled = vm_owner_future_cancel(static_cast<uint64_t>(future_id),
+                                             "session submit-watch benchmark cleanup");
+    free_mapping(cancelled);
+    require(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()) == 1,
+            case_name + " session watcher cleanup failed");
+    auto *purged = vm_owner_purge_mailbox(owner_id);
+    free_mapping(purged);
+    auto *session = gateway_find_session_by_object(target);
+    require(session != nullptr && session->output_fifo.empty(),
+            case_name + " session FIFO did not drain");
+    require(gateway_session_future_watch_count() == 0,
+            case_name + " session watcher leaked");
+  }
+
+  auto total_ns = std::accumulate(samples.begin(), samples.end(), 0LL);
+  auto prefix = "session_submit_watch_upfront_" + case_name;
+  report.add(prefix + "_items", item_count);
+  report.add(prefix + "_iterations", iterations);
+  report.add(prefix + "_total_ns", total_ns);
+  report.add(prefix + "_avg_ns", total_ns / iterations);
+  report.add(prefix + "_p50_ns", percentile(samples, 0.50));
+  report.add(prefix + "_p95_ns", percentile(samples, 0.95));
+  report.add(prefix + "_p99_ns", percentile(samples, 0.99));
+  free_mapping(payload);
+}
+
+void run_session_submit_watch_upfront_bench(Report &report) {
+  constexpr int iterations = 128;
+  const char *session_id = "gw-bench-session-submit-watch";
+  auto *target = create_gateway_session_for_bench(session_id, 99);
+  require(target != nullptr, "failed to create session submit-watch benchmark target");
+  add_ref(target, "owner runtime session submit-watch benchmark");
+  vm_owner_set_id(target, "owner/bench/runtime-v4/session-submit-watch");
+
+  run_session_submit_watch_upfront_case(report, target, "small", 4, iterations);
+  run_session_submit_watch_upfront_case(report, target, "medium", 16, iterations);
+
+  require(gateway_destroy_session_internal(session_id, "bench_done", "bench done") == 1,
+          "failed to destroy session submit-watch benchmark target");
+  destruct_object_for_bench(target);
+  free_object(&target, "owner runtime session submit-watch benchmark");
+}
+
 void run_object_resolve_bench(Report &report) {
   const long iterations = 256;
   object_t *probe = clone_object_for_bench("single/void");
@@ -795,6 +877,7 @@ int main(int argc, char **argv) {
     run_frozen_payload_traversal_bench(report);
     run_future_completion_lookup_bench(report);
     run_submit_watch_current_path_bench(report);
+    run_session_submit_watch_upfront_bench(report);
     run_object_resolve_bench(report);
     run_callback_admission_bench(report);
     add_final_status(report);

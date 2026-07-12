@@ -115,6 +115,10 @@ mapping submit_gateway_owner_future(int value) {
   ]));
 }
 
+mapping submit_gateway_owner_future_payload(mapping payload) {
+  return owner_call_async(this_object(), "gateway_owner_future_echo", payload);
+}
+
 int watch_gateway_owner_future(int reservation_id, int future_id, int timeout_ms) {
   return gateway_session_watch_future(this_object(), reservation_id, future_id, timeout_ms);
 }
