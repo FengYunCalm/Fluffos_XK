@@ -4,6 +4,7 @@
 #include "mainlib.h"
 #include "vm/internal/base/mapping.h"
 #include "vm/internal/base/object.h"
+#include "vm/internal/owner_future_store.h"
 #include "vm/context.h"
 #include "vm/frozen_value.h"
 #include "vm/object_handle.h"
@@ -515,6 +516,50 @@ void run_frozen_payload_traversal_bench(Report &report) {
   run_frozen_payload_traversal_case(report, "medium", 16, iterations);
 }
 
+void run_future_completion_lookup_case(Report &report, int backlog) {
+  OwnerFutureStore store;
+  for (int i = 1; i <= backlog; i++) {
+    OwnerFutureRecord future;
+    future.future_id = static_cast<uint64_t>(i);
+    future.target_task_id = static_cast<uint64_t>(100000 + i);
+    future.source_owner_id = "owner/bench/future/source";
+    future.target_owner_id = "owner/bench/future/target";
+    future.message_type = "bench_future_lookup";
+    future.payload_key = "bench/future/lookup/v1";
+    future.state = "pending";
+    store.insert(std::move(future));
+  }
+
+  auto completion_start = Clock::now();
+  for (int i = 1; i <= backlog; i++) {
+    auto completion = store.complete_for_task(static_cast<uint64_t>(100000 + i),
+                                              "completed", "bench_result", "");
+    require(completion.has_value(), "future completion lookup missed target task");
+  }
+  auto completion_total_ns = elapsed_ns(completion_start);
+
+  auto take_start = Clock::now();
+  for (int i = 1; i <= backlog; i++) {
+    auto taken = store.take(static_cast<uint64_t>(i));
+    require(taken.found && taken.consumed, "future completion lookup take failed");
+  }
+  auto take_total_ns = elapsed_ns(take_start);
+  require(store.size() == 0, "future completion lookup store did not drain");
+
+  auto prefix = "future_completion_lookup_" + std::to_string(backlog);
+  report.add(prefix + "_backlog", backlog);
+  report.add(prefix + "_completion_total_ns", completion_total_ns);
+  report.add(prefix + "_completion_avg_ns", completion_total_ns / backlog);
+  report.add(prefix + "_take_total_ns", take_total_ns);
+  report.add(prefix + "_take_avg_ns", take_total_ns / backlog);
+}
+
+void run_future_completion_lookup_bench(Report &report) {
+  for (auto backlog : {16, 256, 2048}) {
+    run_future_completion_lookup_case(report, backlog);
+  }
+}
+
 void run_object_resolve_bench(Report &report) {
   const long iterations = 256;
   object_t *probe = clone_object_for_bench("single/void");
@@ -680,6 +725,7 @@ int main(int argc, char **argv) {
     run_different_owner_bench(report);
     run_future_bench(report);
     run_frozen_payload_traversal_bench(report);
+    run_future_completion_lookup_bench(report);
     run_object_resolve_bench(report);
     run_callback_admission_bench(report);
     add_final_status(report);
