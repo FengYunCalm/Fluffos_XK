@@ -2,6 +2,7 @@
 
 #include "backend.h"
 #include "mainlib.h"
+#include "packages/gateway/gateway.h"
 #include "vm/internal/base/mapping.h"
 #include "vm/internal/base/object.h"
 #include "vm/internal/owner_future_store.h"
@@ -19,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -560,6 +562,72 @@ void run_future_completion_lookup_bench(Report &report) {
   }
 }
 
+long query_lpc_number_for_bench(object_t *target, const char *method) {
+  auto *value = safe_apply(method, target, 0, ORIGIN_DRIVER);
+  require(value != nullptr && value->type == T_NUMBER,
+          std::string("missing numeric LPC benchmark result: ") + method);
+  return value->u.number;
+}
+
+void run_submit_watch_current_path_case(Report &report, object_t *target,
+                                        const std::string &case_name, int item_count,
+                                        int iterations) {
+  constexpr int timeout_ms = 1000;
+  const char *owner_id = "owner/bench/runtime-v4/submit-watch";
+  auto *payload = make_frozen_payload_bench_value(item_count);
+  std::vector<long long> samples;
+  samples.reserve(iterations);
+
+  for (int i = 0; i < iterations; i++) {
+    push_number(100000 + i);
+    push_mapping(payload);
+    push_number(timeout_ms);
+    auto started_at = Clock::now();
+    auto *submitted = safe_apply("submit_and_watch_generic_owner_future", target, 3,
+                                 ORIGIN_DRIVER);
+    samples.push_back(elapsed_ns(started_at));
+    require(submitted != nullptr && submitted->type == T_NUMBER && submitted->u.number == 1,
+            case_name + " submit-watch current path failed");
+
+    auto future_id = query_lpc_number_for_bench(target, "query_last_submit_watch_future_id");
+    require(future_id > 0, case_name + " submit-watch future id missing");
+    auto *cancelled = vm_owner_future_cancel(static_cast<uint64_t>(future_id),
+                                             "submit-watch benchmark cleanup");
+    free_mapping(cancelled);
+    require(gateway_process_future_watches_at(std::numeric_limits<uint64_t>::max()) == 1,
+            case_name + " submit-watch cleanup did not consume watch");
+    auto *purged = vm_owner_purge_mailbox(owner_id);
+    free_mapping(purged);
+    require(gateway_future_watch_count() == 0,
+            case_name + " submit-watch leaked generic watcher");
+  }
+
+  auto total_ns = std::accumulate(samples.begin(), samples.end(), 0LL);
+  auto prefix = "submit_watch_current_" + case_name;
+  report.add(prefix + "_items", item_count);
+  report.add(prefix + "_iterations", iterations);
+  report.add(prefix + "_total_ns", total_ns);
+  report.add(prefix + "_avg_ns", total_ns / iterations);
+  report.add(prefix + "_p50_ns", percentile(samples, 0.50));
+  report.add(prefix + "_p95_ns", percentile(samples, 0.95));
+  report.add(prefix + "_p99_ns", percentile(samples, 0.99));
+  free_mapping(payload);
+}
+
+void run_submit_watch_current_path_bench(Report &report) {
+  constexpr int iterations = 128;
+  auto *target = clone_object_for_bench("clone/gateway_login_example");
+  require(target != nullptr, "failed to clone submit-watch benchmark target");
+  vm_owner_set_id(target, "owner/bench/runtime-v4/submit-watch");
+  vm_object_store_register(target);
+
+  run_submit_watch_current_path_case(report, target, "small", 4, iterations);
+  run_submit_watch_current_path_case(report, target, "medium", 16, iterations);
+
+  vm_owner_clear_id(target);
+  destruct_object_for_bench(target);
+}
+
 void run_object_resolve_bench(Report &report) {
   const long iterations = 256;
   object_t *probe = clone_object_for_bench("single/void");
@@ -726,6 +794,7 @@ int main(int argc, char **argv) {
     run_future_bench(report);
     run_frozen_payload_traversal_bench(report);
     run_future_completion_lookup_bench(report);
+    run_submit_watch_current_path_bench(report);
     run_object_resolve_bench(report);
     run_callback_admission_bench(report);
     add_final_status(report);

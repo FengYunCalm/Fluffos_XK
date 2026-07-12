@@ -17,6 +17,7 @@ private int last_owner_future_callback_off_main = 0;
 private mapping last_generic_owner_future = ([]);
 private int last_generic_owner_future_context_id = 0;
 private int last_generic_owner_future_callback_off_main = 0;
+private int last_submit_watch_future_id = 0;
 
 void logon() {
   write("Normal login path reached.\n");
@@ -121,6 +122,25 @@ int watch_gateway_owner_future(int reservation_id, int future_id, int timeout_ms
 int watch_generic_owner_future(int context_id, int future_id, int timeout_ms) {
   return gateway_future_watch(this_object(), context_id, future_id, timeout_ms);
 }
+
+int submit_and_watch_generic_owner_future(int context_id, mapping payload, int timeout_ms) {
+  mapping submitted;
+  int future_id;
+
+  submitted = owner_call_async(this_object(), "gateway_owner_future_echo", payload);
+  future_id = mapp(submitted) && submitted["success"] == 1
+    ? submitted["future_id"] : 0;
+  last_submit_watch_future_id = future_id;
+  if (future_id <= 0)
+    return 0;
+  if (gateway_future_watch(this_object(), context_id, future_id, timeout_ms))
+    return 1;
+  owner_future_cancel(future_id, "submit-watch benchmark registration failed");
+  owner_future_take(future_id);
+  return 0;
+}
+
+int query_last_submit_watch_future_id() { return last_submit_watch_future_id; }
 
 mapping cancel_gateway_owner_future(int future_id, string reason) {
   return owner_future_cancel(future_id, reason);
