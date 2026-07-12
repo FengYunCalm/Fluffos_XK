@@ -32,6 +32,7 @@
 #include "vm/internal/base/mapping.h"
 #include "vm/internal/base/object.h"
 #include "vm/internal/lpc_vm_profile.h"
+#include "vm/internal/owner_future_store.h"
 #include "vm/internal/owner_service_registry.h"
 #include "vm/internal/otable.h"
 #include "vm/internal/simulate.h"
@@ -55,6 +56,48 @@ extern bool vm_dns_test_support_dispatch_callback(object_t* owner, const char* m
 extern bool vm_socket_test_support_dispatch_callback(object_t* owner, const char* method, LPC_INT fd);
 extern int replace_interactive(object_t *ob, object_t *obfrom);
 extern bool gateway_dispatch_message_for_test(int fd, const char *payload);
+
+namespace {
+OwnerFutureRecord owner_future_store_test_record(uint64_t future_id, uint64_t target_task_id) {
+  OwnerFutureRecord record;
+  record.future_id = future_id;
+  record.target_task_id = target_task_id;
+  record.state = "pending";
+  return record;
+}
+}  // namespace
+
+TEST(OwnerFutureStoreTest, KeepsTaskLookupUntilTerminalTake) {
+  OwnerFutureStore store;
+  store.insert(owner_future_store_test_record(1, 101));
+
+  auto pending_take = store.take(1);
+  ASSERT_TRUE(pending_take.found);
+  ASSERT_FALSE(pending_take.consumed);
+  ASSERT_TRUE(store.complete_for_task(101, "completed", "result", "").has_value());
+
+  auto terminal_take = store.take(1);
+  ASSERT_TRUE(terminal_take.found);
+  ASSERT_TRUE(terminal_take.consumed);
+  ASSERT_FALSE(store.complete_for_task(101, "completed", "result", "").has_value());
+  ASSERT_EQ(store.size(), 0);
+}
+
+TEST(OwnerFutureStoreTest, ReindexesOverwriteAndDuplicateTaskIds) {
+  OwnerFutureStore store;
+  store.insert(owner_future_store_test_record(1, 101));
+  store.insert(owner_future_store_test_record(1, 202));
+  ASSERT_FALSE(store.complete_for_task(101, "completed", "stale", "").has_value());
+
+  store.insert(owner_future_store_test_record(2, 202));
+  ASSERT_TRUE(store.complete_for_task(202, "completed", "first", "").has_value());
+  ASSERT_TRUE(store.complete_for_task(202, "completed", "second", "").has_value());
+  ASSERT_FALSE(store.complete_for_task(202, "completed", "extra", "").has_value());
+
+  ASSERT_TRUE(store.take(1).consumed);
+  ASSERT_TRUE(store.take(2).consumed);
+  ASSERT_EQ(store.size(), 0);
+}
 
 namespace {
 void test_set_env(const char* name, const char* value) {

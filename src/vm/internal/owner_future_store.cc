@@ -12,7 +12,14 @@ uint64_t owner_future_now_ns() {
 
 void OwnerFutureStore::insert(OwnerFutureRecord record) {
   std::lock_guard<std::mutex> lock(mutex_);
-  futures_[record.future_id] = std::move(record);
+  auto future_id = record.future_id;
+  auto existing = futures_.find(future_id);
+  if (existing != futures_.end()) {
+    erase_task_index_entry(existing->second.target_task_id, future_id);
+  }
+  auto target_task_id = record.target_task_id;
+  futures_[future_id] = std::move(record);
+  future_ids_by_task_.emplace(target_task_id, future_id);
 }
 
 std::optional<OwnerFutureRecord> OwnerFutureStore::poll(uint64_t future_id) const {
@@ -50,6 +57,7 @@ OwnerFutureTakeResult OwnerFutureStore::take(uint64_t future_id) {
   result.found = true;
   result.record = it->second;
   if (it->second.state != "pending") {
+    erase_task_index_entry(it->second.target_task_id, future_id);
     futures_.erase(it);
     result.consumed = true;
   }
@@ -71,9 +79,16 @@ std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_for_task(uint64_
                                                                          const char *result_key, const char *error,
                                                                          std::shared_ptr<VMFrozenValue> result) {
   std::lock_guard<std::mutex> lock(mutex_);
-  for (auto &entry : futures_) {
-    if (entry.second.target_task_id == target_task_id && entry.second.state == "pending") {
-      return complete_record(entry.second, state, result_key, error, std::move(result));
+  auto range = future_ids_by_task_.equal_range(target_task_id);
+  for (auto index_it = range.first; index_it != range.second;) {
+    auto current_index = index_it++;
+    auto future_it = futures_.find(current_index->second);
+    if (future_it == futures_.end() || future_it->second.target_task_id != target_task_id) {
+      future_ids_by_task_.erase(current_index);
+      continue;
+    }
+    if (future_it->second.state == "pending") {
+      return complete_record(future_it->second, state, result_key, error, std::move(result));
     }
   }
   return std::nullopt;
@@ -146,6 +161,16 @@ const char *OwnerFutureStore::normalize_text(const char *text, const char *fallb
 VMObjectHandleResolveStatus OwnerFutureStore::target_status(const OwnerFutureRecord &record) {
   return record.has_target_handle ? vm_object_handle_resolve_status(record.target_handle).status
                                   : VMObjectHandleResolveStatus::kCurrent;
+}
+
+void OwnerFutureStore::erase_task_index_entry(uint64_t target_task_id, uint64_t future_id) {
+  auto range = future_ids_by_task_.equal_range(target_task_id);
+  for (auto it = range.first; it != range.second; ++it) {
+    if (it->second == future_id) {
+      future_ids_by_task_.erase(it);
+      return;
+    }
+  }
 }
 
 OwnerFutureCompletion OwnerFutureStore::complete_record(OwnerFutureRecord &record, const char *state,

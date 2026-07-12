@@ -84,11 +84,13 @@ class OwnerFutureStore {
  private:
   static const char *normalize_text(const char *text, const char *fallback);
   static VMObjectHandleResolveStatus target_status(const OwnerFutureRecord &record);
+  void erase_task_index_entry(uint64_t target_task_id, uint64_t future_id);
   OwnerFutureCompletion complete_record(OwnerFutureRecord &record, const char *state, const char *result_key,
                                         const char *error, std::shared_ptr<VMFrozenValue> result);
 
   mutable std::mutex mutex_;
   std::unordered_map<uint64_t, OwnerFutureRecord> futures_;
+  std::unordered_multimap<uint64_t, uint64_t> future_ids_by_task_;
   std::atomic<uint64_t> completed_{0};
   std::atomic<uint64_t> failed_{0};
 };
