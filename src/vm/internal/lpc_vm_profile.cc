@@ -30,6 +30,7 @@ struct LpcVmProfileState {
 };
 
 FLUFFOS_VM_THREAD_LOCAL uint64_t opcode_dispatch_batch = 0;
+FLUFFOS_VM_THREAD_LOCAL bool profile_recording_enabled = false;
 
 LpcVmProfileState &state() {
   static LpcVmProfileState profile;
@@ -75,9 +76,14 @@ void lpc_vm_profile_reset() {
 }
 
 #if FLUFFOS_OWNER_THREAD_VM
-bool lpc_vm_profile_recording_enabled() {
-  return vm_multicore_audit_enabled_fast();
+void lpc_vm_profile_set_recording(bool enabled) {
+  if (!enabled) {
+    lpc_vm_profile_flush_opcode_dispatch();
+  }
+  profile_recording_enabled = enabled;
 }
+
+bool lpc_vm_profile_recording_enabled() { return profile_recording_enabled; }
 
 void lpc_vm_profile_record_apply_cache_lookup(bool hit) {
   if (!lpc_vm_profile_recording_enabled()) {

@@ -183,6 +183,10 @@ transcode status、invalid sequence count、rule code、severity、line number �
 The runtime exposes hot-path counters through `lpc_vm_profile_v1` and
 `lpc_vm_bench_v1`:
 
+`lpc_vm_profile` recording is disabled by default and is explicitly enabled
+only for the current VM thread by diagnostics. Owner audit/enforcement remains
+active independently of this profiler gate.
+
 - opcode dispatch;
 - efun dispatch;
 - `call_other` dispatch;
@@ -193,6 +197,9 @@ The runtime exposes hot-path counters through `lpc_vm_profile_v1` and
 - apply dispatch cache hit/miss/invalidation.
 
 运行时通过 `lpc_vm_profile_v1` 和 `lpc_vm_bench_v1` 暴露热路径计数：
+
+`lpc_vm_profile` 默认不持续记录，仅由诊断流程对当前 VM 线程显式开启；owner
+audit/enforcement 与该 profiler 开关相互独立，保持生效。
 
 - opcode dispatch；
 - efun dispatch；

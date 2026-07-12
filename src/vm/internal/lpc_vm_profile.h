@@ -35,6 +35,7 @@ struct LpcVmProfileSnapshot {
 void lpc_vm_profile_reset();
 void lpc_vm_profile_flush_opcode_dispatch();
 #if !FLUFFOS_OWNER_THREAD_VM
+inline void lpc_vm_profile_set_recording(bool /*enabled*/) {}
 inline bool lpc_vm_profile_recording_enabled() { return false; }
 inline void lpc_vm_profile_record_apply_cache_lookup(bool /*hit*/) {}
 inline void lpc_vm_profile_record_apply_cache_table_build(std::size_t /*items*/, uint64_t /*elapsed_ns*/) {}
@@ -49,6 +50,7 @@ inline void lpc_vm_profile_record_mapping_lookup() {}
 inline void lpc_vm_profile_record_mapping_insert_lookup() {}
 inline void lpc_vm_profile_record_string_push() {}
 #else
+void lpc_vm_profile_set_recording(bool enabled);
 bool lpc_vm_profile_recording_enabled();
 void lpc_vm_profile_record_apply_cache_lookup(bool hit);
 void lpc_vm_profile_record_apply_cache_table_build(std::size_t items, uint64_t elapsed_ns);

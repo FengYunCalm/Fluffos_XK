@@ -192,7 +192,7 @@ void f__call_other() {
 
 #if FLUFFOS_OWNER_THREAD_VM
   const bool owner_audit_enabled = vm_multicore_audit_enabled_fast();
-  if (owner_audit_enabled) {
+  if (lpc_vm_profile_recording_enabled()) {
     lpc_vm_profile_record_call_other_dispatch();
   }
 #endif

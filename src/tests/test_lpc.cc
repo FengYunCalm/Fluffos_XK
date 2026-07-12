@@ -173,6 +173,7 @@ TEST_F(DriverTest, TestLpcVmProfileRecordsApplyCacheLookups) {
   ASSERT_STREQ(kLpcVmProfileSchemaV1, "lpc_vm_profile_v1");
   ASSERT_STREQ(kLpcVmBenchSchemaV1, "lpc_vm_bench_v1");
 
+  lpc_vm_profile_set_recording(true);
   lpc_vm_profile_reset();
   object_t *obj = clone_object_for_test("single/void");
   ASSERT_NE(obj, nullptr);
@@ -194,9 +195,11 @@ TEST_F(DriverTest, TestLpcVmProfileRecordsApplyCacheLookups) {
   ASSERT_GE(snapshot.apply_dispatch_cache_hit_count, 1);
 
   destruct_object_for_test(obj);
+  lpc_vm_profile_set_recording(false);
 }
 
 TEST_F(DriverTest, TestLpcVmProfileRecordsHotPathCounters) {
+  lpc_vm_profile_set_recording(true);
   lpc_vm_profile_reset();
 
   lpc_vm_profile_record_opcode_dispatch();
@@ -227,6 +230,51 @@ TEST_F(DriverTest, TestLpcVmProfileRecordsHotPathCounters) {
   ASSERT_GE(snapshot.mapping_lookup_count, 3);
   ASSERT_GE(snapshot.mapping_insert_lookup_count, 1);
   ASSERT_EQ(snapshot.string_push_count, 1);
+  lpc_vm_profile_set_recording(false);
+}
+
+TEST_F(DriverTest, TestLpcVmProfileRequiresExplicitThreadRecording) {
+  lpc_vm_profile_set_recording(false);
+  lpc_vm_profile_reset();
+  lpc_vm_profile_record_opcode_dispatch();
+  lpc_vm_profile_record_call_other_dispatch();
+  auto disabled = lpc_vm_profile_snapshot();
+  ASSERT_EQ(disabled.opcode_dispatch_count, 0);
+  ASSERT_EQ(disabled.call_other_dispatch_count, 0);
+
+  lpc_vm_profile_set_recording(true);
+  lpc_vm_profile_record_opcode_dispatch();
+  lpc_vm_profile_record_call_other_dispatch();
+  auto enabled = lpc_vm_profile_snapshot();
+  ASSERT_EQ(enabled.opcode_dispatch_count, 1);
+  ASSERT_EQ(enabled.call_other_dispatch_count, 1);
+
+  lpc_vm_profile_set_recording(false);
+  lpc_vm_profile_record_opcode_dispatch();
+  lpc_vm_profile_record_call_other_dispatch();
+  auto stopped = lpc_vm_profile_snapshot();
+  ASSERT_EQ(stopped.opcode_dispatch_count, enabled.opcode_dispatch_count);
+  ASSERT_EQ(stopped.call_other_dispatch_count, enabled.call_other_dispatch_count);
+}
+
+TEST_F(DriverTest, TestLpcVmProfileRecordingIsThreadLocal) {
+  lpc_vm_profile_set_recording(true);
+  ASSERT_TRUE(lpc_vm_profile_recording_enabled());
+
+  bool worker_default = true;
+  bool worker_enabled = false;
+  std::thread worker([&] {
+    worker_default = lpc_vm_profile_recording_enabled();
+    lpc_vm_profile_set_recording(true);
+    worker_enabled = lpc_vm_profile_recording_enabled();
+    lpc_vm_profile_set_recording(false);
+  });
+  worker.join();
+
+  ASSERT_FALSE(worker_default);
+  ASSERT_TRUE(worker_enabled);
+  ASSERT_TRUE(lpc_vm_profile_recording_enabled());
+  lpc_vm_profile_set_recording(false);
 }
 
 namespace {
@@ -4805,6 +4853,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(status, "lpc_modern_profile_mode"), "opt_in_pragma");
     ASSERT_EQ(mapping_number(status, "lpc_vm_profile_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "lpc_vm_profile_schema"), "lpc_vm_profile_v1");
+    ASSERT_EQ(mapping_number(status, "lpc_vm_profile_default_recording"), 0);
+    ASSERT_STREQ(mapping_string(status, "lpc_vm_profile_recording_policy"),
+                 "explicit_current_thread_only");
     ASSERT_EQ(mapping_number(status, "lpc_vm_benchmark_smoke_ready"), 1);
     ASSERT_STREQ(mapping_string(status, "lpc_vm_benchmark_schema"), "lpc_vm_bench_v1");
     ASSERT_EQ(mapping_number(status, "lpc_vm_hot_path_profile_ready"), 1);
@@ -5278,6 +5329,9 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_modern_profile_mode"), "opt_in_pragma");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_vm_profile_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_profile_schema"), "lpc_vm_profile_v1");
+    ASSERT_EQ(mapping_number(boundary_contract, "lpc_vm_profile_default_recording"), 0);
+    ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_profile_recording_policy"),
+                 "explicit_current_thread_only");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_vm_benchmark_smoke_ready"), 1);
     ASSERT_STREQ(mapping_string(boundary_contract, "lpc_vm_benchmark_schema"), "lpc_vm_bench_v1");
     ASSERT_EQ(mapping_number(boundary_contract, "lpc_vm_hot_path_profile_ready"), 1);

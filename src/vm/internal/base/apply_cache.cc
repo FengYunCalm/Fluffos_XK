@@ -85,10 +85,11 @@ lookup_entry_s apply_cache_lookup(const char *funcname, program_t *prog) {
   });
 
   // All function names are shared string.
+  const bool profile_enabled = lpc_vm_profile_recording_enabled();
 #if FLUFFOS_OWNER_THREAD_VM
-  const bool profile_enabled = vm_multicore_audit_enabled_fast();
+  const bool direct_cache_enabled = vm_multicore_audit_enabled_fast();
 #else
-  constexpr bool profile_enabled = false;
+  constexpr bool direct_cache_enabled = false;
 #endif
   auto key = (intptr_t)(findstring(funcname));
   if (key == 0) {
@@ -104,12 +105,14 @@ lookup_entry_s apply_cache_lookup(const char *funcname, program_t *prog) {
 
   apply_cache_lookups++;
 
-  if (profile_enabled) {
+  if (direct_cache_enabled) {
     bool direct_hit = false;
     auto direct = apply_dispatch_direct_cache_lookup(prog, key, profile_enabled, &direct_hit);
     if (direct_hit) {
       apply_cache_hits++;
-      lpc_vm_profile_record_apply_cache_lookup(true);
+      if (profile_enabled) {
+        lpc_vm_profile_record_apply_cache_lookup(true);
+      }
       return direct;
     }
   }
@@ -120,7 +123,7 @@ lookup_entry_s apply_cache_lookup(const char *funcname, program_t *prog) {
     if (profile_enabled) {
       lpc_vm_profile_record_apply_cache_lookup(true);
     }
-    if (profile_enabled) {
+    if (direct_cache_enabled) {
       apply_dispatch_direct_cache_store(prog, key, pos->second, profile_enabled);
     }
     return pos->second;
@@ -139,10 +142,11 @@ lookup_entry_s apply_cache_lookup_shared(const char *funcname, program_t *prog) 
   });
 #endif
 
+  const bool profile_enabled = lpc_vm_profile_recording_enabled();
 #if FLUFFOS_OWNER_THREAD_VM
-  const bool profile_enabled = vm_multicore_audit_enabled_fast();
+  const bool direct_cache_enabled = vm_multicore_audit_enabled_fast();
 #else
-  constexpr bool profile_enabled = false;
+  constexpr bool direct_cache_enabled = false;
 #endif
   auto key = reinterpret_cast<intptr_t>(funcname);
   if (key == 0) {
@@ -167,12 +171,14 @@ lookup_entry_s apply_cache_lookup_shared(const char *funcname, program_t *prog) 
 
   apply_cache_lookups++;
 
-  if (profile_enabled) {
+  if (direct_cache_enabled) {
     bool direct_hit = false;
     auto direct = apply_dispatch_direct_cache_lookup(prog, key, profile_enabled, &direct_hit);
     if (direct_hit) {
       apply_cache_hits++;
-      lpc_vm_profile_record_apply_cache_lookup(true);
+      if (profile_enabled) {
+        lpc_vm_profile_record_apply_cache_lookup(true);
+      }
       return direct;
     }
   }
@@ -187,6 +193,8 @@ lookup_entry_s apply_cache_lookup_shared(const char *funcname, program_t *prog) 
 #endif
     if (profile_enabled) {
       lpc_vm_profile_record_apply_cache_lookup(true);
+    }
+    if (direct_cache_enabled) {
       apply_dispatch_direct_cache_store(prog, key, pos->second, profile_enabled);
     }
     return pos->second;
@@ -229,11 +237,7 @@ static inline void fill_lookup_table_recurse(
 }
 
 static inline void fill_lookup_table(program_t *prog) {
-#if FLUFFOS_OWNER_THREAD_VM
-  const bool profile_enabled = vm_multicore_audit_enabled_fast();
-#else
-  constexpr bool profile_enabled = false;
-#endif
+  const bool profile_enabled = lpc_vm_profile_recording_enabled();
   auto start = profile_enabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
   prog->apply_lookup_table = std::make_unique<program_t::apply_lookup_table_type>();
   fill_lookup_table_recurse(prog->apply_lookup_table, prog, 0, 0);

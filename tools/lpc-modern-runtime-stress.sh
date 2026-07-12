@@ -27,6 +27,8 @@ cmake --build "$BUILD_DIR" --target lpc_tests driver lpc_vm_bench object_store_b
 TARGETED_FILTER="DriverTest.TestLpcModernProfilePragmasAndAuditRules"
 TARGETED_FILTER+=":DriverTest.TestLpcVmProfileRecordsApplyCacheLookups"
 TARGETED_FILTER+=":DriverTest.TestLpcVmProfileRecordsHotPathCounters"
+TARGETED_FILTER+=":DriverTest.TestLpcVmProfileRequiresExplicitThreadRecording"
+TARGETED_FILTER+=":DriverTest.TestLpcVmProfileRecordingIsThreadLocal"
 TARGETED_FILTER+=":DriverTest.TestVmOwnerQueryObjectSnapshotOnlyForCrossOwnerTargets"
 TARGETED_FILTER+=":DriverTest.TestVmObjectHandleReportsCapabilityMetadata"
 TARGETED_FILTER+=":DriverTest.TestVmObjectHandleReportsBasicResolveFailures"
@@ -72,6 +74,15 @@ if lpc_metrics.get("hot_path_profile_mapping_lookup_count", 0) <= 0:
     raise SystemExit("lpc vm benchmark did not record mapping lookup hot-path counters")
 if lpc_metrics.get("hot_path_profile_string_push_count", 0) <= 0:
     raise SystemExit("lpc vm benchmark did not record string push hot-path counters")
+for field in (
+    "profile_disabled_hot_path_profile_opcode_dispatch_count",
+    "profile_disabled_hot_path_profile_efun_dispatch_count",
+    "profile_disabled_hot_path_profile_call_other_dispatch_count",
+    "profile_disabled_hot_path_profile_mapping_lookup_count",
+    "profile_disabled_hot_path_profile_string_push_count",
+):
+    if lpc_metrics.get(field) != 0:
+        raise SystemExit(f"lpc vm benchmark recorded disabled profiler counter {field}")
 if object_metrics.get("object_resolve_global_fallback_count") != 0:
     raise SystemExit(
         "object store benchmark used global fallback on owner fast path: "

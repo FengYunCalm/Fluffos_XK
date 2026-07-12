@@ -169,6 +169,7 @@ void write_json_report(const std::string &path, const std::string &json) {
 
 void run_apply_cache_bench(Report &report) {
   const long iterations = 512;
+  lpc_vm_profile_set_recording(true);
   lpc_vm_profile_reset();
 
   object_t *probe = clone_object_for_bench("single/void");
@@ -213,6 +214,7 @@ void run_apply_cache_bench(Report &report) {
   report.add("apply_cache_miss_latency_p99_ns", percentile(miss_samples, 0.99));
 
   destruct_object_for_bench(probe);
+  lpc_vm_profile_set_recording(false);
 }
 
 void add_profile_snapshot_metrics(Report &report, const std::string &prefix,
@@ -232,12 +234,19 @@ void add_profile_snapshot_metrics(Report &report, const std::string &prefix,
   report.add(prefix + "string_push_count", static_cast<long long>(snapshot.string_push_count));
 }
 
-void run_hot_path_profile_bench(Report &report) {
-  const long iterations = 128;
+void run_hot_path_profile_bench(Report &report, bool recording_enabled, const std::string &prefix) {
+  const long iterations = 4096;
+  lpc_vm_profile_set_recording(recording_enabled);
   lpc_vm_profile_reset();
 
   object_t *probe = clone_object_for_bench("single/void");
   require(probe != nullptr, "failed to clone VM hot path probe object");
+
+  for (long i = 0; i < 128; i++) {
+    push_object(probe);
+    require(safe_apply("call_target", probe, 1, ORIGIN_DRIVER) != nullptr,
+            "call_target() warmup did not return");
+  }
 
   std::vector<long long> call_other_samples;
   auto start = Clock::now();
@@ -265,14 +274,15 @@ void run_hot_path_profile_bench(Report &report) {
   pop_stack();
 
   auto snapshot = lpc_vm_profile_snapshot();
-  report.add("hot_path_iterations", iterations);
-  report.add("hot_path_elapsed_ns", elapsed_ns(start));
-  report.add("hot_path_call_other_latency_p50_ns", percentile(call_other_samples, 0.50));
-  report.add("hot_path_call_other_latency_p95_ns", percentile(call_other_samples, 0.95));
-  report.add("hot_path_call_other_latency_p99_ns", percentile(call_other_samples, 0.99));
-  add_profile_snapshot_metrics(report, "hot_path_profile_", snapshot);
+  report.add(prefix + "hot_path_iterations", iterations);
+  report.add(prefix + "hot_path_elapsed_ns", elapsed_ns(start));
+  report.add(prefix + "hot_path_call_other_latency_p50_ns", percentile(call_other_samples, 0.50));
+  report.add(prefix + "hot_path_call_other_latency_p95_ns", percentile(call_other_samples, 0.95));
+  report.add(prefix + "hot_path_call_other_latency_p99_ns", percentile(call_other_samples, 0.99));
+  add_profile_snapshot_metrics(report, prefix + "hot_path_profile_", snapshot);
 
   destruct_object_for_bench(probe);
+  lpc_vm_profile_set_recording(false);
 }
 
 void print_text_report(const Report &report, const std::string &json_path) {
@@ -318,9 +328,11 @@ int main(int argc, char **argv) {
     report.add_string("profile_schema", kLpcVmProfileSchemaV1);
     report.add_string("dispatch_cache_probe", "apply_cache_lookup_v1");
     report.add_string("hot_path_profile_probe", "opcode_efun_call_other_mapping_string_v1");
+    report.add_string("profile_comparison", "explicit_enabled_vs_disabled_same_audit_mode");
 
     run_apply_cache_bench(report);
-    run_hot_path_profile_bench(report);
+    run_hot_path_profile_bench(report, false, "profile_disabled_");
+    run_hot_path_profile_bench(report, true, "");
 
     auto json = report_json(report);
     write_json_report(json_path, json);

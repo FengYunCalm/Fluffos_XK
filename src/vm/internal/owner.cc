@@ -465,6 +465,8 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_string(map, "lpc_modern_profile_mode", kLpcModernProfileModeOptIn);
   add_mapping_pair(map, "lpc_vm_profile_ready", 1);
   add_mapping_string(map, "lpc_vm_profile_schema", kLpcVmProfileSchemaV1);
+  add_mapping_pair(map, "lpc_vm_profile_default_recording", 0);
+  add_mapping_string(map, "lpc_vm_profile_recording_policy", "explicit_current_thread_only");
   add_mapping_pair(map, "lpc_vm_benchmark_smoke_ready", 1);
   add_mapping_string(map, "lpc_vm_benchmark_schema", kLpcVmBenchSchemaV1);
   add_mapping_pair(map, "lpc_vm_hot_path_profile_ready", 1);
@@ -1447,6 +1449,8 @@ mapping_t *owner_executor_boundary_contract_mapping() {
   add_mapping_string(contract, "lpc_modern_profile_mode", kLpcModernProfileModeOptIn);
   add_mapping_pair(contract, "lpc_vm_profile_ready", 1);
   add_mapping_string(contract, "lpc_vm_profile_schema", kLpcVmProfileSchemaV1);
+  add_mapping_pair(contract, "lpc_vm_profile_default_recording", 0);
+  add_mapping_string(contract, "lpc_vm_profile_recording_policy", "explicit_current_thread_only");
   add_mapping_pair(contract, "lpc_vm_benchmark_smoke_ready", 1);
   add_mapping_string(contract, "lpc_vm_benchmark_schema", kLpcVmBenchSchemaV1);
   add_mapping_pair(contract, "lpc_vm_hot_path_profile_ready", 1);

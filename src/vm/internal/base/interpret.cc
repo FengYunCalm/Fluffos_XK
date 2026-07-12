@@ -2075,7 +2075,7 @@ void eval_instruction(char *p) {
     trace_context = ::get_trace_context(csp, sp);
     Tracer::begin(*csp->trace_id, EventCategory::LPC_FUNCTION, std::move(trace_context));
   }
-  const bool lpc_vm_profile_enabled = vm_multicore_audit_enabled_fast();
+  const bool lpc_vm_profile_enabled = lpc_vm_profile_recording_enabled();
 
   while (true) {
     if (debug_level & DBG_LPC) {
