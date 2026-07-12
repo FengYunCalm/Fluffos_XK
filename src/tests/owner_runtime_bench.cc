@@ -5,6 +5,7 @@
 #include "vm/internal/base/mapping.h"
 #include "vm/internal/base/object.h"
 #include "vm/context.h"
+#include "vm/frozen_value.h"
 #include "vm/object_handle.h"
 #include "vm/owner.h"
 
@@ -85,6 +86,10 @@ long mapping_number(mapping_t *map, const char *key) {
 
 long long elapsed_us(Clock::time_point start) {
   return std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - start).count();
+}
+
+long long elapsed_ns(Clock::time_point start) {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
 }
 
 long long percentile(std::vector<long long> samples, double rank) {
@@ -419,6 +424,97 @@ void run_future_bench(Report &report) {
   free_mapping(runtime);
 }
 
+mapping_t *make_frozen_payload_bench_value(int item_count) {
+  auto *payload = allocate_mapping(5);
+  add_mapping_string(payload, "payload_key", "bench/frozen-payload/v1");
+  add_mapping_string(payload, "type", "protocol_payload");
+  add_mapping_pair(payload, "server_seq", 123456);
+  add_mapping_string(payload, "title", "representative owner payload");
+
+  auto *items = allocate_array(item_count);
+  for (int i = 0; i < item_count; i++) {
+    auto *item = allocate_mapping(6);
+    auto id = "item/" + std::to_string(i);
+    auto name = "representative payload item " + std::to_string(i);
+    add_mapping_string(item, "id", id.c_str());
+    add_mapping_string(item, "name", name.c_str());
+    add_mapping_pair(item, "count", i + 1);
+    add_mapping_pair(item, "weight", (i + 1) * 25);
+    add_mapping_string(item, "category", i % 2 == 0 ? "equipment" : "consumable");
+    add_mapping_string(item, "description", "fixed nested payload text for frozen traversal benchmark");
+    items->item[i].type = T_MAPPING;
+    items->item[i].subtype = 0;
+    items->item[i].u.map = item;
+  }
+  add_mapping_array(payload, "items", items);
+  free_array(items);
+  return payload;
+}
+
+void run_frozen_payload_traversal_case(Report &report, const std::string &case_name,
+                                       int item_count, int iterations) {
+  auto *payload = make_frozen_payload_bench_value(item_count);
+  svalue_t source{T_MAPPING, 0, {0}};
+  source.u.map = payload;
+  std::string error;
+
+  require(vm_frozen_value_safe(&source, 0, "owner payload", &error),
+          case_name + " payload validation failed: " + error);
+  auto warm_clone = vm_clone_frozen_value(&source);
+  require(warm_clone != nullptr, case_name + " payload clone warmup failed");
+  warm_clone.reset();
+  svalue_t warm_copy{const0u};
+  require(vm_copy_frozen_svalue(&warm_copy, &source), case_name + " payload copy warmup failed");
+  free_svalue(&warm_copy, "owner runtime frozen payload copy warmup");
+
+  auto validation_start = Clock::now();
+  for (int i = 0; i < iterations; i++) {
+    error.clear();
+    require(vm_frozen_value_safe(&source, 0, "owner payload", &error),
+            case_name + " payload validation failed");
+  }
+  auto validation_total_ns = elapsed_ns(validation_start);
+
+  auto clone_start = Clock::now();
+  for (int i = 0; i < iterations; i++) {
+    auto clone = vm_clone_frozen_value(&source);
+    require(clone != nullptr, case_name + " payload clone failed");
+  }
+  auto clone_total_ns = elapsed_ns(clone_start);
+
+  auto copy_start = Clock::now();
+  for (int i = 0; i < iterations; i++) {
+    svalue_t copied{const0u};
+    require(vm_copy_frozen_svalue(&copied, &source), case_name + " payload copy failed");
+    free_svalue(&copied, "owner runtime frozen payload copy");
+  }
+  auto copy_total_ns = elapsed_ns(copy_start);
+
+  auto validation_avg_ns = validation_total_ns / iterations;
+  auto clone_avg_ns = clone_total_ns / iterations;
+  auto copy_avg_ns = copy_total_ns / iterations;
+  auto current_efun_avg_ns = validation_avg_ns + clone_avg_ns;
+
+  report.add("frozen_payload_" + case_name + "_items", item_count);
+  report.add("frozen_payload_" + case_name + "_iterations", iterations);
+  report.add("frozen_payload_" + case_name + "_validation_avg_ns", validation_avg_ns);
+  report.add("frozen_payload_" + case_name + "_clone_avg_ns", clone_avg_ns);
+  report.add("frozen_payload_" + case_name + "_copy_avg_ns", copy_avg_ns);
+  report.add("frozen_payload_" + case_name + "_current_efun_avg_ns", current_efun_avg_ns);
+  report.add("frozen_payload_" + case_name + "_redundant_traversal_avg_ns",
+             current_efun_avg_ns - copy_avg_ns);
+  report.add("frozen_payload_" + case_name + "_copy_share_x100",
+             current_efun_avg_ns > 0 ? copy_avg_ns * 100LL / current_efun_avg_ns : 0);
+
+  free_mapping(payload);
+}
+
+void run_frozen_payload_traversal_bench(Report &report) {
+  constexpr int iterations = 1000;
+  run_frozen_payload_traversal_case(report, "small", 4, iterations);
+  run_frozen_payload_traversal_case(report, "medium", 16, iterations);
+}
+
 void run_object_resolve_bench(Report &report) {
   const long iterations = 256;
   object_t *probe = clone_object_for_bench("single/void");
@@ -583,6 +679,7 @@ int main(int argc, char **argv) {
     run_same_owner_bench(report);
     run_different_owner_bench(report);
     run_future_bench(report);
+    run_frozen_payload_traversal_bench(report);
     run_object_resolve_bench(report);
     run_callback_admission_bench(report);
     add_final_status(report);
