@@ -13,6 +13,10 @@ mapping deep_result(mapping payload) {
     return ([ "deep": ({ ({ ({ ({ ({ ({ ({ ({ ({ ({ payload["value"] }) }) }) }) }) }) }) }) }) }) ]);
 }
 
+string native_json_result(mapping payload) {
+    return json_encode_frozen(payload["value"]);
+}
+
 void assert_payload_error(mapping result, string error) {
     ASSERT_EQ(0, result["success"]);
     ASSERT_EQ(0, result["frozen_payload"]);
@@ -130,6 +134,16 @@ void do_tests() {
     ASSERT_EQ("dummy/v1", future["result"]["payload_key"]);
     assert_latest_message_trace(result["future_id"], "dummy", "completed",
                                 "dummy", "", "current", 0, 1, 0, 1, 1, 1);
+
+    result = owner_call_async(this_object(), "native_json_result", ([
+        "payload_key": "native-json/v1",
+        "value": ([ "items": ({ 1, "two" }), "ready": 1 ]),
+    ]));
+    ASSERT_EQ(1, result["success"]);
+    future = wait_owner_future(result["future_id"]);
+    ASSERT_EQ("completed", future["state"]);
+    ASSERT_EQ(json_encode(([ "items": ({ 1, "two" }), "ready": 1 ])),
+              future["result"]);
 
     vm_owner_thread_stop();
     vm_set_owner_id(this_object(), "owner/test/payload/stale-old");

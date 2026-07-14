@@ -1,16 +1,114 @@
 #include "base/package_api.h"
 
 #include "packages/core/file.h"
+#include "packages/core/json.h"
 
 #include "vm/internal/base/interpret.h"
+#include "vm/frozen_value.h"
 
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
+#include <cstdio>
 #include <string>
 
 namespace {
 constexpr int k_max_json_depth = 20;
+
+void append_frozen_json_string(const char *value, size_t length, std::string *out) {
+  constexpr char k_hex_digits[] = "0123456789abcdef";
+  out->push_back('"');
+  for (size_t i = 0; i < length; i++) {
+    const auto byte = static_cast<unsigned char>(value[i]);
+    switch (byte) {
+      case '\\':
+        out->append("\\\\");
+        break;
+      case '"':
+        out->append("\\\"");
+        break;
+      case '\b':
+        out->append("\\b");
+        break;
+      case '\f':
+        out->append("\\f");
+        break;
+      case '\n':
+        out->append("\\n");
+        break;
+      case '\r':
+        out->append("\\r");
+        break;
+      case '\t':
+        out->append("\\t");
+        break;
+      default:
+        if (byte <= 0x1f) {
+          out->append("\\u00");
+          out->push_back(k_hex_digits[byte >> 4]);
+          out->push_back(k_hex_digits[byte & 0x0f]);
+        } else {
+          out->push_back(static_cast<char>(byte));
+        }
+        break;
+    }
+  }
+  out->push_back('"');
+}
+
+void append_frozen_json_value(const svalue_t *value, int depth, std::string *out) {
+  if (depth > k_max_json_depth) {
+    error("json_encode_frozen: Maximum JSON nesting depth exceeded.\n");
+  }
+
+  switch (value->type) {
+    case T_NUMBER:
+      out->append(std::to_string(value->u.number));
+      return;
+    case T_REAL: {
+      char buffer[128];
+      std::snprintf(buffer, sizeof(buffer), "%f", value->u.real);
+      out->append(buffer);
+      return;
+    }
+    case T_STRING:
+      append_frozen_json_string(value->u.string ? value->u.string : "",
+                                value->u.string ? SVALUE_STRLEN(value) : 0, out);
+      return;
+    case T_ARRAY:
+      out->push_back('[');
+      for (int i = 0; i < value->u.arr->size; i++) {
+        if (i > 0) {
+          out->push_back(',');
+        }
+        append_frozen_json_value(&value->u.arr->item[i], depth + 1, out);
+      }
+      out->push_back(']');
+      return;
+    case T_MAPPING: {
+      bool first = true;
+      int bucket = value->u.map->table_size;
+      out->push_back('{');
+      do {
+        for (auto *node = value->u.map->table[bucket]; node; node = node->next) {
+          if (!first) {
+            out->push_back(',');
+          }
+          first = false;
+          auto *key = &node->values[0];
+          append_frozen_json_string(key->u.string ? key->u.string : "",
+                                    key->u.string ? SVALUE_STRLEN(key) : 0, out);
+          out->push_back(':');
+          append_frozen_json_value(&node->values[1], depth + 1, out);
+        }
+      } while (bucket-- > 0);
+      out->push_back('}');
+      return;
+    }
+    default:
+      error("json_encode_frozen: value must contain only numbers, strings, arrays, and string-key mappings.\n");
+  }
+}
 
 nlohmann::json svalue_to_plain_json(const svalue_t *sv, int depth) {
   if (depth > k_max_json_depth) {
@@ -148,6 +246,18 @@ svalue_t json_to_svalue_plain(const nlohmann::json &value, int depth) {
   return sv;
 }
 }  // namespace
+
+std::string json_encode_frozen_value(const svalue_t *value) {
+  std::string validation_error;
+  if (!vm_frozen_value_safe(value, 0, "json_encode_frozen value", &validation_error)) {
+    error("json_encode_frozen: %s.\n", validation_error.c_str());
+  }
+
+  std::string result;
+  result.reserve(256);
+  append_frozen_json_value(value, 0, &result);
+  return result;
+}
 
 svalue_t read_json(const char *file) {
   char *content = read_file(file, 0, 0);

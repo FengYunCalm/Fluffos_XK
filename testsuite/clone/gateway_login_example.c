@@ -228,6 +228,55 @@ int query_last_generic_owner_future_callback_off_main() {
   return last_generic_owner_future_callback_off_main;
 }
 
+mapping benchmark_json_encoders(int item_count, int iterations) {
+  mapping payload;
+  mixed *items;
+  string lpc_json;
+  string native_json;
+  int lpc_started_at;
+  int native_started_at;
+  int index;
+
+  items = allocate(item_count);
+  for (index = 0; index < item_count; index++) {
+    items[index] = ([
+      "id": sprintf("item/%d", index),
+      "name": sprintf("representative payload item %d", index),
+      "count": index + 1,
+      "weight": (index + 1) * 25,
+      "category": index % 2 ? "consumable" : "equipment",
+      "description": "fixed nested payload text for JSON encoding benchmark",
+    ]);
+  }
+  payload = ([
+    "payload_key": "bench/json-encode/v1",
+    "type": "protocol_payload",
+    "server_seq": 123456,
+    "title": "representative owner payload",
+    "items": items,
+  ]);
+
+  lpc_json = json_encode(payload);
+  native_json = json_encode_frozen(payload);
+  lpc_started_at = thread_cpu_time_ns();
+  for (index = 0; index < iterations; index++)
+    lpc_json = json_encode(payload);
+  lpc_started_at = thread_cpu_time_ns() - lpc_started_at;
+  native_started_at = thread_cpu_time_ns();
+  for (index = 0; index < iterations; index++)
+    native_json = json_encode_frozen(payload);
+  native_started_at = thread_cpu_time_ns() - native_started_at;
+
+  return ([
+    "item_count": item_count,
+    "iterations": iterations,
+    "encoded_bytes": strlen(native_json),
+    "byte_equal": native_json == lpc_json,
+    "lpc_total_ns": lpc_started_at,
+    "native_total_ns": native_started_at,
+  ]);
+}
+
 void net_dead() {
   if (!last_disconnect_code) {
     last_disconnect_code = "net_dead";

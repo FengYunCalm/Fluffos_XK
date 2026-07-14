@@ -576,6 +576,39 @@ std::string query_lpc_string_for_bench(object_t *target, const char *method) {
   return std::string(value->u.string, SVALUE_STRLEN(value));
 }
 
+void run_json_encode_case(Report &report, object_t *target, const std::string &case_name,
+                          int item_count, int iterations) {
+  push_number(item_count);
+  push_number(iterations);
+  auto *value = safe_apply("benchmark_json_encoders", target, 2, ORIGIN_DRIVER);
+  require(value != nullptr && value->type == T_MAPPING,
+          case_name + " JSON encoder benchmark result missing");
+  auto *result = value->u.map;
+  auto lpc_total_ns = mapping_number(result, "lpc_total_ns");
+  auto native_total_ns = mapping_number(result, "native_total_ns");
+  require(mapping_number(result, "byte_equal") == 1,
+          case_name + " native JSON output differs from LPC output");
+  require(lpc_total_ns > 0 && native_total_ns > 0,
+          case_name + " JSON encoder CPU clock unavailable");
+
+  auto prefix = "json_encode_" + case_name;
+  report.add(prefix + "_items", mapping_number(result, "item_count"));
+  report.add(prefix + "_iterations", mapping_number(result, "iterations"));
+  report.add(prefix + "_encoded_bytes", mapping_number(result, "encoded_bytes"));
+  report.add(prefix + "_lpc_avg_ns", lpc_total_ns / iterations);
+  report.add(prefix + "_native_avg_ns", native_total_ns / iterations);
+  report.add(prefix + "_speedup_x100", lpc_total_ns * 100 / native_total_ns);
+  report.add(prefix + "_saved_avg_ns", (lpc_total_ns - native_total_ns) / iterations);
+}
+
+void run_json_encode_bench(Report &report) {
+  auto *target = clone_object_for_bench("clone/gateway_login_example");
+  require(target != nullptr, "failed to clone JSON encoder benchmark target");
+  run_json_encode_case(report, target, "medium", 16, 100);
+  run_json_encode_case(report, target, "large", 64, 50);
+  destruct_object_for_bench(target);
+}
+
 void run_submit_watch_current_path_case(Report &report, object_t *target,
                                         const std::string &case_name, int item_count,
                                         int iterations) {
@@ -1023,6 +1056,7 @@ int main(int argc, char **argv) {
     run_different_owner_bench(report);
     run_future_bench(report);
     run_frozen_payload_traversal_bench(report);
+    run_json_encode_bench(report);
     run_future_completion_lookup_bench(report);
     run_submit_watch_current_path_bench(report);
     run_session_submit_watch_upfront_bench(report);

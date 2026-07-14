@@ -21,6 +21,7 @@
 #include "packages/core/dns.h"
 #include "packages/core/add_action.h"  // stat_living_objects
 #include "packages/core/file.h"
+#include "packages/core/json.h"
 #include "packages/core/regexp.h"
 #include "packages/core/sprintf.h"  // string_print_formatted
 #include "packages/core/outbuf.h"
@@ -1782,6 +1783,17 @@ void f_read_json() {
 
   free_string_svalue(sp);
   *sp = result;
+}
+#endif
+
+#ifdef F_JSON_ENCODE_FROZEN
+void f_json_encode_frozen() {
+  auto encoded = json_encode_frozen_value(sp);
+  free_svalue(sp, "f_json_encode_frozen");
+  auto *result = new_string(encoded.size(), "f_json_encode_frozen");
+  std::memcpy(result, encoded.data(), encoded.size());
+  result[encoded.size()] = '\0';
+  put_malloced_string(result);
 }
 #endif
 

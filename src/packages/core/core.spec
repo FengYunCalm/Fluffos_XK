@@ -163,6 +163,7 @@ int crc32(string OR_BUFFER);
 
 mixed read_buffer(string | buffer, void | int, void | int);
 mixed read_json(string);
+string json_encode_frozen(mixed);
 int write_buffer(string | buffer, int, string | buffer | int);
 int write_file(string, string, int default:0);
 int write_json(string, mixed);
