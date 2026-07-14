@@ -37,12 +37,14 @@ int g_gateway_max_masters = 16;
 int g_gateway_max_sessions = 4096;
 int g_gateway_heartbeat_interval = 15;
 int g_gateway_heartbeat_timeout = 45;
+int g_gateway_reconnect_grace = 60;
 GatewayRuntimeCounters g_gateway_runtime_counters;
 
 namespace {
 constexpr int kGatewayDefaultMaxMasters = 16;
 constexpr int kGatewayDefaultHeartbeatInterval = 15;
 constexpr int kGatewayDefaultHeartbeatTimeout = 45;
+constexpr int kGatewayDefaultReconnectGrace = 60;
 constexpr int kGatewayMaxJsonDepth = 20;
 constexpr int kGatewayDeferredMainDrainBudget = 64;
 constexpr int kGatewayFirstInlineDrainBudget = 1;
@@ -489,6 +491,23 @@ void gateway_handle_login(int fd, const nlohmann::json &msg) {
     has_data = true;
   }
 
+  if (gateway_find_session(session_id.c_str())) {
+    if (gateway_rebind_session_internal(session_id.c_str(), ip.c_str(), port, fd)) {
+      if (has_data) {
+        free_svalue(&data_sv, "gateway_login_data");
+      }
+      return;
+    }
+    gateway_destroy_session_internal(session_id.c_str(), "session_stale",
+                                     "stale session replaced by gateway replay");
+    if (gateway_find_session(session_id.c_str())) {
+      if (has_data) {
+        free_svalue(&data_sv, "gateway_login_data");
+      }
+      return;
+    }
+  }
+
   auto payload = gateway_copy_svalue(has_data ? &data_sv : nullptr, "gateway_login_payload");
   if (vm_owner_enqueue_main_task(master_ob, "gateway", "gateway_login",
                                  [session_id, ip, port, fd, payload] {
@@ -532,6 +551,11 @@ void gateway_handle_data(int fd, const nlohmann::json &msg) {
     return;
   }
   sess = gateway_find_session(session_id.c_str());
+  if (!sess || sess->master_fd != fd) {
+    g_gateway_runtime_counters.data_frames_rejected.fetch_add(1, std::memory_order_relaxed);
+    g_gateway_runtime_counters.stale_master_frames_rejected.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
   user = sess ? sess->user_ob : nullptr;
   if (!gateway_object_valid_local(user)) {
     g_gateway_runtime_counters.data_frames_rejected.fetch_add(1, std::memory_order_relaxed);
@@ -563,6 +587,11 @@ void gateway_handle_discon(int fd, const nlohmann::json &msg) {
   }
   if (g_gateway_debug) {
     debug_message("[gateway] discon fd=%d cid=%s\n", fd, msg["cid"].get_ref<const std::string &>().c_str());
+  }
+  auto *sess = gateway_find_session(msg["cid"].get_ref<const std::string &>().c_str());
+  if (!sess || sess->master_fd != fd) {
+    g_gateway_runtime_counters.stale_master_frames_rejected.fetch_add(1, std::memory_order_relaxed);
+    return;
   }
   if (msg.contains("reason_code") && msg["reason_code"].is_string() &&
       !msg["reason_code"].get_ref<const std::string &>().empty()) {
@@ -864,6 +893,7 @@ void init_gateway(void) {
   g_gateway_max_sessions = g_gateway_max_sessions > 0 ? g_gateway_max_sessions : 4096;
   g_gateway_heartbeat_interval = kGatewayDefaultHeartbeatInterval;
   g_gateway_heartbeat_timeout = kGatewayDefaultHeartbeatTimeout;
+  g_gateway_reconnect_grace = kGatewayDefaultReconnectGrace;
   if (!g_gateway_started_at) {
     g_gateway_started_at = get_current_time();
   }
@@ -1020,6 +1050,18 @@ mapping_t *gateway_status_internal() {
                    static_cast<long>(g_gateway_runtime_counters.data_frames_applied.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_data_frames_rejected",
                    static_cast<long>(g_gateway_runtime_counters.data_frames_rejected.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_stale_master_frames_rejected",
+                   static_cast<long>(g_gateway_runtime_counters.stale_master_frames_rejected.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_sessions_detached_total",
+                   static_cast<long>(g_gateway_runtime_counters.sessions_detached.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_session_rebind_attempts",
+                   static_cast<long>(g_gateway_runtime_counters.session_rebind_attempts.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_session_rebind_completed",
+                   static_cast<long>(g_gateway_runtime_counters.session_rebind_completed.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_session_rebind_rejected",
+                   static_cast<long>(g_gateway_runtime_counters.session_rebind_rejected.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_session_reconnect_expired",
+                   static_cast<long>(g_gateway_runtime_counters.session_reconnect_expired.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_receive_tasks_enqueued",
       static_cast<long>(g_gateway_runtime_counters.receive_tasks_enqueued.load(std::memory_order_relaxed)));
@@ -1365,6 +1407,7 @@ mapping_t *gateway_status_internal() {
   add_mapping_pair(map, "max_sessions", g_gateway_max_sessions);
   add_mapping_pair(map, "heartbeat_interval", g_gateway_heartbeat_interval);
   add_mapping_pair(map, "heartbeat_timeout", g_gateway_heartbeat_timeout);
+  add_mapping_pair(map, "reconnect_grace", g_gateway_reconnect_grace);
   add_mapping_string(map, "heartbeat_timer", g_gateway_heartbeat_timer ? "active" : "inactive");
   add_mapping_pair(map, "uptime", uptime);
   return map;
@@ -1449,6 +1492,14 @@ void f_gateway_config() {
     }
     pop_n_elems(num_args);
     push_number(g_gateway_heartbeat_interval);
+    return;
+  }
+  if (strcmp(key, "reconnect_grace") == 0) {
+    if (val && val->type == T_NUMBER && val->u.number > 0) {
+      g_gateway_reconnect_grace = val->u.number;
+    }
+    pop_n_elems(num_args);
+    push_number(g_gateway_reconnect_grace);
     return;
   }
   if (strcmp(key, "debug") == 0) {

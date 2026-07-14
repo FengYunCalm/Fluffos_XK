@@ -18,11 +18,18 @@ extern int g_gateway_max_masters;
 extern int g_gateway_max_sessions;
 extern int g_gateway_heartbeat_interval;
 extern int g_gateway_heartbeat_timeout;
+extern int g_gateway_reconnect_grace;
 
 struct GatewayRuntimeCounters {
   std::atomic<uint64_t> data_frames_received{0};
   std::atomic<uint64_t> data_frames_applied{0};
   std::atomic<uint64_t> data_frames_rejected{0};
+  std::atomic<uint64_t> stale_master_frames_rejected{0};
+  std::atomic<uint64_t> sessions_detached{0};
+  std::atomic<uint64_t> session_rebind_attempts{0};
+  std::atomic<uint64_t> session_rebind_completed{0};
+  std::atomic<uint64_t> session_rebind_rejected{0};
+  std::atomic<uint64_t> session_reconnect_expired{0};
   std::atomic<uint64_t> receive_tasks_enqueued{0};
   std::atomic<uint64_t> receive_tasks_dispatched{0};
   std::atomic<uint64_t> receive_tasks_rejected{0};
@@ -163,6 +170,7 @@ struct GatewaySession {
   std::string real_ip;
   int real_port{0};
   int master_fd{-1};
+  time_t detached_at{0};
   time_t connected_at{0};
   time_t last_active{0};
   object_t *user_ob{nullptr};
@@ -222,6 +230,8 @@ GatewaySession *gateway_find_session(const char *session_id);
 GatewaySession *gateway_find_session_by_object(object_t *ob);
 int gateway_bind_session_object(const char *session_id, object_t *ob, const char *ip,
                                 int port, int master_fd);
+object_t *gateway_rebind_session_internal(const char *session_id, const char *ip,
+                                          int port, int master_fd);
 void gateway_unbind_session_object(object_t *ob);
 void gateway_cleanup_master_sessions(int master_fd);
 object_t *gateway_create_session_internal(const char *session_id, svalue_t *data_val,

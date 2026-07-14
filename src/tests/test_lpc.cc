@@ -350,6 +350,12 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_data_frames_received"), 0);
   ASSERT_GE(mapping_number(status, "gateway_data_frames_applied"), 0);
   ASSERT_GE(mapping_number(status, "gateway_data_frames_rejected"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_stale_master_frames_rejected"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_sessions_detached_total"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_session_rebind_attempts"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_session_rebind_completed"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_session_rebind_rejected"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_session_reconnect_expired"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_tasks_enqueued"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_tasks_dispatched"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_tasks_rejected"), 0);
@@ -11563,6 +11569,112 @@ TEST_F(DriverTest, TestGatewaySessionDestroyAllowsNetDeadSelfDestruct) {
   ASSERT_EQ(ob->interactive, nullptr);
 
   free_object(&ob, "TestGatewaySessionDestroyAllowsNetDeadSelfDestruct");
+}
+
+TEST_F(DriverTest, TestGatewayMasterReconnectRebindsExistingSessionWithoutLosingState) {
+  static std::vector<std::pair<int, std::string>> writes;
+  writes.clear();
+  auto writer = [](int fd, const char *data, size_t len) -> int {
+    writes.emplace_back(fd, std::string(data, len));
+    return 1;
+  };
+  constexpr int old_master_fd = 1701;
+  constexpr int new_master_fd = 1702;
+  const char *session_id = "gw-test-master-reconnect";
+  auto *ob = create_gateway_session_for_test(session_id, "/clone/gateway_login_example",
+                                             old_master_fd);
+  ASSERT_NE(ob, nullptr);
+  ASSERT_NE(ob->interactive, nullptr);
+  add_ref(ob, "TestGatewayMasterReconnectRebindsExistingSessionWithoutLosingState");
+
+  auto *session = gateway_find_session(session_id);
+  ASSERT_NE(session, nullptr);
+  ASSERT_EQ(session->master_fd, old_master_fd);
+  ASSERT_EQ(ob->interactive->gateway_master_fd, old_master_fd);
+
+  gateway_cleanup_master_sessions(old_master_fd);
+  session = gateway_find_session(session_id);
+  ASSERT_NE(session, nullptr);
+  ASSERT_EQ(session->user_ob, ob);
+  ASSERT_EQ(session->master_fd, -1);
+  ASSERT_NE(ob->interactive, nullptr);
+  ASSERT_TRUE(gateway_is_session(ob));
+
+  ASSERT_EQ(gateway_enqueue_session_output(session, "queued-while-detached"), 1);
+  ASSERT_EQ(session->output_fifo.size(), 1u);
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      new_master_fd,
+      R"({"type":"login","cid":"gw-test-master-reconnect","data":{"ip":"127.0.0.2","port":6041}})"));
+  session = gateway_find_session(session_id);
+  ASSERT_NE(session, nullptr);
+  ASSERT_EQ(session->master_fd, new_master_fd);
+  ASSERT_EQ(ob->interactive->gateway_master_fd, new_master_fd);
+  ASSERT_STREQ(ob->interactive->gateway_real_ip, "127.0.0.2");
+  ASSERT_EQ(ob->interactive->gateway_real_port, 6041);
+  ASSERT_EQ(gateway_flush_session_output_fifo_with_writer(session, writer), 1);
+  ASSERT_EQ(writes, (std::vector<std::pair<int, std::string>>{
+                        {new_master_fd, "queued-while-detached"}}));
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      old_master_fd,
+      R"({"type":"data","cid":"gw-test-master-reconnect","data":{"cmd":"stale"}})"));
+  auto *payload = call_lpc_method(ob, "query_last_gateway_payload");
+  ASSERT_TRUE(payload == nullptr || payload->type == T_NUMBER);
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      new_master_fd,
+      R"({"type":"data","cid":"gw-test-master-reconnect","data":{"cmd":"current"}})"));
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 0);
+  payload = call_lpc_method(ob, "query_last_gateway_payload");
+  ASSERT_NE(payload, nullptr);
+  ASSERT_EQ(payload->type, T_MAPPING);
+  auto *command_value = find_string_in_mapping(payload->u.map, "cmd");
+  ASSERT_NE(command_value, nullptr);
+  ASSERT_EQ(command_value->type, T_STRING);
+  ASSERT_STREQ(command_value->u.string, "current");
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      old_master_fd,
+      R"({"type":"discon","cid":"gw-test-master-reconnect"})"));
+  ASSERT_EQ(gateway_find_session(session_id), session);
+  ASSERT_NE(ob->interactive, nullptr);
+
+  gateway_cleanup_master_sessions(old_master_fd);
+  ASSERT_EQ(gateway_find_session(session_id), session);
+  ASSERT_NE(ob->interactive, nullptr);
+
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
+  ASSERT_EQ(ob->interactive, nullptr);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayMasterReconnectRebindsExistingSessionWithoutLosingState");
+}
+
+TEST_F(DriverTest, TestGatewayDetachedSessionExpiresAfterReconnectGrace) {
+  const char *session_id = "gw-test-reconnect-expired";
+  auto *ob = create_gateway_session_for_test(session_id, "/clone/gateway_login_example", 1801);
+  ASSERT_NE(ob, nullptr);
+  ASSERT_NE(ob->interactive, nullptr);
+  add_ref(ob, "TestGatewayDetachedSessionExpiresAfterReconnectGrace");
+
+  auto old_grace = g_gateway_reconnect_grace;
+  g_gateway_reconnect_grace = 1;
+  gateway_cleanup_master_sessions(1801);
+  auto *session = gateway_find_session(session_id);
+  ASSERT_NE(session, nullptr);
+  session->detached_at = get_current_time() - 2;
+
+  gateway_check_session_timeouts();
+  ASSERT_EQ(gateway_find_session(session_id), nullptr);
+  ASSERT_EQ(ob->interactive, nullptr);
+  auto *code = call_lpc_method(ob, "query_last_disconnect_code");
+  ASSERT_NE(code, nullptr);
+  ASSERT_EQ(code->type, T_STRING);
+  ASSERT_STREQ(code->u.string, "session_timeout");
+
+  g_gateway_reconnect_grace = old_grace;
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayDetachedSessionExpiresAfterReconnectGrace");
 }
 
 TEST_F(DriverTest, TestGatewayReceiveRunsThroughOwnerMainQueue) {

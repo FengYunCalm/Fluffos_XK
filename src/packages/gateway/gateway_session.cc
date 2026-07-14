@@ -1130,7 +1130,7 @@ int gateway_flush_session_output_fifo(GatewaySession *sess) {
 }
 
 int gateway_enqueue_session_output(GatewaySession *sess, std::string encoded) {
-  if (!sess || sess->master_fd < 0 || encoded.empty()) {
+  if (!sess || encoded.empty()) {
     return 0;
   }
   if (sess->output_fifo.size() >= sess->output_fifo_max_depth) {
@@ -1150,7 +1150,7 @@ int gateway_enqueue_session_output(GatewaySession *sess, std::string encoded) {
 
 uint64_t gateway_reserve_session_output(GatewaySession *sess) {
   auto reserve_started_ns = gateway_session_now_ns();
-  if (!sess || sess->master_fd < 0) {
+  if (!sess) {
     return 0;
   }
   if (sess->output_fifo.size() >= sess->output_fifo_max_depth) {
@@ -1290,12 +1290,42 @@ int gateway_bind_session_object(const char *session_id, object_t *ob, const char
   sess->real_ip = ip ? ip : "";
   sess->real_port = port;
   sess->master_fd = master_fd;
+  sess->detached_at = 0;
   sess->user_ob = ob;
   sess->user_ob_name = ob->obname ? ob->obname : "";
   sess->user_ob_load_time = ob->load_time;
   sess->last_active = get_current_time();
   g_gateway_obj_to_session[ob] = sess;
   return 1;
+}
+
+object_t *gateway_rebind_session_internal(const char *session_id, const char *ip,
+                                          int port, int master_fd) {
+  g_gateway_runtime_counters.session_rebind_attempts.fetch_add(1, std::memory_order_relaxed);
+  auto *sess = gateway_find_session(session_id);
+  auto *ob = gateway_resolve_session_object(sess);
+  if (!sess || !gateway_object_valid(ob) || !ob->interactive ||
+      !(ob->interactive->iflags & GATEWAY_SESSION) || master_fd < 0) {
+    g_gateway_runtime_counters.session_rebind_rejected.fetch_add(1, std::memory_order_relaxed);
+    return nullptr;
+  }
+
+  auto *user = ob->interactive;
+  sess->real_ip = ip ? ip : "";
+  sess->real_port = port;
+  sess->master_fd = master_fd;
+  sess->detached_at = 0;
+  sess->last_active = get_current_time();
+  user->gateway_master_fd = master_fd;
+  user->gateway_real_port = port;
+  user->last_time = sess->last_active;
+  if (user->gateway_real_ip) {
+    FREE_MSTR(user->gateway_real_ip);
+  }
+  user->gateway_real_ip = string_copy(ip ? ip : "", "gateway_real_ip");
+  gateway_flush_session_output_fifo(sess);
+  g_gateway_runtime_counters.session_rebind_completed.fetch_add(1, std::memory_order_relaxed);
+  return ob;
 }
 
 void gateway_unbind_session_object(object_t *ob) {
@@ -1310,16 +1340,17 @@ void gateway_unbind_session_object(object_t *ob) {
 }
 
 void gateway_cleanup_master_sessions(int master_fd) {
-  std::vector<std::string> to_remove;
-
   for (const auto &entry : g_gateway_sessions) {
-    if (entry.second && entry.second->master_fd == master_fd) {
-      to_remove.push_back(entry.first);
+    auto *sess = entry.second.get();
+    if (!sess || sess->master_fd != master_fd) {
+      continue;
     }
-  }
-
-  for (const auto &session_id : to_remove) {
-    gateway_destroy_session_internal(session_id.c_str(), "gateway_lost", "gateway lost");
+    sess->master_fd = -1;
+    sess->detached_at = get_current_time();
+    if (auto *ob = gateway_resolve_session_object(sess); gateway_object_valid(ob) && ob->interactive) {
+      ob->interactive->gateway_master_fd = -1;
+    }
+    g_gateway_runtime_counters.sessions_detached.fetch_add(1, std::memory_order_relaxed);
   }
 }
 
@@ -1456,7 +1487,7 @@ int gateway_send_to_session(const char *session_id, const char *data, size_t len
   nlohmann::json payload;
   std::string encoded;
 
-  if (!sess || sess->master_fd < 0 || !data) {
+  if (!sess || !data) {
     return 0;
   }
 
@@ -1680,14 +1711,31 @@ void gateway_check_session_timeouts() {
       to_remove.push_back(entry.first);
       continue;
     }
-    if (!gateway_has_master(sess->master_fd)) {
-      to_remove.push_back(entry.first);
-      continue;
-    }
     auto *session_ob = gateway_resolve_session_object(sess);
     if (!session_ob || !session_ob->interactive) {
       to_remove.push_back(entry.first);
+      continue;
     }
+    if (sess->master_fd >= 0 && gateway_has_master(sess->master_fd)) {
+      continue;
+    }
+    if (sess->master_fd >= 0) {
+      sess->master_fd = -1;
+      sess->detached_at = get_current_time();
+      session_ob->interactive->gateway_master_fd = -1;
+      g_gateway_runtime_counters.sessions_detached.fetch_add(1, std::memory_order_relaxed);
+      continue;
+    }
+    if (sess->detached_at <= 0) {
+      sess->detached_at = get_current_time();
+      continue;
+    }
+    if (g_gateway_reconnect_grace > 0 &&
+        (get_current_time() - sess->detached_at) <= g_gateway_reconnect_grace) {
+      continue;
+    }
+    g_gateway_runtime_counters.session_reconnect_expired.fetch_add(1, std::memory_order_relaxed);
+    to_remove.push_back(entry.first);
   }
 
   for (const auto &session_id : to_remove) {
