@@ -33,6 +33,7 @@
 #include "vm/internal/base/object.h"
 #include "vm/internal/lpc_vm_profile.h"
 #include "vm/internal/owner_future_store.h"
+#include "vm/internal/owner_runtime_coordinator.h"
 #include "vm/internal/owner_service_registry.h"
 #include "vm/internal/otable.h"
 #include "vm/internal/simulate.h"
@@ -704,6 +705,44 @@ TEST_F(DriverTest, TestThreadCpuClockIsMonotonicWhenAvailable) {
 
   ASSERT_GT(accumulator, 0u);
   ASSERT_GE(after, before);
+}
+
+TEST_F(DriverTest, TestOwnerAsyncLpcAndCompletionExposeWorkerThreadCpuCounters) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  const auto metrics_source =
+      read_source_file_for_test("../src/vm/internal/owner_runtime_metrics.h");
+
+  ASSERT_NE(owner_source.find("get_current_thread_cpu_time_ns()"), std::string::npos);
+  ASSERT_NE(metrics_source.find("owner_async_lpc_execute_thread_cpu_ns_total"),
+            std::string::npos);
+  ASSERT_NE(metrics_source.find("owner_async_lpc_execute_thread_cpu_unavailable"),
+            std::string::npos);
+  ASSERT_NE(metrics_source.find("owner_async_result_completion_thread_cpu_ns_total"),
+            std::string::npos);
+  ASSERT_NE(metrics_source.find("owner_async_result_completion_thread_cpu_unavailable"),
+            std::string::npos);
+  ASSERT_NE(owner_source.find("owner_async_lpc_execute_thread_cpu_total_us"),
+            std::string::npos);
+  ASSERT_NE(owner_source.find("owner_async_result_completion_thread_cpu_total_us"),
+            std::string::npos);
+}
+
+TEST_F(DriverTest, TestGatewayFutureCompletionExposesMainThreadCpuCounter) {
+  const auto gateway_header = read_source_file_for_test("../src/packages/gateway/gateway.h");
+  const auto gateway_source =
+      read_source_file_for_test("../src/packages/gateway/gateway_session.cc");
+  const auto gateway_status = read_source_file_for_test("../src/packages/gateway/gateway.cc");
+
+  ASSERT_NE(gateway_source.find("get_current_thread_cpu_time_ns()"),
+            std::string::npos);
+  ASSERT_NE(gateway_header.find("future_watch_main_completion_thread_cpu_ns_total"),
+            std::string::npos);
+  ASSERT_NE(gateway_header.find("future_watch_main_completion_thread_cpu_unavailable"),
+            std::string::npos);
+  ASSERT_NE(gateway_status.find("gateway_future_watch_main_completion_thread_cpu_total_us"),
+            std::string::npos);
+  ASSERT_NE(gateway_status.find("gateway_future_watch_main_completion_thread_cpu_unavailable"),
+            std::string::npos);
 }
 
 TEST_F(DriverTest, TestSaveSvalueDepthIsThreadLocal) {
@@ -10827,6 +10866,13 @@ TEST_F(DriverTest, TestGatewayFutureWatchKeepsPendingFutureAndReservation) {
 }
 
 TEST_F(DriverTest, TestGatewayFutureWatchDispatchesCompletedFutureOnMain) {
+  auto before_owner_metrics = owner_runtime_metrics_instance().snapshot();
+  auto before_gateway_completion_cpu_total =
+      g_gateway_runtime_counters.future_watch_main_completion_thread_cpu_ns_total.load(
+          std::memory_order_relaxed);
+  auto before_gateway_completion_cpu_unavailable =
+      g_gateway_runtime_counters.future_watch_main_completion_thread_cpu_unavailable.load(
+          std::memory_order_relaxed);
   auto *before_owner = vm_owner_thread_status();
   auto before_owner_queue_samples =
       gateway_test_mapping_number(before_owner, "owner_async_queue_wait_samples");
@@ -10914,6 +10960,17 @@ TEST_F(DriverTest, TestGatewayFutureWatchDispatchesCompletedFutureOnMain) {
             before_owner_execute_samples + 1);
   ASSERT_GE(gateway_test_mapping_number(after_owner, "owner_async_result_completion_samples"),
             before_owner_completion_samples + 1);
+  auto after_owner_metrics = owner_runtime_metrics_instance().snapshot();
+  ASSERT_TRUE(
+      after_owner_metrics.owner_async_lpc_execute_thread_cpu_ns_total >
+          before_owner_metrics.owner_async_lpc_execute_thread_cpu_ns_total ||
+      after_owner_metrics.owner_async_lpc_execute_thread_cpu_unavailable >
+          before_owner_metrics.owner_async_lpc_execute_thread_cpu_unavailable);
+  ASSERT_TRUE(
+      after_owner_metrics.owner_async_result_completion_thread_cpu_ns_total >
+          before_owner_metrics.owner_async_result_completion_thread_cpu_ns_total ||
+      after_owner_metrics.owner_async_result_completion_thread_cpu_unavailable >
+          before_owner_metrics.owner_async_result_completion_thread_cpu_unavailable);
   free_mapping(after_owner);
   auto *after_gateway = gateway_status_internal();
   ASSERT_GE(gateway_test_mapping_number(after_gateway, "gateway_output_reserve_samples"),
@@ -10933,6 +10990,11 @@ TEST_F(DriverTest, TestGatewayFutureWatchDispatchesCompletedFutureOnMain) {
   ASSERT_GE(after_completion_notifications, before_completion_notifications + 1);
   ASSERT_GE(gateway_test_mapping_number(after_gateway, "gateway_future_watch_completion_wakeups"),
             before_completion_wakeups + 1);
+  ASSERT_TRUE(
+      g_gateway_runtime_counters.future_watch_main_completion_thread_cpu_ns_total.load(
+          std::memory_order_relaxed) > before_gateway_completion_cpu_total ||
+      g_gateway_runtime_counters.future_watch_main_completion_thread_cpu_unavailable.load(
+          std::memory_order_relaxed) > before_gateway_completion_cpu_unavailable);
   free_mapping(after_gateway);
 
   push_number(99);

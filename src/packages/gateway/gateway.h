@@ -75,6 +75,8 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> future_watch_end_to_end_ns_total{0};
   std::atomic<uint64_t> future_watch_end_to_end_ns_max{0};
   std::atomic<uint64_t> future_watch_end_to_end_samples{0};
+  std::atomic<uint64_t> future_watch_main_completion_thread_cpu_ns_total{0};
+  std::atomic<uint64_t> future_watch_main_completion_thread_cpu_unavailable{0};
   std::atomic<uint64_t> generic_future_watches_registered{0};
   std::atomic<uint64_t> generic_future_watches_rejected{0};
   std::atomic<uint64_t> generic_future_watches_completed{0};

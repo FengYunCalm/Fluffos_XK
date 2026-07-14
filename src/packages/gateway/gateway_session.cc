@@ -4,6 +4,7 @@
 
 #include "backend.h"
 #include "base/internal/external_port.h"
+#include "base/internal/port.h"
 #include "comm.h"
 #include "packages/core/dns.h"
 #include "user.h"
@@ -88,6 +89,17 @@ void gateway_session_record_latency(std::atomic<uint64_t> &total, std::atomic<ui
   total.fetch_add(elapsed_ns, std::memory_order_relaxed);
   samples.fetch_add(1, std::memory_order_relaxed);
   gateway_session_record_max(max, elapsed_ns);
+}
+
+void gateway_record_future_completion_thread_cpu(int64_t started_ns) {
+  auto finished_ns = get_current_thread_cpu_time_ns();
+  if (started_ns < 0 || finished_ns < started_ns) {
+    g_gateway_runtime_counters.future_watch_main_completion_thread_cpu_unavailable.fetch_add(
+        1, std::memory_order_relaxed);
+    return;
+  }
+  g_gateway_runtime_counters.future_watch_main_completion_thread_cpu_ns_total.fetch_add(
+      static_cast<uint64_t>(finished_ns - started_ns), std::memory_order_relaxed);
 }
 
 class GatewayControlledLpcScope {
@@ -757,6 +769,7 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
     }
     g_gateway_runtime_counters.future_watch_poll_items.fetch_add(1, std::memory_order_relaxed);
     auto watch = watch_it->second;
+    auto completion_cpu_started_ns = get_current_thread_cpu_time_ns();
     auto *sess = gateway_find_session(watch.session_id.c_str());
     auto *ob = gateway_resolve_session_object(sess);
     auto session_current = sess && ob && sess->user_ob_name == watch.user_ob_name &&
@@ -769,6 +782,7 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
         gateway_release_session_output(sess, watch.reservation_id);
       }
       g_gateway_runtime_counters.future_watches_cancelled.fetch_add(1, std::memory_order_relaxed);
+      gateway_record_future_completion_thread_cpu(completion_cpu_started_ns);
       processed++;
       continue;
     }
@@ -893,6 +907,7 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
     if (session_current && gateway_session_has_pending_reservation(sess, watch.reservation_id)) {
       gateway_release_session_output(sess, watch.reservation_id);
     }
+    gateway_record_future_completion_thread_cpu(completion_cpu_started_ns);
   }
 
   if (g_gateway_session_future_watches.empty()) {
@@ -970,12 +985,14 @@ int gateway_process_future_watches_at(uint64_t now_ms) {
       continue;
     }
     auto watch = watch_it->second;
+    auto completion_cpu_started_ns = get_current_thread_cpu_time_ns();
     auto *ob = gateway_resolve_future_watch_object(watch);
     if (!ob) {
       g_gateway_future_watches.erase(watch_it);
       gateway_consume_cancelled_future(future_id, "gateway future watch target stale");
       g_gateway_runtime_counters.generic_future_watches_cancelled.fetch_add(
           1, std::memory_order_relaxed);
+      gateway_record_future_completion_thread_cpu(completion_cpu_started_ns);
       processed++;
       continue;
     }
@@ -1017,6 +1034,7 @@ int gateway_process_future_watches_at(uint64_t now_ms) {
           1, std::memory_order_relaxed);
     }
     free_mapping(future);
+    gateway_record_future_completion_thread_cpu(completion_cpu_started_ns);
   }
 
   if (g_gateway_future_watches.empty()) {

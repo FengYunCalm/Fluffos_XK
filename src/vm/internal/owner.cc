@@ -1,5 +1,7 @@
 #include "base/package_api.h"
 
+#include "base/internal/port.h"
+
 #include "vm/context.h"
 #include "vm/frozen_value.h"
 #include "vm/object_handle.h"
@@ -329,6 +331,18 @@ void owner_record_latency(std::atomic<uint64_t> &total, std::atomic<uint64_t> &m
   }
 }
 
+void owner_record_thread_cpu(std::atomic<uint64_t> &total,
+                             std::atomic<uint64_t> &unavailable,
+                             int64_t started_ns) {
+  auto finished_ns = get_current_thread_cpu_time_ns();
+  if (started_ns < 0 || finished_ns < started_ns) {
+    unavailable.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+  total.fetch_add(static_cast<uint64_t>(finished_ns - started_ns),
+                  std::memory_order_relaxed);
+}
+
 void notify_owner_future_terminal() {
   auto notifier = owner_future_terminal_notifier.load(std::memory_order_acquire);
   if (notifier) {
@@ -563,12 +577,24 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
                    static_cast<long>(metrics.owner_async_lpc_execute_ns_total / 1000));
   add_mapping_pair(map, "owner_async_lpc_execute_max_us",
                    static_cast<long>(metrics.owner_async_lpc_execute_ns_max / 1000));
+  add_mapping_pair(
+      map, "owner_async_lpc_execute_thread_cpu_total_us",
+      static_cast<long>(metrics.owner_async_lpc_execute_thread_cpu_ns_total / 1000));
+  add_mapping_pair(
+      map, "owner_async_lpc_execute_thread_cpu_unavailable",
+      static_cast<long>(metrics.owner_async_lpc_execute_thread_cpu_unavailable));
   add_mapping_pair(map, "owner_async_result_completion_samples",
                    static_cast<long>(metrics.owner_async_result_completion_samples));
   add_mapping_pair(map, "owner_async_result_completion_total_us",
                    static_cast<long>(metrics.owner_async_result_completion_ns_total / 1000));
   add_mapping_pair(map, "owner_async_result_completion_max_us",
                    static_cast<long>(metrics.owner_async_result_completion_ns_max / 1000));
+  add_mapping_pair(
+      map, "owner_async_result_completion_thread_cpu_total_us",
+      static_cast<long>(metrics.owner_async_result_completion_thread_cpu_ns_total / 1000));
+  add_mapping_pair(
+      map, "owner_async_result_completion_thread_cpu_unavailable",
+      static_cast<long>(metrics.owner_async_result_completion_thread_cpu_unavailable));
   add_mapping_pair(map, "owner_executor_queue_depth_metrics_ready", 1);
   add_mapping_pair(map, "owner_executor_queue_depth", owner_mailbox_total_depth());
   add_mapping_pair(map, "owner_executor_runnable_queue_depth", owner_executor_runnable_queue_depth());
@@ -2539,13 +2565,21 @@ void dispatch_owner_message_in_current_context(const OwnerMailboxTask &task) {
     num_args = 1;
   }
   auto lpc_started_ns = owner_now_ns();
+  auto lpc_cpu_started_ns = get_current_thread_cpu_time_ns();
   auto *result = safe_apply(task.task_key.c_str(), target, num_args, ORIGIN_DRIVER);
+  owner_record_thread_cpu(owner_async_lpc_execute_thread_cpu_ns_total,
+                          owner_async_lpc_execute_thread_cpu_unavailable,
+                          lpc_cpu_started_ns);
   owner_record_latency(owner_async_lpc_execute_ns_total, owner_async_lpc_execute_ns_max,
                        owner_async_lpc_execute_samples, owner_now_ns() - lpc_started_ns);
   auto completion_started_ns = owner_now_ns();
+  auto completion_cpu_started_ns = get_current_thread_cpu_time_ns();
   if (!result) {
     clear_owner_apply_return();
     complete_owner_message_task_threadsafe(task, "failed", "", "lpc call failed");
+    owner_record_thread_cpu(owner_async_result_completion_thread_cpu_ns_total,
+                            owner_async_result_completion_thread_cpu_unavailable,
+                            completion_cpu_started_ns);
     owner_record_latency(owner_async_result_completion_ns_total, owner_async_result_completion_ns_max,
                          owner_async_result_completion_samples, owner_now_ns() - completion_started_ns);
     return;
@@ -2554,11 +2588,17 @@ void dispatch_owner_message_in_current_context(const OwnerMailboxTask &task) {
   clear_owner_apply_return();
   if (!frozen_result) {
     complete_owner_message_task_threadsafe(task, "failed", "", "owner async result must be frozen data");
+    owner_record_thread_cpu(owner_async_result_completion_thread_cpu_ns_total,
+                            owner_async_result_completion_thread_cpu_unavailable,
+                            completion_cpu_started_ns);
     owner_record_latency(owner_async_result_completion_ns_total, owner_async_result_completion_ns_max,
                          owner_async_result_completion_samples, owner_now_ns() - completion_started_ns);
     return;
   }
   complete_owner_message_task_threadsafe(task, "completed", task.task_key.c_str(), "", std::move(frozen_result));
+  owner_record_thread_cpu(owner_async_result_completion_thread_cpu_ns_total,
+                          owner_async_result_completion_thread_cpu_unavailable,
+                          completion_cpu_started_ns);
   owner_record_latency(owner_async_result_completion_ns_total, owner_async_result_completion_ns_max,
                        owner_async_result_completion_samples, owner_now_ns() - completion_started_ns);
 }

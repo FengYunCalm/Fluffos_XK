@@ -61,9 +61,13 @@
   X(owner_async_lpc_execute_ns_total, 0)                          \
   X(owner_async_lpc_execute_ns_max, 0)                            \
   X(owner_async_lpc_execute_samples, 0)                           \
+  X(owner_async_lpc_execute_thread_cpu_ns_total, 0)               \
+  X(owner_async_lpc_execute_thread_cpu_unavailable, 0)            \
   X(owner_async_result_completion_ns_total, 0)                    \
   X(owner_async_result_completion_ns_max, 0)                      \
   X(owner_async_result_completion_samples, 0)                     \
+  X(owner_async_result_completion_thread_cpu_ns_total, 0)         \
+  X(owner_async_result_completion_thread_cpu_unavailable, 0)      \
   X(owner_thread_ordinary_lpc_executed, 0)                        \
   X(owner_thread_ordinary_lpc_succeeded, 0)                       \
   X(owner_thread_ordinary_lpc_failed, 0)                          \

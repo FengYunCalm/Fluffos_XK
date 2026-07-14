@@ -1182,6 +1182,17 @@ mapping_t *gateway_status_internal() {
                              g_gateway_runtime_counters.future_watch_end_to_end_ns_total,
                              g_gateway_runtime_counters.future_watch_end_to_end_ns_max,
                              g_gateway_runtime_counters.future_watch_end_to_end_samples);
+  add_mapping_pair(
+      map, "gateway_future_watch_main_completion_thread_cpu_total_us",
+      static_cast<long>(
+          g_gateway_runtime_counters.future_watch_main_completion_thread_cpu_ns_total.load(
+              std::memory_order_relaxed) /
+          1000));
+  add_mapping_pair(
+      map, "gateway_future_watch_main_completion_thread_cpu_unavailable",
+      static_cast<long>(
+          g_gateway_runtime_counters.future_watch_main_completion_thread_cpu_unavailable.load(
+              std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_raw_writes_sent",
                    static_cast<long>(g_gateway_runtime_counters.raw_writes_sent.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_raw_writes_failed",
