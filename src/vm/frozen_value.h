@@ -19,6 +19,8 @@ struct VMFrozenValue {
 bool vm_copy_frozen_svalue(svalue_t *dest, svalue_t *source);
 std::shared_ptr<VMFrozenValue> vm_clone_frozen_value(svalue_t *source);
 bool vm_frozen_value_safe(const svalue_t *value, int depth, const char *error_prefix, std::string *error);
+bool vm_frozen_value_safe_with_max_depth(const svalue_t *value, int depth, int max_depth,
+                                         const char *error_prefix, std::string *error);
 
 #ifdef DEBUGMALLOC_EXTENSIONS
 void vm_mark_frozen_value(const VMFrozenValue *value);

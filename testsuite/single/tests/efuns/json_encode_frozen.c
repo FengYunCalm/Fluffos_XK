@@ -35,9 +35,10 @@ void do_tests() {
     ASSERT_EQ(json_encode(value), json_encode_frozen_or_zero(value));
 
     nested = 1;
-    for (index = 0; index < 8; index++)
+    for (index = 0; index < 20; index++)
         nested = ({ nested });
-    ASSERT_EQ(nested, json_decode(json_encode_frozen(nested)));
+    ASSERT_EQ(json_encode(nested), json_encode_frozen(nested));
+    ASSERT_EQ(nested, json_decode(json_encode_frozen_or_zero(nested)));
     nested = ({ nested });
     ASSERT(catch(json_encode_frozen(nested)));
     ASSERT_EQ(0, json_encode_frozen_or_zero(nested));

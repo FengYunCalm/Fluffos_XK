@@ -249,7 +249,8 @@ svalue_t json_to_svalue_plain(const nlohmann::json &value, int depth) {
 
 std::string json_encode_frozen_value(const svalue_t *value) {
   std::string validation_error;
-  if (!vm_frozen_value_safe(value, 0, "json_encode_frozen value", &validation_error)) {
+  if (!vm_frozen_value_safe_with_max_depth(value, 0, k_max_json_depth,
+                                           "json_encode_frozen value", &validation_error)) {
     error("json_encode_frozen: %s.\n", validation_error.c_str());
   }
 
@@ -262,7 +263,8 @@ std::string json_encode_frozen_value(const svalue_t *value) {
 bool try_json_encode_frozen_value(const svalue_t *value, std::string *result) {
   std::string validation_error;
   if (result == nullptr ||
-      !vm_frozen_value_safe(value, 0, "json_encode_frozen value", &validation_error)) {
+      !vm_frozen_value_safe_with_max_depth(value, 0, k_max_json_depth,
+                                           "json_encode_frozen value", &validation_error)) {
     return false;
   }
 

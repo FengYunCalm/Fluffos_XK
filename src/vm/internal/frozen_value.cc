@@ -5,6 +5,8 @@
 #include <cstring>
 
 namespace {
+constexpr int k_max_frozen_value_depth = 8;
+
 const char *safe_error_prefix(const char *error_prefix) { return error_prefix && error_prefix[0] ? error_prefix : "value"; }
 
 bool copy_frozen_array(svalue_t *dest, array_t *source) {
@@ -86,12 +88,13 @@ std::shared_ptr<VMFrozenValue> vm_clone_frozen_value(svalue_t *source) {
   return value;
 }
 
-bool vm_frozen_value_safe(const svalue_t *value, int depth, const char *error_prefix, std::string *error) {
+bool vm_frozen_value_safe_with_max_depth(const svalue_t *value, int depth, int max_depth,
+                                         const char *error_prefix, std::string *error) {
   auto prefix = safe_error_prefix(error_prefix);
   if (!value) {
     return true;
   }
-  if (depth > 8) {
+  if (depth > max_depth) {
     *error = std::string(prefix) + " nesting is too deep";
     return false;
   }
@@ -102,7 +105,8 @@ bool vm_frozen_value_safe(const svalue_t *value, int depth, const char *error_pr
       return true;
     case T_ARRAY:
       for (int i = 0; i < value->u.arr->size; i++) {
-        if (!vm_frozen_value_safe(&value->u.arr->item[i], depth + 1, error_prefix, error)) {
+        if (!vm_frozen_value_safe_with_max_depth(&value->u.arr->item[i], depth + 1,
+                                                 max_depth, error_prefix, error)) {
           return false;
         }
       }
@@ -114,7 +118,8 @@ bool vm_frozen_value_safe(const svalue_t *value, int depth, const char *error_pr
             *error = std::string(prefix) + " mapping keys must be strings";
             return false;
           }
-          if (!vm_frozen_value_safe(&node->values[1], depth + 1, error_prefix, error)) {
+          if (!vm_frozen_value_safe_with_max_depth(&node->values[1], depth + 1, max_depth,
+                                                   error_prefix, error)) {
             return false;
           }
         }
@@ -124,6 +129,12 @@ bool vm_frozen_value_safe(const svalue_t *value, int depth, const char *error_pr
       *error = std::string(prefix) + " must be frozen data, not object/function/buffer/class";
       return false;
   }
+}
+
+bool vm_frozen_value_safe(const svalue_t *value, int depth, const char *error_prefix,
+                          std::string *error) {
+  return vm_frozen_value_safe_with_max_depth(value, depth, k_max_frozen_value_depth,
+                                             error_prefix, error);
 }
 
 #ifdef DEBUGMALLOC_EXTENSIONS
