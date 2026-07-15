@@ -1797,6 +1797,23 @@ void f_json_encode_frozen() {
 }
 #endif
 
+#ifdef F_JSON_ENCODE_FROZEN_OR_ZERO
+void f_json_encode_frozen_or_zero() {
+  std::string encoded;
+  if (!try_json_encode_frozen_value(sp, &encoded)) {
+    free_svalue(sp, "f_json_encode_frozen_or_zero");
+    *sp = const0u;
+    return;
+  }
+
+  free_svalue(sp, "f_json_encode_frozen_or_zero");
+  auto *result = new_string(encoded.size(), "f_json_encode_frozen_or_zero");
+  std::memcpy(result, encoded.data(), encoded.size());
+  result[encoded.size()] = '\0';
+  put_malloced_string(result);
+}
+#endif
+
 #ifdef F_RECEIVE
 void f_receive() {
   if (sp->type == T_STRING) {

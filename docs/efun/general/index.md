@@ -19,6 +19,7 @@ title: general
 * [filter](filter.html)
 * [id_matrix](id_matrix.html)
 * [json_encode_frozen](json_encode_frozen.html)
+* [json_encode_frozen_or_zero](json_encode_frozen_or_zero.html)
 * [log10](log10.html)
 * [log2](log2.html)
 * [lookat_rotate](lookat_rotate.html)

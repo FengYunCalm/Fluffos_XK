@@ -32,6 +32,7 @@ void do_tests() {
               json_encode_frozen(({ 0.0, -1.5, 1.23456789 })));
     ASSERT_EQ("[]", json_encode_frozen(({})));
     ASSERT_EQ("{}", json_encode_frozen(([])));
+    ASSERT_EQ(json_encode(value), json_encode_frozen_or_zero(value));
 
     nested = 1;
     for (index = 0; index < 8; index++)
@@ -39,8 +40,12 @@ void do_tests() {
     ASSERT_EQ(nested, json_decode(json_encode_frozen(nested)));
     nested = ({ nested });
     ASSERT(catch(json_encode_frozen(nested)));
+    ASSERT_EQ(0, json_encode_frozen_or_zero(nested));
 
     ASSERT(catch(json_encode_frozen(this_object())));
     ASSERT(catch(json_encode_frozen(([ 1: "bad key" ]))));
     ASSERT(catch(json_encode_frozen(allocate_buffer(4))));
+    ASSERT_EQ(0, json_encode_frozen_or_zero(this_object()));
+    ASSERT_EQ(0, json_encode_frozen_or_zero(([ 1: "bad key" ])));
+    ASSERT_EQ(0, json_encode_frozen_or_zero(allocate_buffer(4)));
 }

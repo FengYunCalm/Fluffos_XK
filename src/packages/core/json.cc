@@ -259,6 +259,19 @@ std::string json_encode_frozen_value(const svalue_t *value) {
   return result;
 }
 
+bool try_json_encode_frozen_value(const svalue_t *value, std::string *result) {
+  std::string validation_error;
+  if (result == nullptr ||
+      !vm_frozen_value_safe(value, 0, "json_encode_frozen value", &validation_error)) {
+    return false;
+  }
+
+  result->clear();
+  result->reserve(256);
+  append_frozen_json_value(value, 0, result);
+  return true;
+}
+
 svalue_t read_json(const char *file) {
   char *content = read_file(file, 0, 0);
   if (!content) {

@@ -405,6 +405,7 @@ title: EFUN
 * [inherit_list](system/inherit_list.html)
 * [inherits](system/inherits.html)
 * [json_encode_frozen](general/json_encode_frozen.html)
+* [json_encode_frozen_or_zero](general/json_encode_frozen_or_zero.html)
 * [localtime](system/localtime.html)
 * [max_eval_cost](system/max_eval_cost.html)
 * [perf_counter_ns](system/perf_counter_ns.html)
