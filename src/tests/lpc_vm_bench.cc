@@ -217,6 +217,45 @@ void run_apply_cache_bench(Report &report) {
   lpc_vm_profile_set_recording(false);
 }
 
+void run_dispatch_bench(Report &report) {
+  constexpr long kWarmupIterations = 4096;
+  constexpr long kMeasuredIterations = 250000;
+  object_t *probe = clone_object_for_bench("single/void");
+  require(probe != nullptr, "failed to clone dispatch probe object");
+
+  auto direct = apply_cache_lookup("dummy", probe->prog);
+  require(direct.funp != nullptr, "dispatch probe dummy() lookup failed");
+
+  for (long i = 0; i < kWarmupIterations; i++) {
+    require(safe_apply("dummy", probe, 0, ORIGIN_DRIVER) != nullptr,
+            "dispatch apply warmup failed");
+    call_direct(probe, direct.runtime_index, ORIGIN_DRIVER, 0);
+    pop_stack();
+  }
+
+  auto apply_start = Clock::now();
+  for (long i = 0; i < kMeasuredIterations; i++) {
+    require(safe_apply("dummy", probe, 0, ORIGIN_DRIVER) != nullptr,
+            "dispatch apply probe failed");
+  }
+  const auto apply_elapsed = elapsed_ns(apply_start);
+
+  auto direct_start = Clock::now();
+  for (long i = 0; i < kMeasuredIterations; i++) {
+    call_direct(probe, direct.runtime_index, ORIGIN_DRIVER, 0);
+    pop_stack();
+  }
+  const auto direct_elapsed = elapsed_ns(direct_start);
+
+  report.add("dispatch_iterations", kMeasuredIterations);
+  report.add("dispatch_apply_elapsed_ns", apply_elapsed);
+  report.add("dispatch_apply_ns_per_call", apply_elapsed / kMeasuredIterations);
+  report.add("dispatch_call_direct_elapsed_ns", direct_elapsed);
+  report.add("dispatch_call_direct_ns_per_call", direct_elapsed / kMeasuredIterations);
+
+  destruct_object_for_bench(probe);
+}
+
 void add_profile_snapshot_metrics(Report &report, const std::string &prefix,
                                   const LpcVmProfileSnapshot &snapshot) {
   report.add(prefix + "opcode_dispatch_count", static_cast<long long>(snapshot.opcode_dispatch_count));
@@ -327,10 +366,12 @@ int main(int argc, char **argv) {
     report.add_string("mode", "diagnostic");
     report.add_string("profile_schema", kLpcVmProfileSchemaV1);
     report.add_string("dispatch_cache_probe", "apply_cache_lookup_v1");
+    report.add_string("dispatch_hot_path_probe", "apply_and_call_direct_v1");
     report.add_string("hot_path_profile_probe", "opcode_efun_call_other_mapping_string_v1");
     report.add_string("profile_comparison", "explicit_enabled_vs_disabled_same_audit_mode");
 
     run_apply_cache_bench(report);
+    run_dispatch_bench(report);
     run_hot_path_profile_bench(report, false, "profile_disabled_");
     run_hot_path_profile_bench(report, true, "");
 

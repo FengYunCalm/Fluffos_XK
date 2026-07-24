@@ -26,6 +26,10 @@
 #include <map>          // for multimap, _Rb_tree_iterator
 #include <utility>      // for pair, make_pair
 #include <algorithm>
+#include <atomic>
+#include <mutex>
+#include <unordered_set>
+#include <vector>
 
 #include "vm/vm.h"
 #include "vm/owner.h"
@@ -73,15 +77,41 @@ event_base *init_backend() {
 #else
   evthread_use_pthreads();
 #endif
-  g_event_base = event_base_new();
+  auto *event_config = event_config_new();
+  if (!event_config) {
+    fatal("Unable to allocate Libevent backend configuration.\n");
+    return nullptr;
+  }
+  struct timeval max_background_dispatch_interval {
+    static_cast<long>(kBackendBackgroundDispatchMaxInterval.count() / 1000),
+        static_cast<long>(
+            (kBackendBackgroundDispatchMaxInterval.count() % 1000) * 1000),
+  };
+  if (event_config_set_max_dispatch_interval(
+          event_config, &max_background_dispatch_interval,
+          kBackendBackgroundDispatchMaxCallbacks,
+          static_cast<int>(kBackendBackgroundDispatchMinPriority)) != 0) {
+    event_config_free(event_config);
+    fatal("Unable to configure bounded Libevent background dispatch.\n");
+    return nullptr;
+  }
+  g_event_base = event_base_new_with_config(event_config);
+  event_config_free(event_config);
+  if (!g_event_base ||
+      event_base_priority_init(g_event_base, kBackendEventPriorityLevels) != 0) {
+    fatal("Unable to initialize Libevent backend priorities.\n");
+  }
   vm_context_set_event_base(vm_context(), g_event_base);
   debug_message("Event backend in use: %s\n", event_base_get_method(g_event_base));
   return g_event_base;
 }
 
-// This the current game time, which is updated in on_virtual_time_tick. Note we use a large type
-// to avoid dealing with rollover.
-uint64_t g_current_gametick;
+namespace {
+// This is the current game time. Use a large type to avoid dealing with rollover.
+std::atomic<uint64_t> g_current_gametick{0};
+}
+
+uint64_t current_gametick() { return g_current_gametick.load(std::memory_order_relaxed); }
 
 int time_to_next_gametick(std::chrono::milliseconds msec) {
   return std::max(1, (int)(ceil(msec.count() / (double)CONFIG_INT(__RC_GAMETICK_MSEC__))));
@@ -105,15 +135,13 @@ inline struct timeval gametick_timeval() {
 }
 
 // Global structure to holding all events to be executed on gameticks.
-using TickQueue = std::multimap<decltype(g_current_gametick), TickEvent *, std::less<>>;
+using TickQueue = std::multimap<uint64_t, TickEvent *, std::less<>>;
 TickQueue g_tick_queue;
+std::mutex g_tick_queue_mutex;
 
 // Call all events for current tick
-inline void call_tick_events() {
-  // Skip if nothing to do.
-  if (g_tick_queue.empty() || g_tick_queue.begin()->first > g_current_gametick) {
-    return;
-  }
+inline size_t call_tick_events() {
+  size_t processed = 0;
   // Loop until there are no more events to run.
   //
   // NOTE: some event, like call_out(0), will add event to tick_queue during
@@ -121,37 +149,41 @@ inline void call_tick_events() {
   // left.
   while (true) {
     std::deque<TickEvent *> all_events;
-    auto iter_end = g_tick_queue.upper_bound(g_current_gametick);
-    // No more eligible events.
-    if (iter_end == g_tick_queue.begin()) {
-      break;
-    }
-    auto iter_start = g_tick_queue.begin();
+    {
+      std::lock_guard<std::mutex> lock(g_tick_queue_mutex);
+      auto iter_end = g_tick_queue.upper_bound(current_gametick());
+      // No more eligible events.
+      if (iter_end == g_tick_queue.begin()) {
+        break;
+      }
+      auto iter_start = g_tick_queue.begin();
 
-    // Extract all eligible events
-    all_events.clear();
-    for (auto iter = iter_start; iter != iter_end; iter++) {
-      all_events.push_back(iter->second);
+      // Extract and erase eligible events while the queue is stable. Callbacks run below.
+      for (auto iter = iter_start; iter != iter_end; iter++) {
+        all_events.push_back(iter->second);
+      }
+      g_tick_queue.erase(iter_start, iter_end);
     }
-    g_tick_queue.erase(iter_start, iter_end);
 
     // TODO: randomly shuffle the events
 
     for (auto *event : all_events) {
-      if (event->valid) {
+      if (event->is_valid()) {
         event->callback();
       }
       delete event;
+      processed++;
     }
   }
+  return processed;
 }
 
 void on_game_tick(evutil_socket_t /*fd*/, short /*what*/, void *arg) {
   call_tick_events();
   vm_owner_drain_main_tasks(1024);
   remove_destructed_objects_bounded(kDestructedObjectCleanupTickBudget);
-  g_current_gametick++;
-  vm_context_set_current_gametick(vm_context(), g_current_gametick);
+  auto next_gametick = g_current_gametick.fetch_add(1, std::memory_order_relaxed) + 1;
+  vm_context_set_current_gametick(vm_context(), next_gametick);
 
   auto *ev = *(reinterpret_cast<struct event **>(arg));
   auto t = gametick_timeval();
@@ -162,45 +194,135 @@ void on_game_tick(evutil_socket_t /*fd*/, short /*what*/, void *arg) {
 
 TickEvent *add_gametick_event(int delay_ticks, TickEvent::callback_type callback) {
   auto *event = new TickEvent(callback);
-  g_tick_queue.insert(TickQueue::value_type(g_current_gametick + delay_ticks, event));
+  std::lock_guard<std::mutex> lock(g_tick_queue_mutex);
+  g_tick_queue.insert(TickQueue::value_type(current_gametick() + delay_ticks, event));
   return event;
 }
 
 namespace {
-void on_walltime_event(evutil_socket_t /*fd*/, short /*what*/, void *arg) {
-  auto *event = reinterpret_cast<TickEvent *>(arg);
-  if (event->valid) {
-    event->callback();
+struct WalltimeEvent {
+  explicit WalltimeEvent(TickEvent::callback_type callback, BackendEventPriority priority)
+      : tick(callback), priority(priority) {}
+
+  TickEvent tick;
+  BackendEventPriority priority;
+  struct event *native_event{nullptr};
+};
+
+std::unordered_set<WalltimeEvent *> g_walltime_events;
+std::mutex g_walltime_events_mutex;
+
+void remove_walltime_event(WalltimeEvent *walltime_event) {
+  std::lock_guard<std::mutex> lock(g_walltime_events_mutex);
+  g_walltime_events.erase(walltime_event);
+}
+
+void destroy_walltime_event(WalltimeEvent *walltime_event) {
+  if (!walltime_event) {
+    return;
   }
-  delete event;
+  if (walltime_event->native_event) {
+    event_free(walltime_event->native_event);
+    walltime_event->native_event = nullptr;
+  }
+  delete walltime_event;
+}
+
+void on_walltime_event(evutil_socket_t /*fd*/, short /*what*/, void *arg) {
+  auto *walltime_event = reinterpret_cast<WalltimeEvent *>(arg);
+  remove_walltime_event(walltime_event);
+  if (walltime_event->tick.is_valid()) {
+    walltime_event->tick.callback();
+  }
+  destroy_walltime_event(walltime_event);
 }
 }  // namespace
 
 // Schedule a immediate event on main loop.
 TickEvent *add_walltime_event(std::chrono::milliseconds delay_msecs,
-                              TickEvent::callback_type callback) {
-  auto *event = new TickEvent(callback);
+                              TickEvent::callback_type callback,
+                              BackendEventPriority priority) {
+  if (!g_event_base) {
+    fatal("Cannot schedule walltime event without a Libevent backend.\n");
+  }
+  if (delay_msecs.count() < 0) {
+    delay_msecs = std::chrono::milliseconds(0);
+  }
+  auto *walltime_event = new WalltimeEvent(std::move(callback), priority);
+  walltime_event->native_event =
+      evtimer_new(g_event_base, on_walltime_event, walltime_event);
+  if (!walltime_event->native_event ||
+      event_priority_set(walltime_event->native_event,
+                         static_cast<int>(priority)) != 0) {
+    destroy_walltime_event(walltime_event);
+    fatal("Unable to create prioritized walltime event.\n");
+  }
+
   struct timeval val {
     (int)(delay_msecs.count() / 1000), (int)(delay_msecs.count() % 1000 * 1000),
   };
-  struct timeval *delay_ptr = nullptr;
-  if (delay_msecs.count() != 0) {
-    delay_ptr = &val;
+  {
+    std::lock_guard<std::mutex> lock(g_walltime_events_mutex);
+    g_walltime_events.insert(walltime_event);
   }
-  event_base_once(g_event_base, -1, EV_TIMEOUT, on_walltime_event, event, delay_ptr);
-  return event;
+  if (delay_msecs.count() == 0) {
+    event_active(walltime_event->native_event, EV_TIMEOUT, 1);
+  } else if (event_add(walltime_event->native_event, &val) != 0) {
+    remove_walltime_event(walltime_event);
+    destroy_walltime_event(walltime_event);
+    fatal("Unable to schedule prioritized walltime event.\n");
+  }
+  return &walltime_event->tick;
 }
 
 void clear_tick_events() {
-  int i = 0;
-  if (!g_tick_queue.empty()) {
-    for (auto &iter : g_tick_queue) {
-      delete iter.second;
-      i++;
+  TickQueue leftover_events;
+  std::vector<WalltimeEvent *> leftover_walltime_events;
+  {
+    std::lock_guard<std::mutex> lock(g_tick_queue_mutex);
+    leftover_events.swap(g_tick_queue);
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_walltime_events_mutex);
+    leftover_walltime_events.reserve(g_walltime_events.size());
+    for (auto *event : g_walltime_events) {
+      leftover_walltime_events.push_back(event);
     }
-    g_tick_queue.clear();
+    g_walltime_events.clear();
+  }
+  int i = 0;
+  for (auto &iter : leftover_events) {
+    delete iter.second;
+    i++;
+  }
+  for (auto *event : leftover_walltime_events) {
+    event->tick.cancel();
+    destroy_walltime_event(event);
+    i++;
   }
   debug_message("clear_tick_events: %d leftover events cleared.\n", i);
+}
+
+size_t tick_event_queue_size_for_test() {
+  std::lock_guard<std::mutex> lock(g_tick_queue_mutex);
+  return g_tick_queue.size();
+}
+
+size_t run_tick_events_for_test() { return call_tick_events(); }
+
+size_t walltime_event_queue_size_for_test() {
+  std::lock_guard<std::mutex> lock(g_walltime_events_mutex);
+  return g_walltime_events.size();
+}
+
+int walltime_event_priority_for_test(TickEvent *event) {
+  std::lock_guard<std::mutex> lock(g_walltime_events_mutex);
+  for (auto *walltime_event : g_walltime_events) {
+    if (&walltime_event->tick == event && walltime_event->native_event) {
+      return event_get_priority(walltime_event->native_event);
+    }
+  }
+  return -1;
 }
 
 namespace {
@@ -218,8 +340,8 @@ void call_remove_destructed_objects() {
  */
 void backend(struct event_base *base) {
   clear_state();
-  g_current_gametick = 0;
-  vm_context_set_current_gametick(vm_context(), g_current_gametick);
+  g_current_gametick.store(0, std::memory_order_relaxed);
+  vm_context_set_current_gametick(vm_context(), current_gametick());
 
   // Register various tick events
   add_gametick_event(0, TickEvent::callback_type(call_heart_beat));
@@ -240,6 +362,11 @@ void backend(struct event_base *base) {
   // Gametick provides a fixed-delay scheduling with a guaranteed minimum delay for
   // heartbeats, callouts, and various cleaning function.
   g_ev_tick = evtimer_new(base, on_game_tick, &g_ev_tick);
+  if (!g_ev_tick ||
+      event_priority_set(g_ev_tick,
+                         static_cast<int>(BackendEventPriority::kNormal)) != 0) {
+    fatal("Unable to create normal-priority gametick event.\n");
+  }
 
   auto t = gametick_timeval();
   event_add(g_ev_tick, &t);
@@ -300,7 +427,7 @@ void look_for_objects_to_swap() {
       /*
        * Check reference time before reset() is called.
        */
-      if (gametick_to_time(g_current_gametick - ob->time_of_ref) >=
+      if (gametick_to_time(current_gametick() - ob->time_of_ref) >=
           std::chrono::seconds(time_to_clean_up)) {
         ready_for_clean_up = 1;
       }
@@ -308,7 +435,7 @@ void look_for_objects_to_swap() {
         /*
          * Should this object have reset(1) called ?
          */
-        if ((ob->flags & O_WILL_RESET) && (g_current_gametick >= ob->next_reset) &&
+        if ((ob->flags & O_WILL_RESET) && (current_gametick() >= ob->next_reset) &&
             !(ob->flags & O_RESET_STATE)) {
           debug(d_flag, "RESET /%s\n", ob->obname);
           reset_object(ob);

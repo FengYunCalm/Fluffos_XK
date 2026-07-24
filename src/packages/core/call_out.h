@@ -18,6 +18,8 @@
 #endif
 #endif
 
+enum class BackendEventPriority : int;
+
 typedef struct pending_call_s {
   uint64_t target_time;
   union string_or_func function;
@@ -39,7 +41,8 @@ void clear_call_outs(void);
 void reclaim_call_outs(void);
 int find_call_out_by_handle(object_t *, LPC_INT);
 int remove_call_out_by_handle(object_t *, LPC_INT);
-LPC_INT new_call_out(object_t *, svalue_t *, std::chrono::milliseconds delay_msec, int, svalue_t *);
+LPC_INT new_call_out(object_t *, svalue_t *, std::chrono::milliseconds delay_msec, int,
+                     svalue_t *, bool, BackendEventPriority);
 int remove_call_out(object_t *, const char *);
 void remove_all_call_out(object_t *);
 int find_call_out(object_t *, const char *);

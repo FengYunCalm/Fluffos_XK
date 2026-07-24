@@ -29,6 +29,8 @@ title: EFUN
 * [call_other](calls/call_other.html)
 * [call_out](calls/call_out.html)
 * [call_out_walltime](calls/call_out_walltime.html)
+* [call_out_walltime_gateway](calls/call_out_walltime_gateway.html)
+* [call_out_walltime_background](calls/call_out_walltime_background.html)
 * [call_stack](calls/call_stack.html)
 * [catch](calls/catch.html)
 * [origin](calls/origin.html)

@@ -5,6 +5,8 @@ title: calls
 * [call_other](call_other.html)
 * [call_out](call_out.html)
 * [call_out_walltime](call_out_walltime.html)
+* [call_out_walltime_gateway](call_out_walltime_gateway.html)
+* [call_out_walltime_background](call_out_walltime_background.html)
 * [call_stack](call_stack.html)
 * [catch](catch.html)
 * [origin](origin.html)

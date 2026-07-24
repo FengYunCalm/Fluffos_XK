@@ -41,7 +41,7 @@ extern FLUFFOS_VM_THREAD_LOCAL object_t *command_giver;
 extern FLUFFOS_VM_THREAD_LOCAL object_t *current_interactive;
 
 // TODO: defined in backend.cc
-extern uint64_t g_current_gametick;
+uint64_t current_gametick();
 // Util to help translate gameticks with time.
 int time_to_next_gametick(std::chrono::milliseconds msec);
 std::chrono::milliseconds gametick_to_time(int ticks);

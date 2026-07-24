@@ -46,6 +46,9 @@
 #ifdef PACKAGE_DB
 void db_cleanup(void);  // FIXME
 #endif
+#ifdef PACKAGE_GATEWAY
+#include "packages/gateway/gateway.h"
+#endif
 #ifdef PACKAGE_SOCKETS
 #include "packages/sockets/socket_efuns.h"
 #endif
@@ -188,6 +191,9 @@ void shutdownMudOS(int exit_code) {
 
   /* clean up heap allocations so valgrind don't consider them lost.*/
   reset_machine(0);
+#ifdef PACKAGE_GATEWAY
+  cleanup_gateway();
+#endif
   clear_call_outs();
   clear_tick_events();
   clear_heartbeats();
@@ -2270,7 +2276,7 @@ void do_message(svalue_t *lclass, svalue_t *msg, array_t *scope, array_t *exclud
 }
 
 void try_reset(object_t *ob) {
-  if ((ob->next_reset < g_current_gametick) && !(ob->flags & O_RESET_STATE)) {
+  if ((ob->next_reset < current_gametick()) && !(ob->flags & O_RESET_STATE)) {
     debug(d_flag, "(lazy) RESET /%s\n", ob->obname);
 
     /* need to set the flag here to prevent infinite loops in apply_low */

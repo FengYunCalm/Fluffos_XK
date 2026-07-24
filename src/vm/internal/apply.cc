@@ -198,16 +198,14 @@ static int apply_low_impl(const char *fun, object_t *ob, int num_arg) {
   }
   bool owner_controlled_lpc = false;
   if constexpr (context_tracking_enabled) {
-    owner_controlled_lpc = !vm_context_is_main_thread() &&
-                           (vm_context().owner.lpc_canary_active ||
-                            vm_context().owner.controlled_lpc_active);
+    owner_controlled_lpc = vm_context_is_owner_controlled_lpc();
   }
   if (!owner_controlled_lpc) {
-    ob->time_of_ref = g_current_gametick; /* Used by the swapper */
-                                          /*
-                                           * This object will now be used, and is thus a target for reset later on
-                                           * (when time due).
-                                           */
+    ob->time_of_ref = vm_context().current_gametick; /* Used by the swapper */
+                                                     /*
+                                                      * This object will now be used, and is thus a target for reset later on
+                                                      * (when time due).
+                                                      */
     if (!CONFIG_INT(__RC_NO_RESETS__) && CONFIG_INT(__RC_LAZY_RESETS__)) {
       try_reset(ob);
     }
