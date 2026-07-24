@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+#include <event2/buffer.h>
+#include <event2/bufferevent.h>
 #include <event2/event.h>
 #include <atomic>
 #include <cerrno>
@@ -7,6 +9,7 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -47,6 +50,7 @@ extern uint64_t vm_owner_enqueue_command_frame_restore(object_t* target);
 extern bool vm_object_store_test_support_remove_live_object_ref_for_bridge_readiness(const char* owner_id,
                                                                                     uint64_t object_id);
 extern bool vm_call_out_test_support_run_handle(LPC_INT handle);
+extern int vm_call_out_test_support_priority(LPC_INT handle);
 extern bool vm_async_test_support_dispatch_read_callback(object_t* owner, const char* method, const char* payload);
 
 namespace {
@@ -57,6 +61,10 @@ extern bool vm_dns_test_support_dispatch_callback(object_t* owner, const char* m
 extern bool vm_socket_test_support_dispatch_callback(object_t* owner, const char* method, LPC_INT fd);
 extern int replace_interactive(object_t *ob, object_t *obfrom);
 extern bool gateway_dispatch_message_for_test(int fd, const char *payload);
+extern int gateway_dispatch_buffered_frames_for_test(GatewayMaster *master, int budget);
+extern void gateway_set_read_dispatch_pending_for_test(GatewayMaster *master, bool pending);
+extern void gateway_service_admitted_receive_tasks_for_test();
+extern bool gateway_master_has_buffered_input_for_test(const GatewayMaster *master);
 
 namespace {
 OwnerFutureRecord owner_future_store_test_record(uint64_t future_id, uint64_t target_task_id) {
@@ -341,6 +349,18 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
 
   mapping_t* status = gateway_status_internal();
   ASSERT_NE(status, nullptr);
+  ASSERT_EQ(mapping_number(status, "gateway_event_priority_levels"), 3);
+  ASSERT_EQ(mapping_number(status, "gateway_normal_event_priority"), 0);
+  ASSERT_EQ(mapping_number(status, "gateway_io_event_priority"), 1);
+  ASSERT_EQ(mapping_number(status,
+                           "gateway_background_dispatch_max_interval_us"),
+            2000);
+  ASSERT_EQ(mapping_number(status,
+                           "gateway_background_dispatch_max_callbacks"),
+            8);
+  ASSERT_EQ(mapping_number(status,
+                           "gateway_background_dispatch_min_priority"),
+            1);
   ASSERT_EQ(mapping_number(status, "session_fifo_contract_ready"), 1);
   ASSERT_GE(mapping_number(status, "session_fifo_depth"), 0);
   ASSERT_GE(mapping_number(status, "session_fifo_pending_reservations"), 0);
@@ -366,7 +386,20 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_command_tasks_finished"), 0);
   ASSERT_GE(mapping_number(status, "gateway_command_tasks_stale"), 0);
   ASSERT_GE(mapping_number(status, "gateway_command_tasks_cleared"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_input_pending_sessions"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_task_pending_sessions"), 0);
   ASSERT_GE(mapping_number(status, "gateway_command_pending_sessions"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_read_dispatch_pending_masters"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_buffered_input_pending_masters"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_command_pressure"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_queue_pending"), 0);
+  ASSERT_EQ(mapping_number(status, "gateway_main_queue_read_high_watermark"), 96);
+  ASSERT_EQ(mapping_number(status, "gateway_main_queue_read_low_watermark"), 32);
+  ASSERT_GE(mapping_number(status, "gateway_main_queue_read_admission_limited"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_queue_read_pressure_events"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_queue_read_paused"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_queue_read_resumed"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_queue_read_paused_masters"), 0);
   ASSERT_GE(mapping_number(status, "gateway_reply_tasks_enqueued"), 0);
   ASSERT_GE(mapping_number(status, "gateway_reply_tasks_inline_fallbacks"), 0);
   ASSERT_GE(mapping_number(status, "gateway_reply_reschedule_cmd_in_buf"), 0);
@@ -377,6 +410,9 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_filled"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_released"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_reservation_misses"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_fifo_head_blocked_fills"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_fifo_head_blocked_predecessors_total"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_fifo_head_blocked_predecessors_max"), 0);
   ASSERT_GE(mapping_number(status, "gateway_future_watch_pending"), 0);
   ASSERT_GE(mapping_number(status, "gateway_generic_future_watch_pending"), 0);
   ASSERT_GE(mapping_number(status, "gateway_generic_future_watches_registered"), 0);
@@ -427,6 +463,47 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_scheduled"), 0);
   ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_coalesced"), 0);
   ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_executed"), 0);
+  ASSERT_EQ(mapping_number(status, "gateway_main_drain_deferred_task_budget"), 64);
+  ASSERT_EQ(mapping_number(status, "gateway_main_drain_deferred_base_wall_budget_us"), 24000);
+  ASSERT_EQ(mapping_number(status, "gateway_main_drain_deferred_backlog_wall_budget_us"), 48000);
+  ASSERT_EQ(mapping_number(status, "gateway_main_drain_deferred_backlog_threshold"), 64);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_backlog_boosted"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_tasks_total"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_tasks_max"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_wall_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_wall_total_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_wall_avg_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_wall_max_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_wall_budget_yields"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_task_budget_yields"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_remaining_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_remaining_total"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_remaining_avg"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_remaining_max"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_main_task_wall_max_us"), 0);
+  ASSERT_GE(mapping_number(status,
+                           "gateway_main_drain_deferred_main_tasks_exceeding_wall_budget"),
+            0);
+  ASSERT_EQ(mapping_number(status, "gateway_read_batch_drain_task_budget"), 32);
+  ASSERT_EQ(mapping_number(status, "gateway_read_batch_drain_wall_budget_us"), 12000);
+  ASSERT_GE(mapping_number(status, "gateway_read_batch_drain_runs"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_read_batch_drain_tasks_total"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_read_batch_drain_tasks_max"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_read_batch_drain_backlog_rescheduled"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_read_batch_drain_main_task_wall_max_us"), 0);
+  ASSERT_GE(mapping_number(status,
+                           "gateway_read_batch_drain_main_tasks_exceeding_wall_budget"),
+            0);
+  ASSERT_EQ(mapping_number(status, "gateway_read_dispatch_budget"), 128);
+  ASSERT_GE(mapping_number(status, "gateway_read_dispatch_runs"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_read_dispatch_frames_total"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_read_dispatch_frames_max"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_read_dispatch_budget_hits"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_read_dispatch_deferred_scheduled"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_read_dispatch_deferred_coalesced"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_read_dispatch_deferred_executed"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_read_dispatch_input_paused"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_read_dispatch_input_resumed"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_inline_drain_calls"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_deferred_drain_requests"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_main_queue_depth_samples"), 0);
@@ -437,6 +514,9 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_wait_total_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_wait_avg_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_wait_max_us"), 0);
+  ASSERT_EQ(mapping_number(status,
+                           "gateway_main_drain_deferred_wait_timer_queue_only"),
+            1);
   ASSERT_GE(mapping_number(status, "gateway_receive_decode_samples"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_decode_avg_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_decode_max_us"), 0);
@@ -447,8 +527,14 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_receive_enqueue_to_dispatch_avg_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_enqueue_to_dispatch_max_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_apply_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_apply_total_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_apply_avg_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_apply_max_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_apply_thread_cpu_samples"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_apply_thread_cpu_total_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_apply_thread_cpu_avg_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_apply_thread_cpu_max_us"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_receive_apply_thread_cpu_unavailable"), 0);
   ASSERT_GE(mapping_number(status, "gateway_command_enqueue_to_dispatch_samples"), 0);
   ASSERT_GE(mapping_number(status, "gateway_command_enqueue_to_dispatch_avg_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_command_enqueue_to_dispatch_max_us"), 0);
@@ -482,18 +568,29 @@ TEST_F(DriverTest, TestGatewayOutputReservationBlocksAndPreservesFifo) {
 
   GatewaySession session;
   session.master_fd = 77;
-  auto reservation_id = gateway_reserve_session_output(&session);
-  ASSERT_GT(reservation_id, 0u);
-  ASSERT_EQ(gateway_enqueue_session_output(&session, "second"), 1);
+  auto first_reservation_id = gateway_reserve_session_output(&session);
+  auto second_reservation_id = gateway_reserve_session_output(&session);
+  ASSERT_GT(first_reservation_id, 0u);
+  ASSERT_GT(second_reservation_id, 0u);
+  auto blocked_fills_before =
+      g_gateway_runtime_counters.output_fifo_head_blocked_fills.load(std::memory_order_relaxed);
+  auto blocked_predecessors_before =
+      g_gateway_runtime_counters.output_fifo_head_blocked_predecessors_total.load(std::memory_order_relaxed);
+  ASSERT_EQ(gateway_fill_session_output_with_writer(&session, second_reservation_id, "second", writer), 1);
   ASSERT_EQ(session.output_fifo.size(), 2u);
   ASSERT_FALSE(session.output_fifo.front().ready);
   ASSERT_TRUE(session.output_fifo.back().ready);
-
-  ASSERT_EQ(gateway_flush_session_output_fifo_with_writer(&session, writer), 0);
   ASSERT_TRUE(writes.empty());
-  ASSERT_EQ(session.output_fifo.size(), 2u);
+  ASSERT_EQ(g_gateway_runtime_counters.output_fifo_head_blocked_fills.load(std::memory_order_relaxed),
+            blocked_fills_before + 1);
+  ASSERT_EQ(g_gateway_runtime_counters.output_fifo_head_blocked_predecessors_total.load(
+                std::memory_order_relaxed),
+            blocked_predecessors_before + 1);
+  ASSERT_GE(g_gateway_runtime_counters.output_fifo_head_blocked_predecessors_max.load(
+                std::memory_order_relaxed),
+            1u);
 
-  ASSERT_EQ(gateway_fill_session_output_with_writer(&session, reservation_id, "first", writer), 1);
+  ASSERT_EQ(gateway_fill_session_output_with_writer(&session, first_reservation_id, "first", writer), 1);
   ASSERT_EQ(writes, (std::vector<std::string>{"first", "second"}));
   ASSERT_TRUE(session.output_fifo.empty());
 }
@@ -531,6 +628,40 @@ TEST_F(DriverTest, TestGatewayOutputReservationIdsDoNotRepeatAcrossSessions) {
   ASSERT_NE(first_id, second_id);
 }
 
+TEST_F(DriverTest, TestGatewayPreencodedChatBatchBuilderKeepsStableAndDynamicBoundaries) {
+  const std::vector<std::string> stable_children{
+      "{\"content\":\"first\",\"direction\":\"incoming\"}",
+      "{\"content\":\"第二条\",\"direction\":\"incoming\"}",
+  };
+  const auto frame = gateway_encode_preencoded_chat_batch_for_test(
+      stable_children, 7, 101, 123456,
+      "{\"meta\":{\"server_seq\":100,\"stream\":\"message\"}}");
+
+  ASSERT_EQ(
+      frame,
+      "\x1bXKBACH{\"messages\":[{\"type\":\"CHAT\",\"payload\":{\"content\":\"first\","
+      "\"direction\":\"incoming\",\"meta\":{\"stream\":\"message\",\"server_seq\":101,"
+      "\"sent_at\":123456,\"priority\":\"normal\",\"epoch\":7,"
+      "\"reliability\":\"important\"}}},{\"type\":\"CHAT\",\"payload\":{"
+      "\"content\":\"第二条\",\"direction\":\"incoming\",\"meta\":{\"stream\":\"message\","
+      "\"server_seq\":102,\"sent_at\":123456,\"priority\":\"normal\",\"epoch\":7,"
+      "\"reliability\":\"important\"}}}],\"meta\":{\"server_seq\":100,"
+      "\"stream\":\"message\"}}\x1b\n");
+  ASSERT_TRUE(gateway_encode_preencoded_chat_batch_for_test(
+                  {"[]"}, 7, 101, 123456, "{\"meta\":{}}")
+                  .empty());
+  ASSERT_TRUE(gateway_encode_preencoded_chat_batch_for_test(
+                  stable_children, -1, 101, 123456, "{\"meta\":{}}")
+                  .empty());
+  ASSERT_TRUE(gateway_encode_preencoded_chat_batch_for_test(
+                  stable_children, 7, std::numeric_limits<LPC_INT>::max(),
+                  123456, "{\"meta\":{}}")
+                  .empty());
+  ASSERT_TRUE(gateway_encode_preencoded_chat_batch_for_test(
+                  stable_children, 7, 101, 123456, "[]")
+                  .empty());
+}
+
 TEST_F(DriverTest, TestGatewayReceiveDoesNotDrainMainTasksInsideReadCallback) {
   const auto source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
   const auto apply_pos = source.find("void gateway_apply_receive");
@@ -539,11 +670,449 @@ TEST_F(DriverTest, TestGatewayReceiveDoesNotDrainMainTasksInsideReadCallback) {
   ASSERT_NE(next_function_pos, std::string::npos);
 
   const auto apply_source = source.substr(apply_pos, next_function_pos - apply_pos);
+  const auto event_base_pos = apply_source.find("if (g_event_base) {");
+  const auto fallback_pos = apply_source.find("\n    } else {", event_base_pos);
   ASSERT_EQ(apply_source.find("vm_owner_drain_main_tasks"), std::string::npos);
   ASSERT_NE(apply_source.find("vm_owner_enqueue_main_task"), std::string::npos);
+  ASSERT_NE(event_base_pos, std::string::npos);
+  ASSERT_NE(fallback_pos, std::string::npos);
+  const auto event_base_source =
+      apply_source.substr(event_base_pos, fallback_pos - event_base_pos);
+  ASSERT_EQ(event_base_source.find("gateway_drain_owner_main_tasks_later"),
+            std::string::npos);
+  ASSERT_EQ(event_base_source.find("gateway_drain_owner_main_tasks_now"),
+            std::string::npos);
+  ASSERT_EQ(apply_source.find("vm_owner_executor_available"), std::string::npos);
 }
 
-TEST_F(DriverTest, TestGatewayMasterListenerEnablesTcpNoDelay) {
+TEST_F(DriverTest, TestGatewayReadBatchDrainsAdmittedTasksBeforeDeferredRemainder) {
+  const auto source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
+  const auto header = read_source_file_for_test("../src/packages/gateway/gateway.h");
+
+  const auto helper_pos = source.find("void gateway_service_admitted_receive_tasks()");
+  const auto helper_end = source.find("\nvoid gateway_apply_receive", helper_pos);
+  ASSERT_NE(helper_pos, std::string::npos);
+  ASSERT_NE(helper_end, std::string::npos);
+  const auto helper_source = source.substr(helper_pos, helper_end - helper_pos);
+  ASSERT_NE(helper_source.find("gateway_drain_owner_main_tasks_with_budget("),
+            std::string::npos);
+  ASSERT_NE(helper_source.find("kGatewayReadBatchMainDrainBudget"),
+            std::string::npos);
+  ASSERT_NE(helper_source.find("kGatewayReadBatchMainDrainWallBudget"),
+            std::string::npos);
+  ASSERT_NE(helper_source.find("drain_result.remaining_main_tasks > 0"),
+            std::string::npos);
+  ASSERT_NE(helper_source.find("gateway_drain_owner_main_tasks_later()"),
+            std::string::npos);
+  ASSERT_NE(source.find(
+                "kGatewayDeferredMainDrainContinuationDelay = std::chrono::milliseconds(1)"),
+            std::string::npos);
+  ASSERT_NE(source.find("gateway_deferred_main_drain_wall_budget(backlog_before)"),
+            std::string::npos);
+  ASSERT_NE(source.find("kGatewayDeferredMainDrainBaseWallBudget = std::chrono::milliseconds(24)"),
+            std::string::npos);
+  ASSERT_NE(source.find("kGatewayDeferredMainDrainBacklogWallBudget = std::chrono::milliseconds(48)"),
+            std::string::npos);
+  ASSERT_NE(source.find("kGatewayDeferredMainDrainBacklogThreshold = 64"),
+            std::string::npos);
+  ASSERT_NE(source.find("kGatewayDeferredMainDrainWaitTimerQueueOnly = 1"),
+            std::string::npos);
+
+  const auto deferred_pos = source.find("void gateway_drain_owner_main_tasks_later()");
+  const auto deferred_end = source.find("\nvoid gateway_service_admitted_receive_tasks", deferred_pos);
+  ASSERT_NE(deferred_pos, std::string::npos);
+  ASSERT_NE(deferred_end, std::string::npos);
+  const auto deferred_source = source.substr(deferred_pos, deferred_end - deferred_pos);
+  ASSERT_NE(deferred_source.find("add_walltime_event("), std::string::npos);
+  ASSERT_NE(deferred_source.find("kGatewayDeferredMainDrainContinuationDelay"),
+            std::string::npos);
+  ASSERT_NE(deferred_source.find("BackendEventPriority::kGateway"),
+            std::string::npos);
+  const auto callback_started = deferred_source.find("auto callback_started_at = gateway_now_ns();");
+  const auto drain_call = deferred_source.find("gateway_drain_owner_main_tasks_with_budget(");
+  const auto wait_sample = deferred_source.find("callback_started_at - scheduled_at");
+  ASSERT_NE(callback_started, std::string::npos);
+  ASSERT_NE(drain_call, std::string::npos);
+  ASSERT_NE(wait_sample, std::string::npos);
+  ASSERT_LT(callback_started, drain_call);
+  ASSERT_LT(drain_call, wait_sample);
+  ASSERT_EQ(deferred_source.find("gateway_now_ns() - scheduled_at"),
+            std::string::npos);
+
+  const auto schedule_pos = source.find("void gateway_schedule_buffered_read");
+  const auto readcb_pos = source.find("void gateway_readcb", schedule_pos);
+  ASSERT_NE(schedule_pos, std::string::npos);
+  ASSERT_NE(readcb_pos, std::string::npos);
+  const auto schedule_source = source.substr(schedule_pos, readcb_pos - schedule_pos);
+  const auto continuation_dispatch = schedule_source.find(
+      "gateway_dispatch_buffered_frames(scheduled_master,");
+  const auto continuation_service = schedule_source.find(
+      "gateway_service_admitted_receive_tasks();", continuation_dispatch);
+  ASSERT_NE(continuation_dispatch, std::string::npos);
+  ASSERT_NE(continuation_service, std::string::npos);
+
+  const auto listener_pos = source.find("\nvoid gateway_listener_cb", readcb_pos);
+  ASSERT_NE(listener_pos, std::string::npos);
+  const auto readcb_source = source.substr(readcb_pos, listener_pos - readcb_pos);
+  const auto read_dispatch = readcb_source.find(
+      "gateway_dispatch_buffered_frames(master, kGatewayReadFrameBudget)");
+  const auto read_service = readcb_source.find(
+      "gateway_service_admitted_receive_tasks();", read_dispatch);
+  ASSERT_NE(read_dispatch, std::string::npos);
+  ASSERT_NE(read_service, std::string::npos);
+
+  for (const auto *field : {
+           "read_batch_drain_runs",
+           "read_batch_drain_tasks_total",
+           "read_batch_drain_tasks_max",
+           "read_batch_drain_backlog_rescheduled",
+           "read_batch_drain_wall_ns_total",
+           "read_batch_drain_wall_ns_max",
+           "read_batch_drain_wall_samples",
+           "read_batch_drain_wall_budget_yields",
+           "read_batch_drain_task_budget_yields",
+           "read_batch_drain_remaining_total",
+           "read_batch_drain_remaining_max",
+           "read_batch_drain_remaining_samples",
+           "read_batch_drain_main_task_wall_ns_max",
+           "read_batch_drain_main_tasks_exceeding_wall_budget",
+           "main_drain_deferred_backlog_boosted",
+           "main_drain_deferred_tasks_total",
+           "main_drain_deferred_tasks_max",
+           "main_drain_deferred_wall_ns_total",
+           "main_drain_deferred_wall_ns_max",
+           "main_drain_deferred_wall_samples",
+           "main_drain_deferred_wall_budget_yields",
+           "main_drain_deferred_task_budget_yields",
+           "main_drain_deferred_remaining_total",
+           "main_drain_deferred_remaining_max",
+           "main_drain_deferred_remaining_samples",
+           "main_drain_deferred_main_task_wall_ns_max",
+           "main_drain_deferred_main_tasks_exceeding_wall_budget",
+       }) {
+    ASSERT_NE(header.find(field), std::string::npos) << field;
+  }
+}
+
+TEST_F(DriverTest, TestGatewayCommandPendingCountUsesAtomicSessionLifecycle) {
+  const auto source =
+      read_source_file_for_test("../src/packages/gateway/gateway_session.cc");
+  const auto count_pos = source.find("long gateway_session_command_pending_count()");
+  const auto count_end = source.find("\nuint64_t gateway_session_fifo_enqueued_total", count_pos);
+  const auto unbind_pos = source.find("void gateway_unbind_session_object");
+  const auto unbind_end = source.find("\nvoid gateway_cleanup_master_sessions", unbind_pos);
+  const auto cleanup_pos = source.find("void cleanup_gateway_sessions()");
+  const auto cleanup_end = source.find("\nvoid f_gateway_session_send", cleanup_pos);
+
+  ASSERT_NE(source.find("std::atomic<long> g_gateway_command_input_pending_sessions{0}"),
+            std::string::npos);
+  ASSERT_NE(source.find("std::atomic<long> g_gateway_command_task_pending_sessions{0}"),
+            std::string::npos);
+  ASSERT_NE(source.find("void gateway_release_command_input_pending(GatewaySession *sess)"),
+            std::string::npos);
+  ASSERT_NE(source.find("void gateway_release_command_task_pending(GatewaySession *sess)"),
+            std::string::npos);
+  ASSERT_NE(source.find("g_gateway_command_input_pending_sessions.fetch_add("),
+            std::string::npos);
+  ASSERT_NE(source.find("g_gateway_command_task_pending_sessions.fetch_add("),
+            std::string::npos);
+  ASSERT_NE(count_pos, std::string::npos);
+  ASSERT_NE(count_end, std::string::npos);
+  const auto count_source = source.substr(count_pos, count_end - count_pos);
+  ASSERT_NE(count_source.find("gateway_session_command_input_pending_count()"),
+            std::string::npos);
+  ASSERT_NE(count_source.find("gateway_session_command_task_pending_count()"),
+            std::string::npos);
+  ASSERT_EQ(count_source.find("g_gateway_sessions"), std::string::npos);
+
+  ASSERT_NE(unbind_pos, std::string::npos);
+  ASSERT_NE(unbind_end, std::string::npos);
+  const auto unbind_source = source.substr(unbind_pos, unbind_end - unbind_pos);
+  ASSERT_NE(unbind_source.find("gateway_release_command_input_pending(sess);"),
+            std::string::npos);
+  ASSERT_NE(unbind_source.find("gateway_release_command_task_pending(sess);"),
+            std::string::npos);
+  ASSERT_LT(unbind_source.find("gateway_release_command_task_pending(sess);"),
+            unbind_source.find("g_gateway_sessions.erase(session_id);"));
+
+  ASSERT_NE(cleanup_pos, std::string::npos);
+  ASSERT_NE(cleanup_end, std::string::npos);
+  const auto cleanup_source = source.substr(cleanup_pos, cleanup_end - cleanup_pos);
+  ASSERT_NE(cleanup_source.find(
+                "g_gateway_command_input_pending_sessions.store(0, std::memory_order_release);"),
+            std::string::npos);
+  ASSERT_NE(cleanup_source.find(
+                "g_gateway_command_task_pending_sessions.store(0, std::memory_order_release);"),
+            std::string::npos);
+}
+
+TEST_F(DriverTest, TestGatewayReadDispatchPressureIsTransitionCountedAndUnderflowSafe) {
+  const auto before = gateway_read_dispatch_pending_count();
+  {
+    GatewayMaster master;
+    gateway_set_read_dispatch_pending_for_test(&master, true);
+    ASSERT_EQ(gateway_read_dispatch_pending_count(), before + 1);
+    gateway_set_read_dispatch_pending_for_test(&master, true);
+    ASSERT_EQ(gateway_read_dispatch_pending_count(), before + 1);
+    ASSERT_GE(gateway_command_pressure_count(), before + 1);
+    gateway_set_read_dispatch_pending_for_test(&master, false);
+    ASSERT_EQ(gateway_read_dispatch_pending_count(), before);
+    gateway_set_read_dispatch_pending_for_test(&master, false);
+    ASSERT_EQ(gateway_read_dispatch_pending_count(), before);
+    gateway_set_read_dispatch_pending_for_test(&master, true);
+    ASSERT_EQ(gateway_read_dispatch_pending_count(), before + 1);
+  }
+  ASSERT_EQ(gateway_read_dispatch_pending_count(), before);
+}
+
+TEST_F(DriverTest, TestGatewayBufferedInputPressureRequiresACompleteFrame) {
+  GatewayMaster master;
+  const std::string payload = R"({"type":"hello"})";
+  const auto size = static_cast<uint32_t>(payload.size());
+  const auto frame = [&] {
+    std::string encoded;
+    encoded.push_back(static_cast<char>((size >> 24) & 0xff));
+    encoded.push_back(static_cast<char>((size >> 16) & 0xff));
+    encoded.push_back(static_cast<char>((size >> 8) & 0xff));
+    encoded.push_back(static_cast<char>(size & 0xff));
+    encoded += payload;
+    return encoded;
+  }();
+
+  master.read_buffer.append(frame.data(), sizeof(uint32_t));
+  master.read_buffer += payload.substr(0, payload.size() - 1);
+  ASSERT_FALSE(gateway_master_has_buffered_input_for_test(&master));
+
+  master.read_buffer += payload.substr(payload.size() - 1);
+  ASSERT_TRUE(gateway_master_has_buffered_input_for_test(&master));
+
+  GatewayMaster native_master;
+  bufferevent *pair[2] = {nullptr, nullptr};
+  ASSERT_EQ(bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, pair), 0);
+  ASSERT_NE(pair[0], nullptr);
+  ASSERT_NE(pair[1], nullptr);
+  native_master.bev = pair[0];
+  ASSERT_EQ(bufferevent_enable(pair[0], EV_READ), 0);
+  ASSERT_EQ(bufferevent_enable(pair[1], EV_WRITE), 0);
+  auto *native_input = bufferevent_get_input(pair[0]);
+  ASSERT_NE(native_input, nullptr);
+  const auto pump_until = [&](size_t expected) {
+    for (int attempt = 0;
+         attempt < 8 && evbuffer_get_length(native_input) < expected;
+         ++attempt) {
+      event_base_loop(g_event_base, EVLOOP_ONCE | EVLOOP_NONBLOCK);
+    }
+    ASSERT_EQ(evbuffer_get_length(native_input), expected);
+  };
+
+  ASSERT_EQ(bufferevent_write(pair[1], frame.data(), frame.size() - 1), 0);
+  pump_until(frame.size() - 1);
+  ASSERT_FALSE(gateway_master_has_buffered_input_for_test(&native_master));
+  ASSERT_EQ(bufferevent_write(pair[1], frame.data() + frame.size() - 1, 1), 0);
+  pump_until(frame.size());
+  ASSERT_TRUE(gateway_master_has_buffered_input_for_test(&native_master));
+
+  ASSERT_EQ(evbuffer_drain(native_input, frame.size()), 0);
+  native_master.read_buffer.assign(frame.data(), 2);
+  ASSERT_EQ(bufferevent_write(pair[1], frame.data() + 2, frame.size() - 2), 0);
+  pump_until(frame.size() - 2);
+  ASSERT_TRUE(gateway_master_has_buffered_input_for_test(&native_master));
+
+  bufferevent_free(pair[1]);
+}
+
+TEST_F(DriverTest, TestGatewayMainQueueReadAdmissionUsesComposedHighLowWaterBackpressure) {
+  const auto source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
+  const auto header = read_source_file_for_test("../src/packages/gateway/gateway.h");
+  const auto spec = read_source_file_for_test("../src/packages/gateway/gateway.spec");
+
+  ASSERT_NE(source.find("constexpr long kGatewayMainQueueReadHighWatermark = 96"),
+            std::string::npos);
+  ASSERT_NE(source.find("constexpr long kGatewayMainQueueReadLowWatermark = 32"),
+            std::string::npos);
+  ASSERT_NE(header.find("GATEWAY_READ_PAUSE_BUFFERED_BACKLOG"), std::string::npos);
+  ASSERT_NE(header.find("GATEWAY_READ_PAUSE_MAIN_QUEUE"), std::string::npos);
+  ASSERT_NE(header.find("uint8_t read_dispatch_pause_reasons{0}"), std::string::npos);
+
+  const auto dispatch_pos = source.find("int gateway_dispatch_buffered_frames");
+  const auto dispatch_end = source.find("\nvoid gateway_record_read_dispatch", dispatch_pos);
+  ASSERT_NE(dispatch_pos, std::string::npos);
+  ASSERT_NE(dispatch_end, std::string::npos);
+  const auto dispatch_source = source.substr(dispatch_pos, dispatch_end - dispatch_pos);
+  ASSERT_NE(dispatch_source.find("gateway_main_queue_admission_budget(budget)"),
+            std::string::npos);
+  ASSERT_NE(dispatch_source.find("gateway_pause_all_reads_for_main_queue_pressure()"),
+            std::string::npos);
+
+  const auto deferred_pos = source.find("void gateway_drain_owner_main_tasks_later");
+  const auto deferred_end = source.find("\nvoid gateway_service_admitted_receive_tasks",
+                                        deferred_pos);
+  ASSERT_NE(deferred_pos, std::string::npos);
+  ASSERT_NE(deferred_end, std::string::npos);
+  const auto deferred_source = source.substr(deferred_pos, deferred_end - deferred_pos);
+  ASSERT_NE(deferred_source.find(
+                "gateway_resume_main_queue_reads_if_below_low_watermark();"),
+            std::string::npos);
+
+  const auto service_pos = source.find("void gateway_service_admitted_receive_tasks");
+  const auto service_end = source.find("\nvoid gateway_apply_receive", service_pos);
+  ASSERT_NE(service_pos, std::string::npos);
+  ASSERT_NE(service_end, std::string::npos);
+  const auto service_source = source.substr(service_pos, service_end - service_pos);
+  ASSERT_NE(service_source.find(
+                "gateway_resume_main_queue_reads_if_below_low_watermark();"),
+            std::string::npos);
+
+  ASSERT_NE(source.find("long gateway_main_queue_pending_count()"), std::string::npos);
+  ASSERT_NE(spec.find("int gateway_main_queue_pending();"), std::string::npos);
+  ASSERT_NE(source.find("long gateway_buffered_input_pending_count()"),
+            std::string::npos);
+  ASSERT_NE(spec.find("int gateway_buffered_input_pending();"),
+            std::string::npos);
+  ASSERT_NE(source.find("bufferevent_get_input(master->bev)"),
+            std::string::npos);
+  ASSERT_NE(source.find("evbuffer_copyout("), std::string::npos);
+  ASSERT_NE(source.find("static_cast<ev_ssize_t>"), std::string::npos);
+  const auto efun_pos = source.find("void f_gateway_main_queue_pending()");
+  const auto efun_end = source.find("\nvoid f_gateway_status()", efun_pos);
+  ASSERT_NE(efun_pos, std::string::npos);
+  ASSERT_NE(efun_end, std::string::npos);
+  ASSERT_NE(source.substr(efun_pos, efun_end - efun_pos)
+                .find("gateway_main_queue_pending_count()"),
+            std::string::npos);
+
+  const auto buffered_efun_pos = source.find("void f_gateway_buffered_input_pending()");
+  ASSERT_NE(buffered_efun_pos, std::string::npos);
+  ASSERT_NE(source.substr(buffered_efun_pos)
+                .find("gateway_buffered_input_pending_count()"),
+            std::string::npos);
+
+  const auto pressure_pos = source.find("long gateway_command_pressure_count()");
+  const auto pressure_end = source.find("\nlong gateway_main_queue_pending_count", pressure_pos);
+  ASSERT_NE(pressure_pos, std::string::npos);
+  ASSERT_NE(pressure_end, std::string::npos);
+  ASSERT_EQ(source.substr(pressure_pos, pressure_end - pressure_pos)
+                .find("gateway_main_queue_pending_count()"),
+            std::string::npos);
+}
+
+TEST_F(DriverTest, TestGatewayReadCallbackYieldsBoundedFrameBatches) {
+  const auto source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
+  const auto header = read_source_file_for_test("../src/packages/gateway/gateway.h");
+
+  ASSERT_NE(source.find("constexpr int kGatewayReadFrameBudget = 128"), std::string::npos);
+  ASSERT_NE(source.find("constexpr auto kGatewayReadContinuationDelay = std::chrono::milliseconds(1)"),
+            std::string::npos);
+  ASSERT_NE(header.find("bool read_dispatch_scheduled{false}"), std::string::npos);
+  ASSERT_NE(header.find("bool read_dispatch_input_paused{false}"), std::string::npos);
+  ASSERT_NE(source.find("gateway_dispatch_buffered_frames(master, kGatewayReadFrameBudget)"),
+            std::string::npos);
+  ASSERT_NE(source.find("gateway_schedule_buffered_read(master->fd)"), std::string::npos);
+  ASSERT_NE(source.find("g_gateway_masters.find(fd)"), std::string::npos);
+
+  const auto schedule_pos = source.find("void gateway_schedule_buffered_read");
+  const auto readcb_pos = source.find("void gateway_readcb", schedule_pos);
+  ASSERT_NE(schedule_pos, std::string::npos);
+  ASSERT_NE(readcb_pos, std::string::npos);
+  const auto schedule_source = source.substr(schedule_pos, readcb_pos - schedule_pos);
+  ASSERT_NE(schedule_source.find("gateway_pause_buffered_read(master);"), std::string::npos);
+  ASSERT_NE(schedule_source.find("gateway_resume_buffered_read(scheduled_master);"),
+            std::string::npos);
+  ASSERT_NE(schedule_source.find("add_walltime_event("), std::string::npos);
+  ASSERT_NE(schedule_source.find("kGatewayReadContinuationDelay"),
+            std::string::npos);
+  ASSERT_EQ(schedule_source.find("std::chrono::milliseconds(0)"),
+            std::string::npos);
+  ASSERT_NE(schedule_source.find("BackendEventPriority::kGateway"),
+            std::string::npos);
+  ASSERT_NE(source.find("void gateway_pause_buffered_read"), std::string::npos);
+  ASSERT_NE(source.find("bufferevent_disable(master->bev, EV_READ)"), std::string::npos);
+  ASSERT_NE(source.find("void gateway_resume_buffered_read"), std::string::npos);
+  ASSERT_NE(source.find("bufferevent_enable(master->bev, EV_READ)"), std::string::npos);
+}
+
+TEST_F(DriverTest, TestGatewayBufferedReadParserUsesCursorInsteadOfPerFrameFrontErase) {
+  const auto source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
+  const auto header = read_source_file_for_test("../src/packages/gateway/gateway.h");
+  const auto parser_pos = source.find("int gateway_dispatch_buffered_frames");
+  const auto parser_end = source.find("\nvoid gateway_record_read_dispatch", parser_pos);
+
+  ASSERT_NE(parser_pos, std::string::npos);
+  ASSERT_NE(parser_end, std::string::npos);
+  ASSERT_NE(header.find("size_t read_buffer_offset{0}"), std::string::npos);
+  const auto parser_source = source.substr(parser_pos, parser_end - parser_pos);
+  ASSERT_NE(parser_source.find("read_buffer_offset"), std::string::npos);
+  ASSERT_NE(parser_source.find("gateway_compact_read_buffer"), std::string::npos);
+  ASSERT_EQ(parser_source.find("read_buffer.erase(0, sizeof(uint32_t) + frame_len)"),
+            std::string::npos);
+}
+
+TEST_F(DriverTest, TestGatewayBufferedReadParserHonorsFrameBudgetAndOrder) {
+  GatewayMaster master;
+  master.fd = -1;
+  const auto append_frame = [&master](const std::string &payload) {
+    const auto size = static_cast<uint32_t>(payload.size());
+    master.read_buffer.push_back(static_cast<char>((size >> 24) & 0xff));
+    master.read_buffer.push_back(static_cast<char>((size >> 16) & 0xff));
+    master.read_buffer.push_back(static_cast<char>((size >> 8) & 0xff));
+    master.read_buffer.push_back(static_cast<char>(size & 0xff));
+    master.read_buffer += payload;
+  };
+  for (int index = 0; index < 5; index++) {
+    append_frame(R"({"type":"hello"})");
+  }
+  const auto buffered_size = master.read_buffer.size();
+
+  ASSERT_EQ(gateway_dispatch_buffered_frames_for_test(&master, 2), 2);
+  ASSERT_EQ(master.messages_received, 2u);
+  ASSERT_GT(master.read_buffer_offset, 0u);
+  ASSERT_EQ(master.read_buffer.size(), buffered_size);
+  ASSERT_FALSE(master.read_buffer.empty());
+  ASSERT_EQ(gateway_dispatch_buffered_frames_for_test(&master, 2), 2);
+  ASSERT_EQ(master.messages_received, 4u);
+  ASSERT_GT(master.read_buffer_offset, 0u);
+  ASSERT_EQ(master.read_buffer.size(), buffered_size);
+  ASSERT_FALSE(master.read_buffer.empty());
+  ASSERT_EQ(gateway_dispatch_buffered_frames_for_test(&master, 2), 1);
+  ASSERT_EQ(master.messages_received, 5u);
+  ASSERT_EQ(master.read_buffer_offset, 0u);
+  ASSERT_TRUE(master.read_buffer.empty());
+}
+
+TEST_F(DriverTest, TestGatewayBufferedReadParserPreservesPartialFramesAndChargesBadJson) {
+  const auto frame_for = [](const std::string &payload) {
+    const auto size = static_cast<uint32_t>(payload.size());
+    std::string frame;
+    frame.push_back(static_cast<char>((size >> 24) & 0xff));
+    frame.push_back(static_cast<char>((size >> 16) & 0xff));
+    frame.push_back(static_cast<char>((size >> 8) & 0xff));
+    frame.push_back(static_cast<char>(size & 0xff));
+    frame += payload;
+    return frame;
+  };
+
+  GatewayMaster master;
+  master.fd = -1;
+  const auto complete_tail = frame_for(R"({"type":"hello"})");
+  master.read_buffer = frame_for(R"({"type":"hello"})") + frame_for("{") +
+                       complete_tail.substr(0, 7);
+
+  ASSERT_EQ(gateway_dispatch_buffered_frames_for_test(&master, 2), 2);
+  ASSERT_EQ(master.messages_received, 1u);
+  ASSERT_EQ(master.read_buffer, complete_tail.substr(0, 7));
+
+  master.read_buffer += complete_tail.substr(7);
+  ASSERT_EQ(gateway_dispatch_buffered_frames_for_test(&master, 2), 1);
+  ASSERT_EQ(master.messages_received, 2u);
+  ASSERT_TRUE(master.read_buffer.empty());
+
+  GatewayMaster invalid_length;
+  invalid_length.fd = -1;
+  invalid_length.read_buffer.assign(sizeof(uint32_t), '\0');
+  ASSERT_EQ(gateway_dispatch_buffered_frames_for_test(&invalid_length, 2), -1);
+}
+
+TEST_F(DriverTest, TestGatewayMasterListenerEnablesTcpNoDelayAndGatewayPriority) {
   const auto source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
   const auto listener_pos = source.find("void gateway_listener_cb");
   ASSERT_NE(listener_pos, std::string::npos);
@@ -553,6 +1122,9 @@ TEST_F(DriverTest, TestGatewayMasterListenerEnablesTcpNoDelay) {
   const auto listener_source = source.substr(listener_pos, listener_end - listener_pos);
   ASSERT_NE(source.find("setsockopt(fd, IPPROTO_TCP, TCP_NODELAY"), std::string::npos);
   ASSERT_NE(listener_source.find("gateway_enable_master_tcp_nodelay(fd)"), std::string::npos);
+  ASSERT_NE(listener_source.find("bufferevent_priority_set("), std::string::npos);
+  ASSERT_NE(listener_source.find("BackendEventPriority::kGateway"),
+            std::string::npos);
 }
 
 TEST_F(DriverTest, TestGatewayLoginRunsThroughOwnerMainQueue) {
@@ -751,6 +1323,24 @@ TEST_F(DriverTest, TestGatewayFutureCompletionExposesMainThreadCpuCounter) {
             std::string::npos);
 }
 
+TEST_F(DriverTest, TestGatewayReceiveApplyExposesMainThreadCpuCounter) {
+  const auto gateway_header = read_source_file_for_test("../src/packages/gateway/gateway.h");
+  const auto gateway_source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
+  const auto gateway_status = read_source_file_for_test("../src/packages/gateway/gateway.cc");
+
+  ASSERT_NE(gateway_header.find("receive_apply_thread_cpu_ns_total"), std::string::npos);
+  ASSERT_NE(gateway_header.find("receive_apply_thread_cpu_ns_max"), std::string::npos);
+  ASSERT_NE(gateway_header.find("receive_apply_thread_cpu_samples"), std::string::npos);
+  ASSERT_NE(gateway_header.find("receive_apply_thread_cpu_unavailable"), std::string::npos);
+  ASSERT_NE(gateway_source.find("auto apply_cpu_started_at = get_current_thread_cpu_time_ns()"),
+            std::string::npos);
+  ASSERT_NE(gateway_source.find("gateway_record_thread_cpu("), std::string::npos);
+  ASSERT_NE(gateway_status.find("gateway_receive_apply_total_us"), std::string::npos);
+  ASSERT_NE(gateway_status.find("gateway_receive_apply_thread_cpu_total_us"), std::string::npos);
+  ASSERT_NE(gateway_status.find("gateway_receive_apply_thread_cpu_unavailable"),
+            std::string::npos);
+}
+
 TEST_F(DriverTest, TestSaveSvalueDepthIsThreadLocal) {
   save_svalue_depth = 41;
   std::atomic<int> worker_depth{0};
@@ -840,7 +1430,7 @@ TEST_F(DriverTest, TestCompileDumpProgWorks) {
 
 TEST_F(DriverTest, TestVmContextTracksTopLevelState) {
   ASSERT_EQ(vm_context().event_loop, g_event_base);
-  ASSERT_EQ(vm_context().current_gametick, g_current_gametick);
+  ASSERT_EQ(vm_context().current_gametick, current_gametick());
   ASSERT_EQ(vm_context().execution.current_object, nullptr);
   ASSERT_EQ(vm_context().execution.command_giver, nullptr);
   ASSERT_EQ(vm_context().execution.current_interactive, nullptr);
@@ -860,6 +1450,261 @@ TEST_F(DriverTest, TestVmContextTracksTopLevelState) {
   ASSERT_EQ(vm_context().object_store.destructed_objects, obj_list_destruct);
   ASSERT_EQ(vm_context().object_store.load_object_depth, 0);
   ASSERT_EQ(vm_context().object_store.restricted_destruct_object, nullptr);
+}
+
+TEST_F(DriverTest, TestGameTickQueueSupportsConcurrentProducersAndFullDrain) {
+  clear_tick_events();
+  struct TickQueueGuard {
+    ~TickQueueGuard() { clear_tick_events(); }
+  } tick_queue_guard;
+  constexpr int kProducerCount = 8;
+  constexpr int kEventsPerProducer = 2000;
+  constexpr size_t kExpectedEvents = kProducerCount * kEventsPerProducer;
+  std::atomic<bool> start{false};
+  std::atomic<size_t> callbacks{0};
+  std::vector<std::thread> producers;
+  producers.reserve(kProducerCount);
+
+  for (int producer = 0; producer < kProducerCount; producer++) {
+    producers.emplace_back([&] {
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      for (int event = 0; event < kEventsPerProducer; event++) {
+        add_gametick_event(0, [&] { callbacks.fetch_add(1, std::memory_order_relaxed); });
+      }
+    });
+  }
+
+  start.store(true, std::memory_order_release);
+  for (auto &producer : producers) {
+    producer.join();
+  }
+
+  ASSERT_EQ(tick_event_queue_size_for_test(), kExpectedEvents);
+  ASSERT_EQ(run_tick_events_for_test(), kExpectedEvents);
+  ASSERT_EQ(callbacks.load(std::memory_order_relaxed), kExpectedEvents);
+  ASSERT_EQ(tick_event_queue_size_for_test(), 0u);
+}
+
+TEST_F(DriverTest, TestGameTickQueueRunsReentrantCallbacksOutsideLockAndHonorsCancellation) {
+  clear_tick_events();
+  struct TickQueueGuard {
+    ~TickQueueGuard() { clear_tick_events(); }
+  } tick_queue_guard;
+  std::atomic<int> callbacks{0};
+
+  add_gametick_event(0, [&] {
+    callbacks.fetch_add(1, std::memory_order_relaxed);
+    add_gametick_event(0, [&] { callbacks.fetch_add(1, std::memory_order_relaxed); });
+  });
+  auto *cancelled = add_gametick_event(
+      0, [&] { callbacks.fetch_add(100, std::memory_order_relaxed); });
+  cancelled->cancel();
+
+  ASSERT_EQ(run_tick_events_for_test(), 3u);
+  ASSERT_EQ(callbacks.load(std::memory_order_relaxed), 2);
+  ASSERT_EQ(tick_event_queue_size_for_test(), 0u);
+}
+
+TEST_F(DriverTest, TestWalltimeEventsExposeThreePrioritiesAndCleanup) {
+  clear_tick_events();
+  struct TickQueueGuard {
+    ~TickQueueGuard() { clear_tick_events(); }
+  } tick_queue_guard;
+
+  ASSERT_EQ(event_base_get_npriorities(g_event_base), kBackendEventPriorityLevels);
+  auto *normal = add_walltime_event(std::chrono::hours(1), [] {});
+  auto *gateway = add_walltime_event(
+      std::chrono::hours(1), [] {}, BackendEventPriority::kGateway);
+  auto *background = add_walltime_event(
+      std::chrono::hours(1), [] {}, BackendEventPriority::kBackground);
+
+  ASSERT_NE(normal, nullptr);
+  ASSERT_NE(gateway, nullptr);
+  ASSERT_NE(background, nullptr);
+  ASSERT_EQ(walltime_event_queue_size_for_test(), 3u);
+  ASSERT_EQ(walltime_event_priority_for_test(normal),
+            static_cast<int>(BackendEventPriority::kNormal));
+  ASSERT_EQ(walltime_event_priority_for_test(gateway),
+            static_cast<int>(BackendEventPriority::kGateway));
+  ASSERT_EQ(walltime_event_priority_for_test(background),
+            static_cast<int>(BackendEventPriority::kBackground));
+
+  normal->cancel();
+  gateway->cancel();
+  background->cancel();
+  clear_tick_events();
+  ASSERT_EQ(walltime_event_queue_size_for_test(), 0u);
+}
+
+TEST_F(DriverTest, TestPrioritizedWalltimeCalloutsPreserveHandleLifecycle) {
+  clear_call_outs();
+  clear_tick_events();
+  struct CalloutGuard {
+    ~CalloutGuard() {
+      clear_call_outs();
+      clear_tick_events();
+    }
+  } callout_guard;
+
+  auto *obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+  auto call_number = [](const char *method, object_t *target) -> long {
+    auto *ret = safe_apply(method, target, 0, ORIGIN_DRIVER);
+    EXPECT_NE(ret, nullptr);
+    EXPECT_EQ(ret ? ret->type : T_INVALID, T_NUMBER);
+    return ret && ret->type == T_NUMBER ? ret->u.number : -1;
+  };
+
+  const auto normal_handle =
+      static_cast<LPC_INT>(call_number("start_walltime_callout_probe", obj));
+  const auto gateway_handle = static_cast<LPC_INT>(
+      call_number("start_gateway_walltime_callout_probe", obj));
+  const auto background_handle = static_cast<LPC_INT>(
+      call_number("start_background_walltime_callout_probe", obj));
+  ASSERT_GT(normal_handle, 0);
+  ASSERT_GT(gateway_handle, 0);
+  ASSERT_GT(background_handle, 0);
+  ASSERT_EQ(vm_call_out_test_support_priority(normal_handle),
+            static_cast<int>(BackendEventPriority::kNormal));
+  ASSERT_EQ(vm_call_out_test_support_priority(gateway_handle),
+            static_cast<int>(BackendEventPriority::kGateway));
+  ASSERT_EQ(vm_call_out_test_support_priority(background_handle),
+            static_cast<int>(BackendEventPriority::kBackground));
+  ASSERT_GE(find_call_out_by_handle(obj, normal_handle), 0);
+  ASSERT_GE(find_call_out_by_handle(obj, gateway_handle), 0);
+  ASSERT_GE(find_call_out_by_handle(obj, background_handle), 0);
+
+  ASSERT_GE(remove_call_out_by_handle(obj, normal_handle), 0);
+  ASSERT_GE(remove_call_out_by_handle(obj, gateway_handle), 0);
+  ASSERT_GE(remove_call_out_by_handle(obj, background_handle), 0);
+  ASSERT_EQ(vm_call_out_test_support_priority(normal_handle), -1);
+  ASSERT_EQ(vm_call_out_test_support_priority(gateway_handle), -1);
+  ASSERT_EQ(vm_call_out_test_support_priority(background_handle), -1);
+}
+
+TEST_F(DriverTest, TestGatewayPriorityPreemptsQueuedBackgroundWarmups) {
+  struct PriorityProbe {
+    event *gateway_event{nullptr};
+    int background_callbacks{0};
+    int gateway_observed_after{-1};
+  } probe;
+  std::vector<event *> background_events;
+  constexpr int kBackgroundEvents = 4;
+
+  probe.gateway_event = evtimer_new(
+      g_event_base,
+      [](evutil_socket_t, short, void *arg) {
+        auto *state = static_cast<PriorityProbe *>(arg);
+        state->gateway_observed_after = state->background_callbacks;
+      },
+      &probe);
+  ASSERT_NE(probe.gateway_event, nullptr);
+  ASSERT_EQ(event_priority_set(
+                probe.gateway_event,
+                static_cast<int>(BackendEventPriority::kGateway)),
+            0);
+
+  for (int i = 0; i < kBackgroundEvents; ++i) {
+    auto *background_event = evtimer_new(
+        g_event_base,
+        [](evutil_socket_t, short, void *arg) {
+          auto *state = static_cast<PriorityProbe *>(arg);
+          state->background_callbacks++;
+          if (state->background_callbacks == 1) {
+            event_active(state->gateway_event, EV_TIMEOUT, 1);
+          }
+        },
+        &probe);
+    ASSERT_NE(background_event, nullptr);
+    ASSERT_EQ(event_priority_set(
+                  background_event,
+                  static_cast<int>(BackendEventPriority::kBackground)),
+              0);
+    background_events.push_back(background_event);
+    event_active(background_event, EV_TIMEOUT, 1);
+  }
+
+  ASSERT_EQ(event_base_loop(g_event_base, EVLOOP_ONCE | EVLOOP_NONBLOCK), 0);
+  ASSERT_EQ(probe.gateway_observed_after, 1);
+  ASSERT_EQ(probe.background_callbacks, kBackgroundEvents);
+
+  for (auto *background_event : background_events) {
+    event_free(background_event);
+  }
+  event_free(probe.gateway_event);
+}
+
+TEST_F(DriverTest, TestBackgroundDispatchRepollsBeforeDrainingWholeActiveQueue) {
+  struct DispatchProbe {
+    event *normal_event{nullptr};
+    int background_callbacks{0};
+    int normal_observed_after{-1};
+  } probe;
+  std::vector<event *> background_events;
+  constexpr int kBackgroundEvents = kBackendBackgroundDispatchMaxCallbacks * 2;
+
+  probe.normal_event = evtimer_new(
+      g_event_base,
+      [](evutil_socket_t, short, void *arg) {
+        auto *state = static_cast<DispatchProbe *>(arg);
+        state->normal_observed_after = state->background_callbacks;
+      },
+      &probe);
+  ASSERT_NE(probe.normal_event, nullptr);
+  ASSERT_EQ(event_priority_set(
+                probe.normal_event,
+                static_cast<int>(BackendEventPriority::kNormal)),
+            0);
+
+  for (int i = 0; i < kBackgroundEvents; ++i) {
+    auto *background_event = evtimer_new(
+        g_event_base,
+        [](evutil_socket_t, short, void *arg) {
+          auto *state = static_cast<DispatchProbe *>(arg);
+          state->background_callbacks++;
+          if (state->background_callbacks == 1) {
+            timeval due_now{};
+            ASSERT_EQ(event_add(state->normal_event, &due_now), 0);
+          }
+        },
+        &probe);
+    ASSERT_NE(background_event, nullptr);
+    ASSERT_EQ(event_priority_set(
+                  background_event,
+                  static_cast<int>(BackendEventPriority::kBackground)),
+              0);
+    background_events.push_back(background_event);
+    event_active(background_event, EV_TIMEOUT, 1);
+  }
+
+  ASSERT_EQ(event_base_loop(g_event_base, EVLOOP_ONCE | EVLOOP_NONBLOCK), 0);
+  ASSERT_EQ(probe.background_callbacks, kBackgroundEvents);
+  ASSERT_GT(probe.normal_observed_after, 0);
+  ASSERT_LE(probe.normal_observed_after,
+            kBackendBackgroundDispatchMaxCallbacks);
+
+  for (auto *background_event : background_events) {
+    event_free(background_event);
+  }
+  event_free(probe.normal_event);
+}
+
+TEST_F(DriverTest, TestGatewayCleanupPrecedesGlobalWalltimeEventDestruction) {
+  const auto source =
+      read_source_file_for_test("../src/vm/internal/simulate.cc");
+  const auto shutdown_pos = source.find("void shutdownMudOS(int exit_code)");
+  const auto gateway_cleanup_pos = source.find("cleanup_gateway();", shutdown_pos);
+  const auto callout_cleanup_pos = source.find("clear_call_outs();", shutdown_pos);
+  const auto tick_cleanup_pos = source.find("clear_tick_events();", shutdown_pos);
+
+  ASSERT_NE(shutdown_pos, std::string::npos);
+  ASSERT_NE(gateway_cleanup_pos, std::string::npos);
+  ASSERT_NE(callout_cleanup_pos, std::string::npos);
+  ASSERT_NE(tick_cleanup_pos, std::string::npos);
+  ASSERT_LT(gateway_cleanup_pos, callout_cleanup_pos);
+  ASSERT_LT(callout_cleanup_pos, tick_cleanup_pos);
 }
 
 TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
@@ -2066,6 +2911,53 @@ TEST_F(DriverTest, TestVmOwnerMainQueueDispatchesWithOwnerScope) {
 
   vm_owner_clear_id(obj);
   destruct_object(obj);
+}
+
+TEST_F(DriverTest, TestVmOwnerMainDrainWallBudgetYieldsAfterFirstTask) {
+  current_object = master_ob;
+  ASSERT_EQ(vm_owner_drain_main_tasks(1024), 0);
+  object_t* first = clone_object_for_test("single/void");
+  object_t* second = clone_object_for_test("single/void");
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  vm_owner_set_id(first, "owner/test/main-wall-budget/first");
+  vm_owner_set_id(second, "owner/test/main-wall-budget/second");
+
+  int first_ran = 0;
+  int second_ran = 0;
+  ASSERT_GT(vm_owner_enqueue_main_task(first, "unit_main", "wall-budget-first", [&] {
+              first_ran++;
+              auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds(3);
+              while (std::chrono::steady_clock::now() < deadline) {
+              }
+            }),
+            0u);
+  ASSERT_GT(vm_owner_enqueue_main_task(second, "unit_main", "wall-budget-second",
+                                       [&] { second_ran++; }),
+            0u);
+
+  auto result = vm_owner_drain_main_tasks_with_budget(64, 500000);
+  ASSERT_EQ(result.dispatched, 1);
+  ASSERT_EQ(result.remaining_main_tasks, 1);
+  ASSERT_EQ(result.remaining_cleanup_tasks, 0);
+  ASSERT_GE(result.elapsed_ns, 500000u);
+  ASSERT_GE(result.max_main_task_elapsed_ns, 500000u);
+  ASSERT_EQ(result.main_tasks_exceeding_wall_budget, 1);
+  ASSERT_TRUE(result.wall_budget_yielded);
+  ASSERT_FALSE(result.task_budget_yielded);
+  ASSERT_EQ(first_ran, 1);
+  ASSERT_EQ(second_ran, 0);
+
+  ASSERT_EQ(vm_owner_drain_main_tasks(64), 1);
+  ASSERT_EQ(first_ran, 1);
+  ASSERT_EQ(second_ran, 1);
+  ASSERT_EQ(vm_owner_main_queue_total_depth(), 0);
+
+  vm_owner_clear_id(first);
+  vm_owner_clear_id(second);
+  destruct_object(first);
+  destruct_object(second);
 }
 
 TEST_F(DriverTest, TestVmOwnerMainQueueDropsStaleOwnerEpoch) {
@@ -11571,6 +12463,33 @@ TEST_F(DriverTest, TestGatewaySessionDestroyAllowsNetDeadSelfDestruct) {
   free_object(&ob, "TestGatewaySessionDestroyAllowsNetDeadSelfDestruct");
 }
 
+TEST_F(DriverTest, TestGatewayOutputEnvelopeFastPathIsByteEquivalent) {
+  const std::vector<std::pair<std::string, std::string>> cases = {
+      {"plain-session", "plain XK frame"},
+      {"quote\"slash\\session", "line1\nline2\t\"quoted\"\\tail"},
+      {"control", std::string("zero\0one\b\ftwo\r", 14)},
+      {"utf8-session-\xe4\xbc\x9a\xe8\xaf\x9d", "\xe4\xbe\xa0\xe5\xae\xa2\xe8\xa1\x8c\xe4\xb8\xad"},
+  };
+
+  for (const auto &[session_id, data] : cases) {
+    nlohmann::json expected{
+        {"type", "output"},
+        {"cid", session_id},
+        {"data", data},
+    };
+    ASSERT_EQ(gateway_encode_output_envelope_for_test(
+                  session_id, data.data(), data.size()),
+              expected.dump());
+  }
+
+  const std::string invalid_utf8{"\xc3\x28", 2};
+  EXPECT_THROW(gateway_encode_output_envelope_for_test("invalid", invalid_utf8.data(),
+                                                        invalid_utf8.size()),
+               nlohmann::json::type_error);
+  EXPECT_THROW(gateway_encode_output_envelope_for_test(invalid_utf8, "frame", 5),
+               nlohmann::json::type_error);
+}
+
 TEST_F(DriverTest, TestGatewayMasterReconnectRebindsExistingSessionWithoutLosingState) {
   static std::vector<std::pair<int, std::string>> writes;
   writes.clear();
@@ -11625,7 +12544,7 @@ TEST_F(DriverTest, TestGatewayMasterReconnectRebindsExistingSessionWithoutLosing
   ASSERT_TRUE(gateway_dispatch_message_for_test(
       new_master_fd,
       R"({"type":"data","cid":"gw-test-master-reconnect","data":{"cmd":"current"}})"));
-  ASSERT_EQ(vm_owner_drain_main_tasks(8), 0);
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
   payload = call_lpc_method(ob, "query_last_gateway_payload");
   ASSERT_NE(payload, nullptr);
   ASSERT_EQ(payload->type, T_MAPPING);
@@ -11699,7 +12618,8 @@ TEST_F(DriverTest, TestGatewayReceiveRunsThroughOwnerMainQueue) {
 
   ASSERT_TRUE(gateway_dispatch_message_for_test(
       -1, R"({"type":"data","cid":"gw-test-receive","data":{"cmd":"look","seq":7}})"));
-  ASSERT_EQ(vm_owner_drain_main_tasks(1), 0);
+  ASSERT_EQ(vm_owner_main_queue_total_depth(), 1);
+  ASSERT_EQ(vm_owner_drain_main_tasks(1), 1);
 
   auto *payload = call_lpc_method(ob, "query_last_gateway_payload");
   ASSERT_NE(payload, nullptr);
@@ -11750,7 +12670,7 @@ TEST_F(DriverTest, TestGatewayReceiveRunsThroughOwnerMainQueue) {
   free_object(&ob, "TestGatewayReceiveRunsThroughOwnerMainQueue");
 }
 
-TEST_F(DriverTest, TestGatewayReceiveUsesBoundedInlineDrainWhenOwnerThreadsAvailable) {
+TEST_F(DriverTest, TestGatewayReceiveDefersMainDrainWhenEventBaseIsAvailable) {
   auto *ob = create_gateway_session_for_test("gw-test-receive-threaded", "/clone/gateway_login_example");
   ASSERT_NE(ob, nullptr);
   ASSERT_NE(ob->interactive, nullptr);
@@ -11778,6 +12698,10 @@ TEST_F(DriverTest, TestGatewayReceiveUsesBoundedInlineDrainWhenOwnerThreadsAvail
   auto before_inline_drain_calls = mapping_number(before_status, "gateway_receive_inline_drain_calls");
   auto before_receive_deferred_requests = mapping_number(before_status, "gateway_receive_deferred_drain_requests");
   auto before_queue_depth_samples = mapping_number(before_status, "gateway_receive_main_queue_depth_samples");
+  auto before_apply_samples = mapping_number(before_status, "gateway_receive_apply_samples");
+  auto before_apply_cpu_samples = mapping_number(before_status, "gateway_receive_apply_thread_cpu_samples");
+  auto before_apply_cpu_unavailable =
+      mapping_number(before_status, "gateway_receive_apply_thread_cpu_unavailable");
   free_mapping(before_status);
 
   vm_owner_thread_start(1);
@@ -11792,6 +12716,30 @@ TEST_F(DriverTest, TestGatewayReceiveUsesBoundedInlineDrainWhenOwnerThreadsAvail
       -1, R"({"type":"data","cid":"gw-test-receive-threaded","data":{"cmd":"look","seq":9}})"));
 
   auto *payload = call_lpc_method(ob, "query_last_gateway_payload");
+  ASSERT_NE(payload, nullptr);
+  ASSERT_EQ(payload->type, T_NUMBER);
+  ASSERT_EQ(payload->u.number, 0);
+
+  auto *queued_status = gateway_status_internal();
+  ASSERT_NE(queued_status, nullptr);
+  ASSERT_GE(mapping_number(queued_status, "gateway_receive_tasks_enqueued"),
+            before_receive_enqueued + 1);
+  ASSERT_EQ(mapping_number(queued_status, "gateway_receive_tasks_dispatched"),
+            before_receive_dispatched);
+  ASSERT_EQ(mapping_number(queued_status, "gateway_main_drain_runs"),
+            before_main_drain_runs);
+  ASSERT_EQ(mapping_number(queued_status, "gateway_receive_inline_drain_calls"),
+            before_inline_drain_calls);
+  ASSERT_GE(mapping_number(queued_status, "gateway_receive_deferred_drain_requests"),
+            before_receive_deferred_requests + 1);
+  ASSERT_GE(mapping_number(queued_status, "gateway_receive_main_queue_depth_samples"),
+            before_queue_depth_samples + 1);
+  free_mapping(queued_status);
+
+  ASSERT_EQ(vm_owner_main_queue_total_depth(), 1);
+  ASSERT_EQ(vm_owner_drain_main_tasks(1), 1);
+
+  payload = call_lpc_method(ob, "query_last_gateway_payload");
   ASSERT_NE(payload, nullptr);
   ASSERT_EQ(payload->type, T_MAPPING);
   ASSERT_STREQ(mapping_string(payload->u.map, "cmd"), "look");
@@ -11808,12 +12756,21 @@ TEST_F(DriverTest, TestGatewayReceiveUsesBoundedInlineDrainWhenOwnerThreadsAvail
   ASSERT_NE(after_status, nullptr);
   ASSERT_GE(mapping_number(after_status, "gateway_receive_tasks_enqueued"), before_receive_enqueued + 1);
   ASSERT_GE(mapping_number(after_status, "gateway_receive_tasks_dispatched"), before_receive_dispatched + 1);
-  ASSERT_GE(mapping_number(after_status, "gateway_main_drain_runs"), before_main_drain_runs + 1);
-  ASSERT_GE(mapping_number(after_status, "gateway_receive_inline_drain_calls"), before_inline_drain_calls + 1);
+  ASSERT_EQ(mapping_number(after_status, "gateway_main_drain_runs"), before_main_drain_runs);
+  ASSERT_EQ(mapping_number(after_status, "gateway_receive_inline_drain_calls"), before_inline_drain_calls);
   ASSERT_GE(mapping_number(after_status, "gateway_receive_deferred_drain_requests"),
             before_receive_deferred_requests + 1);
   ASSERT_GE(mapping_number(after_status, "gateway_receive_main_queue_depth_samples"),
             before_queue_depth_samples + 1);
+  auto apply_samples_delta =
+      mapping_number(after_status, "gateway_receive_apply_samples") - before_apply_samples;
+  auto apply_cpu_samples_delta = mapping_number(after_status, "gateway_receive_apply_thread_cpu_samples") -
+                                 before_apply_cpu_samples;
+  auto apply_cpu_unavailable_delta =
+      mapping_number(after_status, "gateway_receive_apply_thread_cpu_unavailable") -
+      before_apply_cpu_unavailable;
+  ASSERT_GE(apply_samples_delta, 1);
+  ASSERT_EQ(apply_samples_delta, apply_cpu_samples_delta + apply_cpu_unavailable_delta);
   free_mapping(after_status);
 
   auto *trace = vm_owner_task_trace(32);
@@ -11845,11 +12802,80 @@ TEST_F(DriverTest, TestGatewayReceiveUsesBoundedInlineDrainWhenOwnerThreadsAvail
   free_mapping(trace);
   ASSERT_EQ(vm_owner_drain_main_tasks(1), 0);
 
-  add_ref(ob, "TestGatewayReceiveUsesBoundedInlineDrainWhenOwnerThreadsAvailable");
+  add_ref(ob, "TestGatewayReceiveDefersMainDrainWhenEventBaseIsAvailable");
   ASSERT_EQ(gateway_destroy_session_internal("gw-test-receive-threaded", "test_done", "done"), 1);
   ASSERT_EQ(ob->interactive, nullptr);
   destruct_object(ob);
-  free_object(&ob, "TestGatewayReceiveUsesBoundedInlineDrainWhenOwnerThreadsAvailable");
+  free_object(&ob, "TestGatewayReceiveDefersMainDrainWhenEventBaseIsAvailable");
+}
+
+TEST_F(DriverTest, TestGatewayReadBatchDrainServicesAdmittedReceiveTask) {
+  auto *ob = create_gateway_session_for_test("gw-test-read-batch-drain",
+                                             "/clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  ASSERT_NE(ob->interactive, nullptr);
+
+  auto mapping_number = [](mapping_t *map, const char *key) -> long {
+    auto *value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+
+  auto *before = gateway_status_internal();
+  ASSERT_NE(before, nullptr);
+  auto before_runs = mapping_number(before, "gateway_read_batch_drain_runs");
+  auto before_tasks =
+      mapping_number(before, "gateway_read_batch_drain_tasks_total");
+  auto before_backlog = mapping_number(
+      before, "gateway_read_batch_drain_backlog_rescheduled");
+  auto before_wall_samples =
+      mapping_number(before, "gateway_read_batch_drain_wall_samples");
+  auto before_remaining_samples =
+      mapping_number(before, "gateway_read_batch_drain_remaining_samples");
+  auto before_remaining_total =
+      mapping_number(before, "gateway_read_batch_drain_remaining_total");
+  free_mapping(before);
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1,
+      R"({"type":"data","cid":"gw-test-read-batch-drain","data":{"cmd":"look","seq":11}})"));
+  ASSERT_EQ(vm_owner_main_queue_total_depth(), 1);
+
+  gateway_service_admitted_receive_tasks_for_test();
+  ASSERT_EQ(vm_owner_main_queue_total_depth(), 0);
+
+  auto *payload = call_lpc_method(ob, "query_last_gateway_payload");
+  ASSERT_NE(payload, nullptr);
+  ASSERT_EQ(payload->type, T_MAPPING);
+  ASSERT_EQ(mapping_number(payload->u.map, "seq"), 11);
+
+  auto *after = gateway_status_internal();
+  ASSERT_NE(after, nullptr);
+  ASSERT_EQ(mapping_number(after, "gateway_read_batch_drain_runs"),
+            before_runs + 1);
+  ASSERT_EQ(mapping_number(after, "gateway_read_batch_drain_tasks_total"),
+            before_tasks + 1);
+  ASSERT_GE(mapping_number(after, "gateway_read_batch_drain_tasks_max"), 1);
+  ASSERT_EQ(mapping_number(after,
+                           "gateway_read_batch_drain_backlog_rescheduled"),
+            before_backlog);
+  ASSERT_EQ(mapping_number(after, "gateway_read_batch_drain_wall_samples"),
+            before_wall_samples + 1);
+  ASSERT_EQ(
+      mapping_number(after, "gateway_read_batch_drain_remaining_samples"),
+      before_remaining_samples + 1);
+  ASSERT_EQ(mapping_number(after, "gateway_read_batch_drain_remaining_total"),
+            before_remaining_total);
+  free_mapping(after);
+
+  add_ref(ob, "TestGatewayReadBatchDrainServicesAdmittedReceiveTask");
+  ASSERT_EQ(gateway_destroy_session_internal("gw-test-read-batch-drain",
+                                             "test_done", "done"),
+            1);
+  ASSERT_EQ(ob->interactive, nullptr);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayReadBatchDrainServicesAdmittedReceiveTask");
 }
 
 TEST_F(DriverTest, TestGatewayCommandTaskCarriesOwnerHandlePayload) {
@@ -12684,16 +13710,22 @@ TEST_F(DriverTest, TestGatewayCommandExecutesThroughOwnerMainQueue) {
   };
 
   safe_apply("reset_gateway_command_probe", ob, 0, ORIGIN_DRIVER);
+  ASSERT_EQ(gateway_session_command_pending_count(), 0);
   auto* before = vm_owner_thread_status();
   auto before_callback_queued = mapping_number(before, "executor_callback_queued");
   auto before_callback_dispatched = mapping_number(before, "executor_callback_dispatched");
   free_mapping(before);
 
   ASSERT_EQ(gateway_inject_input_internal(ob, "look"), 1);
+  ASSERT_EQ(gateway_session_command_input_pending_count(), 1);
+  ASSERT_EQ(gateway_session_command_task_pending_count(), 0);
   auto task_id = gateway_enqueue_pending_command_internal(ob);
   ASSERT_GT(task_id, 0u);
+  ASSERT_EQ(gateway_session_command_pending_count(), 2);
+  ASSERT_EQ(gateway_session_command_task_pending_count(), 1);
 
   ASSERT_GE(vm_owner_drain_main_tasks(64), 1);
+  ASSERT_EQ(gateway_session_command_pending_count(), 0);
   ASSERT_TRUE(trace_has_state("main_dispatched", task_id));
   ASSERT_EQ(call_number("query_last_process_input_off_main", ob), 0);
   ASSERT_EQ(call_string("query_last_process_input_command", ob), "look");
@@ -12791,10 +13823,15 @@ TEST_F(DriverTest, TestGatewayCommandMainQueueDropsStaleOwnerEpoch) {
   };
 
   safe_apply("reset_gateway_command_probe", ob, 0, ORIGIN_DRIVER);
+  ASSERT_EQ(gateway_session_command_pending_count(), 0);
   ASSERT_EQ(gateway_inject_input_internal(ob, "look"), 1);
   ASSERT_GT(gateway_enqueue_pending_command_internal(ob), 0u);
+  ASSERT_EQ(gateway_session_command_pending_count(), 2);
   vm_owner_set_id(ob, moved_owner);
   ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+  ASSERT_EQ(gateway_session_command_input_pending_count(), 1);
+  ASSERT_EQ(gateway_session_command_task_pending_count(), 0);
+  ASSERT_EQ(gateway_session_command_pending_count(), 1);
 
   for (int i = 0; i < 100 && !trace_has_gateway_stale(); i++) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -12869,9 +13906,12 @@ TEST_F(DriverTest, TestGatewayCommandMainQueueDropsDisconnectedSession) {
 
   ASSERT_EQ(gateway_inject_input_internal(ob, "look"), 1);
   ASSERT_GT(gateway_enqueue_pending_command_internal(ob), 0u);
+  ASSERT_EQ(gateway_session_command_pending_count(), 2);
   ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_disconnect", "disconnect"), 1);
   ASSERT_EQ(ob->interactive, nullptr);
+  ASSERT_EQ(gateway_session_command_pending_count(), 0);
   ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+  ASSERT_EQ(gateway_session_command_pending_count(), 0);
 
   for (int i = 0; i < 100 && !trace_has_disconnected_stale(); i++) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -12927,15 +13967,20 @@ TEST_F(DriverTest, TestGatewayCommandMainQueueReschedulesBufferedCommands) {
 
   safe_apply("reset_gateway_command_probe", ob, 0, ORIGIN_DRIVER);
   ASSERT_EQ(gateway_inject_input_internal(ob, "look\nscore"), 1);
+  ASSERT_EQ(gateway_session_command_input_pending_count(), 1);
   ASSERT_GT(gateway_enqueue_pending_command_internal(ob), 0u);
+  ASSERT_EQ(gateway_session_command_pending_count(), 2);
   ASSERT_EQ(gateway_enqueue_pending_command_internal(ob), 0u);
 
   ASSERT_GE(vm_owner_drain_main_tasks(8), 1);
   ASSERT_EQ(call_string("query_last_process_input_command", ob), "look");
   ASSERT_TRUE(ob->interactive->iflags & CMD_IN_BUF);
+  ASSERT_EQ(gateway_session_command_input_pending_count(), 1);
+  ASSERT_EQ(gateway_session_command_task_pending_count(), 0);
   ASSERT_EQ(gateway_process_pending_command_internal(ob), 1);
   ASSERT_EQ(call_string("query_last_process_input_command", ob), "score");
   ASSERT_FALSE(ob->interactive->iflags & CMD_IN_BUF);
+  ASSERT_EQ(gateway_session_command_pending_count(), 0);
 }
 
 TEST_F(DriverTest, TestGatewayCommandMainQueueStaleTraceIncludesFrameMetadata) {

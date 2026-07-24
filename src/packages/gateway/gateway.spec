@@ -2,6 +2,9 @@
 
 int gateway_listen(int, int default:0);
 mapping gateway_status();
+int gateway_command_pending();
+int gateway_main_queue_pending();
+int gateway_buffered_input_pending();
 mixed gateway_config(string, mixed default:0);
 int gateway_send(mixed, mixed default:0);
 void gateway_set_heartbeat(int, int default:0);
@@ -14,6 +17,7 @@ mapping gateway_session_info(object);
 int gateway_session_send(object, mixed, mixed default:0);
 int gateway_session_reserve(object);
 int gateway_session_fill(object, int, string);
+int gateway_session_fill_preencoded_chat_batch(object, int, string *, int, int, int, string);
 int gateway_session_release(object, int);
 int gateway_session_watch_future(object, int, int, int);
 int gateway_session_watch_future_output(object, int, int, int);

@@ -2080,7 +2080,9 @@ bool enqueue_owner_executor_callback_main_adapter_locked(OwnerMailboxTask &task)
   return true;
 }
 
-int drain_owner_executor_callback_cleanups(int limit) {
+int drain_owner_executor_callback_cleanups(int limit, uint64_t started_at_ns = 0,
+                                           uint64_t wall_budget_ns = 0,
+                                           bool *wall_budget_reached = nullptr) {
   if (!vm_context_is_main_thread()) {
     return 0;
   }
@@ -2105,6 +2107,13 @@ int drain_owner_executor_callback_cleanups(int limit) {
     }
     owner_executor_callback_main_cleanup_dispatched.fetch_add(1, std::memory_order_relaxed);
     dispatched++;
+    if (wall_budget_ns > 0 && started_at_ns > 0 &&
+        owner_now_ns() - started_at_ns >= wall_budget_ns) {
+      if (wall_budget_reached) {
+        *wall_budget_reached = true;
+      }
+      break;
+    }
   }
   return dispatched;
 }
@@ -4246,22 +4255,33 @@ uint64_t enqueue_owner_message_main_task_locked(const OwnerMailboxTask &mailbox_
   return task_id;
 }
 
-int vm_owner_drain_main_tasks(int limit) {
+VMOwnerMainDrainResult vm_owner_drain_main_tasks_with_budget(
+    int limit, uint64_t wall_budget_ns) {
+  VMOwnerMainDrainResult result;
   if (!vm_context_is_main_thread()) {
-    return 0;
+    return result;
   }
 
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     if (owner_main_draining) {
-      return 0;
+      result.remaining_main_tasks = owner_main_queue_total_depth();
+      result.remaining_cleanup_tasks = static_cast<long>(
+          owner_executor_callback_main_cleanups.size());
+      return result;
     }
     owner_main_draining = true;
   }
 
+  auto started_at_ns = owner_now_ns();
   auto budget = limit <= 0 ? kOwnerExecutorTaskBudget : limit;
-  int dispatched = drain_owner_executor_callback_cleanups(budget);
+  bool wall_budget_reached = false;
+  int dispatched = drain_owner_executor_callback_cleanups(
+      budget, started_at_ns, wall_budget_ns, &wall_budget_reached);
   while (dispatched < budget) {
+    if (wall_budget_reached) {
+      break;
+    }
     OwnerMainTask task;
     {
       std::lock_guard<std::mutex> lock(owner_runtime_mutex);
@@ -4269,6 +4289,7 @@ int vm_owner_drain_main_tasks(int limit) {
         break;
       }
     }
+    auto task_started_at_ns = owner_now_ns();
 
     auto *target = task.target;
     bool stale = !target || (target->flags & O_DESTRUCTED) || task.owner_id != vm_owner_id(target) ||
@@ -4341,16 +4362,40 @@ int vm_owner_drain_main_tasks(int limit) {
     dispatched++;
     finish_active_main_owner_task(task.owner_id);
     release_owner_main_task_target(&task);
+    auto task_elapsed_ns = owner_now_ns() - task_started_at_ns;
+    result.max_main_task_elapsed_ns = std::max(
+        result.max_main_task_elapsed_ns, task_elapsed_ns);
+    if (wall_budget_ns > 0 && task_elapsed_ns >= wall_budget_ns) {
+      result.main_tasks_exceeding_wall_budget++;
+    }
+    if (wall_budget_ns > 0 &&
+        owner_now_ns() - started_at_ns >= wall_budget_ns) {
+      wall_budget_reached = true;
+      break;
+    }
   }
 
+  result.dispatched = dispatched;
+  result.elapsed_ns = owner_now_ns() - started_at_ns;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    if (dispatched >= budget && owner_main_queue_total_depth() > 0) {
+    result.remaining_main_tasks = owner_main_queue_total_depth();
+    result.remaining_cleanup_tasks = static_cast<long>(
+        owner_executor_callback_main_cleanups.size());
+    auto remaining = result.remaining_main_tasks + result.remaining_cleanup_tasks;
+    result.task_budget_yielded = remaining > 0 && dispatched >= budget;
+    result.wall_budget_yielded = remaining > 0 && wall_budget_reached &&
+                                 dispatched < budget;
+    if (result.task_budget_yielded || result.wall_budget_yielded) {
       owner_main_budget_yields.fetch_add(1, std::memory_order_relaxed);
     }
     owner_main_draining = false;
   }
-  return dispatched;
+  return result;
+}
+
+int vm_owner_drain_main_tasks(int limit) {
+  return vm_owner_drain_main_tasks_with_budget(limit, 0).dispatched;
 }
 
 uint64_t vm_owner_record_access(object_t *source, object_t *target, const char *operation) {

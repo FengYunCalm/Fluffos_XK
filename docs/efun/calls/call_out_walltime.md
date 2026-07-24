@@ -20,5 +20,5 @@ title: calls / call_out_walltime
 
 ### SEE ALSO
 
-    remove_call_out, call_out_info, call_out
-
+    remove_call_out, call_out_info, call_out, call_out_walltime_gateway,
+    call_out_walltime_background

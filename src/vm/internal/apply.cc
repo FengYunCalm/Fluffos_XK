@@ -203,7 +203,7 @@ static int apply_low_impl(const char *fun, object_t *ob, int num_arg) {
                             vm_context().owner.controlled_lpc_active);
   }
   if (!owner_controlled_lpc) {
-    ob->time_of_ref = g_current_gametick; /* Used by the swapper */
+    ob->time_of_ref = current_gametick(); /* Used by the swapper */
                                           /*
                                            * This object will now be used, and is thus a target for reset later on
                                            * (when time due).

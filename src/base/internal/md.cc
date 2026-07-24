@@ -35,7 +35,7 @@ unsigned int total_malloced = 0L;
 unsigned int hiwater = 0L;
 
 // TODO: defined in backend.cc
-extern uint64_t g_current_gametick;
+uint64_t current_gametick();
 
 #ifdef DEBUGMALLOC_EXTENSIONS
 // journal to record all ref/unref operations
@@ -129,7 +129,7 @@ void MDmalloc(md_node_t *node, int size, int tag, const char *desc) {
   node->tag = tag;
   node->id = count++;
   node->desc = desc ? desc : "default";
-  node->gametick = g_current_gametick;
+  node->gametick = current_gametick();
 
   assert(desc != nullptr);
 

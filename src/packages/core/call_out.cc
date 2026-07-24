@@ -49,6 +49,29 @@ int new_call_out_zero_last_gametick = 0;
 // Total number of call_out(0) that was scheduled on this gametick.
 int new_call_out_zero_scheduled_on_this_gametick = 0;
 
+LPC_INT next_callout_handle() {
+  while (true) {
+    unique++;
+    if (unique > 0xffffffff) {
+      unique = 1;
+    }
+    auto handle = static_cast<LPC_INT>(current_gametick() + unique);
+    if (handle != 0 && g_callout_handle_map.find(handle) == g_callout_handle_map.end()) {
+      return handle;
+    }
+  }
+}
+
+bool callout_belongs_to_object(pending_call_t *cop, object_t *ob) {
+  if (!cop || !ob) {
+    return false;
+  }
+  if (cop->ob) {
+    return cop->ob == ob;
+  }
+  return cop->function.f && cop->function.f->hdr.owner == ob;
+}
+
 class ControlledLpcScope {
  public:
   ControlledLpcScope() : previous_(vm_context().owner.controlled_lpc_active) {
@@ -80,7 +103,7 @@ void release_callout_tick_event(pending_call_t *cop) {
   if (!cop || !cop->tick_event) {
     return;
   }
-  cop->tick_event->valid = false;
+  cop->tick_event->cancel();
   cop->tick_event = nullptr;
 }
 
@@ -137,7 +160,7 @@ static void free_called_call(pending_call_t *cop) {
     cop->owner_id = nullptr;
   }
   if (cop->tick_event != nullptr) {
-    cop->tick_event->valid = false;  // Will be freed by tick loop itself.
+    cop->tick_event->cancel();  // Will be freed by tick loop itself.
     cop->tick_event = nullptr;
   }
   FREE(cop);
@@ -154,16 +177,18 @@ static void free_call(pending_call_t *cop) {
  * Setup a new call out.
  */
 LPC_INT new_call_out(object_t *ob, svalue_t *fun, std::chrono::milliseconds delay_msecs,
-                     int num_args, svalue_t *arg, bool walltime) {
+                     int num_args, svalue_t *arg, bool walltime,
+                     BackendEventPriority walltime_priority) {
   DBG_CALLOUT("new_call_out: /%s delay msecs %" PRId64 "\n", ob->obname, delay_msecs.count());
 
   // call_out(0) loop prevention. This is based on the fact that new call_out(0)
   // will be executed on the same gametick, and when the total exceed the limit
   // new_call_out will error(), thus breaking the loop.
   if (delay_msecs.count() == 0) {
-    if (g_current_gametick != new_call_out_zero_last_gametick) {
+    auto gametick = current_gametick();
+    if (gametick != new_call_out_zero_last_gametick) {
       // First time call_out(0) on this tick.
-      new_call_out_zero_last_gametick = g_current_gametick;
+      new_call_out_zero_last_gametick = gametick;
       new_call_out_zero_scheduled_on_this_gametick = 1;
     } else {
       new_call_out_zero_scheduled_on_this_gametick++;
@@ -187,9 +212,9 @@ LPC_INT new_call_out(object_t *ob, svalue_t *fun, std::chrono::milliseconds dela
             (std::chrono::high_resolution_clock::now() + delay_msecs).time_since_epoch())
             .count();
   } else {
-    cop->target_time = g_current_gametick + delay_ticks;
+    cop->target_time = current_gametick() + delay_ticks;
   }
-  DBG_CALLOUT("  current: %" PRIu64 "\n", g_current_gametick);
+  DBG_CALLOUT("  current: %" PRIu64 "\n", current_gametick());
   DBG_CALLOUT("  is_walltime: %d\n", cop->is_walltime ? 1 : 0);
   DBG_CALLOUT("  target_time: %" PRIu64 "\n", cop->target_time);
 
@@ -205,10 +230,7 @@ LPC_INT new_call_out(object_t *ob, svalue_t *fun, std::chrono::milliseconds dela
     cop->ob = nullptr;
   }
 
-  cop->handle = g_current_gametick + (++unique);
-  if (unique > 0xffffffff) {
-    unique = 1;  // force wrapping around.
-  }
+  cop->handle = next_callout_handle();
   DBG_CALLOUT("  handle: %" LPC_INT_FMTSTR_P "\n", cop->handle);
 
   object_t *owner_ob = cop->ob ? cop->ob : fun->u.fp->hdr.owner;
@@ -238,7 +260,8 @@ LPC_INT new_call_out(object_t *ob, svalue_t *fun, std::chrono::milliseconds dela
 
   auto callback = [=] { return call_out(cop); };
   if (walltime) {
-    cop->tick_event = add_walltime_event(delay_msecs, TickEvent::callback_type(callback));
+    cop->tick_event = add_walltime_event(
+        delay_msecs, TickEvent::callback_type(callback), walltime_priority);
   } else {
     cop->tick_event = add_gametick_event(delay_ticks, TickEvent::callback_type(callback));
   }
@@ -267,7 +290,7 @@ static void execute_call_out(pending_call_t *cop, bool handle_detached = false, 
               cop->is_walltime ? std::chrono::duration_cast<std::chrono::milliseconds>(
                                      std::chrono::high_resolution_clock::now().time_since_epoch())
                                      .count()
-                               : g_current_gametick);
+                               : current_gametick());
 
   // Remove self from callout map on the main path. Owner executor tasks detach before dispatch.
   if (!handle_detached) {
@@ -397,6 +420,15 @@ bool vm_call_out_test_support_run_handle(LPC_INT handle) {
   return true;
 }
 
+int vm_call_out_test_support_priority(LPC_INT handle) {
+  auto iter = g_callout_handle_map.find(handle);
+  if (iter == g_callout_handle_map.end() || !iter->second->is_walltime ||
+      !iter->second->tick_event) {
+    return -1;
+  }
+  return walltime_event_priority_for_test(iter->second->tick_event);
+}
+
 static int time_left(pending_call_t *cop) {
   if (cop->is_walltime) {
     return (cop->target_time - std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -405,7 +437,7 @@ static int time_left(pending_call_t *cop) {
            1000;
   }
   return std::chrono::duration_cast<std::chrono::seconds>(
-             gametick_to_time(cop->target_time - g_current_gametick))
+             gametick_to_time(cop->target_time - current_gametick()))
       .count();
 }
 
@@ -454,7 +486,7 @@ int remove_call_out_by_handle(object_t *ob, LPC_INT handle) {
   DBG_CALLOUT("remove_call_out_by_handle: ob: %s, handle: %" LPC_INT_FMTSTR_P ".\n", ob->obname,
               handle);
 
-  if (handle == 0 || handle < unique) {
+  if (handle == 0) {
     DBG_CALLOUT("  invalid handle, ignored.\n");
     return -1;
   }
@@ -462,6 +494,10 @@ int remove_call_out_by_handle(object_t *ob, LPC_INT handle) {
   auto iter = g_callout_handle_map.find(handle);
   if (iter != g_callout_handle_map.end()) {
     auto *cop = iter->second;
+    if (!callout_belongs_to_object(cop, ob)) {
+      DBG_CALLOUT("  handle belongs to another object.\n");
+      return -1;
+    }
     auto remaining_time = time_left(cop);
     free_call(cop);
 
@@ -478,7 +514,7 @@ int find_call_out_by_handle(object_t *ob, LPC_INT handle) {
   DBG_CALLOUT("find_call_out_by_handle: ob: %s, handle: %" LPC_INT_FMTSTR_P "\n", ob->obname,
               handle);
 
-  if (handle == 0 || handle < unique) {
+  if (handle == 0) {
     DBG_CALLOUT("  invalid handle, ignored.\n");
     return -1;
   }
@@ -486,7 +522,7 @@ int find_call_out_by_handle(object_t *ob, LPC_INT handle) {
   auto iter = g_callout_handle_map.find(handle);
   if (iter != g_callout_handle_map.end()) {
     auto *cop = iter->second;
-    if (cop->handle == handle && (cop->ob == ob || cop->function.f->hdr.owner == ob)) {
+    if (cop->handle == handle && callout_belongs_to_object(cop, ob)) {
       auto remaining_time = time_left(cop);
       DBG_CALLOUT("  found: remaining time %d.\n", remaining_time);
       return remaining_time;
@@ -730,7 +766,8 @@ void reclaim_call_outs() {
 }
 
 namespace {
-inline void int_call_out(bool walltime) {
+inline void int_call_out(bool walltime,
+                         BackendEventPriority walltime_priority) {
   svalue_t *arg = sp - st_num_arg + 1;
   int const num = st_num_arg - 2;
   LPC_INT ret;
@@ -750,7 +787,7 @@ inline void int_call_out(bool walltime) {
 
   if (!(current_object->flags & O_DESTRUCTED)) {
     ret = new_call_out(current_object, arg, std::chrono::milliseconds(delay_msecs), num, arg + 2,
-                       walltime);
+                       walltime, walltime_priority);
     /* args have been transfered; don't free them;
      also don't need to free the int */
     sp -= num + 1;
@@ -766,11 +803,27 @@ inline void int_call_out(bool walltime) {
 }  // namespace
 
 #ifdef F_CALL_OUT
-void f_call_out() { int_call_out(false); }
+void f_call_out() {
+  int_call_out(false, BackendEventPriority::kNormal);
+}
 #endif
 
 #ifdef F_CALL_OUT_WALLTIME
-void f_call_out_walltime() { int_call_out(true); }
+void f_call_out_walltime() {
+  int_call_out(true, BackendEventPriority::kNormal);
+}
+#endif
+
+#ifdef F_CALL_OUT_WALLTIME_GATEWAY
+void f_call_out_walltime_gateway() {
+  int_call_out(true, BackendEventPriority::kGateway);
+}
+#endif
+
+#ifdef F_CALL_OUT_WALLTIME_BACKGROUND
+void f_call_out_walltime_background() {
+  int_call_out(true, BackendEventPriority::kBackground);
+}
 #endif
 
 #ifdef F_CALL_OUT_INFO

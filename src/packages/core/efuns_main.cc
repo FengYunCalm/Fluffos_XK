@@ -3301,12 +3301,12 @@ void f_set_reset() {
 
   if (st_num_arg == 2) {
     (sp - 1)->u.ob->next_reset =
-        g_current_gametick + time_to_next_gametick(std::chrono::seconds(sp->u.number));
+        current_gametick() + time_to_next_gametick(std::chrono::seconds(sp->u.number));
     free_object(&(--sp)->u.ob, "f_set_reset:1");
     sp--;
   } else {
     sp->u.ob->next_reset =
-        g_current_gametick + time_to_next_gametick(std::chrono::seconds(
+        current_gametick() + time_to_next_gametick(std::chrono::seconds(
                                  time_to_reset / 2 + random_number(time_to_reset / 2)));
     free_object(&(sp--)->u.ob, "f_set_reset:2");
   }

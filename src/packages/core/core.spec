@@ -53,6 +53,8 @@ mixed implode(mixed *, string | function, void | mixed);
 
 int call_out(string | function, int|float, ...);
 int call_out_walltime(string | function, int|float, ...);
+int call_out_walltime_gateway(string | function, int|float, ...);
+int call_out_walltime_background(string | function, int|float, ...);
 mixed *call_out_info();
 int find_call_out(int | string);
 int remove_call_out(int | void | string);

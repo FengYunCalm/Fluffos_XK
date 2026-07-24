@@ -4430,7 +4430,7 @@ void call_direct(object_t *ob, int offset, int origin, int num_arg) {
   function_t *funp;
   program_t *prog = ob->prog;
 
-  ob->time_of_ref = g_current_gametick;
+  ob->time_of_ref = current_gametick();
   push_control_stack(FRAME_FUNCTION | FRAME_OB_CHANGE);
   csp->num_local_variables = num_arg;
   vm_set_execution_frame_fast(ob, prog, current_object, origin);
