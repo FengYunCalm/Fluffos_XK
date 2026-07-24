@@ -45,6 +45,18 @@ int start_callout_probe() {
   return call_out("callout_probe", 0);
 }
 
+int start_walltime_callout_probe() {
+  return call_out_walltime("callout_probe", 3600);
+}
+
+int start_gateway_walltime_callout_probe() {
+  return call_out_walltime_gateway("callout_probe", 3600);
+}
+
+int start_background_walltime_callout_probe() {
+  return call_out_walltime_background("callout_probe", 3600);
+}
+
 void callout_probe() {
   callout_called++;
   callout_off_main = !vm_context_is_main_thread();

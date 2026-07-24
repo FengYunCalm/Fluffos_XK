@@ -48,6 +48,17 @@ struct VMOwnerFutureStringTakeResult {
   std::string value;
 };
 
+struct VMOwnerMainDrainResult {
+  int dispatched{0};
+  long remaining_main_tasks{0};
+  long remaining_cleanup_tasks{0};
+  uint64_t elapsed_ns{0};
+  uint64_t max_main_task_elapsed_ns{0};
+  int main_tasks_exceeding_wall_budget{0};
+  bool task_budget_yielded{false};
+  bool wall_budget_yielded{false};
+};
+
 using VMOwnerFutureTerminalNotifier = void (*)();
 
 const char *vm_owner_default_id();
@@ -131,6 +142,8 @@ uint64_t vm_owner_enqueue_main_task_with_payload(object_t *target, const char *t
                                                  size_t command_text_snapshot_length = 0,
                                                  VMOwnerMainTaskPolicy policy = VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK);
 int vm_owner_drain_main_tasks(int limit);
+VMOwnerMainDrainResult vm_owner_drain_main_tasks_with_budget(int limit,
+                                                             uint64_t wall_budget_ns);
 uint64_t vm_owner_record_access(object_t *source, object_t *target, const char *operation);
 bool vm_owner_access_fast_bypass(object_t *source, object_t *target);
 uint64_t vm_owner_record_cross_owner_access(object_t *source, object_t *target, const char *operation);
