@@ -16,12 +16,15 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <charconv>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <limits>
 #include <list>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -32,6 +35,8 @@ namespace {
 std::unordered_map<std::string, std::unique_ptr<GatewaySession>> g_gateway_sessions;
 std::unordered_map<object_t *, GatewaySession *> g_gateway_obj_to_session;
 std::atomic<uint64_t> g_gateway_next_output_reservation_id{1};
+std::atomic<long> g_gateway_command_input_pending_sessions{0};
+std::atomic<long> g_gateway_command_task_pending_sessions{0};
 struct GatewaySessionFutureWatch {
   std::string session_id;
   std::string user_ob_name;
@@ -115,6 +120,220 @@ class GatewayControlledLpcScope {
 
 bool gateway_object_valid(object_t *ob) {
   return ob && !(ob->flags & O_DESTRUCTED) && ob->obname && ob->obname[0] != '\0';
+}
+
+bool gateway_append_json_string(const char *value, size_t length, std::string *out) {
+  constexpr char kHexDigits[] = "0123456789abcdef";
+  size_t index = 0;
+
+  if (!out || (!value && length != 0)) {
+    return false;
+  }
+  out->push_back('"');
+  while (index < length) {
+    const auto byte = static_cast<unsigned char>(value[index]);
+    if (byte >= 0x80) {
+      size_t continuation_count = 0;
+      uint32_t codepoint = 0;
+      uint32_t minimum_codepoint = 0;
+      if (byte >= 0xc2 && byte <= 0xdf) {
+        continuation_count = 1;
+        codepoint = byte & 0x1f;
+        minimum_codepoint = 0x80;
+      } else if (byte >= 0xe0 && byte <= 0xef) {
+        continuation_count = 2;
+        codepoint = byte & 0x0f;
+        minimum_codepoint = 0x800;
+      } else if (byte >= 0xf0 && byte <= 0xf4) {
+        continuation_count = 3;
+        codepoint = byte & 0x07;
+        minimum_codepoint = 0x10000;
+      } else {
+        return false;
+      }
+      if (continuation_count >= length - index) {
+        return false;
+      }
+      for (size_t offset = 1; offset <= continuation_count; ++offset) {
+        const auto continuation = static_cast<unsigned char>(value[index + offset]);
+        if ((continuation & 0xc0) != 0x80) {
+          return false;
+        }
+        codepoint = (codepoint << 6) | (continuation & 0x3f);
+      }
+      if (codepoint < minimum_codepoint || codepoint > 0x10ffff ||
+          (codepoint >= 0xd800 && codepoint <= 0xdfff)) {
+        return false;
+      }
+      out->append(value + index, continuation_count + 1);
+      index += continuation_count + 1;
+      continue;
+    }
+
+    switch (byte) {
+      case '\\':
+        out->append("\\\\");
+        break;
+      case '"':
+        out->append("\\\"");
+        break;
+      case '\b':
+        out->append("\\b");
+        break;
+      case '\f':
+        out->append("\\f");
+        break;
+      case '\n':
+        out->append("\\n");
+        break;
+      case '\r':
+        out->append("\\r");
+        break;
+      case '\t':
+        out->append("\\t");
+        break;
+      default:
+        if (byte <= 0x1f) {
+          out->append("\\u00");
+          out->push_back(kHexDigits[byte >> 4]);
+          out->push_back(kHexDigits[byte & 0x0f]);
+        } else {
+          out->push_back(static_cast<char>(byte));
+        }
+        break;
+    }
+    ++index;
+  }
+  out->push_back('"');
+  return true;
+}
+
+std::string gateway_encode_output_envelope_slow(const std::string &session_id, const char *data,
+                                                size_t len) {
+  nlohmann::json payload{
+      {"type", "output"},
+      {"cid", session_id},
+      {"data", std::string(data, len)},
+  };
+  return payload.dump();
+}
+
+std::string gateway_encode_output_envelope(const std::string &session_id,
+                                           const char *data, size_t len) {
+  std::string encoded;
+
+  encoded.reserve(session_id.size() + len + 36);
+  encoded.append("{\"cid\":");
+  if (!gateway_append_json_string(session_id.data(), session_id.size(), &encoded)) {
+    return gateway_encode_output_envelope_slow(session_id, data, len);
+  }
+  encoded.append(",\"data\":");
+  if (!gateway_append_json_string(data, len, &encoded)) {
+    return gateway_encode_output_envelope_slow(session_id, data, len);
+  }
+  encoded.append(",\"type\":\"output\"}");
+  return encoded;
+}
+
+bool gateway_json_object_members(std::string_view encoded, std::string_view *members) {
+  if (!members || encoded.size() < 2 || encoded.front() != '{' || encoded.back() != '}') {
+    return false;
+  }
+  *members = encoded.substr(1, encoded.size() - 2);
+  return true;
+}
+
+bool gateway_append_lpc_int(LPC_INT value, std::string *out) {
+  char buffer[std::numeric_limits<LPC_INT>::digits10 + 4];
+  auto result = std::to_chars(buffer, buffer + sizeof(buffer), value);
+  if (!out || result.ec != std::errc{}) {
+    return false;
+  }
+  out->append(buffer, static_cast<size_t>(result.ptr - buffer));
+  return true;
+}
+
+bool gateway_build_preencoded_chat_batch_frame(
+    const std::vector<std::string_view> &stable_children_json, LPC_INT message_epoch,
+    LPC_INT first_server_seq, LPC_INT sent_at, std::string_view outer_dynamic_json,
+    std::string *frame) {
+  constexpr std::string_view kFramePrefix = "\x1bXKBACH{\"messages\":[";
+  constexpr std::string_view kChildPrefix = "{\"type\":\"CHAT\",\"payload\":{";
+  constexpr std::string_view kChildMetaPrefix =
+      "\"meta\":{\"stream\":\"message\",\"server_seq\":";
+  constexpr std::string_view kSentAtPrefix =
+      ",\"sent_at\":";
+  constexpr std::string_view kEpochPrefix =
+      ",\"priority\":\"normal\",\"epoch\":";
+  constexpr std::string_view kChildSuffix =
+      ",\"reliability\":\"important\"}}}";
+  std::string_view outer_members;
+  const auto child_overhead = kChildPrefix.size() + kChildMetaPrefix.size() +
+                              kSentAtPrefix.size() + kEpochPrefix.size() +
+                              kChildSuffix.size() + 72;
+  const auto maximum_size = frame ? frame->max_size() : 0;
+  size_t estimated_size;
+
+  if (!frame || stable_children_json.empty() || message_epoch < 0 || first_server_seq <= 0 ||
+      sent_at <= 0 || !gateway_json_object_members(outer_dynamic_json, &outer_members) ||
+      stable_children_json.size() > static_cast<size_t>(std::numeric_limits<LPC_INT>::max()) ||
+      first_server_seq > std::numeric_limits<LPC_INT>::max() -
+                             static_cast<LPC_INT>(stable_children_json.size() - 1)) {
+    return false;
+  }
+
+  if (outer_members.size() > maximum_size - kFramePrefix.size() - 4) {
+    return false;
+  }
+  estimated_size = kFramePrefix.size() + outer_members.size() + 4;
+  for (const auto stable_json : stable_children_json) {
+    std::string_view stable_members;
+    if (!gateway_json_object_members(stable_json, &stable_members) ||
+        stable_json.size() > maximum_size - estimated_size ||
+        child_overhead > maximum_size - estimated_size - stable_json.size()) {
+      return false;
+    }
+    estimated_size += stable_json.size() + child_overhead;
+  }
+
+  frame->clear();
+  frame->reserve(estimated_size);
+  frame->append(kFramePrefix);
+  for (size_t index = 0; index < stable_children_json.size(); ++index) {
+    std::string_view stable_members;
+    gateway_json_object_members(stable_children_json[index], &stable_members);
+    if (index > 0) {
+      frame->push_back(',');
+    }
+    frame->append(kChildPrefix);
+    if (!stable_members.empty()) {
+      frame->append(stable_members);
+      frame->push_back(',');
+    }
+    frame->append(kChildMetaPrefix);
+    if (!gateway_append_lpc_int(first_server_seq + static_cast<LPC_INT>(index), frame)) {
+      frame->clear();
+      return false;
+    }
+    frame->append(kSentAtPrefix);
+    if (!gateway_append_lpc_int(sent_at, frame)) {
+      frame->clear();
+      return false;
+    }
+    frame->append(kEpochPrefix);
+    if (!gateway_append_lpc_int(message_epoch, frame)) {
+      frame->clear();
+      return false;
+    }
+    frame->append(kChildSuffix);
+  }
+  frame->push_back(']');
+  if (!outer_members.empty()) {
+    frame->push_back(',');
+    frame->append(outer_members);
+  }
+  frame->append("}\x1b\n");
+  return true;
 }
 
 object_t *gateway_resolve_session_object(GatewaySession *sess) {
@@ -598,8 +817,49 @@ bool gateway_mark_command_task_pending(GatewaySession *sess) {
     return false;
   }
   bool expected = false;
-  return sess->command_task_pending.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
-                                                           std::memory_order_acquire);
+  if (!sess->command_task_pending.compare_exchange_strong(
+          expected, true, std::memory_order_acq_rel, std::memory_order_acquire)) {
+    return false;
+  }
+  g_gateway_command_task_pending_sessions.fetch_add(1, std::memory_order_release);
+  return true;
+}
+
+void gateway_decrement_pending_counter(std::atomic<long> &counter) {
+  auto pending = counter.load(std::memory_order_acquire);
+  while (pending > 0 &&
+         !counter.compare_exchange_weak(
+             pending, pending - 1, std::memory_order_acq_rel, std::memory_order_acquire)) {
+  }
+}
+
+bool gateway_mark_command_input_pending(GatewaySession *sess) {
+  if (!sess) {
+    return false;
+  }
+  bool expected = false;
+  if (!sess->command_input_pending.compare_exchange_strong(
+          expected, true, std::memory_order_acq_rel, std::memory_order_acquire)) {
+    return false;
+  }
+  g_gateway_command_input_pending_sessions.fetch_add(1, std::memory_order_release);
+  return true;
+}
+
+void gateway_release_command_input_pending(GatewaySession *sess) {
+  if (!sess || !sess->command_input_pending.exchange(false, std::memory_order_acq_rel)) {
+    return;
+  }
+  gateway_decrement_pending_counter(g_gateway_command_input_pending_sessions);
+}
+
+void gateway_release_command_task_pending(GatewaySession *sess) {
+  if (!sess || !sess->command_task_pending.exchange(false, std::memory_order_acq_rel)) {
+    return;
+  }
+
+  gateway_decrement_pending_counter(g_gateway_command_task_pending_sessions);
+  g_gateway_runtime_counters.command_tasks_cleared.fetch_add(1, std::memory_order_relaxed);
 }
 
 void gateway_clear_command_task_pending(const std::string &session_id) {
@@ -607,9 +867,7 @@ void gateway_clear_command_task_pending(const std::string &session_id) {
   if (!sess) {
     return;
   }
-  if (sess->command_task_pending.exchange(false, std::memory_order_acq_rel)) {
-    g_gateway_runtime_counters.command_tasks_cleared.fetch_add(1, std::memory_order_relaxed);
-  }
+  gateway_release_command_task_pending(sess);
 }
 
 void gateway_finish_command_task(const std::string &session_id, object_t *fallback) {
@@ -618,14 +876,17 @@ void gateway_finish_command_task(const std::string &session_id, object_t *fallba
     return;
   }
 
-  if (sess->command_task_pending.exchange(false, std::memory_order_acq_rel)) {
-    g_gateway_runtime_counters.command_tasks_cleared.fetch_add(1, std::memory_order_relaxed);
-  }
+  gateway_release_command_task_pending(sess);
   g_gateway_runtime_counters.command_tasks_finished.fetch_add(1, std::memory_order_relaxed);
   auto *active_user = resolve_active_session_owner(session_id.c_str(), fallback);
   auto *active_ip = active_user ? active_user->interactive : nullptr;
   if (!gateway_executor_session_current(active_user, active_ip)) {
     return;
+  }
+  if (active_ip->iflags & CMD_IN_BUF) {
+    gateway_mark_command_input_pending(sess);
+  } else {
+    gateway_release_command_input_pending(sess);
   }
   /*
    * Do not enqueue the next buffered command here. process_user_command_text()
@@ -1070,14 +1331,17 @@ long gateway_session_fifo_pending_reservations_total() {
   return pending;
 }
 
+long gateway_session_command_input_pending_count() {
+  return g_gateway_command_input_pending_sessions.load(std::memory_order_acquire);
+}
+
+long gateway_session_command_task_pending_count() {
+  return g_gateway_command_task_pending_sessions.load(std::memory_order_acquire);
+}
+
 long gateway_session_command_pending_count() {
-  long total = 0;
-  for (const auto &entry : g_gateway_sessions) {
-    if (entry.second->command_task_pending.load(std::memory_order_acquire)) {
-      total++;
-    }
-  }
-  return total;
+  return gateway_session_command_input_pending_count() +
+         gateway_session_command_task_pending_count();
 }
 
 uint64_t gateway_session_fifo_enqueued_total() {
@@ -1186,13 +1450,26 @@ int gateway_fill_session_output_with_writer(GatewaySession *sess, uint64_t reser
   if (!sess || reservation_id == 0 || encoded.empty() || !writer) {
     return 0;
   }
-  for (auto &entry : sess->output_fifo) {
+  for (auto it = sess->output_fifo.begin(); it != sess->output_fifo.end(); ++it) {
+    auto &entry = *it;
     if (entry.reservation_id != reservation_id || entry.ready) {
       continue;
     }
     entry.encoded = std::move(encoded);
     entry.ready = true;
     g_gateway_runtime_counters.output_fifo_filled.fetch_add(1, std::memory_order_relaxed);
+    if (it != sess->output_fifo.begin() && !sess->output_fifo.front().ready) {
+      auto preceding_count = static_cast<uint64_t>(std::distance(sess->output_fifo.begin(), it));
+      auto &counters = g_gateway_runtime_counters;
+      counters.output_fifo_head_blocked_fills.fetch_add(1, std::memory_order_relaxed);
+      counters.output_fifo_head_blocked_predecessors_total.fetch_add(preceding_count,
+                                                                       std::memory_order_relaxed);
+      auto observed = counters.output_fifo_head_blocked_predecessors_max.load(std::memory_order_relaxed);
+      while (observed < preceding_count &&
+             !counters.output_fifo_head_blocked_predecessors_max.compare_exchange_weak(
+                 observed, preceding_count, std::memory_order_relaxed, std::memory_order_relaxed)) {
+      }
+    }
     sess->last_active = get_current_time();
     gateway_flush_session_output_fifo_with_writer(sess, writer);
     return 1;
@@ -1244,12 +1521,9 @@ int gateway_fill_session_output_for_object(object_t *ob, uint64_t reservation_id
     return 0;
   }
 
-  nlohmann::json payload{
-      {"type", "output"},
-      {"cid", sess->session_id},
-      {"data", std::string(data, len)},
-  };
-  if (!gateway_fill_session_output(sess, reservation_id, payload.dump())) {
+  if (!gateway_fill_session_output(
+          sess, reservation_id,
+          gateway_encode_output_envelope(sess->session_id, data, len))) {
     return 0;
   }
   return 1;
@@ -1335,6 +1609,8 @@ void gateway_unbind_session_object(object_t *ob) {
   }
   std::string session_id = sess->session_id;
   gateway_cancel_session_future_watches(session_id, sess, "gateway session unbound", false);
+  gateway_release_command_input_pending(sess);
+  gateway_release_command_task_pending(sess);
   g_gateway_obj_to_session.erase(ob);
   g_gateway_sessions.erase(session_id);
 }
@@ -1484,21 +1760,39 @@ void gateway_handle_remove_interactive(interactive_t *ip) {
 
 int gateway_send_to_session(const char *session_id, const char *data, size_t len) {
   auto *sess = gateway_find_session(session_id);
-  nlohmann::json payload;
   std::string encoded;
 
   if (!sess || !data) {
     return 0;
   }
 
-  payload["type"] = "output";
-  payload["cid"] = sess->session_id;
-  payload["data"] = std::string(data, len);
-  encoded = payload.dump();
+  encoded = gateway_encode_output_envelope(sess->session_id, data, len);
   if (g_gateway_debug) {
     debug_message("[gateway] output sid=%s len=%zu\n", session_id, len);
   }
   return gateway_enqueue_session_output(sess, std::move(encoded));
+}
+
+std::string gateway_encode_output_envelope_for_test(const std::string &session_id,
+                                                    const char *data, size_t len) {
+  return gateway_encode_output_envelope(session_id, data, len);
+}
+
+std::string gateway_encode_preencoded_chat_batch_for_test(
+    const std::vector<std::string> &stable_children_json, LPC_INT message_epoch,
+    LPC_INT first_server_seq, LPC_INT sent_at, const std::string &outer_dynamic_json) {
+  std::vector<std::string_view> views;
+  std::string frame;
+
+  views.reserve(stable_children_json.size());
+  for (const auto &stable_json : stable_children_json) {
+    views.emplace_back(stable_json);
+  }
+  if (!gateway_build_preencoded_chat_batch_frame(
+          views, message_epoch, first_server_seq, sent_at, outer_dynamic_json, &frame)) {
+    return "";
+  }
+  return frame;
 }
 
 object_t *gateway_create_session_internal(const char *session_id, svalue_t *data_val,
@@ -1647,6 +1941,8 @@ int gateway_destroy_session_internal(const char *session_id, const char *reason_
       if (session_ob) {
         gateway_unbind_session_object(session_ob);
       } else {
+        gateway_release_command_input_pending(sess);
+        gateway_release_command_task_pending(sess);
         g_gateway_sessions.erase(session_id);
       }
       return 1;
@@ -1657,6 +1953,8 @@ int gateway_destroy_session_internal(const char *session_id, const char *reason_
   if (gateway_object_valid(ob)) {
     gateway_unbind_session_object(ob);
   } else {
+    gateway_release_command_input_pending(sess);
+    gateway_release_command_task_pending(sess);
     g_gateway_sessions.erase(session_id);
   }
   return 1;
@@ -1693,6 +1991,9 @@ int gateway_inject_input_internal(object_t *user, const char *input) {
   }
 
   if (auto *sess = gateway_find_session_by_object(user)) {
+    if (ip->iflags & CMD_IN_BUF) {
+      gateway_mark_command_input_pending(sess);
+    }
     sess->last_active = get_current_time();
     if (g_gateway_debug) {
       debug_message("[gateway] inject_input sid=%s text=%s\n", sess->session_id.c_str(), input);
@@ -1757,6 +2058,8 @@ void cleanup_gateway_sessions() {
 
   g_gateway_sessions.clear();
   g_gateway_obj_to_session.clear();
+  g_gateway_command_input_pending_sessions.store(0, std::memory_order_release);
+  g_gateway_command_task_pending_sessions.store(0, std::memory_order_release);
   for (const auto &entry : g_gateway_future_watches) {
     gateway_consume_cancelled_future(entry.first, "gateway cleanup");
     g_gateway_runtime_counters.generic_future_watches_cancelled.fetch_add(
@@ -1836,6 +2139,43 @@ void f_gateway_session_fill() {
   auto *ob = (sp - 2)->u.ob;
   auto result = gateway_fill_session_output_for_object(ob, reservation_id, data->u.string, SVALUE_STRLEN(data));
   pop_n_elems(3);
+  push_number(result);
+}
+
+void f_gateway_session_fill_preencoded_chat_batch() {
+  const auto *outer_dynamic_json = sp->u.string;
+  const auto outer_dynamic_json_len = SVALUE_STRLEN(sp);
+  const auto sent_at = (sp - 1)->u.number;
+  const auto first_server_seq = (sp - 2)->u.number;
+  const auto message_epoch = (sp - 3)->u.number;
+  auto *stable_children = (sp - 4)->u.arr;
+  const auto reservation_id = static_cast<uint64_t>((sp - 5)->u.number);
+  auto *ob = (sp - 6)->u.ob;
+  std::vector<std::string_view> stable_children_json;
+  std::string frame;
+  int result = 0;
+
+  if (stable_children && stable_children->size > 0 && outer_dynamic_json &&
+      vm_context_is_main_thread()) {
+    stable_children_json.reserve(static_cast<size_t>(stable_children->size));
+    for (int index = 0; index < stable_children->size; ++index) {
+      const auto *child = &stable_children->item[index];
+      if (child->type != T_STRING || !child->u.string) {
+        stable_children_json.clear();
+        break;
+      }
+      stable_children_json.emplace_back(child->u.string, SVALUE_STRLEN(child));
+    }
+    if (!stable_children_json.empty() &&
+        gateway_build_preencoded_chat_batch_frame(
+            stable_children_json, message_epoch, first_server_seq, sent_at,
+            std::string_view(outer_dynamic_json, outer_dynamic_json_len), &frame)) {
+      result = gateway_fill_session_output_for_object(
+          ob, reservation_id, frame.data(), frame.size());
+    }
+  }
+
+  pop_n_elems(7);
   push_number(result);
 }
 

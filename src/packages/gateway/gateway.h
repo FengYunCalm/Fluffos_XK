@@ -4,13 +4,22 @@
 #include "base/package_api.h"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <string>
+#include <vector>
 
 #include <event2/listener.h>
 
+struct TickEvent;
+
 using GatewayOutputWriter = int (*)(int fd, const char *data, size_t len);
+
+enum GatewayReadPauseReason : uint8_t {
+  GATEWAY_READ_PAUSE_BUFFERED_BACKLOG = 1u << 0,
+  GATEWAY_READ_PAUSE_MAIN_QUEUE = 1u << 1,
+};
 
 extern int g_gateway_debug;
 extern size_t g_gateway_max_packet_size;
@@ -33,6 +42,23 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> receive_tasks_enqueued{0};
   std::atomic<uint64_t> receive_tasks_dispatched{0};
   std::atomic<uint64_t> receive_tasks_rejected{0};
+  std::atomic<uint64_t> read_dispatch_runs{0};
+  std::atomic<uint64_t> read_dispatch_frames_total{0};
+  std::atomic<uint64_t> read_dispatch_frames_max{0};
+  std::atomic<uint64_t> read_dispatch_budget_hits{0};
+  std::atomic<uint64_t> read_dispatch_deferred_scheduled{0};
+  std::atomic<uint64_t> read_dispatch_deferred_coalesced{0};
+  std::atomic<uint64_t> read_dispatch_deferred_executed{0};
+  std::atomic<uint64_t> read_dispatch_input_paused{0};
+  std::atomic<uint64_t> read_dispatch_input_resumed{0};
+  std::atomic<uint64_t> main_queue_read_admission_limited{0};
+  std::atomic<uint64_t> main_queue_read_pressure_events{0};
+  std::atomic<uint64_t> main_queue_read_paused{0};
+  std::atomic<uint64_t> main_queue_read_resumed{0};
+  std::atomic<uint64_t> read_dispatch_buffer_compactions{0};
+  std::atomic<uint64_t> read_dispatch_buffer_compacted_bytes{0};
+  std::atomic<uint64_t> read_dispatch_front_shift_bytes_avoided{0};
+  std::atomic<uint64_t> read_dispatch_buffer_peak_bytes{0};
   std::atomic<uint64_t> command_callbacks{0};
   std::atomic<uint64_t> command_tasks_enqueued{0};
   std::atomic<uint64_t> command_tasks_rejected{0};
@@ -50,6 +76,11 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> output_fifo_filled{0};
   std::atomic<uint64_t> output_fifo_released{0};
   std::atomic<uint64_t> output_fifo_reservation_misses{0};
+  // A later reservation was filled but could not write because an earlier
+  // reservation remains unresolved.  These are aggregate-only FIFO evidence.
+  std::atomic<uint64_t> output_fifo_head_blocked_fills{0};
+  std::atomic<uint64_t> output_fifo_head_blocked_predecessors_total{0};
+  std::atomic<uint64_t> output_fifo_head_blocked_predecessors_max{0};
   std::atomic<uint64_t> output_reserve_ns_total{0};
   std::atomic<uint64_t> output_reserve_ns_max{0};
   std::atomic<uint64_t> output_reserve_samples{0};
@@ -103,6 +134,33 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> main_drain_deferred_scheduled{0};
   std::atomic<uint64_t> main_drain_deferred_coalesced{0};
   std::atomic<uint64_t> main_drain_deferred_executed{0};
+  std::atomic<uint64_t> main_drain_deferred_backlog_boosted{0};
+  std::atomic<uint64_t> main_drain_deferred_tasks_total{0};
+  std::atomic<uint64_t> main_drain_deferred_tasks_max{0};
+  std::atomic<uint64_t> main_drain_deferred_wall_ns_total{0};
+  std::atomic<uint64_t> main_drain_deferred_wall_ns_max{0};
+  std::atomic<uint64_t> main_drain_deferred_wall_samples{0};
+  std::atomic<uint64_t> main_drain_deferred_wall_budget_yields{0};
+  std::atomic<uint64_t> main_drain_deferred_task_budget_yields{0};
+  std::atomic<uint64_t> main_drain_deferred_remaining_total{0};
+  std::atomic<uint64_t> main_drain_deferred_remaining_max{0};
+  std::atomic<uint64_t> main_drain_deferred_remaining_samples{0};
+  std::atomic<uint64_t> main_drain_deferred_main_task_wall_ns_max{0};
+  std::atomic<uint64_t> main_drain_deferred_main_tasks_exceeding_wall_budget{0};
+  std::atomic<uint64_t> read_batch_drain_runs{0};
+  std::atomic<uint64_t> read_batch_drain_tasks_total{0};
+  std::atomic<uint64_t> read_batch_drain_tasks_max{0};
+  std::atomic<uint64_t> read_batch_drain_backlog_rescheduled{0};
+  std::atomic<uint64_t> read_batch_drain_wall_ns_total{0};
+  std::atomic<uint64_t> read_batch_drain_wall_ns_max{0};
+  std::atomic<uint64_t> read_batch_drain_wall_samples{0};
+  std::atomic<uint64_t> read_batch_drain_wall_budget_yields{0};
+  std::atomic<uint64_t> read_batch_drain_task_budget_yields{0};
+  std::atomic<uint64_t> read_batch_drain_remaining_total{0};
+  std::atomic<uint64_t> read_batch_drain_remaining_max{0};
+  std::atomic<uint64_t> read_batch_drain_remaining_samples{0};
+  std::atomic<uint64_t> read_batch_drain_main_task_wall_ns_max{0};
+  std::atomic<uint64_t> read_batch_drain_main_tasks_exceeding_wall_budget{0};
   std::atomic<uint64_t> receive_inline_drain_calls{0};
   std::atomic<uint64_t> receive_deferred_drain_requests{0};
   std::atomic<uint64_t> receive_main_queue_depth_total{0};
@@ -123,6 +181,10 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> receive_apply_ns_total{0};
   std::atomic<uint64_t> receive_apply_ns_max{0};
   std::atomic<uint64_t> receive_apply_samples{0};
+  std::atomic<uint64_t> receive_apply_thread_cpu_ns_total{0};
+  std::atomic<uint64_t> receive_apply_thread_cpu_ns_max{0};
+  std::atomic<uint64_t> receive_apply_thread_cpu_samples{0};
+  std::atomic<uint64_t> receive_apply_thread_cpu_unavailable{0};
   std::atomic<uint64_t> command_enqueue_to_dispatch_ns_total{0};
   std::atomic<uint64_t> command_enqueue_to_dispatch_ns_max{0};
   std::atomic<uint64_t> command_enqueue_to_dispatch_samples{0};
@@ -155,6 +217,12 @@ struct GatewayMaster {
   uint64_t messages_received{0};
   uint64_t messages_sent{0};
   std::string read_buffer;
+  size_t read_buffer_offset{0};
+  bool read_dispatch_scheduled{false};
+  TickEvent *read_dispatch_event{nullptr};
+  bool read_dispatch_pending{false};
+  bool read_dispatch_input_paused{false};
+  uint8_t read_dispatch_pause_reasons{0};
 
   ~GatewayMaster();
 };
@@ -176,6 +244,7 @@ struct GatewaySession {
   object_t *user_ob{nullptr};
   std::string user_ob_name;
   int64_t user_ob_load_time{0};
+  std::atomic<bool> command_input_pending{false};
   std::atomic<bool> command_task_pending{false};
   bool probe_suppressed_once{false};
   std::deque<GatewayOutputEntry> output_fifo;
@@ -193,7 +262,13 @@ mapping_t *gateway_status_internal();
 int gateway_get_session_count();
 long gateway_session_fifo_depth_total();
 long gateway_session_fifo_pending_reservations_total();
+long gateway_session_command_input_pending_count();
+long gateway_session_command_task_pending_count();
 long gateway_session_command_pending_count();
+long gateway_read_dispatch_pending_count();
+long gateway_buffered_input_pending_count();
+long gateway_command_pressure_count();
+long gateway_main_queue_pending_count();
 uint64_t gateway_session_fifo_enqueued_total();
 uint64_t gateway_session_fifo_flushed_total();
 uint64_t gateway_session_fifo_rejected_total();
@@ -225,6 +300,18 @@ int gateway_svalue_to_json_string(const svalue_t *sv, std::string *out);
 int gateway_ping_master_internal(int fd);
 void gateway_check_heartbeat_timeouts();
 bool gateway_has_master(int fd);
+
+// C++ regression hooks; not part of the LPC/runtime API.
+bool gateway_dispatch_message_for_test(int fd, const char *payload);
+int gateway_dispatch_buffered_frames_for_test(GatewayMaster *master, int budget);
+void gateway_set_read_dispatch_pending_for_test(GatewayMaster *master, bool pending);
+void gateway_service_admitted_receive_tasks_for_test();
+bool gateway_master_has_buffered_input_for_test(const GatewayMaster *master);
+std::string gateway_encode_output_envelope_for_test(const std::string &session_id,
+                                                    const char *data, size_t len);
+std::string gateway_encode_preencoded_chat_batch_for_test(
+    const std::vector<std::string> &stable_children_json, LPC_INT message_epoch,
+    LPC_INT first_server_seq, LPC_INT sent_at, const std::string &outer_dynamic_json);
 
 GatewaySession *gateway_find_session(const char *session_id);
 GatewaySession *gateway_find_session_by_object(object_t *ob);
