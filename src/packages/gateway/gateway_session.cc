@@ -15,11 +15,13 @@
 #include <event2/event.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <charconv>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <limits>
 #include <list>
 #include <memory>
@@ -70,6 +72,26 @@ constexpr int kGatewayCommandMainDrainBudget = 16;
 constexpr size_t kGatewayMaxFutureWatches = 65536;
 constexpr int kGatewayFutureWatchPollIntervalMs = 1;
 constexpr size_t kGatewayFutureWatchPollBudget = 64;
+constexpr size_t kGatewayMessageEventTemplateCacheMaxEntries = 256;
+constexpr size_t kGatewayMessageEventTemplateCacheMaxBytes = 4 * 1024 * 1024;
+constexpr size_t kGatewayMessageEventTemplateCacheMaxItemBytes = 64 * 1024;
+
+struct GatewayMessageEventTemplate {
+  std::string encoded;
+  std::string stable_members;
+  std::string reliability_json;
+  std::string priority_json;
+  std::string collapse_key_json;
+  LPC_INT ttl_ms = 0;
+  bool has_id = false;
+  bool has_scope = false;
+  bool has_causation_id = false;
+  bool has_correlation_id = false;
+};
+
+std::unordered_multimap<size_t, GatewayMessageEventTemplate>
+    g_gateway_message_event_template_cache;
+size_t g_gateway_message_event_template_cache_bytes = 0;
 
 uint64_t gateway_session_now_ns() {
   return static_cast<uint64_t>(
@@ -337,8 +359,8 @@ bool gateway_build_preencoded_chat_batch_frame(
   return true;
 }
 
-bool gateway_parse_stable_message_event(std::string_view encoded,
-                                        nlohmann::json *event) {
+bool gateway_parse_and_validate_stable_message_event(
+    std::string_view encoded, GatewayMessageEventTemplate *message_template) {
   static const std::unordered_set<std::string> kAllowedKeys{
       "id",             "schema_version", "scope",       "causation_id",
       "correlation_id", "channel",        "intent",      "priority",
@@ -346,48 +368,211 @@ bool gateway_parse_stable_message_event(std::string_view encoded,
       "text",           "payload",
   };
 
-  if (!event || encoded.empty()) {
+  if (!message_template || encoded.empty()) {
     return false;
   }
-  *event = nlohmann::json::parse(encoded.begin(), encoded.end(), nullptr, false);
-  if (event->is_discarded() || !event->is_object()) {
+  auto event = nlohmann::json::parse(encoded.begin(), encoded.end(), nullptr, false);
+  if (event.is_discarded() || !event.is_object()) {
     return false;
   }
-  for (const auto &[key, value] : event->items()) {
+  for (const auto &[key, value] : event.items()) {
     (void)value;
     if (kAllowedKeys.find(key) == kAllowedKeys.end()) {
       return false;
     }
   }
-  if (event->size() < 10 || !event->contains("schema_version") ||
-      !(*event)["schema_version"].is_number_integer() ||
-      (*event)["schema_version"].get<LPC_INT>() != 1 ||
-      !event->contains("channel") || !(*event)["channel"].is_string() ||
-      (*event)["channel"].get_ref<const std::string &>().empty() ||
-      !event->contains("intent") || !(*event)["intent"].is_string() ||
-      (*event)["intent"].get_ref<const std::string &>().empty() ||
-      !event->contains("priority") || !(*event)["priority"].is_string() ||
-      (*event)["priority"].get_ref<const std::string &>().empty() ||
-      !event->contains("reliability") || !(*event)["reliability"].is_string() ||
-      (*event)["reliability"].get_ref<const std::string &>().empty() ||
-      !event->contains("display_mode") || !(*event)["display_mode"].is_string() ||
-      (*event)["display_mode"].get_ref<const std::string &>().empty() ||
-      !event->contains("ttl_ms") || !(*event)["ttl_ms"].is_number_integer() ||
-      (*event)["ttl_ms"].get<LPC_INT>() <= 0 ||
-      !event->contains("collapse_key") || !(*event)["collapse_key"].is_string() ||
-      !event->contains("text") || !(*event)["text"].is_string() ||
-      (*event)["text"].get_ref<const std::string &>().empty() ||
-      !event->contains("payload") || !(*event)["payload"].is_object()) {
+  if (event.size() < 10 || !event.contains("schema_version") ||
+      !event["schema_version"].is_number_integer() ||
+      event["schema_version"].get<LPC_INT>() != 1 ||
+      !event.contains("channel") || !event["channel"].is_string() ||
+      event["channel"].get_ref<const std::string &>().empty() ||
+      !event.contains("intent") || !event["intent"].is_string() ||
+      event["intent"].get_ref<const std::string &>().empty() ||
+      !event.contains("priority") || !event["priority"].is_string() ||
+      event["priority"].get_ref<const std::string &>().empty() ||
+      !event.contains("reliability") || !event["reliability"].is_string() ||
+      event["reliability"].get_ref<const std::string &>().empty() ||
+      !event.contains("display_mode") || !event["display_mode"].is_string() ||
+      event["display_mode"].get_ref<const std::string &>().empty() ||
+      !event.contains("ttl_ms") || !event["ttl_ms"].is_number_integer() ||
+      event["ttl_ms"].get<LPC_INT>() <= 0 ||
+      !event.contains("collapse_key") || !event["collapse_key"].is_string() ||
+      !event.contains("text") || !event["text"].is_string() ||
+      event["text"].get_ref<const std::string &>().empty() ||
+      !event.contains("payload") || !event["payload"].is_object()) {
     return false;
   }
   for (const auto *key : {"id", "causation_id", "correlation_id"}) {
-    if (event->contains(key) &&
-        (!(*event)[key].is_string() ||
-         (*event)[key].get_ref<const std::string &>().empty())) {
+    if (event.contains(key) &&
+        (!event[key].is_string() ||
+         event[key].get_ref<const std::string &>().empty())) {
       return false;
     }
   }
-  return !event->contains("scope") || (*event)["scope"].is_object();
+  if (event.contains("scope") && !event["scope"].is_object()) {
+    return false;
+  }
+
+  auto canonical = event.dump();
+  if (canonical.size() < 2 || canonical.front() != '{' ||
+      canonical.back() != '}') {
+    return false;
+  }
+  message_template->encoded.assign(encoded.data(), encoded.size());
+  message_template->stable_members.assign(canonical.data() + 1,
+                                          canonical.size() - 2);
+  message_template->reliability_json = event["reliability"].dump();
+  message_template->priority_json = event["priority"].dump();
+  if (!event["collapse_key"].get_ref<const std::string &>().empty()) {
+    message_template->collapse_key_json = event["collapse_key"].dump();
+  }
+  message_template->ttl_ms = event["ttl_ms"].get<LPC_INT>();
+  message_template->has_id = event.contains("id");
+  message_template->has_scope = event.contains("scope");
+  message_template->has_causation_id = event.contains("causation_id");
+  message_template->has_correlation_id = event.contains("correlation_id");
+  return true;
+}
+
+size_t gateway_message_event_template_bytes(
+    const GatewayMessageEventTemplate &message_template) {
+  return sizeof(message_template) + message_template.encoded.size() +
+         message_template.stable_members.size() +
+         message_template.reliability_json.size() +
+         message_template.priority_json.size() +
+         message_template.collapse_key_json.size();
+}
+
+const GatewayMessageEventTemplate *gateway_resolve_message_event_template(
+    std::string_view encoded, GatewayMessageEventTemplate *uncached) {
+  if (!uncached || encoded.empty()) {
+    return nullptr;
+  }
+  if (encoded.size() > kGatewayMessageEventTemplateCacheMaxItemBytes) {
+    g_gateway_runtime_counters.message_event_template_cache_bypasses.fetch_add(
+        1, std::memory_order_relaxed);
+    return gateway_parse_and_validate_stable_message_event(encoded, uncached)
+               ? uncached
+               : nullptr;
+  }
+
+  const auto cache_key = std::hash<std::string_view>{}(encoded);
+  const auto cached = g_gateway_message_event_template_cache.equal_range(cache_key);
+  for (auto it = cached.first; it != cached.second; ++it) {
+    if (it->second.encoded.size() == encoded.size() &&
+        std::equal(encoded.begin(), encoded.end(), it->second.encoded.begin())) {
+      g_gateway_runtime_counters.message_event_template_cache_hits.fetch_add(
+          1, std::memory_order_relaxed);
+      return &it->second;
+    }
+  }
+
+  g_gateway_runtime_counters.message_event_template_cache_misses.fetch_add(
+      1, std::memory_order_relaxed);
+  if (!gateway_parse_and_validate_stable_message_event(encoded, uncached)) {
+    return nullptr;
+  }
+
+  const auto entry_bytes = gateway_message_event_template_bytes(*uncached);
+  if (g_gateway_message_event_template_cache.size() >=
+          kGatewayMessageEventTemplateCacheMaxEntries ||
+      entry_bytes > kGatewayMessageEventTemplateCacheMaxBytes -
+                        std::min(g_gateway_message_event_template_cache_bytes,
+                                 kGatewayMessageEventTemplateCacheMaxBytes)) {
+    g_gateway_runtime_counters.message_event_template_cache_evictions.fetch_add(
+        g_gateway_message_event_template_cache.size(),
+        std::memory_order_relaxed);
+    g_gateway_message_event_template_cache.clear();
+    g_gateway_message_event_template_cache_bytes = 0;
+  }
+  auto inserted = g_gateway_message_event_template_cache.emplace(
+      cache_key, std::move(*uncached));
+  g_gateway_message_event_template_cache_bytes += entry_bytes;
+  return &inserted->second;
+}
+
+bool gateway_append_message_event_template(
+    const GatewayMessageEventTemplate &message_template,
+    std::string_view scope_type, std::string_view scope_id,
+    LPC_INT message_seq, LPC_INT server_seq, LPC_INT epoch, LPC_INT sent_at,
+    std::string *frame) {
+  if (!frame || scope_type.empty() || scope_id.empty() || message_seq <= 0 ||
+      server_seq <= 0 || epoch < 0 || sent_at <= 0) {
+    return false;
+  }
+
+  frame->push_back('{');
+  frame->append(message_template.stable_members);
+  if (!message_template.has_id) {
+    frame->append(",\"id\":\"msg_");
+    if (!gateway_append_lpc_int(sent_at, frame)) {
+      return false;
+    }
+    frame->push_back('_');
+    if (!gateway_append_lpc_int(message_seq, frame)) {
+      return false;
+    }
+    frame->push_back('"');
+  }
+  frame->append(",\"seq\":");
+  if (!gateway_append_lpc_int(message_seq, frame)) {
+    return false;
+  }
+  if (!message_template.has_scope) {
+    frame->append(",\"scope\":{\"type\":");
+    if (!gateway_append_json_string(scope_type.data(), scope_type.size(), frame)) {
+      return false;
+    }
+    frame->append(",\"id\":");
+    if (!gateway_append_json_string(scope_id.data(), scope_id.size(), frame)) {
+      return false;
+    }
+    frame->push_back('}');
+  }
+  if (!message_template.has_causation_id) {
+    frame->append(",\"causation_id\":\"cmd_");
+    if (!gateway_append_lpc_int(message_seq, frame)) {
+      return false;
+    }
+    frame->push_back('"');
+  }
+  if (!message_template.has_correlation_id) {
+    frame->append(",\"correlation_id\":\"txn_");
+    if (!gateway_append_lpc_int(message_seq, frame)) {
+      return false;
+    }
+    frame->push_back('"');
+  }
+  frame->append(",\"timestamp\":");
+  if (!gateway_append_lpc_int(sent_at, frame)) {
+    return false;
+  }
+  frame->append(",\"meta\":{\"server_seq\":");
+  if (!gateway_append_lpc_int(server_seq, frame)) {
+    return false;
+  }
+  frame->append(",\"stream\":\"message\",\"epoch\":");
+  if (!gateway_append_lpc_int(epoch, frame)) {
+    return false;
+  }
+  frame->append(",\"reliability\":");
+  frame->append(message_template.reliability_json);
+  frame->append(",\"priority\":");
+  frame->append(message_template.priority_json);
+  frame->append(",\"sent_at\":");
+  if (!gateway_append_lpc_int(sent_at, frame)) {
+    return false;
+  }
+  if (!message_template.collapse_key_json.empty()) {
+    frame->append(",\"collapse_key\":");
+    frame->append(message_template.collapse_key_json);
+  }
+  frame->append(",\"ttl_ms\":");
+  if (!gateway_append_lpc_int(message_template.ttl_ms, frame)) {
+    return false;
+  }
+  frame->append("}}");
+  return true;
 }
 
 bool gateway_build_preencoded_message_event_batch_frame(
@@ -408,78 +593,67 @@ bool gateway_build_preencoded_message_event_batch_frame(
   }
 
   try {
-    nlohmann::json messages = nlohmann::json::array();
-    nlohmann::json singleton;
+    frame->clear();
+    frame->reserve(64 + count * 384);
+    if (count == 1) {
+      frame->append("\x1bXKMSGE");
+    } else {
+      frame->append("\x1bXKBACH{\"messages\":[");
+    }
 
     for (size_t index = 0; index < count; ++index) {
-      nlohmann::json event;
-      nlohmann::json meta;
+      GatewayMessageEventTemplate uncached;
       const auto message_seq = message_seqs[index];
       const auto server_seq = server_seqs[index];
       const auto epoch = message_epochs[index];
       const auto sent_at = sent_ats[index];
 
       if (scope_types[index].empty() || message_seq <= 0 || server_seq <= 0 ||
-          epoch < 0 || sent_at <= 0 ||
-          !gateway_parse_stable_message_event(stable_children_json[index], &event)) {
+          epoch < 0 || sent_at <= 0) {
         return false;
       }
-      if (!event.contains("id")) {
-        event["id"] = "msg_" + std::to_string(sent_at) + "_" +
-                      std::to_string(message_seq);
+      const auto *message_template = gateway_resolve_message_event_template(
+          stable_children_json[index], &uncached);
+      if (!message_template) {
+        frame->clear();
+        return false;
       }
-      event["seq"] = message_seq;
-      if (!event.contains("scope")) {
-        event["scope"] = {{"type", std::string(scope_types[index])},
-                          {"id", std::string(scope_id)}};
+      if (count > 1) {
+        if (index > 0) {
+          frame->push_back(',');
+        }
+        frame->append("{\"type\":\"MSGE\",\"payload\":");
       }
-      if (!event.contains("causation_id")) {
-        event["causation_id"] = "cmd_" + std::to_string(message_seq);
+      if (!gateway_append_message_event_template(
+              *message_template, scope_types[index], scope_id, message_seq,
+              count == 1 ? slot_server_seq : server_seq, epoch, sent_at,
+              frame)) {
+        frame->clear();
+        return false;
       }
-      if (!event.contains("correlation_id")) {
-        event["correlation_id"] = "txn_" + std::to_string(message_seq);
-      }
-      event["timestamp"] = sent_at;
-
-      meta = {{"server_seq", count == 1 ? slot_server_seq : server_seq},
-              {"stream", "message"},
-              {"epoch", epoch},
-              {"reliability", event["reliability"]},
-              {"priority", event["priority"]},
-              {"sent_at", sent_at}};
-      if (!event["collapse_key"].get_ref<const std::string &>().empty()) {
-        meta["collapse_key"] = event["collapse_key"];
-      }
-      meta["ttl_ms"] = event["ttl_ms"];
-      event["meta"] = std::move(meta);
-
-      if (count == 1) {
-        singleton = std::move(event);
-      } else {
-        messages.push_back({{"type", "MSGE"}, {"payload", std::move(event)}});
+      if (count > 1) {
+        frame->push_back('}');
       }
     }
 
-    frame->clear();
-    if (count == 1) {
-      const auto encoded = singleton.dump();
-      frame->reserve(encoded.size() + 10);
-      frame->append("\x1bXKMSGE");
-      frame->append(encoded);
-    } else {
-      nlohmann::json payload{
-          {"messages", std::move(messages)},
-          {"meta", {{"server_seq", slot_server_seq},
-                    {"stream", "system"},
-                    {"epoch", slot_epoch},
-                    {"reliability", "important"},
-                    {"priority", "normal"},
-                    {"sent_at", slot_sent_at}}},
-      };
-      const auto encoded = payload.dump();
-      frame->reserve(encoded.size() + 10);
-      frame->append("\x1bXKBACH");
-      frame->append(encoded);
+    if (count > 1) {
+      frame->append("],\"meta\":{\"server_seq\":");
+      if (!gateway_append_lpc_int(slot_server_seq, frame)) {
+        frame->clear();
+        return false;
+      }
+      frame->append(",\"stream\":\"system\",\"epoch\":");
+      if (!gateway_append_lpc_int(slot_epoch, frame)) {
+        frame->clear();
+        return false;
+      }
+      frame->append(",\"reliability\":\"important\",\"priority\":\"normal\","
+                    "\"sent_at\":");
+      if (!gateway_append_lpc_int(slot_sent_at, frame)) {
+        frame->clear();
+        return false;
+      }
+      frame->append("}}");
     }
     frame->append("\x1b\n");
     return true;
@@ -2038,6 +2212,11 @@ std::string gateway_encode_preencoded_message_event_batch_for_test(
     return {};
   }
   return frame;
+}
+
+void gateway_clear_message_event_template_cache_for_test() {
+  g_gateway_message_event_template_cache.clear();
+  g_gateway_message_event_template_cache_bytes = 0;
 }
 
 object_t *gateway_create_session_internal(const char *session_id, svalue_t *data_val,

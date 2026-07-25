@@ -832,6 +832,144 @@ TEST_F(DriverTest, TestGatewayPreencodedMessageEventBuilderRejectsMalformedOrDyn
                   .empty());
 }
 
+TEST_F(DriverTest, TestGatewayPreencodedMessageEventTemplateCacheKeepsDynamicMetadataIsolated) {
+  const std::string stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"normal\",\"reliability\":\"important\","
+      "\"display_mode\":\"paced\",\"ttl_ms\":30000,\"collapse_key\":\"\","
+      "\"text\":\"shared room fact\",\"payload\":{}}";
+
+  gateway_clear_message_event_template_cache_for_test();
+  const auto hits_before =
+      g_gateway_runtime_counters.message_event_template_cache_hits.load();
+  const auto misses_before =
+      g_gateway_runtime_counters.message_event_template_cache_misses.load();
+
+  const auto first_frame = gateway_encode_preencoded_message_event_batch_for_test(
+      {stable}, {"player"}, "observer-a", {11}, {201}, {7}, {1000},
+      200, 0, 999);
+  const auto second_frame = gateway_encode_preencoded_message_event_batch_for_test(
+      {stable}, {"player"}, "observer-b", {12}, {301}, {8}, {2000},
+      300, 0, 1999);
+
+  ASSERT_FALSE(first_frame.empty());
+  ASSERT_FALSE(second_frame.empty());
+  const auto first = nlohmann::json::parse(
+      first_frame.substr(7, first_frame.size() - 9));
+  const auto second = nlohmann::json::parse(
+      second_frame.substr(7, second_frame.size() - 9));
+  ASSERT_EQ(first["scope"]["id"], "observer-a");
+  ASSERT_EQ(first["seq"], 11);
+  ASSERT_EQ(first["meta"]["server_seq"], 200);
+  ASSERT_EQ(second["scope"]["id"], "observer-b");
+  ASSERT_EQ(second["seq"], 12);
+  ASSERT_EQ(second["meta"]["server_seq"], 300);
+  ASSERT_EQ(
+      g_gateway_runtime_counters.message_event_template_cache_misses.load(),
+      misses_before + 1);
+  ASSERT_EQ(
+      g_gateway_runtime_counters.message_event_template_cache_hits.load(),
+      hits_before + 1);
+}
+
+TEST_F(DriverTest, TestGatewayPreencodedMessageEventTemplateEscapesDynamicScope) {
+  const std::string stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"normal\",\"reliability\":\"important\","
+      "\"display_mode\":\"paced\",\"ttl_ms\":30000,\"collapse_key\":\"\","
+      "\"text\":\"shared room fact\",\"payload\":{}}";
+  const std::string scope_type = "player\nobserver";
+  const std::string scope_id = "观察者\"甲\\乙";
+
+  gateway_clear_message_event_template_cache_for_test();
+  const auto frame = gateway_encode_preencoded_message_event_batch_for_test(
+      {stable}, {scope_type}, scope_id, {15}, {501}, {11}, {4000},
+      500, 0, 3999);
+
+  ASSERT_FALSE(frame.empty());
+  const auto payload = nlohmann::json::parse(
+      frame.substr(7, frame.size() - 9));
+  ASSERT_EQ(payload["scope"]["type"], scope_type);
+  ASSERT_EQ(payload["scope"]["id"], scope_id);
+  ASSERT_EQ(payload["text"], "shared room fact");
+}
+
+TEST_F(DriverTest, TestGatewayPreencodedMessageEventTemplateCacheRejectsInvalidAndBypassesOversizedInput) {
+  const std::string stable_prefix =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"normal\",\"reliability\":\"important\","
+      "\"display_mode\":\"paced\",\"ttl_ms\":30000,\"collapse_key\":\"\","
+      "\"text\":\"";
+  const std::string stable_suffix = "\",\"payload\":{}}";
+  const std::string invalid = stable_prefix + "invalid\"} ";
+  const std::string oversized =
+      stable_prefix + std::string(70 * 1024, 'x') + stable_suffix;
+
+  gateway_clear_message_event_template_cache_for_test();
+  const auto hits_before =
+      g_gateway_runtime_counters.message_event_template_cache_hits.load();
+  const auto misses_before =
+      g_gateway_runtime_counters.message_event_template_cache_misses.load();
+  const auto bypasses_before =
+      g_gateway_runtime_counters.message_event_template_cache_bypasses.load();
+  const auto encode = [](const std::string &stable) {
+    return gateway_encode_preencoded_message_event_batch_for_test(
+        {stable}, {"player"}, "observer-cache", {14}, {401}, {10},
+        {3000}, 400, 0, 2999);
+  };
+
+  ASSERT_TRUE(encode(invalid).empty());
+  ASSERT_TRUE(encode(invalid).empty());
+  ASSERT_FALSE(encode(oversized).empty());
+  ASSERT_FALSE(encode(oversized).empty());
+  ASSERT_EQ(
+      g_gateway_runtime_counters.message_event_template_cache_hits.load(),
+      hits_before);
+  ASSERT_EQ(
+      g_gateway_runtime_counters.message_event_template_cache_misses.load(),
+      misses_before + 2);
+  ASSERT_EQ(
+      g_gateway_runtime_counters.message_event_template_cache_bypasses.load(),
+      bypasses_before + 2);
+}
+
+TEST_F(DriverTest, TestGatewayPreencodedMessageEventTemplateCacheEvictsAtBound) {
+  const std::string stable_prefix =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"normal\",\"reliability\":\"important\","
+      "\"display_mode\":\"paced\",\"ttl_ms\":30000,\"collapse_key\":\"\","
+      "\"text\":\"event ";
+  const std::string stable_suffix = "\",\"payload\":{}}";
+  std::vector<std::string> stable_events;
+  stable_events.reserve(257);
+  for (size_t index = 0; index < 257; ++index) {
+    stable_events.push_back(stable_prefix + std::to_string(index) + stable_suffix);
+  }
+
+  gateway_clear_message_event_template_cache_for_test();
+  const auto evictions_before =
+      g_gateway_runtime_counters.message_event_template_cache_evictions.load();
+  for (const auto &stable : stable_events) {
+    ASSERT_FALSE(gateway_encode_preencoded_message_event_batch_for_test(
+                     {stable}, {"player"}, "observer-bound", {16}, {601},
+                     {12}, {5000}, 600, 0, 4999)
+                     .empty());
+  }
+  ASSERT_EQ(
+      g_gateway_runtime_counters.message_event_template_cache_evictions.load(),
+      evictions_before + 256);
+
+  const auto hits_before =
+      g_gateway_runtime_counters.message_event_template_cache_hits.load();
+  ASSERT_FALSE(gateway_encode_preencoded_message_event_batch_for_test(
+                   {stable_events.back()}, {"player"}, "observer-bound", {17},
+                   {602}, {12}, {5001}, 601, 0, 5000)
+                   .empty());
+  ASSERT_EQ(
+      g_gateway_runtime_counters.message_event_template_cache_hits.load(),
+      hits_before + 1);
+}
+
 TEST_F(DriverTest, TestGatewayReceiveDoesNotDrainMainTasksInsideReadCallback) {
   const auto source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
   const auto apply_pos = source.find("void gateway_apply_receive");

@@ -2242,6 +2242,26 @@ mapping_t *gateway_status_internal() {
                                      1000));
   add_mapping_pair(map, "gateway_output_execute_max_us",
                    gateway_max_us(g_gateway_runtime_counters.output_execute_ns_max));
+  add_mapping_pair(
+      map, "gateway_message_event_template_cache_hits",
+      static_cast<long>(
+          g_gateway_runtime_counters.message_event_template_cache_hits.load(
+              std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_message_event_template_cache_misses",
+      static_cast<long>(
+          g_gateway_runtime_counters.message_event_template_cache_misses.load(
+              std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_message_event_template_cache_evictions",
+      static_cast<long>(
+          g_gateway_runtime_counters.message_event_template_cache_evictions.load(
+              std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_message_event_template_cache_bypasses",
+      static_cast<long>(
+          g_gateway_runtime_counters.message_event_template_cache_bypasses.load(
+              std::memory_order_relaxed)));
   add_mapping_string(map, "gateway_io_boundary", "main_thread_io_adapter");
   add_mapping_pair(map, "debug", g_gateway_debug);
   add_mapping_pair(map, "max_packet_size", static_cast<LPC_INT>(g_gateway_max_packet_size));

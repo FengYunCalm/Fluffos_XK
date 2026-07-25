@@ -203,6 +203,10 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> output_execute_ns_total{0};
   std::atomic<uint64_t> output_execute_ns_max{0};
   std::atomic<uint64_t> output_execute_samples{0};
+  std::atomic<uint64_t> message_event_template_cache_hits{0};
+  std::atomic<uint64_t> message_event_template_cache_misses{0};
+  std::atomic<uint64_t> message_event_template_cache_evictions{0};
+  std::atomic<uint64_t> message_event_template_cache_bypasses{0};
 };
 
 extern GatewayRuntimeCounters g_gateway_runtime_counters;
@@ -329,6 +333,7 @@ std::string gateway_encode_preencoded_message_event_batch_for_test(
     const std::vector<LPC_INT> &message_epochs,
     const std::vector<LPC_INT> &sent_ats, LPC_INT slot_server_seq,
     LPC_INT slot_epoch, LPC_INT slot_sent_at);
+void gateway_clear_message_event_template_cache_for_test();
 
 GatewaySession *gateway_find_session(const char *session_id);
 GatewaySession *gateway_find_session_by_object(object_t *ob);

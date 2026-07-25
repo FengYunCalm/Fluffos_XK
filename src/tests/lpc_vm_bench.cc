@@ -2,6 +2,7 @@
 
 #include "backend.h"
 #include "mainlib.h"
+#include "packages/gateway/gateway.h"
 #include "vm/internal/apply.h"
 #include "vm/internal/base/apply_cache.h"
 #include "vm/internal/base/interpret.h"
@@ -304,6 +305,102 @@ void run_representative_lpc_bench(Report &report) {
   destruct_object_for_bench(probe);
 }
 
+void run_message_event_template_cache_bench(Report &report) {
+  constexpr size_t kTemplateCount = 104;
+  constexpr size_t kUncachedRecipients = 16;
+  constexpr size_t kWarmRecipients = 64;
+  std::vector<std::string> stable_children;
+  std::vector<std::string> scope_types;
+  std::vector<LPC_INT> message_seqs;
+  std::vector<LPC_INT> server_seqs;
+  std::vector<LPC_INT> epochs;
+  std::vector<LPC_INT> sent_ats;
+
+  stable_children.reserve(kTemplateCount);
+  scope_types.reserve(kTemplateCount);
+  message_seqs.reserve(kTemplateCount);
+  server_seqs.reserve(kTemplateCount);
+  epochs.reserve(kTemplateCount);
+  sent_ats.reserve(kTemplateCount);
+  for (size_t index = 0; index < kTemplateCount; ++index) {
+    stable_children.push_back(
+        "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+        "\"priority\":\"normal\",\"reliability\":\"important\","
+        "\"display_mode\":\"paced\",\"ttl_ms\":30000,\"collapse_key\":\"\","
+        "\"text\":\"room event " + std::to_string(index) +
+        "\",\"payload\":{}}");
+    scope_types.emplace_back("player");
+    message_seqs.push_back(static_cast<LPC_INT>(index + 1));
+    server_seqs.push_back(static_cast<LPC_INT>(1000 + index));
+    epochs.push_back(0);
+    sent_ats.push_back(2000);
+  }
+
+  size_t output_bytes = 0;
+  auto uncached_started_at = Clock::now();
+  for (size_t recipient = 0; recipient < kUncachedRecipients; ++recipient) {
+    gateway_clear_message_event_template_cache_for_test();
+    auto frame = gateway_encode_preencoded_message_event_batch_for_test(
+        stable_children, scope_types,
+        "observer-uncached-" + std::to_string(recipient), message_seqs,
+        server_seqs, epochs, sent_ats,
+        static_cast<LPC_INT>(3000 + recipient), 0, 2000);
+    require(!frame.empty(), "message-event uncached probe failed");
+    output_bytes += frame.size();
+  }
+  const auto uncached_elapsed = elapsed_ns(uncached_started_at);
+
+  gateway_clear_message_event_template_cache_for_test();
+  const auto hits_before =
+      g_gateway_runtime_counters.message_event_template_cache_hits.load();
+  const auto misses_before =
+      g_gateway_runtime_counters.message_event_template_cache_misses.load();
+  auto cold_started_at = Clock::now();
+  auto cold_frame = gateway_encode_preencoded_message_event_batch_for_test(
+      stable_children, scope_types, "observer-cold", message_seqs,
+      server_seqs, epochs, sent_ats, 999, 0, 1999);
+  const auto cold_elapsed = elapsed_ns(cold_started_at);
+  require(!cold_frame.empty(), "message-event cold cache probe failed");
+
+  output_bytes += cold_frame.size();
+  auto warm_started_at = Clock::now();
+  for (size_t recipient = 0; recipient < kWarmRecipients; ++recipient) {
+    auto frame = gateway_encode_preencoded_message_event_batch_for_test(
+        stable_children, scope_types,
+        "observer-warm-" + std::to_string(recipient), message_seqs,
+        server_seqs, epochs, sent_ats,
+        static_cast<LPC_INT>(2000 + recipient), 0, 2000);
+    require(!frame.empty(), "message-event warm cache probe failed");
+    output_bytes += frame.size();
+  }
+  const auto warm_elapsed = elapsed_ns(warm_started_at);
+
+  report.add("message_event_template_count", kTemplateCount);
+  report.add("message_event_template_uncached_recipients",
+             kUncachedRecipients);
+  report.add("message_event_template_uncached_fill_total_ns",
+             uncached_elapsed);
+  report.add("message_event_template_uncached_fill_ns_per_recipient",
+             uncached_elapsed / kUncachedRecipients);
+  report.add("message_event_template_cold_fill_ns", cold_elapsed);
+  report.add("message_event_template_warm_recipients", kWarmRecipients);
+  report.add("message_event_template_warm_fill_total_ns", warm_elapsed);
+  report.add("message_event_template_warm_fill_ns_per_recipient",
+             warm_elapsed / kWarmRecipients);
+  report.add("message_event_template_output_bytes",
+             static_cast<long long>(output_bytes));
+  report.add(
+      "message_event_template_cache_hits",
+      static_cast<long long>(
+          g_gateway_runtime_counters.message_event_template_cache_hits.load() -
+          hits_before));
+  report.add(
+      "message_event_template_cache_misses",
+      static_cast<long long>(
+          g_gateway_runtime_counters.message_event_template_cache_misses.load() -
+          misses_before));
+}
+
 void add_profile_snapshot_metrics(Report &report, const std::string &prefix,
                                   const LpcVmProfileSnapshot &snapshot) {
   report.add(prefix + "opcode_dispatch_count", static_cast<long long>(snapshot.opcode_dispatch_count));
@@ -418,11 +515,14 @@ int main(int argc, char **argv) {
     report.add_string("hot_path_profile_probe", "opcode_efun_call_other_mapping_string_v1");
     report.add_string("representative_lpc_probe",
                       "mapping_array_sort_sprintf_json_encode_v1");
+    report.add_string("message_event_template_probe",
+                      "validated_stable_json_cache_104x64_v1");
     report.add_string("profile_comparison", "explicit_enabled_vs_disabled_same_audit_mode");
 
     run_apply_cache_bench(report);
     run_dispatch_bench(report);
     run_representative_lpc_bench(report);
+    run_message_event_template_cache_bench(report);
     run_hot_path_profile_bench(report, false, "profile_disabled_");
     run_hot_path_profile_bench(report, true, "");
 
