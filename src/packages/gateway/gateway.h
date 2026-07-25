@@ -254,6 +254,11 @@ struct GatewaySession {
   size_t output_fifo_max_depth{4096};
 };
 
+struct GatewaySessionBatchReservationResult {
+  std::vector<uint64_t> reservation_ids;
+  std::vector<bool> reused;
+};
+
 void init_gateway(void);
 void cleanup_gateway(void);
 
@@ -276,6 +281,10 @@ int gateway_flush_session_output_fifo_with_writer(GatewaySession *sess, GatewayO
 int gateway_flush_session_output_fifo(GatewaySession *sess);
 int gateway_enqueue_session_output(GatewaySession *sess, std::string encoded);
 uint64_t gateway_reserve_session_output(GatewaySession *sess);
+bool gateway_reserve_session_outputs(
+    const std::vector<GatewaySession *> &sessions,
+    const std::vector<uint64_t> &existing_reservation_ids,
+    GatewaySessionBatchReservationResult *result);
 int gateway_fill_session_output_with_writer(GatewaySession *sess, uint64_t reservation_id,
                                             std::string encoded, GatewayOutputWriter writer);
 int gateway_fill_session_output(GatewaySession *sess, uint64_t reservation_id, std::string encoded);

@@ -26,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -1445,6 +1446,69 @@ uint64_t gateway_reserve_session_output(GatewaySession *sess) {
   return reservation_id;
 }
 
+bool gateway_reserve_session_outputs(
+    const std::vector<GatewaySession *> &sessions,
+    const std::vector<uint64_t> &existing_reservation_ids,
+    GatewaySessionBatchReservationResult *result) {
+  std::unordered_set<GatewaySession *> unique_sessions;
+  std::vector<std::pair<GatewaySession *, uint64_t>> created;
+
+  if (!result || sessions.empty() || sessions.size() != existing_reservation_ids.size()) {
+    return false;
+  }
+  result->reservation_ids.clear();
+  result->reused.clear();
+  result->reservation_ids.reserve(sessions.size());
+  result->reused.reserve(sessions.size());
+  created.reserve(sessions.size());
+
+  // Validate the complete wave before appending anything. A caller may offer
+  // an earlier unresolved reservation, but it is reusable only while it is
+  // still the tail; any intervening output forces a new FIFO slot.
+  for (size_t index = 0; index < sessions.size(); ++index) {
+    auto *sess = sessions[index];
+    const auto existing_id = existing_reservation_ids[index];
+    if (!sess || !unique_sessions.insert(sess).second) {
+      return false;
+    }
+    const bool can_reuse = existing_id > 0 && !sess->output_fifo.empty() &&
+                           sess->output_fifo.back().reservation_id == existing_id &&
+                           !sess->output_fifo.back().ready;
+    if (!can_reuse && sess->output_fifo.size() >= sess->output_fifo_max_depth) {
+      return false;
+    }
+  }
+
+  for (size_t index = 0; index < sessions.size(); ++index) {
+    auto *sess = sessions[index];
+    const auto existing_id = existing_reservation_ids[index];
+    const bool can_reuse = existing_id > 0 && !sess->output_fifo.empty() &&
+                           sess->output_fifo.back().reservation_id == existing_id &&
+                           !sess->output_fifo.back().ready;
+    if (can_reuse) {
+      result->reservation_ids.push_back(existing_id);
+      result->reused.push_back(true);
+      continue;
+    }
+
+    const auto reservation_id = gateway_reserve_session_output(sess);
+    if (reservation_id == 0) {
+      for (auto it = created.rbegin(); it != created.rend(); ++it) {
+        gateway_release_session_output_with_writer(
+            it->first, it->second,
+            [](int, const char *, size_t) -> int { return 0; });
+      }
+      result->reservation_ids.clear();
+      result->reused.clear();
+      return false;
+    }
+    created.emplace_back(sess, reservation_id);
+    result->reservation_ids.push_back(reservation_id);
+    result->reused.push_back(false);
+  }
+  return true;
+}
+
 int gateway_fill_session_output_with_writer(GatewaySession *sess, uint64_t reservation_id,
                                             std::string encoded, GatewayOutputWriter writer) {
   if (!sess || reservation_id == 0 || encoded.empty() || !writer) {
@@ -2131,6 +2195,65 @@ void f_gateway_session_reserve() {
   auto reservation_id = gateway_reserve_session_output_for_object(ob);
   pop_stack();
   push_number(static_cast<LPC_INT>(reservation_id));
+}
+
+void f_gateway_sessions_reserve_or_reuse() {
+  auto *existing_ids = sp->u.arr;
+  auto *targets = (sp - 1)->u.arr;
+  std::vector<GatewaySession *> sessions;
+  std::vector<uint64_t> requested_ids;
+  GatewaySessionBatchReservationResult result;
+  mapping_t *response;
+  array_t *reservation_ids;
+  array_t *reused;
+  bool ok = false;
+
+  if (targets && existing_ids && targets->size > 0 &&
+      targets->size == existing_ids->size && vm_context_is_main_thread()) {
+    sessions.reserve(static_cast<size_t>(targets->size));
+    requested_ids.reserve(static_cast<size_t>(targets->size));
+    ok = true;
+    for (int index = 0; index < targets->size; ++index) {
+      const auto *target = &targets->item[index];
+      const auto *existing = &existing_ids->item[index];
+      if (target->type != T_OBJECT || !gateway_object_valid(target->u.ob) ||
+          existing->type != T_NUMBER || existing->u.number < 0) {
+        ok = false;
+        break;
+      }
+      auto *sess = gateway_find_session_by_object(target->u.ob);
+      if (!sess) {
+        ok = false;
+        break;
+      }
+      sessions.push_back(sess);
+      requested_ids.push_back(static_cast<uint64_t>(existing->u.number));
+    }
+    if (ok) {
+      ok = gateway_reserve_session_outputs(sessions, requested_ids, &result);
+    }
+  }
+
+  reservation_ids = allocate_array(ok ? static_cast<int>(result.reservation_ids.size()) : 0);
+  reused = allocate_array(ok ? static_cast<int>(result.reused.size()) : 0);
+  if (ok) {
+    for (size_t index = 0; index < result.reservation_ids.size(); ++index) {
+      reservation_ids->item[index].type = T_NUMBER;
+      reservation_ids->item[index].u.number =
+          static_cast<LPC_INT>(result.reservation_ids[index]);
+      reused->item[index].type = T_NUMBER;
+      reused->item[index].u.number = result.reused[index] ? 1 : 0;
+    }
+  }
+
+  response = allocate_mapping(3);
+  add_mapping_pair(response, "ok", ok ? 1 : 0);
+  add_mapping_array(response, "reservation_ids", reservation_ids);
+  add_mapping_array(response, "reused", reused);
+  free_array(reservation_ids);
+  free_array(reused);
+  pop_2_elems();
+  push_refed_mapping(response);
 }
 
 void f_gateway_session_fill() {

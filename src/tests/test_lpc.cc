@@ -628,6 +628,66 @@ TEST_F(DriverTest, TestGatewayOutputReservationIdsDoNotRepeatAcrossSessions) {
   ASSERT_NE(first_id, second_id);
 }
 
+TEST_F(DriverTest, TestGatewayBatchReservationReusesOnlyPendingTailSlots) {
+  GatewaySession first;
+  GatewaySession second;
+  first.master_fd = 93;
+  second.master_fd = 94;
+
+  const auto first_id = gateway_reserve_session_output(&first);
+  ASSERT_GT(first_id, 0u);
+
+  GatewaySessionBatchReservationResult result;
+  ASSERT_TRUE(gateway_reserve_session_outputs(
+      {&first, &second}, {first_id, 0}, &result));
+  ASSERT_EQ(result.reservation_ids.size(), 2u);
+  ASSERT_EQ(result.reused, (std::vector<bool>{true, false}));
+  ASSERT_EQ(result.reservation_ids[0], first_id);
+  ASSERT_GT(result.reservation_ids[1], 0u);
+  ASSERT_EQ(first.output_fifo.size(), 1u);
+  ASSERT_EQ(second.output_fifo.size(), 1u);
+
+  ASSERT_EQ(gateway_enqueue_session_output(&first, "after-pending"), 1);
+  GatewaySessionBatchReservationResult after_intervening;
+  ASSERT_TRUE(gateway_reserve_session_outputs(
+      {&first}, {first_id}, &after_intervening));
+  ASSERT_FALSE(after_intervening.reused[0]);
+  ASSERT_NE(after_intervening.reservation_ids[0], first_id);
+  ASSERT_EQ(first.output_fifo.size(), 3u);
+}
+
+TEST_F(DriverTest, TestGatewayBatchReservationPrevalidatesAllSessions) {
+  GatewaySession first;
+  GatewaySession full;
+  first.master_fd = 95;
+  full.master_fd = 96;
+  full.output_fifo_max_depth = 0;
+  const auto first_id = gateway_reserve_session_output(&first);
+  ASSERT_GT(first_id, 0u);
+
+  GatewaySessionBatchReservationResult result;
+  ASSERT_FALSE(gateway_reserve_session_outputs(
+      {&first, &full}, {first_id, 0}, &result));
+  ASSERT_TRUE(result.reservation_ids.empty());
+  ASSERT_TRUE(result.reused.empty());
+  ASSERT_EQ(first.output_fifo.size(), 1u);
+  ASSERT_EQ(first.output_fifo.front().reservation_id, first_id);
+  ASSERT_FALSE(first.output_fifo.front().ready);
+  ASSERT_TRUE(full.output_fifo.empty());
+}
+
+TEST_F(DriverTest, TestGatewayBatchReservationRejectsDuplicateSessions) {
+  GatewaySession session;
+  session.master_fd = 97;
+
+  GatewaySessionBatchReservationResult result;
+  ASSERT_FALSE(gateway_reserve_session_outputs(
+      {&session, &session}, {0, 0}, &result));
+  ASSERT_TRUE(result.reservation_ids.empty());
+  ASSERT_TRUE(result.reused.empty());
+  ASSERT_TRUE(session.output_fifo.empty());
+}
+
 TEST_F(DriverTest, TestGatewayPreencodedChatBatchBuilderKeepsStableAndDynamicBoundaries) {
   const std::vector<std::string> stable_children{
       "{\"content\":\"first\",\"direction\":\"incoming\"}",
