@@ -47,15 +47,19 @@ constexpr int kGatewayDefaultHeartbeatInterval = 15;
 constexpr int kGatewayDefaultHeartbeatTimeout = 45;
 constexpr int kGatewayDefaultReconnectGrace = 60;
 constexpr int kGatewayMaxJsonDepth = 20;
-// Read admission is cheap once gateway_receive execution is deferred to the
-// owner main queue. Admit a useful cross-session batch before the fair owner
-// drain, while keeping a hard bound for malformed or unbounded masters.
-constexpr int kGatewayReadFrameBudget = 128;
-// Cap admitted owner-main work before socket reads can outrun the fair drain.
-// The gap between high and low watermarks is one deferred drain quantum, which
-// avoids toggling EV_READ for every completed task under a synchronized wave.
-constexpr long kGatewayMainQueueReadHighWatermark = 96;
-constexpr long kGatewayMainQueueReadLowWatermark = 32;
+// A synchronized gameplay wave can make each admitted receive task reserve
+// output for hundreds of sessions. Keep socket admission to one small
+// cross-session quantum so later command phases cannot run far ahead of
+// unresolved FIFO predecessors from the current phase.
+constexpr int kGatewayReadFrameBudget = 16;
+// Bound the owner-main ingress queue to two admission quanta. Resume at one
+// quantum so a newly admitted batch cannot cross the high watermark and every
+// read callback returns to Libevent before phase skew grows without bound.
+constexpr long kGatewayMainQueueReadHighWatermark = 32;
+constexpr long kGatewayMainQueueReadLowWatermark = 16;
+static_assert(kGatewayReadFrameBudget <=
+              kGatewayMainQueueReadHighWatermark -
+                  kGatewayMainQueueReadLowWatermark);
 // A zero-delay event_base_once callback is made active immediately. A
 // self-rescheduling backlog can therefore keep due timeout callbacks behind
 // its active queue; one millisecond returns this continuation to the timer

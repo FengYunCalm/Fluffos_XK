@@ -393,8 +393,8 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_buffered_input_pending_masters"), 0);
   ASSERT_GE(mapping_number(status, "gateway_command_pressure"), 0);
   ASSERT_GE(mapping_number(status, "gateway_main_queue_pending"), 0);
-  ASSERT_EQ(mapping_number(status, "gateway_main_queue_read_high_watermark"), 96);
-  ASSERT_EQ(mapping_number(status, "gateway_main_queue_read_low_watermark"), 32);
+  ASSERT_EQ(mapping_number(status, "gateway_main_queue_read_high_watermark"), 32);
+  ASSERT_EQ(mapping_number(status, "gateway_main_queue_read_low_watermark"), 16);
   ASSERT_GE(mapping_number(status, "gateway_main_queue_read_admission_limited"), 0);
   ASSERT_GE(mapping_number(status, "gateway_main_queue_read_pressure_events"), 0);
   ASSERT_GE(mapping_number(status, "gateway_main_queue_read_paused"), 0);
@@ -494,7 +494,7 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status,
                            "gateway_read_batch_drain_main_tasks_exceeding_wall_budget"),
             0);
-  ASSERT_EQ(mapping_number(status, "gateway_read_dispatch_budget"), 128);
+  ASSERT_EQ(mapping_number(status, "gateway_read_dispatch_budget"), 16);
   ASSERT_GE(mapping_number(status, "gateway_read_dispatch_runs"), 0);
   ASSERT_GE(mapping_number(status, "gateway_read_dispatch_frames_total"), 0);
   ASSERT_GE(mapping_number(status, "gateway_read_dispatch_frames_max"), 0);
@@ -986,9 +986,18 @@ TEST_F(DriverTest, TestGatewayMainQueueReadAdmissionUsesComposedHighLowWaterBack
   const auto header = read_source_file_for_test("../src/packages/gateway/gateway.h");
   const auto spec = read_source_file_for_test("../src/packages/gateway/gateway.spec");
 
-  ASSERT_NE(source.find("constexpr long kGatewayMainQueueReadHighWatermark = 96"),
+  ASSERT_NE(source.find("constexpr long kGatewayMainQueueReadHighWatermark = 32"),
             std::string::npos);
-  ASSERT_NE(source.find("constexpr long kGatewayMainQueueReadLowWatermark = 32"),
+  ASSERT_NE(source.find("constexpr long kGatewayMainQueueReadLowWatermark = 16"),
+            std::string::npos);
+  const auto admission_assert_pos = source.find(
+      "static_assert(kGatewayReadFrameBudget <=");
+  ASSERT_NE(admission_assert_pos, std::string::npos);
+  ASSERT_NE(source.find("kGatewayMainQueueReadHighWatermark -",
+                        admission_assert_pos),
+            std::string::npos);
+  ASSERT_NE(source.find("kGatewayMainQueueReadLowWatermark);",
+                        admission_assert_pos),
             std::string::npos);
   ASSERT_NE(header.find("GATEWAY_READ_PAUSE_BUFFERED_BACKLOG"), std::string::npos);
   ASSERT_NE(header.find("GATEWAY_READ_PAUSE_MAIN_QUEUE"), std::string::npos);
@@ -1060,7 +1069,7 @@ TEST_F(DriverTest, TestGatewayReadCallbackYieldsBoundedFrameBatches) {
   const auto source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
   const auto header = read_source_file_for_test("../src/packages/gateway/gateway.h");
 
-  ASSERT_NE(source.find("constexpr int kGatewayReadFrameBudget = 128"), std::string::npos);
+  ASSERT_NE(source.find("constexpr int kGatewayReadFrameBudget = 16"), std::string::npos);
   ASSERT_NE(source.find("constexpr auto kGatewayReadContinuationDelay = std::chrono::milliseconds(1)"),
             std::string::npos);
   ASSERT_NE(header.find("bool read_dispatch_scheduled{false}"), std::string::npos);
