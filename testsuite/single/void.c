@@ -132,6 +132,84 @@ mixed call_target(object target)
   return call_other(target, "dummy");
 }
 
+mapping benchmark_representative_lpc_workload(int item_count, int iterations)
+{
+  mapping skills;
+  mapping payload;
+  mapping record;
+  mapping *entries;
+  string *skill_ids;
+  string *signature_parts;
+  string encoded;
+  string skill_id;
+  int checksum;
+  int cpu_started_at;
+  int cpu_total_ns;
+  int index;
+  int round;
+
+  if (item_count < 1)
+    item_count = 1;
+  if (item_count > 64)
+    item_count = 64;
+  if (iterations < 1)
+    iterations = 1;
+  if (iterations > 4096)
+    iterations = 4096;
+
+  skills = ([]);
+  for (index = 0; index < item_count; index++) {
+    skill_id = sprintf("skill_%02d", index);
+    skills[skill_id] = ([
+      "level": index + 1,
+      "exp": index % 10,
+      "category": index % 2 ? "movement" : "combat",
+    ]);
+  }
+
+  cpu_started_at = thread_cpu_time_ns();
+  for (round = 0; round < iterations; round++) {
+    skill_ids = sort_array(keys(skills), 1);
+    entries = allocate(sizeof(skill_ids));
+    signature_parts = allocate(sizeof(skill_ids));
+    for (index = 0; index < sizeof(skill_ids); index++) {
+      skill_id = skill_ids[index];
+      record = skills[skill_id];
+      signature_parts[index] = sprintf("%s:%d:%d", skill_id,
+        record["level"] || 0, record["exp"] || 0);
+      entries[index] = ([
+        "id": skill_id,
+        "name": sprintf("Representative skill %d", index),
+        "level": record["level"] || 0,
+        "max_level": 1000,
+        "enabled": (record["level"] || 0) > 0,
+        "meta": ([
+          "category": record["category"] || "combat",
+          "resource": index % 3 ? "mp" : "ep",
+          "bucket": (record["level"] || 0) % 5,
+        ]),
+      ]);
+    }
+    payload = ([
+      "skills": entries,
+      "signature": implode(signature_parts, "|"),
+      "round": round % 7,
+    ]);
+    encoded = json_encode(payload);
+    checksum += strlen(encoded);
+    record = skills[skill_ids[round % sizeof(skill_ids)]];
+    record["exp"] = ((record["exp"] || 0) + 1) % 10;
+  }
+  cpu_total_ns = thread_cpu_time_ns() - cpu_started_at;
+
+  return ([
+    "item_count": item_count,
+    "iterations": iterations,
+    "checksum": checksum,
+    "cpu_total_ns": cpu_total_ns,
+  ]);
+}
+
 mapping call_owner_async_echo(object target)
 {
   return owner_call_async(target, "owner_async_echo", ([

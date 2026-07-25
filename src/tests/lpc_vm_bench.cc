@@ -256,6 +256,54 @@ void run_dispatch_bench(Report &report) {
   destruct_object_for_bench(probe);
 }
 
+long long require_mapping_number(mapping_t *map, const char *key) {
+  auto *value = map ? find_string_in_mapping(map, key) : nullptr;
+  require(value != nullptr && value->type == T_NUMBER,
+          std::string("representative LPC workload missing numeric field: ") + key);
+  return value->u.number;
+}
+
+void run_representative_lpc_bench(Report &report) {
+  constexpr long kItemCount = 16;
+  constexpr long kIterations = 256;
+  object_t *probe = clone_object_for_bench("single/void");
+  require(probe != nullptr, "failed to clone representative LPC workload probe");
+
+  push_number(kItemCount);
+  push_number(8);
+  require(safe_apply("benchmark_representative_lpc_workload", probe, 2,
+                     ORIGIN_DRIVER) != nullptr,
+          "representative LPC workload warmup failed");
+
+  push_number(kItemCount);
+  push_number(kIterations);
+  auto wall_start = Clock::now();
+  auto *result = safe_apply("benchmark_representative_lpc_workload", probe, 2,
+                            ORIGIN_DRIVER);
+  auto wall_elapsed = elapsed_ns(wall_start);
+  require(result != nullptr && result->type == T_MAPPING,
+          "representative LPC workload result missing");
+  auto *values = result->u.map;
+  auto cpu_total_ns = require_mapping_number(values, "cpu_total_ns");
+  auto iterations = require_mapping_number(values, "iterations");
+  require(iterations == kIterations && cpu_total_ns > 0,
+          "representative LPC workload returned invalid timing");
+
+  report.add("representative_lpc_items",
+             require_mapping_number(values, "item_count"));
+  report.add("representative_lpc_iterations", iterations);
+  report.add("representative_lpc_checksum",
+             require_mapping_number(values, "checksum"));
+  report.add("representative_lpc_cpu_total_ns", cpu_total_ns);
+  report.add("representative_lpc_cpu_ns_per_iteration",
+             cpu_total_ns / iterations);
+  report.add("representative_lpc_wall_total_ns", wall_elapsed);
+  report.add("representative_lpc_wall_ns_per_iteration",
+             wall_elapsed / iterations);
+
+  destruct_object_for_bench(probe);
+}
+
 void add_profile_snapshot_metrics(Report &report, const std::string &prefix,
                                   const LpcVmProfileSnapshot &snapshot) {
   report.add(prefix + "opcode_dispatch_count", static_cast<long long>(snapshot.opcode_dispatch_count));
@@ -368,10 +416,13 @@ int main(int argc, char **argv) {
     report.add_string("dispatch_cache_probe", "apply_cache_lookup_v1");
     report.add_string("dispatch_hot_path_probe", "apply_and_call_direct_v1");
     report.add_string("hot_path_profile_probe", "opcode_efun_call_other_mapping_string_v1");
+    report.add_string("representative_lpc_probe",
+                      "mapping_array_sort_sprintf_json_encode_v1");
     report.add_string("profile_comparison", "explicit_enabled_vs_disabled_same_audit_mode");
 
     run_apply_cache_bench(report);
     run_dispatch_bench(report);
+    run_representative_lpc_bench(report);
     run_hot_path_profile_bench(report, false, "profile_disabled_");
     run_hot_path_profile_bench(report, true, "");
 
