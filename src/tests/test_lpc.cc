@@ -722,6 +722,116 @@ TEST_F(DriverTest, TestGatewayPreencodedChatBatchBuilderKeepsStableAndDynamicBou
                   .empty());
 }
 
+TEST_F(DriverTest, TestGatewayPreencodedMessageEventBatchBuilderKeepsEnvelopeAndMetaSemantics) {
+  const std::vector<std::string> stable_children{
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"normal\",\"reliability\":\"important\","
+      "\"display_mode\":\"paced\",\"ttl_ms\":30000,\"collapse_key\":\"\","
+      "\"text\":\"first\",\"payload\":{}}",
+      "{\"id\":\"fixed-id\",\"scope\":{\"type\":\"room\",\"id\":\"room-1\"},"
+      "\"causation_id\":\"fixed-cause\",\"correlation_id\":\"fixed-correlation\","
+      "\"schema_version\":1,\"channel\":\"combat\",\"intent\":\"append\","
+      "\"priority\":\"critical\",\"reliability\":\"critical\","
+      "\"display_mode\":\"paced\",\"ttl_ms\":45000,"
+      "\"collapse_key\":\"combat/wave\",\"text\":\"second\","
+      "\"payload\":{\"kind\":\"combat\"}}",
+  };
+  const auto frame = gateway_encode_preencoded_message_event_batch_for_test(
+      stable_children, {"player", "player"}, "observer-7", {11, 12},
+      {201, 202}, {7, 8}, {1000, 1001}, 200, 0, 999);
+
+  ASSERT_GE(frame.size(), 8u);
+  ASSERT_EQ(frame.substr(0, 7), "\x1bXKBACH");
+  ASSERT_EQ(frame.substr(frame.size() - 2), "\x1b\n");
+  const auto payload = nlohmann::json::parse(
+      frame.substr(7, frame.size() - 9));
+  ASSERT_EQ(payload["meta"],
+            (nlohmann::json{{"server_seq", 200}, {"stream", "system"},
+                            {"epoch", 0}, {"reliability", "important"},
+                            {"priority", "normal"}, {"sent_at", 999}}));
+  ASSERT_EQ(payload["messages"].size(), 2u);
+
+  const auto &first = payload["messages"][0];
+  ASSERT_EQ(first["type"], "MSGE");
+  ASSERT_EQ(first["payload"]["id"], "msg_1000_11");
+  ASSERT_EQ(first["payload"]["seq"], 11);
+  ASSERT_EQ(first["payload"]["scope"],
+            (nlohmann::json{{"type", "player"}, {"id", "observer-7"}}));
+  ASSERT_EQ(first["payload"]["causation_id"], "cmd_11");
+  ASSERT_EQ(first["payload"]["correlation_id"], "txn_11");
+  ASSERT_EQ(first["payload"]["timestamp"], 1000);
+  ASSERT_EQ(first["payload"]["text"], "first");
+  ASSERT_EQ(first["payload"]["meta"],
+            (nlohmann::json{{"server_seq", 201}, {"stream", "message"},
+                            {"epoch", 7}, {"reliability", "important"},
+                            {"priority", "normal"}, {"sent_at", 1000},
+                            {"ttl_ms", 30000}}));
+
+  const auto &second = payload["messages"][1]["payload"];
+  ASSERT_EQ(second["id"], "fixed-id");
+  ASSERT_EQ(second["scope"],
+            (nlohmann::json{{"type", "room"}, {"id", "room-1"}}));
+  ASSERT_EQ(second["causation_id"], "fixed-cause");
+  ASSERT_EQ(second["correlation_id"], "fixed-correlation");
+  ASSERT_EQ(second["meta"]["server_seq"], 202);
+  ASSERT_EQ(second["meta"]["epoch"], 8);
+  ASSERT_EQ(second["meta"]["reliability"], "critical");
+  ASSERT_EQ(second["meta"]["priority"], "critical");
+  ASSERT_EQ(second["meta"]["collapse_key"], "combat/wave");
+  ASSERT_EQ(second["meta"]["ttl_ms"], 45000);
+}
+
+TEST_F(DriverTest, TestGatewayPreencodedMessageEventSingletonUsesReservedOuterSequence) {
+  const std::vector<std::string> stable_children{
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"normal\",\"reliability\":\"important\","
+      "\"display_mode\":\"paced\",\"ttl_ms\":30000,\"collapse_key\":\"\","
+      "\"text\":\"only\",\"payload\":{}}",
+  };
+  const auto frame = gateway_encode_preencoded_message_event_batch_for_test(
+      stable_children, {"player"}, "observer-8", {13}, {301}, {9},
+      {2000}, 300, 0, 1999);
+
+  ASSERT_EQ(frame.substr(0, 7), "\x1bXKMSGE");
+  const auto payload = nlohmann::json::parse(
+      frame.substr(7, frame.size() - 9));
+  ASSERT_EQ(payload["seq"], 13);
+  ASSERT_EQ(payload["meta"]["server_seq"], 300);
+  ASSERT_EQ(payload["meta"]["epoch"], 9);
+  ASSERT_EQ(payload["meta"]["sent_at"], 2000);
+}
+
+TEST_F(DriverTest, TestGatewayPreencodedMessageEventBuilderRejectsMalformedOrDynamicStableInput) {
+  const std::string valid =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"normal\",\"reliability\":\"important\","
+      "\"display_mode\":\"paced\",\"ttl_ms\":30000,\"collapse_key\":\"\","
+      "\"text\":\"only\",\"payload\":{}}";
+  const auto encode = [&](const std::vector<std::string> &stable,
+                          const std::vector<std::string> &scope_types,
+                          const std::vector<LPC_INT> &message_seqs) {
+    return gateway_encode_preencoded_message_event_batch_for_test(
+        stable, scope_types, "observer-9", message_seqs, {401}, {10},
+        {3000}, 400, 0, 2999);
+  };
+
+  ASSERT_TRUE(encode({"[]"}, {"player"}, {14}).empty());
+  ASSERT_TRUE(encode({valid}, {}, {14}).empty());
+  ASSERT_TRUE(encode({valid}, {"player"}, {}).empty());
+  ASSERT_TRUE(encode({valid.substr(0, valid.size() - 1) +
+                      ",\"seq\":999}"},
+                     {"player"}, {14})
+                  .empty());
+  ASSERT_TRUE(encode({valid.substr(0, valid.size() - 1) +
+                      ",\"meta\":{\"server_seq\":999}}"},
+                     {"player"}, {14})
+                  .empty());
+  ASSERT_TRUE(gateway_encode_preencoded_message_event_batch_for_test(
+                  {valid}, {"player"}, "observer-9", {14}, {401}, {10},
+                  {3000}, 0, 0, 2999)
+                  .empty());
+}
+
 TEST_F(DriverTest, TestGatewayReceiveDoesNotDrainMainTasksInsideReadCallback) {
   const auto source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
   const auto apply_pos = source.find("void gateway_apply_receive");

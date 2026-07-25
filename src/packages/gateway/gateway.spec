@@ -19,6 +19,7 @@ int gateway_session_reserve(object);
 mapping gateway_sessions_reserve_or_reuse(object *, int *);
 int gateway_session_fill(object, int, string);
 int gateway_session_fill_preencoded_chat_batch(object, int, string *, int, int, int, string);
+int gateway_session_fill_preencoded_message_event_batch(object, int, string *, string *, string, int *, int *, int *, int *, int, int, int);
 int gateway_session_release(object, int);
 int gateway_session_watch_future(object, int, int, int);
 int gateway_session_watch_future_output(object, int, int, int);

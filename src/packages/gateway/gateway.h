@@ -321,6 +321,14 @@ std::string gateway_encode_output_envelope_for_test(const std::string &session_i
 std::string gateway_encode_preencoded_chat_batch_for_test(
     const std::vector<std::string> &stable_children_json, LPC_INT message_epoch,
     LPC_INT first_server_seq, LPC_INT sent_at, const std::string &outer_dynamic_json);
+std::string gateway_encode_preencoded_message_event_batch_for_test(
+    const std::vector<std::string> &stable_children_json,
+    const std::vector<std::string> &scope_types, const std::string &scope_id,
+    const std::vector<LPC_INT> &message_seqs,
+    const std::vector<LPC_INT> &server_seqs,
+    const std::vector<LPC_INT> &message_epochs,
+    const std::vector<LPC_INT> &sent_ats, LPC_INT slot_server_seq,
+    LPC_INT slot_epoch, LPC_INT slot_sent_at);
 
 GatewaySession *gateway_find_session(const char *session_id);
 GatewaySession *gateway_find_session_by_object(object_t *ob);
