@@ -2002,8 +2002,7 @@ bool gateway_append_preencoded_message_event_wave(
 bool gateway_reserve_and_append_preencoded_message_event_wave(
     const std::vector<GatewaySession *> &sessions,
     const std::vector<uint64_t> &existing_reservation_ids,
-    const std::vector<LPC_INT> &slot_server_seqs,
-    const std::vector<LPC_INT> &message_server_seqs,
+    LPC_INT first_server_seq,
     const std::vector<LPC_INT> &message_epochs,
     const std::vector<LPC_INT> &message_seqs, const std::string &stable_json,
     const std::string &scope_type, LPC_INT sent_at, size_t batch_limit,
@@ -2014,6 +2013,28 @@ bool gateway_reserve_and_append_preencoded_message_event_wave(
   result->reservation_ids.clear();
   result->reused.clear();
   result->wave_id = 0;
+
+  const auto count = sessions.size();
+  const auto max_seq = std::numeric_limits<LPC_INT>::max();
+  if (first_server_seq <= 0 || count == 0 ||
+      count > static_cast<size_t>((max_seq - first_server_seq + 1) / 2)) {
+    return false;
+  }
+
+  std::vector<LPC_INT> slot_server_seqs;
+  std::vector<LPC_INT> message_server_seqs;
+  try {
+    slot_server_seqs.reserve(count);
+    message_server_seqs.reserve(count);
+    for (size_t index = 0; index < count; ++index) {
+      const auto slot_server_seq =
+          first_server_seq + static_cast<LPC_INT>(index * 2);
+      slot_server_seqs.push_back(slot_server_seq);
+      message_server_seqs.push_back(slot_server_seq + 1);
+    }
+  } catch (const std::bad_alloc &) {
+    return false;
+  }
 
   GatewayMessageEventTemplate uncached;
   const auto *message_template =
@@ -3036,19 +3057,16 @@ void f_gateway_sessions_reserve_and_append_preencoded_message_event_wave() {
   const auto batch_limit = sp->u.number;
   const auto sent_at = (sp - 1)->u.number;
   auto *message_epochs = (sp - 2)->u.arr;
-  auto *message_server_seqs = (sp - 3)->u.arr;
-  auto *message_seqs = (sp - 4)->u.arr;
-  const auto *scope_type = (sp - 5)->u.string;
-  const auto scope_type_len = SVALUE_STRLEN(sp - 5);
-  const auto *stable_json = (sp - 6)->u.string;
-  const auto stable_json_len = SVALUE_STRLEN(sp - 6);
-  auto *slot_server_seqs = (sp - 7)->u.arr;
-  auto *existing_ids = (sp - 8)->u.arr;
-  auto *targets = (sp - 9)->u.arr;
+  auto *message_seqs = (sp - 3)->u.arr;
+  const auto *scope_type = (sp - 4)->u.string;
+  const auto scope_type_len = SVALUE_STRLEN(sp - 4);
+  const auto *stable_json = (sp - 5)->u.string;
+  const auto stable_json_len = SVALUE_STRLEN(sp - 5);
+  const auto first_server_seq = (sp - 6)->u.number;
+  auto *existing_ids = (sp - 7)->u.arr;
+  auto *targets = (sp - 8)->u.arr;
   std::vector<GatewaySession *> sessions;
   std::vector<uint64_t> requested_ids;
-  std::vector<LPC_INT> slot_seqs;
-  std::vector<LPC_INT> child_seqs;
   std::vector<LPC_INT> epochs;
   std::vector<LPC_INT> seqs;
   GatewaySessionBatchReservationResult result;
@@ -3077,13 +3095,9 @@ void f_gateway_sessions_reserve_and_append_preencoded_message_event_wave() {
   if (targets && existing_ids && targets->size > 0 &&
       targets->size == existing_ids->size && stable_json &&
       stable_json_len > 0 && scope_type && scope_type_len > 0 && sent_at > 0 &&
-      batch_limit > 0 && vm_context_is_main_thread() &&
-      append_ints(slot_server_seqs, &slot_seqs, true) &&
-      append_ints(message_server_seqs, &child_seqs, true) &&
+      batch_limit > 0 && first_server_seq > 0 && vm_context_is_main_thread() &&
       append_ints(message_epochs, &epochs, false) &&
       append_ints(message_seqs, &seqs, true) &&
-      slot_seqs.size() == static_cast<size_t>(targets->size) &&
-      child_seqs.size() == static_cast<size_t>(targets->size) &&
       epochs.size() == static_cast<size_t>(targets->size) &&
       seqs.size() == static_cast<size_t>(targets->size)) {
     sessions.reserve(static_cast<size_t>(targets->size));
@@ -3107,7 +3121,7 @@ void f_gateway_sessions_reserve_and_append_preencoded_message_event_wave() {
     }
     if (ok) {
       ok = gateway_reserve_and_append_preencoded_message_event_wave(
-          sessions, requested_ids, slot_seqs, child_seqs, epochs, seqs,
+          sessions, requested_ids, first_server_seq, epochs, seqs,
           std::string(stable_json, stable_json_len),
           std::string(scope_type, scope_type_len), sent_at,
           static_cast<size_t>(batch_limit), &result);
@@ -3134,7 +3148,7 @@ void f_gateway_sessions_reserve_and_append_preencoded_message_event_wave() {
                    ok ? static_cast<LPC_INT>(result.wave_id) : 0);
   free_array(reservation_ids);
   free_array(reused);
-  pop_n_elems(10);
+  pop_n_elems(9);
   push_refed_mapping(response);
 }
 

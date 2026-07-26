@@ -344,8 +344,7 @@ bool gateway_append_preencoded_message_event_wave(
 bool gateway_reserve_and_append_preencoded_message_event_wave(
     const std::vector<GatewaySession *> &sessions,
     const std::vector<uint64_t> &existing_reservation_ids,
-    const std::vector<LPC_INT> &slot_server_seqs,
-    const std::vector<LPC_INT> &message_server_seqs,
+    LPC_INT first_server_seq,
     const std::vector<LPC_INT> &message_epochs,
     const std::vector<LPC_INT> &message_seqs, const std::string &stable_json,
     const std::string &scope_type, LPC_INT sent_at, size_t batch_limit,

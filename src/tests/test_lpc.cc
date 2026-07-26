@@ -825,13 +825,21 @@ TEST_F(DriverTest, TestGatewayReserveAndAppendWaveRollsBackOnlyNewWork) {
 
   GatewaySessionBatchReservationResult result;
   ASSERT_TRUE(gateway_reserve_and_append_preencoded_message_event_wave(
-      {&reused_session, &new_session}, {existing_id, 0}, {103, 201},
-      {104, 202}, {3, 4}, {1002, 2001}, stable, "player", 123457, 128,
+      {&reused_session, &new_session}, {existing_id, 0}, 103,
+      {3, 4}, {1002, 2001}, stable, "player", 123457, 128,
       &result));
   ASSERT_EQ(result.reused, (std::vector<bool>{true, false}));
   ASSERT_GT(result.wave_id, 0u);
   ASSERT_EQ(gateway_pending_message_event_count(&reused_session, existing_id), 2u);
   ASSERT_EQ(new_session.output_fifo.size(), 1u);
+  ASSERT_EQ(reused_session.output_fifo.front()
+                .pending_message_batch->events.back().server_seq,
+            104);
+  ASSERT_EQ(new_session.output_fifo.front().pending_message_batch->slot_server_seq,
+            105);
+  ASSERT_EQ(new_session.output_fifo.front()
+                .pending_message_batch->events.front().server_seq,
+            106);
 
   ASSERT_TRUE(gateway_rollback_preencoded_message_event_wave_with_writer(
       {&reused_session, &new_session}, result.reservation_ids, result.reused,
@@ -873,7 +881,7 @@ TEST_F(DriverTest, TestGatewayWaveRollbackRejectsWrongIdentityAtomically) {
 
   GatewaySessionBatchReservationResult result;
   ASSERT_TRUE(gateway_reserve_and_append_preencoded_message_event_wave(
-      {&first, &second}, {first_id, 0}, {103, 201}, {104, 202}, {3, 4},
+      {&first, &second}, {first_id, 0}, 103, {3, 4},
       {1002, 2001}, stable, "player", 123457, 128, &result));
   ASSERT_EQ(result.reused, (std::vector<bool>{true, false}));
 
@@ -925,7 +933,7 @@ TEST_F(DriverTest, TestGatewayReserveAndAppendWaveFailuresLeaveNoNewSlots) {
   GatewaySessionBatchReservationResult result;
 
   ASSERT_FALSE(gateway_reserve_and_append_preencoded_message_event_wave(
-      {&first, &full}, {first_id, 0}, {101, 201}, {102, 202}, {3, 4},
+      {&first, &full}, {first_id, 0}, 101, {3, 4},
       {1001, 2001}, stable, "player", 123456, 128, &result));
   ASSERT_EQ(gateway_pending_message_event_count(&first, first_id), 0u);
   ASSERT_EQ(first.output_fifo.size(), 1u);
@@ -937,7 +945,19 @@ TEST_F(DriverTest, TestGatewayReserveAndAppendWaveFailuresLeaveNoNewSlots) {
   result.reused = {true};
   result.wave_id = 999;
   ASSERT_FALSE(gateway_reserve_and_append_preencoded_message_event_wave(
-      {&first}, {first_id}, {101}, {102}, {3}, {1001},
+      {&first}, {first_id}, std::numeric_limits<LPC_INT>::max(), {3}, {1001},
+      stable, "player", 123456, 128, &result));
+  ASSERT_EQ(gateway_pending_message_event_count(&first, first_id), 0u);
+  ASSERT_EQ(first.output_fifo.size(), 1u);
+  ASSERT_TRUE(result.reservation_ids.empty());
+  ASSERT_TRUE(result.reused.empty());
+  ASSERT_EQ(result.wave_id, 0u);
+
+  result.reservation_ids = {999};
+  result.reused = {true};
+  result.wave_id = 999;
+  ASSERT_FALSE(gateway_reserve_and_append_preencoded_message_event_wave(
+      {&first}, {first_id}, 101, {3}, {1001},
       "{\"schema_version\":1,\"text\":", "player", 123456, 128,
       &result));
   ASSERT_EQ(gateway_pending_message_event_count(&first, first_id), 0u);
