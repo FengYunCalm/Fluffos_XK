@@ -688,6 +688,109 @@ TEST_F(DriverTest, TestGatewayBatchReservationRejectsDuplicateSessions) {
   ASSERT_TRUE(session.output_fifo.empty());
 }
 
+TEST_F(DriverTest, TestGatewayPendingMessageEventBatchAppendsMultipleProducerWaves) {
+  GatewaySession first;
+  GatewaySession second;
+  first.master_fd = 98;
+  second.master_fd = 99;
+  const auto first_id = gateway_reserve_session_output(&first);
+  const auto second_id = gateway_reserve_session_output(&second);
+  ASSERT_GT(first_id, 0u);
+  ASSERT_GT(second_id, 0u);
+
+  const std::vector<GatewaySession *> sessions{&first, &second};
+  const std::vector<uint64_t> reservation_ids{first_id, second_id};
+  ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+      sessions, reservation_ids, {101, 201}, {102, 202}, {3, 4}, {1001, 2001},
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"first\",\"payload\":{}}",
+      "player", 123456, 128));
+  ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+      sessions, reservation_ids, {103, 203}, {104, 204}, {3, 4}, {1002, 2002},
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"second\",\"payload\":{}}",
+      "player", 123457, 128));
+  ASSERT_EQ(gateway_pending_message_event_count(&first, first_id), 2u);
+  ASSERT_EQ(gateway_pending_message_event_count(&second, second_id), 2u);
+  ASSERT_TRUE(first.output_fifo.front().pending_message_batch);
+  ASSERT_TRUE(second.output_fifo.front().pending_message_batch);
+  ASSERT_EQ(first.output_fifo.front().pending_message_batch->events[0].wave,
+            second.output_fifo.front().pending_message_batch->events[0].wave);
+  ASSERT_EQ(first.output_fifo.front().pending_message_batch->events[0].message_seq, 1001);
+  ASSERT_EQ(second.output_fifo.front().pending_message_batch->events[0].message_seq, 2001);
+
+  static std::vector<std::string> writes;
+  writes.clear();
+  const auto writer = [](int, const char *data, size_t len) {
+    writes.emplace_back(data, len);
+    return 1;
+  };
+  ASSERT_EQ(gateway_fill_pending_message_event_batch_with_writer(
+                &first, first_id, "player-one", 7, writer),
+            1);
+  ASSERT_EQ(writes.size(), 1u);
+  ASSERT_NE(writes[0].find("first"), std::string::npos);
+  ASSERT_NE(writes[0].find("second"), std::string::npos);
+  ASSERT_LT(writes[0].find("first"), writes[0].find("second"));
+  ASSERT_TRUE(first.output_fifo.empty());
+  ASSERT_EQ(gateway_pending_message_event_count(&first, first_id), 0u);
+}
+
+TEST_F(DriverTest, TestGatewayPendingMessageEventBatchRejectsWaveAtomically) {
+  GatewaySession first;
+  GatewaySession second;
+  first.master_fd = 100;
+  second.master_fd = 101;
+  const auto first_id = gateway_reserve_session_output(&first);
+  const auto second_id = gateway_reserve_session_output(&second);
+  ASSERT_GT(first_id, 0u);
+  ASSERT_GT(second_id, 0u);
+
+  ASSERT_FALSE(gateway_append_preencoded_message_event_wave(
+      {&first, &second}, {first_id, second_id + 1}, {101, 201}, {102, 202},
+      {3, 4}, {1001, 2001},
+      "{\"schema_version\":1,\"text\":\"valid\"}", "player", 123456,
+      128));
+  ASSERT_EQ(gateway_pending_message_event_count(&first, first_id), 0u);
+  ASSERT_EQ(gateway_pending_message_event_count(&second, second_id), 0u);
+
+  ASSERT_FALSE(gateway_append_preencoded_message_event_wave(
+      {&first, &second}, {first_id, second_id}, {101, 201}, {102, 202}, {3, 4},
+      {1001, 2001}, "{\"schema_version\":1,\"text\":", "player", 123456,
+      128));
+  ASSERT_EQ(gateway_pending_message_event_count(&first, first_id), 0u);
+  ASSERT_EQ(gateway_pending_message_event_count(&second, second_id), 0u);
+}
+
+TEST_F(DriverTest, TestGatewayPendingMessageEventBatchHonorsLimitAndRelease) {
+  GatewaySession session;
+  session.master_fd = 102;
+  const auto reservation_id = gateway_reserve_session_output(&session);
+  ASSERT_GT(reservation_id, 0u);
+  const std::string stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"limited\",\"payload\":{}}";
+  ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+      {&session}, {reservation_id}, {101}, {102}, {3}, {1001}, stable, "player",
+      123456, 1));
+  ASSERT_FALSE(gateway_append_preencoded_message_event_wave(
+      {&session}, {reservation_id}, {103}, {104}, {3}, {1001}, stable, "player",
+      123457, 1));
+  ASSERT_EQ(gateway_pending_message_event_count(&session, reservation_id), 1u);
+  ASSERT_EQ(gateway_release_session_output_with_writer(
+                &session, reservation_id,
+                [](int, const char *, size_t) -> int { return 1; }),
+            1);
+  ASSERT_EQ(gateway_pending_message_event_count(&session, reservation_id), 0u);
+  ASSERT_TRUE(session.output_fifo.empty());
+}
+
 TEST_F(DriverTest, TestGatewayPreencodedChatBatchBuilderKeepsStableAndDynamicBoundaries) {
   const std::vector<std::string> stable_children{
       "{\"content\":\"first\",\"direction\":\"incoming\"}",

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -231,10 +232,30 @@ struct GatewayMaster {
   ~GatewayMaster();
 };
 
+struct GatewayPreencodedMessageEventWave {
+  std::string stable_json;
+  std::string scope_type;
+  LPC_INT sent_at{0};
+};
+
+struct GatewayPendingMessageEvent {
+  std::shared_ptr<const GatewayPreencodedMessageEventWave> wave;
+  LPC_INT message_seq{0};
+  LPC_INT server_seq{0};
+  LPC_INT epoch{0};
+};
+
+struct GatewayPendingMessageEventBatch {
+  std::vector<GatewayPendingMessageEvent> events;
+  LPC_INT slot_server_seq{0};
+  LPC_INT slot_sent_at{0};
+};
+
 struct GatewayOutputEntry {
   uint64_t reservation_id{0};
   bool ready{true};
   std::string encoded;
+  std::unique_ptr<GatewayPendingMessageEventBatch> pending_message_batch;
 };
 
 struct GatewaySession {
@@ -289,6 +310,22 @@ bool gateway_reserve_session_outputs(
     const std::vector<GatewaySession *> &sessions,
     const std::vector<uint64_t> &existing_reservation_ids,
     GatewaySessionBatchReservationResult *result);
+bool gateway_append_preencoded_message_event_wave(
+    const std::vector<GatewaySession *> &sessions,
+    const std::vector<uint64_t> &reservation_ids,
+    const std::vector<LPC_INT> &slot_server_seqs,
+    const std::vector<LPC_INT> &message_server_seqs,
+    const std::vector<LPC_INT> &message_epochs,
+    const std::vector<LPC_INT> &message_seqs, const std::string &stable_json,
+    const std::string &scope_type, LPC_INT sent_at, size_t batch_limit);
+size_t gateway_pending_message_event_count(const GatewaySession *sess,
+                                           uint64_t reservation_id);
+int gateway_fill_pending_message_event_batch_with_writer(
+    GatewaySession *sess, uint64_t reservation_id, const std::string &scope_id,
+    LPC_INT slot_epoch, GatewayOutputWriter writer);
+int gateway_fill_pending_message_event_batch_for_object(
+    object_t *ob, uint64_t reservation_id, const char *scope_id,
+    size_t scope_id_len, LPC_INT slot_epoch);
 int gateway_fill_session_output_with_writer(GatewaySession *sess, uint64_t reservation_id,
                                             std::string encoded, GatewayOutputWriter writer);
 int gateway_fill_session_output(GatewaySession *sess, uint64_t reservation_id, std::string encoded);
