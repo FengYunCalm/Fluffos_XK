@@ -38,6 +38,7 @@ namespace {
 std::unordered_map<std::string, std::unique_ptr<GatewaySession>> g_gateway_sessions;
 std::unordered_map<object_t *, GatewaySession *> g_gateway_obj_to_session;
 std::atomic<uint64_t> g_gateway_next_output_reservation_id{1};
+std::atomic<uint64_t> g_gateway_next_message_event_wave_id{1};
 std::atomic<long> g_gateway_command_input_pending_sessions{0};
 std::atomic<long> g_gateway_command_task_pending_sessions{0};
 struct GatewaySessionFutureWatch {
@@ -75,19 +76,6 @@ constexpr size_t kGatewayFutureWatchPollBudget = 64;
 constexpr size_t kGatewayMessageEventTemplateCacheMaxEntries = 256;
 constexpr size_t kGatewayMessageEventTemplateCacheMaxBytes = 4 * 1024 * 1024;
 constexpr size_t kGatewayMessageEventTemplateCacheMaxItemBytes = 64 * 1024;
-
-struct GatewayMessageEventTemplate {
-  std::string encoded;
-  std::string stable_members;
-  std::string reliability_json;
-  std::string priority_json;
-  std::string collapse_key_json;
-  LPC_INT ttl_ms = 0;
-  bool has_id = false;
-  bool has_scope = false;
-  bool has_causation_id = false;
-  bool has_correlation_id = false;
-};
 
 std::unordered_multimap<size_t, GatewayMessageEventTemplate>
     g_gateway_message_event_template_cache;
@@ -575,17 +563,21 @@ bool gateway_append_message_event_template(
   return true;
 }
 
-bool gateway_build_preencoded_message_event_batch_frame(
+bool gateway_build_preencoded_message_event_batch_frame_impl(
     const std::vector<std::string_view> &stable_children_json,
+    const std::vector<const GatewayMessageEventTemplate *> *validated_templates,
     const std::vector<std::string_view> &scope_types, std::string_view scope_id,
     const std::vector<LPC_INT> &message_seqs,
     const std::vector<LPC_INT> &server_seqs,
     const std::vector<LPC_INT> &message_epochs,
     const std::vector<LPC_INT> &sent_ats, LPC_INT slot_server_seq,
     LPC_INT slot_epoch, LPC_INT slot_sent_at, std::string *frame) {
-  const auto count = stable_children_json.size();
+  const auto count = validated_templates
+      ? validated_templates->size()
+      : stable_children_json.size();
 
   if (!frame || count == 0 || scope_types.size() != count || scope_id.empty() ||
+      (validated_templates && stable_children_json.size() != 0) ||
       message_seqs.size() != count || server_seqs.size() != count ||
       message_epochs.size() != count || sent_ats.size() != count ||
       slot_server_seq <= 0 || slot_epoch < 0 || slot_sent_at <= 0) {
@@ -612,8 +604,10 @@ bool gateway_build_preencoded_message_event_batch_frame(
           epoch < 0 || sent_at <= 0) {
         return false;
       }
-      const auto *message_template = gateway_resolve_message_event_template(
-          stable_children_json[index], &uncached);
+      const auto *message_template = validated_templates
+          ? (*validated_templates)[index]
+          : gateway_resolve_message_event_template(
+                stable_children_json[index], &uncached);
       if (!message_template) {
         frame->clear();
         return false;
@@ -661,6 +655,20 @@ bool gateway_build_preencoded_message_event_batch_frame(
     frame->clear();
     return false;
   }
+}
+
+bool gateway_build_preencoded_message_event_batch_frame(
+    const std::vector<std::string_view> &stable_children_json,
+    const std::vector<std::string_view> &scope_types, std::string_view scope_id,
+    const std::vector<LPC_INT> &message_seqs,
+    const std::vector<LPC_INT> &server_seqs,
+    const std::vector<LPC_INT> &message_epochs,
+    const std::vector<LPC_INT> &sent_ats, LPC_INT slot_server_seq,
+    LPC_INT slot_epoch, LPC_INT slot_sent_at, std::string *frame) {
+  return gateway_build_preencoded_message_event_batch_frame_impl(
+      stable_children_json, nullptr, scope_types, scope_id, message_seqs,
+      server_seqs, message_epochs, sent_ats, slot_server_seq, slot_epoch,
+      slot_sent_at, frame);
 }
 
 object_t *gateway_resolve_session_object(GatewaySession *sess) {
@@ -1784,6 +1792,7 @@ bool gateway_reserve_session_outputs(
   }
   result->reservation_ids.clear();
   result->reused.clear();
+  result->wave_id = 0;
   result->reservation_ids.reserve(sessions.size());
   result->reused.reserve(sessions.size());
   created.reserve(sessions.size());
@@ -1863,25 +1872,36 @@ const GatewayOutputEntry *gateway_find_pending_output_entry(
 }
 }  // namespace
 
-bool gateway_append_preencoded_message_event_wave(
+uint64_t gateway_next_message_event_wave_id() {
+  const auto wave_id =
+      g_gateway_next_message_event_wave_id.fetch_add(1, std::memory_order_relaxed);
+  if (wave_id == 0 ||
+      wave_id > static_cast<uint64_t>(std::numeric_limits<LPC_INT>::max())) {
+    return 0;
+  }
+  return wave_id;
+}
+
+bool gateway_append_validated_message_event_wave(
     const std::vector<GatewaySession *> &sessions,
     const std::vector<uint64_t> &reservation_ids,
     const std::vector<LPC_INT> &slot_server_seqs,
     const std::vector<LPC_INT> &message_server_seqs,
     const std::vector<LPC_INT> &message_epochs,
-    const std::vector<LPC_INT> &message_seqs, const std::string &stable_json,
-    const std::string &scope_type, LPC_INT sent_at, size_t batch_limit) {
+    const std::vector<LPC_INT> &message_seqs, const std::string &scope_type,
+    LPC_INT sent_at, size_t batch_limit,
+    const GatewayMessageEventTemplate &message_template, uint64_t wave_id,
+    const std::vector<bool> *reservation_reused) {
   const auto count = sessions.size();
   std::unordered_set<GatewaySession *> unique_sessions;
   std::vector<GatewayOutputEntry *> entries;
   std::vector<std::unique_ptr<GatewayPendingMessageEventBatch>> new_batches;
-  GatewayMessageEventTemplate uncached;
 
   if (count == 0 || reservation_ids.size() != count ||
       slot_server_seqs.size() != count || message_server_seqs.size() != count ||
       message_epochs.size() != count || message_seqs.size() != count ||
-      stable_json.empty() || scope_type.empty() || sent_at <= 0 ||
-      batch_limit == 0 || !gateway_resolve_message_event_template(stable_json, &uncached)) {
+      scope_type.empty() || sent_at <= 0 || batch_limit == 0 || wave_id == 0 ||
+      (reservation_reused && reservation_reused->size() != count)) {
     return false;
   }
 
@@ -1913,8 +1933,18 @@ bool gateway_append_preencoded_message_event_wave(
   try {
     new_batches.resize(count);
     auto mutable_wave = std::make_shared<GatewayPreencodedMessageEventWave>();
-    mutable_wave->stable_json = stable_json;
     mutable_wave->scope_type = scope_type;
+    auto &stored_template = mutable_wave->message_template;
+    stored_template.stable_members = message_template.stable_members;
+    stored_template.reliability_json = message_template.reliability_json;
+    stored_template.priority_json = message_template.priority_json;
+    stored_template.collapse_key_json = message_template.collapse_key_json;
+    stored_template.ttl_ms = message_template.ttl_ms;
+    stored_template.has_id = message_template.has_id;
+    stored_template.has_scope = message_template.has_scope;
+    stored_template.has_causation_id = message_template.has_causation_id;
+    stored_template.has_correlation_id = message_template.has_correlation_id;
+    mutable_wave->wave_id = wave_id;
     mutable_wave->sent_at = sent_at;
     wave = std::move(mutable_wave);
     for (size_t index = 0; index < count; ++index) {
@@ -1938,8 +1968,132 @@ bool gateway_append_preencoded_message_event_wave(
       entry->pending_message_batch->slot_server_seq = slot_server_seqs[index];
       entry->pending_message_batch->slot_sent_at = sent_at;
     }
+    const auto reservation_origin = !reservation_reused
+        ? GatewayMessageEventReservationOrigin::kUnspecified
+        : (*reservation_reused)[index]
+            ? GatewayMessageEventReservationOrigin::kReused
+            : GatewayMessageEventReservationOrigin::kCreated;
     entry->pending_message_batch->events.push_back(
-        {wave, message_seqs[index], message_server_seqs[index], message_epochs[index]});
+        {wave, message_seqs[index], message_server_seqs[index],
+         message_epochs[index], reservation_origin});
+  }
+  return true;
+}
+
+bool gateway_append_preencoded_message_event_wave(
+    const std::vector<GatewaySession *> &sessions,
+    const std::vector<uint64_t> &reservation_ids,
+    const std::vector<LPC_INT> &slot_server_seqs,
+    const std::vector<LPC_INT> &message_server_seqs,
+    const std::vector<LPC_INT> &message_epochs,
+    const std::vector<LPC_INT> &message_seqs, const std::string &stable_json,
+    const std::string &scope_type, LPC_INT sent_at, size_t batch_limit) {
+  GatewayMessageEventTemplate uncached;
+  const auto *message_template =
+      gateway_resolve_message_event_template(stable_json, &uncached);
+  const auto wave_id = gateway_next_message_event_wave_id();
+  return message_template && wave_id > 0 &&
+      gateway_append_validated_message_event_wave(
+          sessions, reservation_ids, slot_server_seqs, message_server_seqs,
+          message_epochs, message_seqs, scope_type, sent_at, batch_limit,
+          *message_template, wave_id, nullptr);
+}
+
+bool gateway_reserve_and_append_preencoded_message_event_wave(
+    const std::vector<GatewaySession *> &sessions,
+    const std::vector<uint64_t> &existing_reservation_ids,
+    const std::vector<LPC_INT> &slot_server_seqs,
+    const std::vector<LPC_INT> &message_server_seqs,
+    const std::vector<LPC_INT> &message_epochs,
+    const std::vector<LPC_INT> &message_seqs, const std::string &stable_json,
+    const std::string &scope_type, LPC_INT sent_at, size_t batch_limit,
+    GatewaySessionBatchReservationResult *result) {
+  if (!result) {
+    return false;
+  }
+  result->reservation_ids.clear();
+  result->reused.clear();
+  result->wave_id = 0;
+
+  GatewayMessageEventTemplate uncached;
+  const auto *message_template =
+      gateway_resolve_message_event_template(stable_json, &uncached);
+  if (!message_template ||
+      !gateway_reserve_session_outputs(sessions, existing_reservation_ids,
+                                       result)) {
+    return false;
+  }
+
+  result->wave_id = gateway_next_message_event_wave_id();
+  if (result->wave_id > 0 &&
+      gateway_append_validated_message_event_wave(
+          sessions, result->reservation_ids, slot_server_seqs,
+          message_server_seqs, message_epochs, message_seqs, scope_type,
+          sent_at, batch_limit, *message_template,
+          result->wave_id, &result->reused)) {
+    return true;
+  }
+
+  for (size_t index = 0; index < sessions.size(); ++index) {
+    if (!result->reused[index]) {
+      gateway_release_session_output_with_writer(
+          sessions[index], result->reservation_ids[index],
+          [](int, const char *, size_t) -> int { return 0; });
+    }
+  }
+  result->reservation_ids.clear();
+  result->reused.clear();
+  result->wave_id = 0;
+  return false;
+}
+
+bool gateway_rollback_preencoded_message_event_wave_with_writer(
+    const std::vector<GatewaySession *> &sessions,
+    const std::vector<uint64_t> &reservation_ids,
+    const std::vector<bool> &reused, uint64_t wave_id,
+    GatewayOutputWriter writer) {
+  std::unordered_set<GatewaySession *> unique_sessions;
+  std::vector<GatewayOutputEntry *> entries;
+  const auto count = sessions.size();
+  if (count == 0 || reservation_ids.size() != count || reused.size() != count ||
+      wave_id == 0 || !writer) {
+    return false;
+  }
+  entries.reserve(count);
+  unique_sessions.reserve(count);
+  for (size_t index = 0; index < count; ++index) {
+    auto *sess = sessions[index];
+    if (!sess || !unique_sessions.insert(sess).second) {
+      return false;
+    }
+    auto *entry = gateway_find_pending_output_entry(sess, reservation_ids[index]);
+    const auto expected_origin = reused[index]
+        ? GatewayMessageEventReservationOrigin::kReused
+        : GatewayMessageEventReservationOrigin::kCreated;
+    if (!entry || !entry->pending_message_batch ||
+        entry->pending_message_batch->events.empty() ||
+        !entry->pending_message_batch->events.back().wave ||
+        entry->pending_message_batch->events.back().wave->wave_id != wave_id ||
+        entry->pending_message_batch->events.back().reservation_origin !=
+            expected_origin ||
+        (!reused[index] && entry->pending_message_batch->events.size() != 1)) {
+      return false;
+    }
+    entries.push_back(entry);
+  }
+
+  for (size_t index = 0; index < count; ++index) {
+    if (!reused[index]) {
+      if (!gateway_release_session_output_with_writer(
+              sessions[index], reservation_ids[index], writer)) {
+        return false;
+      }
+      continue;
+    }
+    entries[index]->pending_message_batch->events.pop_back();
+    if (entries[index]->pending_message_batch->events.empty()) {
+      entries[index]->pending_message_batch.reset();
+    }
   }
   return true;
 }
@@ -1956,7 +2110,8 @@ int gateway_fill_pending_message_event_batch_with_writer(
     GatewaySession *sess, uint64_t reservation_id, const std::string &scope_id,
     LPC_INT slot_epoch, GatewayOutputWriter writer) {
   auto *entry = gateway_find_pending_output_entry(sess, reservation_id);
-  std::vector<std::string_view> stable_children;
+  std::vector<const GatewayMessageEventTemplate *> validated_templates;
+  const std::vector<std::string_view> stable_children;
   std::vector<std::string_view> scope_types;
   std::vector<LPC_INT> message_seqs;
   std::vector<LPC_INT> server_seqs;
@@ -1973,7 +2128,7 @@ int gateway_fill_pending_message_event_batch_with_writer(
   }
   const auto &batch = *entry->pending_message_batch;
   const auto count = batch.events.size();
-  stable_children.reserve(count);
+  validated_templates.reserve(count);
   scope_types.reserve(count);
   message_seqs.reserve(count);
   server_seqs.reserve(count);
@@ -1983,17 +2138,17 @@ int gateway_fill_pending_message_event_batch_with_writer(
     if (!event.wave) {
       return 0;
     }
-    stable_children.emplace_back(event.wave->stable_json);
+    validated_templates.push_back(&event.wave->message_template);
     scope_types.emplace_back(event.wave->scope_type);
     message_seqs.push_back(event.message_seq);
     server_seqs.push_back(event.server_seq);
     message_epochs.push_back(event.epoch);
     sent_ats.push_back(event.wave->sent_at);
   }
-  if (!gateway_build_preencoded_message_event_batch_frame(
-          stable_children, scope_types, scope_id, message_seqs, server_seqs,
-          message_epochs, sent_ats, batch.slot_server_seq,
-          slot_epoch, batch.slot_sent_at, &frame)) {
+  if (!gateway_build_preencoded_message_event_batch_frame_impl(
+          stable_children, &validated_templates, scope_types, scope_id,
+          message_seqs, server_seqs, message_epochs, sent_ats,
+          batch.slot_server_seq, slot_epoch, batch.slot_sent_at, &frame)) {
     return 0;
   }
   return gateway_fill_session_output_with_writer(
@@ -2874,6 +3029,160 @@ void f_gateway_sessions_append_preencoded_message_event_wave() {
   }
 
   pop_n_elems(10);
+  push_number(result);
+}
+
+void f_gateway_sessions_reserve_and_append_preencoded_message_event_wave() {
+  const auto batch_limit = sp->u.number;
+  const auto sent_at = (sp - 1)->u.number;
+  auto *message_epochs = (sp - 2)->u.arr;
+  auto *message_server_seqs = (sp - 3)->u.arr;
+  auto *message_seqs = (sp - 4)->u.arr;
+  const auto *scope_type = (sp - 5)->u.string;
+  const auto scope_type_len = SVALUE_STRLEN(sp - 5);
+  const auto *stable_json = (sp - 6)->u.string;
+  const auto stable_json_len = SVALUE_STRLEN(sp - 6);
+  auto *slot_server_seqs = (sp - 7)->u.arr;
+  auto *existing_ids = (sp - 8)->u.arr;
+  auto *targets = (sp - 9)->u.arr;
+  std::vector<GatewaySession *> sessions;
+  std::vector<uint64_t> requested_ids;
+  std::vector<LPC_INT> slot_seqs;
+  std::vector<LPC_INT> child_seqs;
+  std::vector<LPC_INT> epochs;
+  std::vector<LPC_INT> seqs;
+  GatewaySessionBatchReservationResult result;
+  mapping_t *response;
+  array_t *reservation_ids;
+  array_t *reused;
+  bool ok = false;
+
+  const auto append_ints = [](array_t *source, std::vector<LPC_INT> *target,
+                              bool positive) {
+    if (!source || !target || source->size <= 0) {
+      return false;
+    }
+    target->reserve(static_cast<size_t>(source->size));
+    for (int index = 0; index < source->size; ++index) {
+      const auto *value = &source->item[index];
+      if (value->type != T_NUMBER || (positive ? value->u.number <= 0
+                                               : value->u.number < 0)) {
+        return false;
+      }
+      target->push_back(value->u.number);
+    }
+    return true;
+  };
+
+  if (targets && existing_ids && targets->size > 0 &&
+      targets->size == existing_ids->size && stable_json &&
+      stable_json_len > 0 && scope_type && scope_type_len > 0 && sent_at > 0 &&
+      batch_limit > 0 && vm_context_is_main_thread() &&
+      append_ints(slot_server_seqs, &slot_seqs, true) &&
+      append_ints(message_server_seqs, &child_seqs, true) &&
+      append_ints(message_epochs, &epochs, false) &&
+      append_ints(message_seqs, &seqs, true) &&
+      slot_seqs.size() == static_cast<size_t>(targets->size) &&
+      child_seqs.size() == static_cast<size_t>(targets->size) &&
+      epochs.size() == static_cast<size_t>(targets->size) &&
+      seqs.size() == static_cast<size_t>(targets->size)) {
+    sessions.reserve(static_cast<size_t>(targets->size));
+    requested_ids.reserve(static_cast<size_t>(targets->size));
+    ok = true;
+    for (int index = 0; index < targets->size; ++index) {
+      const auto *target = &targets->item[index];
+      const auto *existing = &existing_ids->item[index];
+      if (target->type != T_OBJECT || !gateway_object_valid(target->u.ob) ||
+          existing->type != T_NUMBER || existing->u.number < 0) {
+        ok = false;
+        break;
+      }
+      auto *sess = gateway_find_session_by_object(target->u.ob);
+      if (!sess) {
+        ok = false;
+        break;
+      }
+      sessions.push_back(sess);
+      requested_ids.push_back(static_cast<uint64_t>(existing->u.number));
+    }
+    if (ok) {
+      ok = gateway_reserve_and_append_preencoded_message_event_wave(
+          sessions, requested_ids, slot_seqs, child_seqs, epochs, seqs,
+          std::string(stable_json, stable_json_len),
+          std::string(scope_type, scope_type_len), sent_at,
+          static_cast<size_t>(batch_limit), &result);
+    }
+  }
+
+  reservation_ids =
+      allocate_array(ok ? static_cast<int>(result.reservation_ids.size()) : 0);
+  reused = allocate_array(ok ? static_cast<int>(result.reused.size()) : 0);
+  if (ok) {
+    for (size_t index = 0; index < result.reservation_ids.size(); ++index) {
+      reservation_ids->item[index].type = T_NUMBER;
+      reservation_ids->item[index].u.number =
+          static_cast<LPC_INT>(result.reservation_ids[index]);
+      reused->item[index].type = T_NUMBER;
+      reused->item[index].u.number = result.reused[index] ? 1 : 0;
+    }
+  }
+  response = allocate_mapping(4);
+  add_mapping_pair(response, "ok", ok ? 1 : 0);
+  add_mapping_array(response, "reservation_ids", reservation_ids);
+  add_mapping_array(response, "reused", reused);
+  add_mapping_pair(response, "wave_id",
+                   ok ? static_cast<LPC_INT>(result.wave_id) : 0);
+  free_array(reservation_ids);
+  free_array(reused);
+  pop_n_elems(10);
+  push_refed_mapping(response);
+}
+
+void f_gateway_sessions_rollback_preencoded_message_event_wave() {
+  const auto wave_id = static_cast<uint64_t>(sp->u.number);
+  auto *reused = (sp - 1)->u.arr;
+  auto *reservation_ids = (sp - 2)->u.arr;
+  auto *targets = (sp - 3)->u.arr;
+  std::vector<GatewaySession *> sessions;
+  std::vector<uint64_t> ids;
+  std::vector<bool> reuse_flags;
+  int result = 0;
+
+  if (targets && reservation_ids && reused && targets->size > 0 &&
+      targets->size == reservation_ids->size && targets->size == reused->size &&
+      wave_id > 0 && vm_context_is_main_thread()) {
+    sessions.reserve(static_cast<size_t>(targets->size));
+    ids.reserve(static_cast<size_t>(targets->size));
+    reuse_flags.reserve(static_cast<size_t>(targets->size));
+    result = 1;
+    for (int index = 0; index < targets->size; ++index) {
+      const auto *target = &targets->item[index];
+      const auto *reservation = &reservation_ids->item[index];
+      const auto *reuse = &reused->item[index];
+      if (target->type != T_OBJECT || !gateway_object_valid(target->u.ob) ||
+          reservation->type != T_NUMBER || reservation->u.number <= 0 ||
+          reuse->type != T_NUMBER ||
+          (reuse->u.number != 0 && reuse->u.number != 1)) {
+        result = 0;
+        break;
+      }
+      auto *sess = gateway_find_session_by_object(target->u.ob);
+      if (!sess) {
+        result = 0;
+        break;
+      }
+      sessions.push_back(sess);
+      ids.push_back(static_cast<uint64_t>(reservation->u.number));
+      reuse_flags.push_back(reuse->u.number == 1);
+    }
+    if (result) {
+      result = gateway_rollback_preencoded_message_event_wave_with_writer(
+          sessions, ids, reuse_flags, wave_id, gateway_send_raw_to_fd)
+          ? 1
+          : 0;
+    }
+  }
+  pop_n_elems(4);
   push_number(result);
 }
 

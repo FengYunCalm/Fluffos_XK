@@ -232,10 +232,30 @@ struct GatewayMaster {
   ~GatewayMaster();
 };
 
+struct GatewayMessageEventTemplate {
+  std::string encoded;
+  std::string stable_members;
+  std::string reliability_json;
+  std::string priority_json;
+  std::string collapse_key_json;
+  LPC_INT ttl_ms{0};
+  bool has_id{false};
+  bool has_scope{false};
+  bool has_causation_id{false};
+  bool has_correlation_id{false};
+};
+
 struct GatewayPreencodedMessageEventWave {
-  std::string stable_json;
   std::string scope_type;
+  GatewayMessageEventTemplate message_template;
+  uint64_t wave_id{0};
   LPC_INT sent_at{0};
+};
+
+enum class GatewayMessageEventReservationOrigin : uint8_t {
+  kUnspecified = 0,
+  kReused,
+  kCreated,
 };
 
 struct GatewayPendingMessageEvent {
@@ -243,6 +263,8 @@ struct GatewayPendingMessageEvent {
   LPC_INT message_seq{0};
   LPC_INT server_seq{0};
   LPC_INT epoch{0};
+  GatewayMessageEventReservationOrigin reservation_origin{
+      GatewayMessageEventReservationOrigin::kUnspecified};
 };
 
 struct GatewayPendingMessageEventBatch {
@@ -282,6 +304,7 @@ struct GatewaySession {
 struct GatewaySessionBatchReservationResult {
   std::vector<uint64_t> reservation_ids;
   std::vector<bool> reused;
+  uint64_t wave_id{0};
 };
 
 void init_gateway(void);
@@ -318,6 +341,20 @@ bool gateway_append_preencoded_message_event_wave(
     const std::vector<LPC_INT> &message_epochs,
     const std::vector<LPC_INT> &message_seqs, const std::string &stable_json,
     const std::string &scope_type, LPC_INT sent_at, size_t batch_limit);
+bool gateway_reserve_and_append_preencoded_message_event_wave(
+    const std::vector<GatewaySession *> &sessions,
+    const std::vector<uint64_t> &existing_reservation_ids,
+    const std::vector<LPC_INT> &slot_server_seqs,
+    const std::vector<LPC_INT> &message_server_seqs,
+    const std::vector<LPC_INT> &message_epochs,
+    const std::vector<LPC_INT> &message_seqs, const std::string &stable_json,
+    const std::string &scope_type, LPC_INT sent_at, size_t batch_limit,
+    GatewaySessionBatchReservationResult *result);
+bool gateway_rollback_preencoded_message_event_wave_with_writer(
+    const std::vector<GatewaySession *> &sessions,
+    const std::vector<uint64_t> &reservation_ids,
+    const std::vector<bool> &reused, uint64_t wave_id,
+    GatewayOutputWriter writer);
 size_t gateway_pending_message_event_count(const GatewaySession *sess,
                                            uint64_t reservation_id);
 int gateway_fill_pending_message_event_batch_with_writer(
