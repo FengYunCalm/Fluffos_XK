@@ -756,6 +756,97 @@ TEST_F(DriverTest, TestGatewayPendingMessageEventBatchAppendsMultipleProducerWav
       cache_misses_after_append);
 }
 
+TEST_F(DriverTest, TestGatewayPendingMessageEventBatchFillsRecipientSliceNatively) {
+  GatewaySession first;
+  GatewaySession second;
+  first.master_fd = 120;
+  second.master_fd = 121;
+  const auto first_id = gateway_reserve_session_output(&first);
+  const auto second_id = gateway_reserve_session_output(&second);
+  ASSERT_GT(first_id, 0u);
+  ASSERT_GT(second_id, 0u);
+
+  const std::string stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"slice\",\"payload\":{}}";
+  ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+      {&first, &second}, {first_id, second_id}, {101, 201}, {102, 202},
+      {3, 4}, {1001, 2001}, stable, "player", 123456, 128));
+
+  static std::vector<std::string> writes;
+  writes.clear();
+  const auto writer = [](int, const char *data, size_t len) {
+    writes.emplace_back(data, len);
+    return 1;
+  };
+  GatewayPendingMessageEventBatchFillResult result;
+
+  ASSERT_FALSE(gateway_fill_pending_message_event_batches_with_writer(
+      {&first, &second}, {first_id, second_id}, {"player-one", ""}, {7, 8},
+      writer, &result));
+  ASSERT_TRUE(writes.empty());
+  ASSERT_EQ(gateway_pending_message_event_count(&first, first_id), 1u);
+  ASSERT_EQ(gateway_pending_message_event_count(&second, second_id), 1u);
+
+  ASSERT_TRUE(gateway_fill_pending_message_event_batches_with_writer(
+      {&first, &second}, {first_id, second_id}, {"player-one", "player-two"},
+      {7, 8}, writer, &result));
+  ASSERT_EQ(result.filled, (std::vector<bool>{true, true}));
+  ASSERT_EQ(result.event_counts, (std::vector<LPC_INT>{1, 1}));
+  ASSERT_EQ(result.slot_server_seqs, (std::vector<LPC_INT>{101, 201}));
+  ASSERT_EQ(writes.size(), 2u);
+  ASSERT_NE(writes[0].find("player-one"), std::string::npos);
+  ASSERT_NE(writes[1].find("player-two"), std::string::npos);
+  ASSERT_TRUE(first.output_fifo.empty());
+  ASSERT_TRUE(second.output_fifo.empty());
+}
+
+TEST_F(DriverTest, TestGatewayPendingMessageEventBatchReportsPostValidationSlotLoss) {
+  GatewaySession first;
+  GatewaySession second;
+  first.master_fd = 122;
+  second.master_fd = 123;
+  const auto first_id = gateway_reserve_session_output(&first);
+  const auto second_id = gateway_reserve_session_output(&second);
+  ASSERT_GT(first_id, 0u);
+  ASSERT_GT(second_id, 0u);
+
+  const std::string stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"partial\",\"payload\":{}}";
+  ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+      {&first, &second}, {first_id, second_id}, {301, 401}, {302, 402},
+      {5, 6}, {3001, 4001}, stable, "player", 123456, 128));
+
+  static GatewaySession *session_to_release = nullptr;
+  static uint64_t reservation_to_release = 0;
+  static bool release_on_first_write = false;
+  session_to_release = &second;
+  reservation_to_release = second_id;
+  release_on_first_write = true;
+  const auto writer = [](int, const char *, size_t) {
+    if (release_on_first_write) {
+      release_on_first_write = false;
+      gateway_release_session_output(session_to_release, reservation_to_release);
+    }
+    return 1;
+  };
+  GatewayPendingMessageEventBatchFillResult result;
+
+  ASSERT_TRUE(gateway_fill_pending_message_event_batches_with_writer(
+      {&first, &second}, {first_id, second_id}, {"player-one", "player-two"},
+      {9, 10}, writer, &result));
+  ASSERT_EQ(result.filled, (std::vector<bool>{true, false}));
+  ASSERT_EQ(result.event_counts, (std::vector<LPC_INT>{1, 1}));
+  ASSERT_EQ(result.slot_server_seqs, (std::vector<LPC_INT>{301, 401}));
+  ASSERT_TRUE(first.output_fifo.empty());
+  ASSERT_TRUE(second.output_fifo.empty());
+}
+
 TEST_F(DriverTest, TestGatewayPendingMessageEventBatchRejectsWaveAtomically) {
   GatewaySession first;
   GatewaySession second;

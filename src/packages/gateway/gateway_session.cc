@@ -2127,9 +2127,10 @@ size_t gateway_pending_message_event_count(const GatewaySession *sess,
       : 0;
 }
 
-int gateway_fill_pending_message_event_batch_with_writer(
+bool gateway_build_pending_message_event_batch_frame(
     GatewaySession *sess, uint64_t reservation_id, const std::string &scope_id,
-    LPC_INT slot_epoch, GatewayOutputWriter writer) {
+    LPC_INT slot_epoch, std::string *frame, LPC_INT *event_count,
+    LPC_INT *slot_server_seq) {
   auto *entry = gateway_find_pending_output_entry(sess, reservation_id);
   std::vector<const GatewayMessageEventTemplate *> validated_templates;
   const std::vector<std::string_view> stable_children;
@@ -2138,17 +2139,19 @@ int gateway_fill_pending_message_event_batch_with_writer(
   std::vector<LPC_INT> server_seqs;
   std::vector<LPC_INT> message_epochs;
   std::vector<LPC_INT> sent_ats;
-  std::string frame;
 
   if (!entry || !entry->pending_message_batch ||
       entry->pending_message_batch->events.empty() || scope_id.empty() ||
-      slot_epoch < 0 || !writer ||
+      slot_epoch < 0 || !frame || !event_count || !slot_server_seq ||
       entry->pending_message_batch->slot_server_seq <= 0 ||
       entry->pending_message_batch->slot_sent_at <= 0) {
-    return 0;
+    return false;
   }
   const auto &batch = *entry->pending_message_batch;
   const auto count = batch.events.size();
+  if (count > static_cast<size_t>(std::numeric_limits<LPC_INT>::max())) {
+    return false;
+  }
   validated_templates.reserve(count);
   scope_types.reserve(count);
   message_seqs.reserve(count);
@@ -2157,7 +2160,7 @@ int gateway_fill_pending_message_event_batch_with_writer(
   sent_ats.reserve(count);
   for (const auto &event : batch.events) {
     if (!event.wave) {
-      return 0;
+      return false;
     }
     validated_templates.push_back(&event.wave->message_template);
     scope_types.emplace_back(event.wave->scope_type);
@@ -2169,11 +2172,84 @@ int gateway_fill_pending_message_event_batch_with_writer(
   if (!gateway_build_preencoded_message_event_batch_frame_impl(
           stable_children, &validated_templates, scope_types, scope_id,
           message_seqs, server_seqs, message_epochs, sent_ats,
-          batch.slot_server_seq, slot_epoch, batch.slot_sent_at, &frame)) {
+          batch.slot_server_seq, slot_epoch, batch.slot_sent_at, frame)) {
+    return false;
+  }
+  *event_count = static_cast<LPC_INT>(count);
+  *slot_server_seq = batch.slot_server_seq;
+  return true;
+}
+
+int gateway_fill_pending_message_event_batch_with_writer(
+    GatewaySession *sess, uint64_t reservation_id, const std::string &scope_id,
+    LPC_INT slot_epoch, GatewayOutputWriter writer) {
+  std::string frame;
+  LPC_INT event_count = 0;
+  LPC_INT slot_server_seq = 0;
+  if (!writer || !gateway_build_pending_message_event_batch_frame(
+                     sess, reservation_id, scope_id, slot_epoch, &frame,
+                     &event_count, &slot_server_seq)) {
     return 0;
   }
   return gateway_fill_session_output_with_writer(
       sess, reservation_id, std::move(frame), writer);
+}
+
+bool gateway_fill_pending_message_event_batches_with_writer(
+    const std::vector<GatewaySession *> &sessions,
+    const std::vector<uint64_t> &reservation_ids,
+    const std::vector<std::string> &scope_ids,
+    const std::vector<LPC_INT> &slot_epochs, GatewayOutputWriter writer,
+    GatewayPendingMessageEventBatchFillResult *result) {
+  const auto count = sessions.size();
+  std::unordered_set<GatewaySession *> unique_sessions;
+  std::vector<std::string> frames;
+
+  if (!result) {
+    return false;
+  }
+  result->filled.clear();
+  result->event_counts.clear();
+  result->slot_server_seqs.clear();
+  if (count == 0 || reservation_ids.size() != count ||
+      scope_ids.size() != count || slot_epochs.size() != count || !writer) {
+    return false;
+  }
+
+  try {
+    unique_sessions.reserve(count);
+    frames.resize(count);
+    result->filled.assign(count, false);
+    result->event_counts.resize(count);
+    result->slot_server_seqs.resize(count);
+    for (size_t index = 0; index < count; ++index) {
+      auto *sess = sessions[index];
+      if (!sess || !unique_sessions.insert(sess).second ||
+          reservation_ids[index] == 0 || scope_ids[index].empty() ||
+          slot_epochs[index] < 0 ||
+          !gateway_build_pending_message_event_batch_frame(
+              sess, reservation_ids[index], scope_ids[index], slot_epochs[index],
+              &frames[index], &result->event_counts[index],
+              &result->slot_server_seqs[index])) {
+        result->filled.clear();
+        result->event_counts.clear();
+        result->slot_server_seqs.clear();
+        return false;
+      }
+    }
+  } catch (const std::bad_alloc &) {
+    result->filled.clear();
+    result->event_counts.clear();
+    result->slot_server_seqs.clear();
+    return false;
+  }
+
+  for (size_t index = 0; index < count; ++index) {
+    result->filled[index] = gateway_fill_session_output_with_writer(
+                                sessions[index], reservation_ids[index],
+                                std::move(frames[index]), writer) == 1;
+  }
+  return true;
 }
 
 int gateway_fill_pending_message_event_batch_for_object(
@@ -3331,6 +3407,83 @@ void f_gateway_session_fill_pending_message_event_batch() {
       ob, reservation_id, scope_id, scope_id_len, slot_epoch);
   pop_n_elems(4);
   push_number(result);
+}
+
+void f_gateway_sessions_fill_pending_message_event_batches() {
+  auto *slot_epochs = sp->u.arr;
+  auto *scope_ids = (sp - 1)->u.arr;
+  auto *reservation_ids = (sp - 2)->u.arr;
+  auto *targets = (sp - 3)->u.arr;
+  std::vector<GatewaySession *> sessions;
+  std::vector<uint64_t> ids;
+  std::vector<std::string> scopes;
+  std::vector<LPC_INT> epochs;
+  GatewayPendingMessageEventBatchFillResult result;
+  mapping_t *response;
+  array_t *filled;
+  array_t *event_counts;
+  array_t *slot_server_seqs;
+  bool ok = false;
+
+  if (targets && reservation_ids && scope_ids && slot_epochs && targets->size > 0 &&
+      reservation_ids->size == targets->size && scope_ids->size == targets->size &&
+      slot_epochs->size == targets->size && vm_context_is_main_thread()) {
+    const auto count = static_cast<size_t>(targets->size);
+    sessions.reserve(count);
+    ids.reserve(count);
+    scopes.reserve(count);
+    epochs.reserve(count);
+    ok = true;
+    for (int index = 0; index < targets->size; ++index) {
+      const auto *target = &targets->item[index];
+      const auto *reservation = &reservation_ids->item[index];
+      const auto *scope = &scope_ids->item[index];
+      const auto *epoch = &slot_epochs->item[index];
+      if (target->type != T_OBJECT || !gateway_object_valid(target->u.ob) ||
+          reservation->type != T_NUMBER || reservation->u.number <= 0 ||
+          scope->type != T_STRING || !scope->u.string || SVALUE_STRLEN(scope) == 0 ||
+          epoch->type != T_NUMBER || epoch->u.number < 0) {
+        ok = false;
+        break;
+      }
+      auto *sess = gateway_find_session_by_object(target->u.ob);
+      if (!sess) {
+        ok = false;
+        break;
+      }
+      sessions.push_back(sess);
+      ids.push_back(static_cast<uint64_t>(reservation->u.number));
+      scopes.emplace_back(scope->u.string, SVALUE_STRLEN(scope));
+      epochs.push_back(epoch->u.number);
+    }
+    if (ok) {
+      ok = gateway_fill_pending_message_event_batches_with_writer(
+          sessions, ids, scopes, epochs, gateway_send_raw_to_fd, &result);
+    }
+  }
+
+  const auto result_count = ok ? static_cast<int>(result.filled.size()) : 0;
+  filled = allocate_array(result_count);
+  event_counts = allocate_array(result_count);
+  slot_server_seqs = allocate_array(result_count);
+  for (int index = 0; index < result_count; ++index) {
+    filled->item[index].type = T_NUMBER;
+    filled->item[index].u.number = result.filled[index] ? 1 : 0;
+    event_counts->item[index].type = T_NUMBER;
+    event_counts->item[index].u.number = result.event_counts[index];
+    slot_server_seqs->item[index].type = T_NUMBER;
+    slot_server_seqs->item[index].u.number = result.slot_server_seqs[index];
+  }
+  response = allocate_mapping(4);
+  add_mapping_pair(response, "ok", ok ? 1 : 0);
+  add_mapping_array(response, "filled", filled);
+  add_mapping_array(response, "event_counts", event_counts);
+  add_mapping_array(response, "slot_server_seqs", slot_server_seqs);
+  free_array(filled);
+  free_array(event_counts);
+  free_array(slot_server_seqs);
+  pop_n_elems(4);
+  push_refed_mapping(response);
 }
 
 void f_gateway_session_release() {

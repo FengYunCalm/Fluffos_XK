@@ -307,6 +307,12 @@ struct GatewaySessionBatchReservationResult {
   uint64_t wave_id{0};
 };
 
+struct GatewayPendingMessageEventBatchFillResult {
+  std::vector<bool> filled;
+  std::vector<LPC_INT> event_counts;
+  std::vector<LPC_INT> slot_server_seqs;
+};
+
 void init_gateway(void);
 void cleanup_gateway(void);
 
@@ -359,6 +365,12 @@ size_t gateway_pending_message_event_count(const GatewaySession *sess,
 int gateway_fill_pending_message_event_batch_with_writer(
     GatewaySession *sess, uint64_t reservation_id, const std::string &scope_id,
     LPC_INT slot_epoch, GatewayOutputWriter writer);
+bool gateway_fill_pending_message_event_batches_with_writer(
+    const std::vector<GatewaySession *> &sessions,
+    const std::vector<uint64_t> &reservation_ids,
+    const std::vector<std::string> &scope_ids,
+    const std::vector<LPC_INT> &slot_epochs, GatewayOutputWriter writer,
+    GatewayPendingMessageEventBatchFillResult *result);
 int gateway_fill_pending_message_event_batch_for_object(
     object_t *ob, uint64_t reservation_id, const char *scope_id,
     size_t scope_id_len, LPC_INT slot_epoch);
