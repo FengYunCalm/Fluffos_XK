@@ -13,6 +13,7 @@
 
 #include <event2/listener.h>
 
+struct evbuffer;
 struct TickEvent;
 
 using GatewayOutputWriter = int (*)(int fd, const char *data, size_t len);
@@ -77,6 +78,13 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> output_fifo_filled{0};
   std::atomic<uint64_t> output_fifo_released{0};
   std::atomic<uint64_t> output_fifo_reservation_misses{0};
+  std::atomic<uint64_t> output_fifo_writer_failures{0};
+  // A ready wire became invalid after max_packet_size was reduced. Unlike a
+  // transient writer failure, this entry can never become writable again and
+  // must fail closed so it cannot block later FIFO entries forever.
+  std::atomic<uint64_t> output_fifo_oversize_dropped{0};
+  std::atomic<uint64_t> output_fifo_destroyed_ready{0};
+  std::atomic<uint64_t> output_fifo_destroyed_pending{0};
   // A later reservation was filled but could not write because an earlier
   // reservation remains unresolved.  These are aggregate-only FIFO evidence.
   std::atomic<uint64_t> output_fifo_head_blocked_fills{0};
@@ -208,6 +216,37 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> message_event_template_cache_misses{0};
   std::atomic<uint64_t> message_event_template_cache_evictions{0};
   std::atomic<uint64_t> message_event_template_cache_bypasses{0};
+  std::atomic<uint64_t> room_output_projection_snapshot_ns_total{0};
+  std::atomic<uint64_t> room_output_projection_snapshot_ns_max{0};
+  std::atomic<uint64_t> room_output_projection_snapshot_samples{0};
+  std::atomic<uint64_t> room_output_projection_submit_watch_ns_total{0};
+  std::atomic<uint64_t> room_output_projection_submit_watch_ns_max{0};
+  std::atomic<uint64_t> room_output_projection_submit_watch_samples{0};
+  std::atomic<uint64_t> room_output_projection_worker_ns_total{0};
+  std::atomic<uint64_t> room_output_projection_worker_ns_max{0};
+  std::atomic<uint64_t> room_output_projection_worker_samples{0};
+  std::atomic<uint64_t> room_output_projection_worker_thread_cpu_ns_total{0};
+  std::atomic<uint64_t> room_output_projection_worker_thread_cpu_ns_max{0};
+  std::atomic<uint64_t> room_output_projection_worker_thread_cpu_samples{0};
+  std::atomic<uint64_t> room_output_projection_worker_thread_cpu_unavailable{0};
+  std::atomic<uint64_t> room_output_projection_inline_thread_cpu_ns_total{0};
+  std::atomic<uint64_t> room_output_projection_inline_thread_cpu_ns_max{0};
+  std::atomic<uint64_t> room_output_projection_inline_thread_cpu_samples{0};
+  std::atomic<uint64_t> room_output_projection_inline_thread_cpu_unavailable{0};
+  std::atomic<uint64_t> room_output_projection_publish_ns_total{0};
+  std::atomic<uint64_t> room_output_projection_publish_ns_max{0};
+  std::atomic<uint64_t> room_output_projection_publish_samples{0};
+  std::atomic<uint64_t> room_output_projection_submitted{0};
+  std::atomic<uint64_t> room_output_projection_completed{0};
+  std::atomic<uint64_t> room_output_projection_released{0};
+  std::atomic<uint64_t> room_output_projection_inline_fallbacks{0};
+  std::atomic<uint64_t> room_output_projection_failed{0};
+  std::atomic<uint64_t> room_output_projection_forced_cleanup{0};
+  std::atomic<uint64_t> room_output_projection_retry_enqueued{0};
+  std::atomic<uint64_t> room_output_projection_retry_attempted{0};
+  std::atomic<uint64_t> room_output_projection_retry_exhausted{0};
+  std::atomic<uint64_t> room_output_projection_retry_budget_hits{0};
+  std::atomic<uint64_t> room_output_projection_retry_wall_budget_hits{0};
 };
 
 extern GatewayRuntimeCounters g_gateway_runtime_counters;
@@ -238,6 +277,10 @@ struct GatewayMessageEventTemplate {
   std::string reliability_json;
   std::string priority_json;
   std::string collapse_key_json;
+  std::string outer_escaped_stable_members;
+  std::string outer_escaped_reliability_json;
+  std::string outer_escaped_priority_json;
+  std::string outer_escaped_collapse_key_json;
   LPC_INT ttl_ms{0};
   bool has_id{false};
   bool has_scope{false};
@@ -247,6 +290,7 @@ struct GatewayMessageEventTemplate {
 
 struct GatewayPreencodedMessageEventWave {
   std::string scope_type;
+  std::string outer_escaped_scope_type_json;
   GatewayMessageEventTemplate message_template;
   uint64_t wave_id{0};
   LPC_INT sent_at{0};
@@ -271,12 +315,15 @@ struct GatewayPendingMessageEventBatch {
   std::vector<GatewayPendingMessageEvent> events;
   LPC_INT slot_server_seq{0};
   LPC_INT slot_sent_at{0};
+  uint64_t projection_generation{0};
+  bool projection_sealed{false};
 };
 
 struct GatewayOutputEntry {
   uint64_t reservation_id{0};
   bool ready{true};
-  std::string encoded;
+  // Complete southbound JSON consumed by the Go Gateway, never an inner XK frame.
+  std::string wire_bytes;
   std::unique_ptr<GatewayPendingMessageEventBatch> pending_message_batch;
 };
 
@@ -313,6 +360,34 @@ struct GatewayPendingMessageEventBatchFillResult {
   std::vector<LPC_INT> slot_server_seqs;
 };
 
+// Object-free immutable input shared by inline and owner projection. Dynamic
+// session metadata lives in the separate columns structure below.
+struct GatewayPendingMessageEventProjectionSnapshot {
+  std::vector<std::shared_ptr<const GatewayPreencodedMessageEventWave>>
+      wave_table;
+  std::vector<size_t> event_wave_indices;
+  uint64_t generation{0};
+};
+
+struct GatewayPendingMessageEventProjectionColumns {
+  std::string session_id;
+  std::string scope_id;
+  std::vector<LPC_INT> message_seqs;
+  std::vector<LPC_INT> server_seqs;
+  std::vector<LPC_INT> message_epochs;
+  LPC_INT slot_server_seq{0};
+  LPC_INT slot_epoch{0};
+  LPC_INT slot_sent_at{0};
+};
+
+struct GatewayPendingMessageEventBatchOwnerSubmitResult {
+  std::vector<bool> submitted;
+  std::vector<bool> filled_inline;
+  std::vector<LPC_INT> event_counts;
+  std::vector<LPC_INT> slot_server_seqs;
+  std::vector<uint64_t> future_ids;
+};
+
 void init_gateway(void);
 void cleanup_gateway(void);
 
@@ -333,7 +408,8 @@ uint64_t gateway_session_fifo_flushed_total();
 uint64_t gateway_session_fifo_rejected_total();
 int gateway_flush_session_output_fifo_with_writer(GatewaySession *sess, GatewayOutputWriter writer);
 int gateway_flush_session_output_fifo(GatewaySession *sess);
-int gateway_enqueue_session_output(GatewaySession *sess, std::string encoded);
+int gateway_enqueue_session_protocol_output(GatewaySession *sess, const char *data,
+                                            size_t len);
 uint64_t gateway_reserve_session_output(GatewaySession *sess);
 bool gateway_reserve_session_outputs(
     const std::vector<GatewaySession *> &sessions,
@@ -371,12 +447,27 @@ bool gateway_fill_pending_message_event_batches_with_writer(
     const std::vector<std::string> &scope_ids,
     const std::vector<LPC_INT> &slot_epochs, GatewayOutputWriter writer,
     GatewayPendingMessageEventBatchFillResult *result);
+bool gateway_snapshot_pending_message_event_batch(
+    const GatewaySession *sess, uint64_t reservation_id,
+    const std::string &scope_id, LPC_INT slot_epoch,
+    GatewayPendingMessageEventProjectionSnapshot *snapshot,
+    GatewayPendingMessageEventProjectionColumns *columns);
+bool gateway_encode_pending_message_event_projection(
+    const GatewayPendingMessageEventProjectionSnapshot &snapshot,
+    const GatewayPendingMessageEventProjectionColumns &columns,
+    std::string *wire_bytes);
+bool gateway_submit_pending_message_event_batches_for_objects(
+    const std::vector<object_t *> &targets,
+    const std::vector<uint64_t> &reservation_ids,
+    const std::vector<std::string> &scope_ids,
+    const std::vector<LPC_INT> &slot_epochs, int timeout_ms,
+    GatewayPendingMessageEventBatchOwnerSubmitResult *result);
 int gateway_fill_pending_message_event_batch_for_object(
     object_t *ob, uint64_t reservation_id, const char *scope_id,
     size_t scope_id_len, LPC_INT slot_epoch);
-int gateway_fill_session_output_with_writer(GatewaySession *sess, uint64_t reservation_id,
-                                            std::string encoded, GatewayOutputWriter writer);
-int gateway_fill_session_output(GatewaySession *sess, uint64_t reservation_id, std::string encoded);
+int gateway_fill_session_protocol_output_with_writer(
+    GatewaySession *sess, uint64_t reservation_id, const char *data, size_t len,
+    GatewayOutputWriter writer);
 int gateway_release_session_output_with_writer(GatewaySession *sess, uint64_t reservation_id,
                                                GatewayOutputWriter writer);
 int gateway_release_session_output(GatewaySession *sess, uint64_t reservation_id);
@@ -392,7 +483,12 @@ int gateway_watch_future_for_object(object_t *ob, uint64_t context_id,
 int gateway_process_session_future_watches_at(uint64_t now_ms);
 int gateway_process_future_watches_at(uint64_t now_ms);
 long gateway_session_future_watch_count();
+long gateway_room_output_projection_pending_count();
+long gateway_room_output_projection_wave_count();
+long gateway_room_output_projection_reservation_count();
+long gateway_room_output_projection_retry_count();
 long gateway_future_watch_count();
+mapping_t *gateway_owner_output_quiesce(const char *reason);
 int gateway_send_raw_to_fd(int fd, const char *data, size_t len);
 int gateway_svalue_to_json_string(const svalue_t *sv, std::string *out);
 int gateway_ping_master_internal(int fd);
@@ -405,8 +501,20 @@ int gateway_dispatch_buffered_frames_for_test(GatewayMaster *master, int budget)
 void gateway_set_read_dispatch_pending_for_test(GatewayMaster *master, bool pending);
 void gateway_service_admitted_receive_tasks_for_test();
 bool gateway_master_has_buffered_input_for_test(const GatewayMaster *master);
+int gateway_append_framed_output_for_test(evbuffer *output, const char *data,
+                                          size_t len);
 std::string gateway_encode_output_envelope_for_test(const std::string &session_id,
                                                     const char *data, size_t len);
+int gateway_enqueue_session_wire_json_for_test(GatewaySession *sess,
+                                               const std::string &wire_json);
+int gateway_enqueue_session_payload_json_for_test(
+    GatewaySession *sess, const std::string &payload_json);
+bool gateway_fill_projected_wires_for_test(
+    const std::vector<GatewaySession *> &sessions,
+    const std::vector<uint64_t> &reservation_ids,
+    const std::vector<std::string> &wire_json,
+    GatewayOutputWriter writer);
+bool gateway_drop_room_output_wave_for_test(uint64_t reservation_id);
 std::string gateway_encode_preencoded_chat_batch_for_test(
     const std::vector<std::string> &stable_children_json, LPC_INT message_epoch,
     LPC_INT first_server_seq, LPC_INT sent_at, const std::string &outer_dynamic_json);

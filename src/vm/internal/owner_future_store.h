@@ -30,6 +30,7 @@ struct OwnerFutureRecord {
   bool terminal_cleanup_required{false};
   bool has_target_handle{false};
   std::shared_ptr<VMFrozenValue> result;
+  std::shared_ptr<const std::string> native_string_result;
 };
 
 struct OwnerFutureCompletion {
@@ -64,12 +65,15 @@ class OwnerFutureStore {
   std::optional<OwnerFutureRecord> poll(uint64_t future_id) const;
   OwnerFutureState state(uint64_t future_id) const;
   OwnerFutureTakeResult take(uint64_t future_id);
+  bool has_pending_for_task(uint64_t target_task_id) const;
   std::optional<OwnerFutureCompletion> complete(uint64_t future_id, const char *state, const char *result_key,
                                                 const char *error,
                                                 std::shared_ptr<VMFrozenValue> result = nullptr);
   std::optional<OwnerFutureCompletion> complete_for_task(uint64_t target_task_id, const char *state,
                                                          const char *result_key, const char *error,
                                                          std::shared_ptr<VMFrozenValue> result = nullptr);
+  std::optional<OwnerFutureCompletion> complete_string_for_task(
+      uint64_t target_task_id, const char *result_key, std::string result);
   OwnerFutureTerminalResult fail_terminal(uint64_t future_id, const char *reason, bool cancelled, bool timed_out);
 
   long pending_count() const;

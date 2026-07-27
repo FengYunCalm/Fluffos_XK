@@ -14,6 +14,7 @@ private int last_process_input_off_main = 0;
 private mapping last_owner_future = ([]);
 private int last_owner_future_reservation_id = 0;
 private int last_owner_future_callback_off_main = 0;
+private int owner_future_completed_should_fail = 0;
 private mapping last_generic_owner_future = ([]);
 private int last_generic_owner_future_context_id = 0;
 private int last_generic_owner_future_callback_off_main = 0;
@@ -21,6 +22,18 @@ private int last_submit_watch_future_id = 0;
 private int last_owner_future_output_reservation_id = 0;
 private int last_owner_future_output_callback_off_main = 0;
 private string last_owner_future_output_state = "";
+private int last_owner_future_cancelled_reservation_id = 0;
+private int last_owner_future_cancelled_future_id = 0;
+private int last_owner_future_cancelled_callback_off_main = 0;
+private int last_owner_future_cancelled_release_result = 0;
+private int last_owner_future_cancelled_reentry_result = 0;
+private string last_owner_future_cancelled_reason = "";
+private string owner_future_cancelled_reentry_session_id = "";
+private int last_owner_room_output_reservation_id = 0;
+private string last_owner_room_output_state = "";
+private int last_owner_room_output_event_count = 0;
+private int last_owner_room_output_slot_server_seq = 0;
+private int last_owner_room_output_callback_off_main = 0;
 
 void logon() {
   write("Normal login path reached.\n");
@@ -186,6 +199,8 @@ mapping take_gateway_owner_future(int future_id) {
 int gateway_owner_future_completed(int reservation_id, mapping future) {
   mapping result;
 
+  if (owner_future_completed_should_fail)
+    return 0;
   last_owner_future_reservation_id = reservation_id;
   last_owner_future = mapp(future) ? copy(future) : ([]);
   last_owner_future_callback_off_main = !vm_context_is_main_thread();
@@ -197,11 +212,53 @@ int gateway_owner_future_completed(int reservation_id, mapping future) {
   return gateway_session_release(this_object(), reservation_id);
 }
 
+void configure_owner_future_completed_failure(int should_fail) {
+  owner_future_completed_should_fail = should_fail;
+}
+
 int gateway_owner_future_output_completed(int reservation_id, string state) {
   last_owner_future_output_reservation_id = reservation_id;
   last_owner_future_output_state = state;
   last_owner_future_output_callback_off_main = !vm_context_is_main_thread();
   return 1;
+}
+
+void configure_owner_future_cancelled_reentry(string session_id) {
+  owner_future_cancelled_reentry_session_id = session_id;
+}
+
+int gateway_owner_future_cancelled(int reservation_id, int future_id,
+                                   string reason) {
+  string reentry_session_id;
+
+  last_owner_future_cancelled_reservation_id = reservation_id;
+  last_owner_future_cancelled_future_id = future_id;
+  last_owner_future_cancelled_reason = reason;
+  last_owner_future_cancelled_callback_off_main = !vm_context_is_main_thread();
+  reentry_session_id = owner_future_cancelled_reentry_session_id;
+  owner_future_cancelled_reentry_session_id = "";
+  if (reentry_session_id != "") {
+    last_owner_future_cancelled_reentry_result =
+        gateway_destroy_session(reentry_session_id);
+    return 1;
+  }
+  last_owner_future_cancelled_release_result =
+      gateway_session_release(this_object(), reservation_id);
+  return 1;
+}
+
+int gateway_owner_room_output_completed(int reservation_id, string state,
+                                        int event_count, int slot_server_seq) {
+  last_owner_room_output_reservation_id = reservation_id;
+  last_owner_room_output_state = state;
+  last_owner_room_output_event_count = event_count;
+  last_owner_room_output_slot_server_seq = slot_server_seq;
+  last_owner_room_output_callback_off_main = !vm_context_is_main_thread();
+  return 1;
+}
+
+mapping quiesce_gateway_owner_output() {
+  return gateway_owner_output_quiesce();
 }
 
 mapping query_last_owner_future() { return copy(last_owner_future); }
@@ -213,6 +270,39 @@ int query_last_owner_future_output_reservation_id() {
 string query_last_owner_future_output_state() { return last_owner_future_output_state; }
 int query_last_owner_future_output_callback_off_main() {
   return last_owner_future_output_callback_off_main;
+}
+int query_last_owner_future_cancelled_reservation_id() {
+  return last_owner_future_cancelled_reservation_id;
+}
+int query_last_owner_future_cancelled_future_id() {
+  return last_owner_future_cancelled_future_id;
+}
+string query_last_owner_future_cancelled_reason() {
+  return last_owner_future_cancelled_reason;
+}
+int query_last_owner_future_cancelled_callback_off_main() {
+  return last_owner_future_cancelled_callback_off_main;
+}
+int query_last_owner_future_cancelled_release_result() {
+  return last_owner_future_cancelled_release_result;
+}
+int query_last_owner_future_cancelled_reentry_result() {
+  return last_owner_future_cancelled_reentry_result;
+}
+int query_last_owner_room_output_reservation_id() {
+  return last_owner_room_output_reservation_id;
+}
+string query_last_owner_room_output_state() {
+  return last_owner_room_output_state;
+}
+int query_last_owner_room_output_event_count() {
+  return last_owner_room_output_event_count;
+}
+int query_last_owner_room_output_slot_server_seq() {
+  return last_owner_room_output_slot_server_seq;
+}
+int query_last_owner_room_output_callback_off_main() {
+  return last_owner_room_output_callback_off_main;
 }
 
 int owner_future_watch_completed(int context_id, mapping future) {

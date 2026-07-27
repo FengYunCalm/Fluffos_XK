@@ -64,6 +64,20 @@ OwnerFutureTakeResult OwnerFutureStore::take(uint64_t future_id) {
   return result;
 }
 
+bool OwnerFutureStore::has_pending_for_task(uint64_t target_task_id) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto range = future_ids_by_task_.equal_range(target_task_id);
+  for (auto it = range.first; it != range.second; ++it) {
+    const auto future_it = futures_.find(it->second);
+    if (future_it != futures_.end() &&
+        future_it->second.target_task_id == target_task_id &&
+        future_it->second.state == "pending") {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::optional<OwnerFutureCompletion> OwnerFutureStore::complete(uint64_t future_id, const char *state,
                                                                 const char *result_key, const char *error,
                                                                 std::shared_ptr<VMFrozenValue> result) {
@@ -90,6 +104,40 @@ std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_for_task(uint64_
     if (future_it->second.state == "pending") {
       return complete_record(future_it->second, state, result_key, error, std::move(result));
     }
+  }
+  return std::nullopt;
+}
+
+std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_string_for_task(
+    uint64_t target_task_id, const char *result_key, std::string result) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto range = future_ids_by_task_.equal_range(target_task_id);
+  for (auto index_it = range.first; index_it != range.second;) {
+    auto current_index = index_it++;
+    auto future_it = futures_.find(current_index->second);
+    if (future_it == futures_.end() ||
+        future_it->second.target_task_id != target_task_id) {
+      future_ids_by_task_.erase(current_index);
+      continue;
+    }
+    auto &record = future_it->second;
+    if (record.state != "pending") {
+      continue;
+    }
+    record.state = "completed";
+    record.result_key = normalize_text(result_key, "native_string");
+    record.error.clear();
+    record.terminal_at_ns = owner_future_now_ns();
+    record.result.reset();
+    record.native_string_result =
+        std::make_shared<const std::string>(std::move(result));
+    completed_.fetch_add(1, std::memory_order_relaxed);
+
+    OwnerFutureCompletion completion;
+    completion.record = record;
+    completion.target_status = target_status(record);
+    completion.completed_with_frozen_result = true;
+    return completion;
   }
   return std::nullopt;
 }
@@ -182,6 +230,7 @@ OwnerFutureCompletion OwnerFutureStore::complete_record(OwnerFutureRecord &recor
   record.terminal_at_ns = owner_future_now_ns();
   auto completed_with_frozen_result = record.state == "completed" && result != nullptr;
   record.result = std::move(result);
+  record.native_string_result.reset();
   if (record.state == "failed") {
     failed_.fetch_add(1, std::memory_order_relaxed);
   } else {

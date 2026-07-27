@@ -36,6 +36,7 @@
 #include "vm/internal/base/object.h"
 #include "vm/internal/lpc_vm_profile.h"
 #include "vm/internal/owner_future_store.h"
+#include "vm/internal/owner_scheduler_state.h"
 #include "vm/internal/owner_runtime_coordinator.h"
 #include "vm/internal/owner_service_registry.h"
 #include "vm/internal/otable.h"
@@ -106,6 +107,102 @@ TEST(OwnerFutureStoreTest, ReindexesOverwriteAndDuplicateTaskIds) {
   ASSERT_TRUE(store.take(1).consumed);
   ASSERT_TRUE(store.take(2).consumed);
   ASSERT_EQ(store.size(), 0);
+}
+
+TEST(OwnerFutureStoreTest, PendingTaskLookupTracksTerminalTransition) {
+  OwnerFutureStore store;
+  store.insert(owner_future_store_test_record(7, 707));
+  ASSERT_TRUE(store.has_pending_for_task(707));
+  ASSERT_TRUE(store.fail_terminal(7, "cancelled", true, false).changed);
+  ASSERT_FALSE(store.has_pending_for_task(707));
+  ASSERT_TRUE(store.take(7).consumed);
+  ASSERT_FALSE(store.has_pending_for_task(707));
+}
+
+TEST(OwnerSchedulerStateTest, RemovesOneQueuedTaskWithoutDroppingNeighbors) {
+  OwnerSchedulerState state;
+  const auto runnable = [](const OwnerMailboxTask &task) {
+    return task.task_type == "executor_probe";
+  };
+  OwnerMailboxTask first{};
+  first.task_id = 11;
+  first.sequence = 1;
+  first.owner_id = "owner/test/scheduler/remove-task";
+  first.task_type = "executor_probe";
+  OwnerMailboxTask removed_candidate = first;
+  removed_candidate.task_id = 12;
+  removed_candidate.sequence = 2;
+  OwnerMailboxTask last = first;
+  last.task_id = 13;
+  last.sequence = 3;
+
+  ASSERT_TRUE(state.enqueue_owner_task(std::move(first),
+                                       "owner/test/scheduler/remove-task",
+                                       false, runnable));
+  ASSERT_FALSE(state.enqueue_owner_task(std::move(removed_candidate),
+                                        "owner/test/scheduler/remove-task",
+                                        false, runnable));
+  ASSERT_FALSE(state.enqueue_owner_task(std::move(last),
+                                        "owner/test/scheduler/remove-task",
+                                        false, runnable));
+
+  OwnerMailboxTask removed{};
+  ASSERT_TRUE(state.remove_owner_task(12, &removed));
+  ASSERT_EQ(removed.task_id, 12u);
+  ASSERT_EQ(state.mailbox_total_depth(), 2);
+  ASSERT_FALSE(state.remove_owner_task(12, &removed));
+
+  OwnerMailboxTask next{};
+  ASSERT_TRUE(state.pop_next_schedulable_task(&next, false, runnable).found);
+  ASSERT_EQ(next.task_id, 11u);
+  ASSERT_TRUE(state.pop_next_schedulable_task(&next, false, runnable).found);
+  ASSERT_EQ(next.task_id, 13u);
+  ASSERT_EQ(state.mailbox_total_depth(), 0);
+}
+
+TEST(OwnerSchedulerStateTest, ForcedReleaseClearsClaimsAndRestoresRunnableOwner) {
+  OwnerSchedulerState state;
+  const auto runnable = [](const OwnerMailboxTask &task) {
+    return task.task_type == "executor_probe";
+  };
+  OwnerMailboxTask first{};
+  first.task_id = 1;
+  first.sequence = 1;
+  first.owner_epoch = 1;
+  first.owner_id = "owner/test/scheduler/forced-release";
+  first.task_type = "executor_probe";
+  OwnerMailboxTask second = first;
+  second.task_id = 2;
+  second.sequence = 2;
+
+  ASSERT_TRUE(state.enqueue_owner_task(
+      std::move(first), second.owner_id, false, runnable));
+  ASSERT_FALSE(state.enqueue_owner_task(
+      std::move(second), "owner/test/scheduler/forced-release", false,
+      runnable));
+
+  OwnerMailboxTask claimed{};
+  const auto claim = state.pop_next_schedulable_task(
+      &claimed, true, runnable);
+  ASSERT_TRUE(claim.found);
+  ASSERT_EQ(claimed.task_id, 1u);
+  ASSERT_EQ(state.active_owner_count(), 1);
+  ASSERT_EQ(state.active_claim_count(), 1);
+  const auto claimed_owner = claimed.owner_id;
+  state.push_front_owner_task(claimed_owner, std::move(claimed));
+
+  const auto claims = state.active_claim_count();
+  const auto releases = state.release_all_active_owners(runnable);
+  ASSERT_EQ(releases, claims);
+  ASSERT_EQ(state.active_owner_count(), 0);
+  ASSERT_EQ(state.active_claim_count(), 0);
+  ASSERT_EQ(state.runnable_owner_count(runnable), 1);
+
+  OwnerMailboxTask restarted{};
+  const auto restarted_claim = state.pop_next_schedulable_task(
+      &restarted, true, runnable);
+  ASSERT_TRUE(restarted_claim.found);
+  ASSERT_EQ(restarted.task_id, 1u);
 }
 
 namespace {
@@ -410,6 +507,10 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_filled"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_released"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_reservation_misses"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_fifo_writer_failures"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_fifo_oversize_dropped"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_fifo_destroyed_ready"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_output_fifo_destroyed_pending"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_head_blocked_fills"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_head_blocked_predecessors_total"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_head_blocked_predecessors_max"), 0);
@@ -452,6 +553,29 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
       ASSERT_GE(mapping_number(status, field.c_str()), 0);
     }
   }
+  for (const auto *prefix : {
+           "gateway_room_output_projection_worker_thread_cpu",
+           "gateway_room_output_projection_inline_thread_cpu",
+       }) {
+    for (const auto *suffix : {"_samples", "_total_us", "_avg_us", "_max_us"}) {
+      const auto field = std::string(prefix) + suffix;
+      ASSERT_NE(find_string_in_mapping(status, field.c_str()), nullptr) << field;
+      ASSERT_GE(mapping_number(status, field.c_str()), 0);
+    }
+  }
+  ASSERT_GE(mapping_number(
+                status,
+                "gateway_room_output_projection_worker_thread_cpu_unavailable"),
+            0);
+  ASSERT_GE(mapping_number(
+                status,
+                "gateway_room_output_projection_inline_thread_cpu_unavailable"),
+            0);
+  ASSERT_GE(mapping_number(status, "gateway_room_output_projection_submitted"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_room_output_projection_completed"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_room_output_projection_released"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_room_output_projection_pending"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_room_output_projection_forced_cleanup"), 0);
   ASSERT_GE(mapping_number(status, "gateway_raw_writes_sent"), 0);
   ASSERT_GE(mapping_number(status, "gateway_raw_writes_failed"), 0);
   ASSERT_GE(mapping_number(status, "gateway_master_tcp_nodelay_enabled"), 0);
@@ -567,6 +691,7 @@ TEST_F(DriverTest, TestGatewayOutputReservationBlocksAndPreservesFifo) {
   };
 
   GatewaySession session;
+  session.session_id = "fifo-session";
   session.master_fd = 77;
   auto first_reservation_id = gateway_reserve_session_output(&session);
   auto second_reservation_id = gateway_reserve_session_output(&session);
@@ -576,7 +701,9 @@ TEST_F(DriverTest, TestGatewayOutputReservationBlocksAndPreservesFifo) {
       g_gateway_runtime_counters.output_fifo_head_blocked_fills.load(std::memory_order_relaxed);
   auto blocked_predecessors_before =
       g_gateway_runtime_counters.output_fifo_head_blocked_predecessors_total.load(std::memory_order_relaxed);
-  ASSERT_EQ(gateway_fill_session_output_with_writer(&session, second_reservation_id, "second", writer), 1);
+  ASSERT_EQ(gateway_fill_session_protocol_output_with_writer(
+                &session, second_reservation_id, "second", 6, writer),
+            1);
   ASSERT_EQ(session.output_fifo.size(), 2u);
   ASSERT_FALSE(session.output_fifo.front().ready);
   ASSERT_TRUE(session.output_fifo.back().ready);
@@ -590,8 +717,18 @@ TEST_F(DriverTest, TestGatewayOutputReservationBlocksAndPreservesFifo) {
                 std::memory_order_relaxed),
             1u);
 
-  ASSERT_EQ(gateway_fill_session_output_with_writer(&session, first_reservation_id, "first", writer), 1);
-  ASSERT_EQ(writes, (std::vector<std::string>{"first", "second"}));
+  ASSERT_EQ(gateway_fill_session_protocol_output_with_writer(
+                &session, first_reservation_id, "first", 5, writer),
+            1);
+  ASSERT_EQ(writes.size(), 2u);
+  const auto first_wire = nlohmann::json::parse(writes[0]);
+  const auto second_wire = nlohmann::json::parse(writes[1]);
+  ASSERT_EQ(first_wire["type"], "output");
+  ASSERT_EQ(first_wire["cid"], "fifo-session");
+  ASSERT_EQ(first_wire["data"], "first");
+  ASSERT_EQ(second_wire["type"], "output");
+  ASSERT_EQ(second_wire["cid"], "fifo-session");
+  ASSERT_EQ(second_wire["data"], "second");
   ASSERT_TRUE(session.output_fifo.empty());
 }
 
@@ -604,14 +741,406 @@ TEST_F(DriverTest, TestGatewayOutputReservationTimeoutReleaseUnblocksFollowingOu
   };
 
   GatewaySession session;
+  session.session_id = "release-session";
   session.master_fd = 88;
   auto reservation_id = gateway_reserve_session_output(&session);
   ASSERT_GT(reservation_id, 0u);
-  ASSERT_EQ(gateway_enqueue_session_output(&session, "after-release"), 1);
+  ASSERT_EQ(gateway_enqueue_session_protocol_output(
+                &session, "after-release", sizeof("after-release") - 1),
+            1);
   ASSERT_EQ(gateway_release_session_output_with_writer(&session, reservation_id, writer), 1);
   ASSERT_EQ(gateway_release_session_output(&session, reservation_id), 0);
-  ASSERT_EQ(writes, (std::vector<std::string>{"after-release"}));
+  ASSERT_EQ(writes.size(), 1u);
+  const auto wire = nlohmann::json::parse(writes[0]);
+  ASSERT_EQ(wire["type"], "output");
+  ASSERT_EQ(wire["cid"], "release-session");
+  ASSERT_EQ(wire["data"], "after-release");
   ASSERT_TRUE(session.output_fifo.empty());
+}
+
+TEST_F(DriverTest, TestGatewayOrdinaryOutputQueuesExactWireEnvelope) {
+  GatewaySession session;
+  session.session_id = "ordinary-session";
+  session.master_fd = -1;
+  const std::string frame{"ordinary\0frame", 14};
+
+  ASSERT_EQ(gateway_enqueue_session_protocol_output(
+                &session, frame.data(), frame.size()),
+            1);
+  ASSERT_EQ(session.output_fifo.size(), 1u);
+  ASSERT_TRUE(session.output_fifo.front().ready);
+  const auto wire = nlohmann::json::parse(
+      session.output_fifo.front().wire_bytes);
+  ASSERT_EQ(wire["type"], "output");
+  ASSERT_EQ(wire["cid"], "ordinary-session");
+  ASSERT_EQ(wire["data"].get<std::string>(), frame);
+}
+
+TEST_F(DriverTest, TestGatewayWireFactoryRejectsOversizeBeforeFifoMutation) {
+  struct PacketSizeGuard {
+    size_t original{g_gateway_max_packet_size};
+    ~PacketSizeGuard() { g_gateway_max_packet_size = original; }
+  } guard;
+  static std::vector<std::string> writes;
+  writes.clear();
+  auto writer = [](int, const char *data, size_t len) -> int {
+    writes.emplace_back(data, len);
+    return 1;
+  };
+  g_gateway_max_packet_size = 96;
+  const std::string oversized_payload(128, 'x');
+
+  GatewaySession ordinary;
+  ordinary.session_id = "oversize-ordinary";
+  ordinary.master_fd = -1;
+  ASSERT_EQ(gateway_enqueue_session_protocol_output(
+                &ordinary, oversized_payload.data(), oversized_payload.size()),
+            0);
+  ASSERT_TRUE(ordinary.output_fifo.empty());
+
+  GatewaySession reserved;
+  reserved.session_id = "oversize-reserved";
+  reserved.master_fd = 77;
+  const auto reservation_id = gateway_reserve_session_output(&reserved);
+  ASSERT_GT(reservation_id, 0u);
+  ASSERT_EQ(gateway_fill_session_protocol_output_with_writer(
+                &reserved, reservation_id, oversized_payload.data(),
+                oversized_payload.size(), writer),
+            0);
+  ASSERT_TRUE(writes.empty());
+  ASSERT_EQ(reserved.output_fifo.size(), 1u);
+  ASSERT_EQ(reserved.output_fifo.front().reservation_id, reservation_id);
+  ASSERT_FALSE(reserved.output_fifo.front().ready);
+  ASSERT_TRUE(reserved.output_fifo.front().wire_bytes.empty());
+}
+
+TEST_F(DriverTest,
+       TestGatewayFlushDropsReadyWireMadeOversizeByLimitReduction) {
+  struct PacketSizeGuard {
+    size_t original{g_gateway_max_packet_size};
+    ~PacketSizeGuard() { g_gateway_max_packet_size = original; }
+  } guard;
+  static std::vector<size_t> attempted_lengths;
+  static std::vector<std::string> writes;
+  attempted_lengths.clear();
+  writes.clear();
+  auto writer = [](int fd, const char *data, size_t len) -> int {
+    EXPECT_EQ(fd, 77);
+    attempted_lengths.push_back(len);
+    if (len > g_gateway_max_packet_size) {
+      return 0;
+    }
+    writes.emplace_back(data, len);
+    return 1;
+  };
+
+  GatewaySession session;
+  session.session_id = "limit-reduction-ordinary";
+  session.master_fd = -1;
+  g_gateway_max_packet_size = 4096;
+  const std::string oversized_payload(2048, 'x');
+  ASSERT_EQ(gateway_enqueue_session_protocol_output(
+                &session, oversized_payload.data(), oversized_payload.size()),
+            1);
+  ASSERT_EQ(gateway_enqueue_session_protocol_output(
+                &session, "successor", sizeof("successor") - 1),
+            1);
+  ASSERT_EQ(session.output_fifo.size(), 2u);
+  ASSERT_TRUE(session.output_fifo.front().ready);
+  ASSERT_EQ(session.output_fifo.front().reservation_id, 0u);
+  ASSERT_GT(session.output_fifo.front().wire_bytes.size(), 1024u);
+  ASSERT_LT(session.output_fifo.back().wire_bytes.size(), 1024u);
+  const auto oversize_dropped_before =
+      g_gateway_runtime_counters.output_fifo_oversize_dropped.load(
+          std::memory_order_relaxed);
+  const auto released_before =
+      g_gateway_runtime_counters.output_fifo_released.load(
+          std::memory_order_relaxed);
+  const auto writer_failures_before =
+      g_gateway_runtime_counters.output_fifo_writer_failures.load(
+          std::memory_order_relaxed);
+
+  g_gateway_max_packet_size = 1024;
+  session.master_fd = 77;
+  ASSERT_EQ(gateway_flush_session_output_fifo_with_writer(&session, writer), 1);
+  ASSERT_TRUE(session.output_fifo.empty());
+  ASSERT_EQ(attempted_lengths.size(), 1u);
+  ASSERT_EQ(writes.size(), 1u);
+  const auto successor = nlohmann::json::parse(writes.front());
+  ASSERT_EQ(successor["type"], "output");
+  ASSERT_EQ(successor["cid"], session.session_id);
+  ASSERT_EQ(successor["data"], "successor");
+  ASSERT_EQ(g_gateway_runtime_counters.output_fifo_oversize_dropped.load(
+                std::memory_order_relaxed),
+            oversize_dropped_before + 1);
+  ASSERT_EQ(g_gateway_runtime_counters.output_fifo_released.load(
+                std::memory_order_relaxed),
+            released_before);
+  ASSERT_EQ(g_gateway_runtime_counters.output_fifo_writer_failures.load(
+                std::memory_order_relaxed),
+            writer_failures_before);
+}
+
+TEST_F(DriverTest,
+       TestGatewayFlushClassifiesReadyReservationOversizeExactlyOnce) {
+  struct PacketSizeGuard {
+    size_t original{g_gateway_max_packet_size};
+    ~PacketSizeGuard() { g_gateway_max_packet_size = original; }
+  } guard;
+  static std::vector<size_t> attempted_lengths;
+  static std::vector<std::string> writes;
+  attempted_lengths.clear();
+  writes.clear();
+  auto writer = [](int fd, const char *data, size_t len) -> int {
+    EXPECT_EQ(fd, 78);
+    attempted_lengths.push_back(len);
+    if (len > g_gateway_max_packet_size) {
+      return 0;
+    }
+    writes.emplace_back(data, len);
+    return 1;
+  };
+
+  GatewaySession session;
+  session.session_id = "limit-reduction-reserved";
+  session.master_fd = -1;
+  g_gateway_max_packet_size = 4096;
+  const auto reservation_id = gateway_reserve_session_output(&session);
+  ASSERT_GT(reservation_id, 0u);
+  const std::string oversized_payload(2048, 'y');
+  ASSERT_EQ(gateway_fill_session_protocol_output_with_writer(
+                &session, reservation_id, oversized_payload.data(),
+                oversized_payload.size(), writer),
+            1);
+  ASSERT_EQ(gateway_enqueue_session_protocol_output(
+                &session, "successor", sizeof("successor") - 1),
+            1);
+  ASSERT_EQ(session.output_fifo.size(), 2u);
+  ASSERT_TRUE(session.output_fifo.front().ready);
+  ASSERT_EQ(session.output_fifo.front().reservation_id, reservation_id);
+  ASSERT_GT(session.output_fifo.front().wire_bytes.size(), 1024u);
+  ASSERT_LT(session.output_fifo.back().wire_bytes.size(), 1024u);
+  const auto oversize_dropped_before =
+      g_gateway_runtime_counters.output_fifo_oversize_dropped.load(
+          std::memory_order_relaxed);
+  const auto released_before =
+      g_gateway_runtime_counters.output_fifo_released.load(
+          std::memory_order_relaxed);
+  const auto writer_failures_before =
+      g_gateway_runtime_counters.output_fifo_writer_failures.load(
+          std::memory_order_relaxed);
+
+  g_gateway_max_packet_size = 1024;
+  session.master_fd = 78;
+  ASSERT_EQ(gateway_flush_session_output_fifo_with_writer(&session, writer), 1);
+  ASSERT_TRUE(session.output_fifo.empty());
+  ASSERT_EQ(attempted_lengths.size(), 1u);
+  ASSERT_EQ(writes.size(), 1u);
+  const auto successor = nlohmann::json::parse(writes.front());
+  ASSERT_EQ(successor["type"], "output");
+  ASSERT_EQ(successor["cid"], session.session_id);
+  ASSERT_EQ(successor["data"], "successor");
+  ASSERT_EQ(g_gateway_runtime_counters.output_fifo_oversize_dropped.load(
+                std::memory_order_relaxed),
+            oversize_dropped_before + 1);
+  ASSERT_EQ(g_gateway_runtime_counters.output_fifo_released.load(
+                std::memory_order_relaxed),
+            released_before);
+  ASSERT_EQ(g_gateway_runtime_counters.output_fifo_writer_failures.load(
+                std::memory_order_relaxed),
+            writer_failures_before);
+}
+
+TEST_F(DriverTest, TestGatewayWireReadyQueueRejectsMalformedSouthboundJson) {
+  GatewaySession session;
+  session.session_id = "wire-ready-session";
+  session.master_fd = -1;
+
+  ASSERT_EQ(gateway_enqueue_session_wire_json_for_test(
+                &session,
+                R"({"type":"output","cid":"wire-ready-session","data":"\u001bXKMSGE{}"})"),
+            1);
+  ASSERT_EQ(session.output_fifo.size(), 1u);
+  const auto valid_wire = session.output_fifo.front().wire_bytes;
+
+  for (const auto &invalid : {
+           R"({"cid":"wire-ready-session","data":"frame"})",
+           R"({"type":"sys","cid":"wire-ready-session","data":"frame"})",
+           R"({"type":"output","cid":"other-session","data":"frame"})",
+           R"({"type":"output","cid":"wire-ready-session"})",
+           R"({"type":"output","cid":"wire-ready-session","data":{"frame":1}})",
+           R"({"type":"output","cid":"wire-ready-session","data":"frame","extra":1})",
+           R"(["output","wire-ready-session","frame"])",
+       }) {
+    EXPECT_EQ(gateway_enqueue_session_wire_json_for_test(&session, invalid), 0)
+        << invalid;
+    EXPECT_EQ(session.output_fifo.size(), 1u) << invalid;
+    EXPECT_EQ(session.output_fifo.front().wire_bytes, valid_wire) << invalid;
+  }
+}
+
+TEST_F(DriverTest, TestGatewayProjectedWireBatchRejectsUnboundRecipientsAtomically) {
+  static std::vector<std::string> writes;
+  writes.clear();
+  auto writer = [](int, const char *data, size_t len) -> int {
+    writes.emplace_back(data, len);
+    return 1;
+  };
+
+  const auto assert_rejected = [&](const std::vector<std::string> &wire_json) {
+    GatewaySession first;
+    GatewaySession second;
+    first.session_id = "projected-first";
+    second.session_id = "projected-second";
+    first.master_fd = 71;
+    second.master_fd = 72;
+    const auto first_id = gateway_reserve_session_output(&first);
+    const auto second_id = gateway_reserve_session_output(&second);
+    ASSERT_GT(first_id, 0u);
+    ASSERT_GT(second_id, 0u);
+    writes.clear();
+
+    EXPECT_FALSE(gateway_fill_projected_wires_for_test(
+        {&first, &second}, {first_id, second_id}, wire_json, writer));
+    EXPECT_TRUE(writes.empty());
+    ASSERT_EQ(first.output_fifo.size(), 1u);
+    ASSERT_EQ(second.output_fifo.size(), 1u);
+    EXPECT_FALSE(first.output_fifo.front().ready);
+    EXPECT_FALSE(second.output_fifo.front().ready);
+  };
+
+  const auto first_wire = gateway_encode_output_envelope_for_test(
+      "projected-first", "first-frame", 11);
+  const auto second_wire = gateway_encode_output_envelope_for_test(
+      "projected-second", "second-frame", 12);
+  assert_rejected({"not-json", second_wire});
+  assert_rejected({second_wire, second_wire});
+  assert_rejected({second_wire, first_wire});
+
+  GatewaySession first;
+  GatewaySession second;
+  first.session_id = "projected-first";
+  second.session_id = "projected-second";
+  first.master_fd = 81;
+  second.master_fd = 82;
+  const auto first_id = gateway_reserve_session_output(&first);
+  const auto second_id = gateway_reserve_session_output(&second);
+  writes.clear();
+  ASSERT_TRUE(gateway_fill_projected_wires_for_test(
+      {&first, &second}, {first_id, second_id}, {first_wire, second_wire}, writer));
+  ASSERT_EQ(writes.size(), 2u);
+  EXPECT_EQ(nlohmann::json::parse(writes[0])["cid"], "projected-first");
+  EXPECT_EQ(nlohmann::json::parse(writes[1])["cid"], "projected-second");
+}
+
+TEST_F(DriverTest, TestGatewayProjectedWireBatchRejectsOversizeAtomically) {
+  struct PacketSizeGuard {
+    size_t original{g_gateway_max_packet_size};
+    ~PacketSizeGuard() { g_gateway_max_packet_size = original; }
+  } guard;
+  static std::vector<std::string> writes;
+  writes.clear();
+  auto writer = [](int, const char *data, size_t len) -> int {
+    writes.emplace_back(data, len);
+    return 1;
+  };
+  g_gateway_max_packet_size = 128;
+
+  GatewaySession first;
+  GatewaySession second;
+  first.session_id = "projected-size-first";
+  second.session_id = "projected-size-second";
+  first.master_fd = 81;
+  second.master_fd = 82;
+  const auto first_id = gateway_reserve_session_output(&first);
+  const auto second_id = gateway_reserve_session_output(&second);
+  ASSERT_GT(first_id, 0u);
+  ASSERT_GT(second_id, 0u);
+  const auto first_wire = gateway_encode_output_envelope_for_test(
+      first.session_id, "ok", 2);
+  const std::string oversized_payload(256, 'y');
+  const auto second_wire = gateway_encode_output_envelope_for_test(
+      second.session_id, oversized_payload.data(), oversized_payload.size());
+  ASSERT_LT(first_wire.size(), g_gateway_max_packet_size);
+  ASSERT_GT(second_wire.size(), g_gateway_max_packet_size);
+
+  ASSERT_FALSE(gateway_fill_projected_wires_for_test(
+      {&first, &second}, {first_id, second_id}, {first_wire, second_wire},
+      writer));
+  ASSERT_TRUE(writes.empty());
+  ASSERT_EQ(first.output_fifo.size(), 1u);
+  ASSERT_EQ(second.output_fifo.size(), 1u);
+  ASSERT_FALSE(first.output_fifo.front().ready);
+  ASSERT_FALSE(second.output_fifo.front().ready);
+  ASSERT_TRUE(first.output_fifo.front().wire_bytes.empty());
+  ASSERT_TRUE(second.output_fifo.front().wire_bytes.empty());
+}
+
+TEST_F(DriverTest, TestGatewaySessionSendKeepsHistoricalMixedPayloadSemantics) {
+  const auto assert_payload = [](const std::string &payload_json,
+                                 const nlohmann::json &expected) {
+    GatewaySession session;
+    session.session_id = "mixed-session";
+    session.master_fd = -1;
+    ASSERT_EQ(gateway_enqueue_session_payload_json_for_test(
+                  &session, payload_json),
+              1);
+    ASSERT_EQ(session.output_fifo.size(), 1u);
+    EXPECT_EQ(nlohmann::json::parse(session.output_fifo.front().wire_bytes),
+              expected);
+  };
+
+  assert_payload("7", {{"type", "output"}, {"cid", "mixed-session"}, {"data", 7}});
+  assert_payload(R"([1,"two"])",
+                 {{"type", "output"},
+                  {"cid", "mixed-session"},
+                  {"data", nlohmann::json::array({1, "two"})}});
+  assert_payload(R"({"type":"custom","data":{"answer":42}})",
+                 {{"type", "custom"},
+                  {"cid", "mixed-session"},
+                  {"data", {{"answer", 42}}}});
+}
+
+TEST_F(DriverTest, TestGatewayWriterFailureRetainsOneReadyFrameForExactRetry) {
+  static std::vector<std::string> writes;
+  writes.clear();
+  auto failing_writer = [](int, const char *, size_t) -> int { return 0; };
+  auto succeeding_writer = [](int, const char *data, size_t len) -> int {
+    writes.emplace_back(data, len);
+    return 1;
+  };
+
+  GatewaySession session;
+  session.session_id = "writer-retry-session";
+  session.master_fd = 71;
+  const auto reservation_id = gateway_reserve_session_output(&session);
+  ASSERT_GT(reservation_id, 0u);
+  const auto failures_before =
+      g_gateway_runtime_counters.output_fifo_writer_failures.load(
+          std::memory_order_relaxed);
+
+  ASSERT_EQ(gateway_fill_session_protocol_output_with_writer(
+                &session, reservation_id, "retry-frame", 11, failing_writer),
+            1);
+  ASSERT_EQ(session.output_fifo.size(), 1u);
+  ASSERT_TRUE(session.output_fifo.front().ready);
+  ASSERT_EQ(session.output_fifo.front().reservation_id, reservation_id);
+  ASSERT_EQ(g_gateway_runtime_counters.output_fifo_writer_failures.load(
+                std::memory_order_relaxed),
+            failures_before + 1);
+
+  ASSERT_EQ(gateway_flush_session_output_fifo_with_writer(
+                &session, succeeding_writer),
+            1);
+  ASSERT_EQ(gateway_flush_session_output_fifo_with_writer(
+                &session, succeeding_writer),
+            0);
+  ASSERT_TRUE(session.output_fifo.empty());
+  ASSERT_EQ(writes.size(), 1u);
+  const auto wire = nlohmann::json::parse(writes.front());
+  ASSERT_EQ(wire["type"], "output");
+  ASSERT_EQ(wire["cid"], "writer-retry-session");
+  ASSERT_EQ(wire["data"], "retry-frame");
 }
 
 TEST_F(DriverTest, TestGatewayOutputReservationIdsDoNotRepeatAcrossSessions) {
@@ -631,6 +1160,8 @@ TEST_F(DriverTest, TestGatewayOutputReservationIdsDoNotRepeatAcrossSessions) {
 TEST_F(DriverTest, TestGatewayBatchReservationReusesOnlyPendingTailSlots) {
   GatewaySession first;
   GatewaySession second;
+  first.session_id = "batch-first";
+  second.session_id = "batch-second";
   first.master_fd = 93;
   second.master_fd = 94;
 
@@ -647,7 +1178,9 @@ TEST_F(DriverTest, TestGatewayBatchReservationReusesOnlyPendingTailSlots) {
   ASSERT_EQ(first.output_fifo.size(), 1u);
   ASSERT_EQ(second.output_fifo.size(), 1u);
 
-  ASSERT_EQ(gateway_enqueue_session_output(&first, "after-pending"), 1);
+  ASSERT_EQ(gateway_enqueue_session_protocol_output(
+                &first, "after-pending", sizeof("after-pending") - 1),
+            1);
   GatewaySessionBatchReservationResult after_intervening;
   ASSERT_TRUE(gateway_reserve_session_outputs(
       {&first}, {first_id}, &after_intervening));
@@ -691,6 +1224,8 @@ TEST_F(DriverTest, TestGatewayBatchReservationRejectsDuplicateSessions) {
 TEST_F(DriverTest, TestGatewayPendingMessageEventBatchAppendsMultipleProducerWaves) {
   GatewaySession first;
   GatewaySession second;
+  first.session_id = "session-one";
+  second.session_id = "session-two";
   first.master_fd = 98;
   second.master_fd = 99;
   const auto first_id = gateway_reserve_session_output(&first);
@@ -740,14 +1275,24 @@ TEST_F(DriverTest, TestGatewayPendingMessageEventBatchAppendsMultipleProducerWav
                 &first, first_id, "player-one", 7, writer),
             1);
   ASSERT_EQ(writes.size(), 1u);
-  ASSERT_NE(writes[0].find("first"), std::string::npos);
-  ASSERT_NE(writes[0].find("second"), std::string::npos);
-  ASSERT_LT(writes[0].find("first"), writes[0].find("second"));
+  const auto first_wire = nlohmann::json::parse(writes[0]);
+  ASSERT_EQ(first_wire["type"], "output");
+  ASSERT_EQ(first_wire["cid"], "session-one");
+  const auto first_frame = first_wire["data"].get<std::string>();
+  ASSERT_EQ(first_frame.substr(0, 7), "\x1bXKBACH");
+  ASSERT_NE(first_frame.find("first"), std::string::npos);
+  ASSERT_NE(first_frame.find("second"), std::string::npos);
+  ASSERT_LT(first_frame.find("first"), first_frame.find("second"));
   ASSERT_TRUE(first.output_fifo.empty());
   ASSERT_EQ(gateway_pending_message_event_count(&first, first_id), 0u);
   ASSERT_EQ(gateway_fill_pending_message_event_batch_with_writer(
                 &second, second_id, "player-two", 8, writer),
             1);
+  ASSERT_EQ(writes.size(), 2u);
+  const auto second_wire = nlohmann::json::parse(writes[1]);
+  ASSERT_EQ(second_wire["type"], "output");
+  ASSERT_EQ(second_wire["cid"], "session-two");
+  ASSERT_EQ(second_wire["data"].get<std::string>().substr(0, 7), "\x1bXKBACH");
   ASSERT_EQ(
       g_gateway_runtime_counters.message_event_template_cache_hits.load(),
       cache_hits_after_append);
@@ -759,6 +1304,8 @@ TEST_F(DriverTest, TestGatewayPendingMessageEventBatchAppendsMultipleProducerWav
 TEST_F(DriverTest, TestGatewayPendingMessageEventBatchFillsRecipientSliceNatively) {
   GatewaySession first;
   GatewaySession second;
+  first.session_id = "session-one";
+  second.session_id = "session-two";
   first.master_fd = 120;
   second.master_fd = 121;
   const auto first_id = gateway_reserve_session_output(&first);
@@ -790,6 +1337,15 @@ TEST_F(DriverTest, TestGatewayPendingMessageEventBatchFillsRecipientSliceNativel
   ASSERT_EQ(gateway_pending_message_event_count(&first, first_id), 1u);
   ASSERT_EQ(gateway_pending_message_event_count(&second, second_id), 1u);
 
+  const auto inline_cpu_samples_before =
+      g_gateway_runtime_counters
+          .room_output_projection_inline_thread_cpu_samples.load(
+              std::memory_order_relaxed);
+  const auto inline_cpu_unavailable_before =
+      g_gateway_runtime_counters
+          .room_output_projection_inline_thread_cpu_unavailable.load(
+              std::memory_order_relaxed);
+
   ASSERT_TRUE(gateway_fill_pending_message_event_batches_with_writer(
       {&first, &second}, {first_id, second_id}, {"player-one", "player-two"},
       {7, 8}, writer, &result));
@@ -797,15 +1353,248 @@ TEST_F(DriverTest, TestGatewayPendingMessageEventBatchFillsRecipientSliceNativel
   ASSERT_EQ(result.event_counts, (std::vector<LPC_INT>{1, 1}));
   ASSERT_EQ(result.slot_server_seqs, (std::vector<LPC_INT>{101, 201}));
   ASSERT_EQ(writes.size(), 2u);
-  ASSERT_NE(writes[0].find("player-one"), std::string::npos);
-  ASSERT_NE(writes[1].find("player-two"), std::string::npos);
+  const auto first_wire = nlohmann::json::parse(writes[0]);
+  const auto second_wire = nlohmann::json::parse(writes[1]);
+  ASSERT_EQ(first_wire["type"], "output");
+  ASSERT_EQ(first_wire["cid"], "session-one");
+  ASSERT_EQ(second_wire["type"], "output");
+  ASSERT_EQ(second_wire["cid"], "session-two");
+  ASSERT_NE(first_wire["data"].get<std::string>().find("player-one"),
+            std::string::npos);
+  ASSERT_NE(second_wire["data"].get<std::string>().find("player-two"),
+            std::string::npos);
+  const auto inline_cpu_samples_after =
+      g_gateway_runtime_counters
+          .room_output_projection_inline_thread_cpu_samples.load(
+              std::memory_order_relaxed);
+  const auto inline_cpu_unavailable_after =
+      g_gateway_runtime_counters
+          .room_output_projection_inline_thread_cpu_unavailable.load(
+              std::memory_order_relaxed);
+  ASSERT_EQ((inline_cpu_samples_after - inline_cpu_samples_before) +
+                (inline_cpu_unavailable_after -
+                 inline_cpu_unavailable_before),
+            2u);
   ASSERT_TRUE(first.output_fifo.empty());
   ASSERT_TRUE(second.output_fifo.empty());
 }
 
-TEST_F(DriverTest, TestGatewayPendingMessageEventBatchReportsPostValidationSlotLoss) {
+TEST_F(DriverTest, TestGatewayPendingMessageEventSnapshotProjectsByteEquivalentFrame) {
+  GatewaySession session;
+  session.session_id = "owner-\"projection\\session";
+  session.master_fd = -1;
+  const auto reservation_id = gateway_reserve_session_output(&session);
+  ASSERT_GT(reservation_id, 0u);
+
+  const std::string first_stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"first-owner-event "
+      "\\\"quoted\\\" \\\\ line\\n\",\"payload\":{}}";
+  const std::string second_stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"second-owner-event\\tend\","
+      "\"payload\":{}}";
+  ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+      {&session}, {reservation_id}, {901}, {902}, {11}, {7001},
+      first_stable, "player", 123456, 128));
+  ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+      {&session}, {reservation_id}, {901}, {904}, {12}, {7002},
+      second_stable, "player", 123457, 128));
+
+  GatewayPendingMessageEventProjectionSnapshot snapshot;
+  GatewayPendingMessageEventProjectionColumns columns;
+  ASSERT_TRUE(gateway_snapshot_pending_message_event_batch(
+      &session, reservation_id, "player-\"owner\\scope", 13, &snapshot,
+      &columns));
+  ASSERT_EQ(snapshot.wave_table.size(), 2u);
+  ASSERT_EQ(snapshot.event_wave_indices, (std::vector<size_t>{0, 1}));
+  ASSERT_EQ(snapshot.wave_table[0]->message_template.stable_members.find(
+                "first-owner-event") != std::string::npos,
+            true);
+  ASSERT_EQ(snapshot.wave_table[1]->message_template.stable_members.find(
+                "second-owner-event") != std::string::npos,
+            true);
+  ASSERT_EQ(columns.session_id, "owner-\"projection\\session");
+  ASSERT_EQ(columns.scope_id, "player-\"owner\\scope");
+  ASSERT_EQ(columns.message_seqs, (std::vector<LPC_INT>{7001, 7002}));
+  ASSERT_EQ(columns.server_seqs, (std::vector<LPC_INT>{902, 904}));
+  ASSERT_EQ(columns.message_epochs, (std::vector<LPC_INT>{11, 12}));
+  ASSERT_EQ(columns.slot_server_seq, 901);
+  ASSERT_EQ(columns.slot_epoch, 13);
+  ASSERT_EQ(columns.slot_sent_at, 123456);
+
+  std::string owner_projected;
+  ASSERT_TRUE(gateway_encode_pending_message_event_projection(
+      snapshot, columns, &owner_projected));
+  const auto inline_inner =
+      gateway_encode_preencoded_message_event_batch_for_test(
+          {first_stable, second_stable}, {"player", "player"},
+          "player-\"owner\\scope", {7001, 7002}, {902, 904}, {11, 12},
+          {123456, 123457}, 901, 13, 123456);
+  ASSERT_FALSE(inline_inner.empty());
+  const auto inline_projected = gateway_encode_output_envelope_for_test(
+      session.session_id, inline_inner.data(), inline_inner.size());
+  ASSERT_EQ(owner_projected, inline_projected);
+  const auto wire = nlohmann::json::parse(owner_projected);
+  ASSERT_EQ(wire["type"], "output");
+  ASSERT_EQ(wire["cid"], session.session_id);
+  ASSERT_EQ(wire["data"], inline_inner);
+  ASSERT_EQ(gateway_pending_message_event_count(&session, reservation_id), 2u);
+  ASSERT_FALSE(session.output_fifo.front().ready);
+}
+
+TEST_F(DriverTest, TestGatewayPendingMessageEventBatchPreencodesEveryWireBeforeFirstWrite) {
+  GatewaySession first;
+  GatewaySession invalid;
+  first.session_id = "session-one";
+  invalid.session_id = std::string("invalid-\xc3\x28", 10);
+  first.master_fd = 124;
+  invalid.master_fd = 125;
+  const auto first_id = gateway_reserve_session_output(&first);
+  const auto invalid_id = gateway_reserve_session_output(&invalid);
+  ASSERT_GT(first_id, 0u);
+  ASSERT_GT(invalid_id, 0u);
+
+  const std::string stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"atomic-wire\",\"payload\":{}}";
+  ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+      {&first, &invalid}, {first_id, invalid_id}, {101, 201}, {102, 202},
+      {3, 4}, {1001, 2001}, stable, "player", 123456, 128));
+
+  static std::vector<std::string> writes;
+  writes.clear();
+  const auto writer = [](int, const char *data, size_t len) {
+    writes.emplace_back(data, len);
+    return 1;
+  };
+  GatewayPendingMessageEventBatchFillResult result;
+
+  ASSERT_FALSE(gateway_fill_pending_message_event_batches_with_writer(
+      {&first, &invalid}, {first_id, invalid_id}, {"player-one", "player-two"},
+      {7, 8}, writer, &result));
+  ASSERT_TRUE(writes.empty());
+  ASSERT_EQ(gateway_pending_message_event_count(&first, first_id), 1u);
+  ASSERT_EQ(gateway_pending_message_event_count(&invalid, invalid_id), 1u);
+  ASSERT_FALSE(first.output_fifo.front().ready);
+  ASSERT_FALSE(invalid.output_fifo.front().ready);
+}
+
+TEST_F(DriverTest, TestGatewayPendingMessageEventBatchFillsTwoSlotsForSameSessionInFifoOrder) {
+  GatewaySession session;
+  session.session_id = "same-session";
+  session.master_fd = 126;
+  const auto first_id = gateway_reserve_session_output(&session);
+  const auto second_id = gateway_reserve_session_output(&session);
+  ASSERT_GT(first_id, 0u);
+  ASSERT_GT(second_id, 0u);
+
+  const std::string first_stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"first-slot\",\"payload\":{}}";
+  const std::string second_stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"second-slot\",\"payload\":{}}";
+  ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+      {&session}, {first_id}, {501}, {502}, {7}, {5001}, first_stable,
+      "player", 123456, 128));
+  ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+      {&session}, {second_id}, {503}, {504}, {7}, {5002}, second_stable,
+      "player", 123457, 128));
+
+  static std::vector<std::string> writes;
+  writes.clear();
+  const auto writer = [](int, const char *data, size_t len) {
+    writes.emplace_back(data, len);
+    return 1;
+  };
+  GatewayPendingMessageEventBatchFillResult result;
+  ASSERT_TRUE(gateway_fill_pending_message_event_batches_with_writer(
+      {&session, &session}, {second_id, first_id},
+      {"player-one", "player-one"}, {9, 9}, writer, &result));
+  ASSERT_EQ(result.filled, (std::vector<bool>{true, true}));
+  ASSERT_EQ(writes.size(), 2u);
+  const auto first_wire = nlohmann::json::parse(writes[0]);
+  const auto second_wire = nlohmann::json::parse(writes[1]);
+  const auto expected_first_frame =
+      gateway_encode_preencoded_message_event_batch_for_test(
+          {first_stable}, {"player"}, "player-one", {5001}, {502}, {7},
+          {123456}, 501, 9, 123456);
+  const auto expected_second_frame =
+      gateway_encode_preencoded_message_event_batch_for_test(
+          {second_stable}, {"player"}, "player-one", {5002}, {504}, {7},
+          {123457}, 503, 9, 123457);
+  ASSERT_EQ(first_wire["type"], "output");
+  ASSERT_EQ(first_wire["cid"], "same-session");
+  ASSERT_EQ(first_wire["data"].get<std::string>(), expected_first_frame);
+  ASSERT_EQ(second_wire["type"], "output");
+  ASSERT_EQ(second_wire["cid"], "same-session");
+  ASSERT_EQ(second_wire["data"].get<std::string>(), expected_second_frame);
+  ASSERT_TRUE(session.output_fifo.empty());
+}
+
+TEST_F(DriverTest, TestGatewayPendingMessageEventBatchSameSessionFailureWritesNothing) {
+  GatewaySession session;
+  session.session_id = "same-session-atomic";
+  session.master_fd = 127;
+  const auto first_id = gateway_reserve_session_output(&session);
+  const auto second_id = gateway_reserve_session_output(&session);
+  ASSERT_GT(first_id, 0u);
+  ASSERT_GT(second_id, 0u);
+
+  const std::string stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"atomic-slot\",\"payload\":{}}";
+  ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+      {&session}, {first_id}, {601}, {602}, {8}, {6001}, stable, "player",
+      123456, 128));
+  ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+      {&session}, {second_id}, {603}, {604}, {8}, {6002}, stable, "player",
+      123457, 128));
+
+  static std::vector<std::string> writes;
+  writes.clear();
+  const auto writer = [](int, const char *data, size_t len) {
+    writes.emplace_back(data, len);
+    return 1;
+  };
+  const std::string invalid_scope("invalid-\xc3\x28", 10);
+  GatewayPendingMessageEventBatchFillResult result;
+  ASSERT_FALSE(gateway_fill_pending_message_event_batches_with_writer(
+      {&session, &session}, {first_id, first_id},
+      {"player-one", "player-one"}, {10, 10}, writer, &result));
+  ASSERT_TRUE(writes.empty());
+  ASSERT_EQ(gateway_pending_message_event_count(&session, first_id), 1u);
+  ASSERT_EQ(gateway_pending_message_event_count(&session, second_id), 1u);
+
+  ASSERT_FALSE(gateway_fill_pending_message_event_batches_with_writer(
+      {&session, &session}, {first_id, second_id},
+      {"player-one", invalid_scope}, {10, 10}, writer, &result));
+  ASSERT_TRUE(writes.empty());
+  ASSERT_EQ(gateway_pending_message_event_count(&session, first_id), 1u);
+  ASSERT_EQ(gateway_pending_message_event_count(&session, second_id), 1u);
+  ASSERT_FALSE(session.output_fifo[0].ready);
+  ASSERT_FALSE(session.output_fifo[1].ready);
+}
+
+TEST_F(DriverTest,
+       TestGatewayPendingMessageEventBatchStagesWholeWaveBeforeFirstWrite) {
   GatewaySession first;
   GatewaySession second;
+  first.session_id = "session-one";
+  second.session_id = "session-two";
   first.master_fd = 122;
   second.master_fd = 123;
   const auto first_id = gateway_reserve_session_output(&first);
@@ -825,13 +1614,19 @@ TEST_F(DriverTest, TestGatewayPendingMessageEventBatchReportsPostValidationSlotL
   static GatewaySession *session_to_release = nullptr;
   static uint64_t reservation_to_release = 0;
   static bool release_on_first_write = false;
+  static int release_result = -1;
+  static int writes = 0;
   session_to_release = &second;
   reservation_to_release = second_id;
   release_on_first_write = true;
+  release_result = -1;
+  writes = 0;
   const auto writer = [](int, const char *, size_t) {
+    ++writes;
     if (release_on_first_write) {
       release_on_first_write = false;
-      gateway_release_session_output(session_to_release, reservation_to_release);
+      release_result = gateway_release_session_output(
+          session_to_release, reservation_to_release);
     }
     return 1;
   };
@@ -840,9 +1635,11 @@ TEST_F(DriverTest, TestGatewayPendingMessageEventBatchReportsPostValidationSlotL
   ASSERT_TRUE(gateway_fill_pending_message_event_batches_with_writer(
       {&first, &second}, {first_id, second_id}, {"player-one", "player-two"},
       {9, 10}, writer, &result));
-  ASSERT_EQ(result.filled, (std::vector<bool>{true, false}));
+  ASSERT_EQ(result.filled, (std::vector<bool>{true, true}));
   ASSERT_EQ(result.event_counts, (std::vector<LPC_INT>{1, 1}));
   ASSERT_EQ(result.slot_server_seqs, (std::vector<LPC_INT>{301, 401}));
+  ASSERT_EQ(release_result, 0);
+  ASSERT_EQ(writes, 2);
   ASSERT_TRUE(first.output_fifo.empty());
   ASSERT_TRUE(second.output_fifo.empty());
 }
@@ -901,6 +1698,8 @@ TEST_F(DriverTest, TestGatewayPendingMessageEventBatchHonorsLimitAndRelease) {
 TEST_F(DriverTest, TestGatewayReserveAndAppendWaveRollsBackOnlyNewWork) {
   GatewaySession reused_session;
   GatewaySession new_session;
+  reused_session.session_id = "session-reused";
+  new_session.session_id = "session-new";
   reused_session.master_fd = 103;
   new_session.master_fd = 104;
   const auto existing_id = gateway_reserve_session_output(&reused_session);
@@ -948,9 +1747,13 @@ TEST_F(DriverTest, TestGatewayReserveAndAppendWaveRollsBackOnlyNewWork) {
                 }),
             1);
   ASSERT_EQ(writes.size(), 1u);
-  ASSERT_NE(writes[0].find("\"text\":\"wave\""), std::string::npos);
-  ASSERT_NE(writes[0].find("\"seq\":1001"), std::string::npos);
-  ASSERT_EQ(writes[0].find("\"seq\":1002"), std::string::npos);
+  const auto wire = nlohmann::json::parse(writes[0]);
+  ASSERT_EQ(wire["type"], "output");
+  ASSERT_EQ(wire["cid"], "session-reused");
+  const auto frame = wire["data"].get<std::string>();
+  ASSERT_NE(frame.find("\"text\":\"wave\""), std::string::npos);
+  ASSERT_NE(frame.find("\"seq\":1001"), std::string::npos);
+  ASSERT_EQ(frame.find("\"seq\":1002"), std::string::npos);
   ASSERT_TRUE(reused_session.output_fifo.empty());
 }
 
@@ -1088,6 +1891,26 @@ TEST_F(DriverTest, TestGatewayPreencodedChatBatchBuilderKeepsStableAndDynamicBou
                   .empty());
   ASSERT_TRUE(gateway_encode_preencoded_chat_batch_for_test(
                   stable_children, 7, 101, 123456, "[]")
+                  .empty());
+  ASSERT_TRUE(gateway_encode_preencoded_chat_batch_for_test(
+                  {"{\"content\":\"bad\",}"}, 7, 101, 123456,
+                  "{\"meta\":{}}")
+                  .empty());
+  ASSERT_TRUE(gateway_encode_preencoded_chat_batch_for_test(
+                  {"{\"content\":\"bad\",\"meta\":{}}"}, 7, 101,
+                  123456, "{\"meta\":{}}")
+                  .empty());
+  ASSERT_TRUE(gateway_encode_preencoded_chat_batch_for_test(
+                  stable_children, 7, 101, 123456,
+                  "{\"messages\":[]}")
+                  .empty());
+  ASSERT_TRUE(gateway_encode_preencoded_chat_batch_for_test(
+                  stable_children, 7, 101, 123456,
+                  "{\"meta\":\"bad\"}")
+                  .empty());
+  ASSERT_TRUE(gateway_encode_preencoded_chat_batch_for_test(
+                  stable_children, 7, 101, 123456,
+                  "{\"meta\":{},\"extra\":1}")
                   .empty());
 }
 
@@ -2009,6 +2832,56 @@ TEST_F(DriverTest, TestGatewayFutureCompletionExposesMainThreadCpuCounter) {
             std::string::npos);
 }
 
+TEST_F(DriverTest, TestGatewayRoomProjectionExposesDedicatedThreadCpuCounters) {
+  const auto gateway_header = read_source_file_for_test("../src/packages/gateway/gateway.h");
+  const auto gateway_source =
+      read_source_file_for_test("../src/packages/gateway/gateway_session.cc");
+  const auto gateway_status = read_source_file_for_test("../src/packages/gateway/gateway.cc");
+
+  ASSERT_NE(gateway_header.find(
+                "room_output_projection_worker_thread_cpu_ns_total"),
+            std::string::npos);
+  ASSERT_NE(gateway_header.find(
+                "room_output_projection_worker_thread_cpu_ns_max"),
+            std::string::npos);
+  ASSERT_NE(gateway_header.find(
+                "room_output_projection_worker_thread_cpu_samples"),
+            std::string::npos);
+  ASSERT_NE(gateway_header.find(
+                "room_output_projection_worker_thread_cpu_unavailable"),
+            std::string::npos);
+  ASSERT_NE(gateway_header.find(
+                "room_output_projection_inline_thread_cpu_ns_total"),
+            std::string::npos);
+  ASSERT_NE(gateway_header.find(
+                "room_output_projection_inline_thread_cpu_ns_max"),
+            std::string::npos);
+  ASSERT_NE(gateway_header.find(
+                "room_output_projection_inline_thread_cpu_samples"),
+            std::string::npos);
+  ASSERT_NE(gateway_header.find(
+                "room_output_projection_inline_thread_cpu_unavailable"),
+            std::string::npos);
+  ASSERT_NE(gateway_source.find(
+                "worker_cpu_started_ns = get_current_thread_cpu_time_ns()"),
+            std::string::npos);
+  ASSERT_NE(gateway_source.find(
+                "cpu_started_ns = get_current_thread_cpu_time_ns()"),
+            std::string::npos);
+  ASSERT_NE(gateway_status.find(
+                "gateway_room_output_projection_worker_thread_cpu"),
+            std::string::npos);
+  ASSERT_NE(gateway_status.find(
+                "gateway_room_output_projection_worker_thread_cpu_unavailable"),
+            std::string::npos);
+  ASSERT_NE(gateway_status.find(
+                "gateway_room_output_projection_inline_thread_cpu"),
+            std::string::npos);
+  ASSERT_NE(gateway_status.find(
+                "gateway_room_output_projection_inline_thread_cpu_unavailable"),
+            std::string::npos);
+}
+
 TEST_F(DriverTest, TestGatewayReceiveApplyExposesMainThreadCpuCounter) {
   const auto gateway_header = read_source_file_for_test("../src/packages/gateway/gateway.h");
   const auto gateway_source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
@@ -2377,20 +3250,57 @@ TEST_F(DriverTest, TestBackgroundDispatchRepollsBeforeDrainingWholeActiveQueue) 
   event_free(probe.normal_event);
 }
 
-TEST_F(DriverTest, TestGatewayCleanupPrecedesGlobalWalltimeEventDestruction) {
+TEST_F(DriverTest,
+       TestGatewayOwnerOutputQuiescesBeforeOwnerStopAndCleanup) {
   const auto source =
       read_source_file_for_test("../src/vm/internal/simulate.cc");
   const auto shutdown_pos = source.find("void shutdownMudOS(int exit_code)");
+  const auto owner_quiesce_pos = source.find(
+      "gateway_owner_output_quiesce(\"driver shutdown\")", shutdown_pos);
+  const auto owner_stop_pos = source.find("vm_owner_thread_stop();", shutdown_pos);
   const auto gateway_cleanup_pos = source.find("cleanup_gateway();", shutdown_pos);
   const auto callout_cleanup_pos = source.find("clear_call_outs();", shutdown_pos);
   const auto tick_cleanup_pos = source.find("clear_tick_events();", shutdown_pos);
 
   ASSERT_NE(shutdown_pos, std::string::npos);
+  ASSERT_NE(owner_quiesce_pos, std::string::npos);
+  ASSERT_NE(owner_stop_pos, std::string::npos);
   ASSERT_NE(gateway_cleanup_pos, std::string::npos);
   ASSERT_NE(callout_cleanup_pos, std::string::npos);
   ASSERT_NE(tick_cleanup_pos, std::string::npos);
+  ASSERT_LT(owner_quiesce_pos, owner_stop_pos);
+  ASSERT_LT(owner_stop_pos, gateway_cleanup_pos);
   ASSERT_LT(gateway_cleanup_pos, callout_cleanup_pos);
   ASSERT_LT(callout_cleanup_pos, tick_cleanup_pos);
+}
+
+TEST_F(DriverTest,
+       TestGatewayOwnerOutputQuiesceRejectsOffMainBeforeContainerAccess) {
+  const auto source =
+      read_source_file_for_test("../src/packages/gateway/gateway_session.cc");
+  const auto quiesce_pos =
+      source.find("mapping_t *gateway_owner_output_quiesce(const char *reason)");
+  const auto next_function_pos = source.find(
+      "int gateway_fill_session_protocol_output_with_writer", quiesce_pos);
+  const auto main_guard_pos = source.find(
+      "if (!vm_context_is_main_thread())", quiesce_pos);
+  const auto session_watch_read_pos = source.find(
+      "g_gateway_session_future_watches", quiesce_pos);
+  const auto room_wave_read_pos = source.find(
+      "g_gateway_room_output_waves", quiesce_pos);
+  const auto room_pending_read_pos = source.find(
+      "gateway_room_output_projection_pending_count()", quiesce_pos);
+
+  ASSERT_NE(quiesce_pos, std::string::npos);
+  ASSERT_NE(next_function_pos, std::string::npos);
+  ASSERT_NE(main_guard_pos, std::string::npos);
+  ASSERT_NE(session_watch_read_pos, std::string::npos);
+  ASSERT_NE(room_wave_read_pos, std::string::npos);
+  ASSERT_NE(room_pending_read_pos, std::string::npos);
+  ASSERT_LT(main_guard_pos, next_function_pos);
+  ASSERT_LT(main_guard_pos, session_watch_read_pos);
+  ASSERT_LT(main_guard_pos, room_wave_read_pos);
+  ASSERT_LT(main_guard_pos, room_pending_read_pos);
 }
 
 TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
@@ -7651,7 +8561,7 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
 
     auto* dispatch_contracts = mapping_array(status, "executor_task_dispatch_contracts");
     ASSERT_NE(dispatch_contracts, nullptr);
-    ASSERT_EQ(dispatch_contracts->size, 19);
+    ASSERT_EQ(dispatch_contracts->size, 20);
     std::unordered_map<std::string, mapping_t*> dispatch_by_type;
     for (int i = 0; i < dispatch_contracts->size; i++) {
       ASSERT_EQ(dispatch_contracts->item[i].type, T_MAPPING);
@@ -7725,6 +8635,8 @@ TEST_F(DriverTest, TestVmOwnerRuntimeReportsExecutorTaskContract) {
                     "main_required", 1, 0, 0, "owner_main_queue", 1);
     assert_dispatch("ed_callback", "owner_executor_callback", "executor_callback", "main_required_callback", 0, 0, 0,
                     "owner_main_queue_callback_adapter", 1);
+    assert_dispatch("room_output_projection", "room_output_projection", "executor_callback",
+                    "executor_safe", 1, 1, 0);
     assert_dispatch("compute_result", "compute_result", "compute_result", "executor_safe", 1, 1, 0);
     assert_dispatch("lpc", "lpc", "reject_lpc", "rejected", 1, 0, 1);
     assert_dispatch("owner_state", "owner_state", "guard_owner_state", "rejected", 1, 0, 1);
@@ -8221,6 +9133,105 @@ TEST_F(DriverTest, TestVmOwnerExecutorRunsDifferentOwnersInParallel) {
   free_mapping(running);
 
   vm_owner_thread_stop();
+}
+
+TEST_F(DriverTest, TestVmOwnerStartCannotCrossAnInProgressStop) {
+  constexpr const char *kOwner = "owner/test/executor/stop-start-guard";
+  vm_owner_thread_stop();
+  auto mapping_number = [](mapping_t *map, const char *key) -> long {
+    auto *value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+
+  auto *before = vm_owner_thread_status();
+  const auto before_starts = mapping_number(before, "thread_starts");
+  const auto before_probe = mapping_number(before, "executor_probe_executed");
+  const auto before_claims = mapping_number(before, "executor_owner_claims");
+  const auto before_releases = mapping_number(before, "executor_owner_releases");
+  free_mapping(before);
+
+  test_set_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "300");
+  ASSERT_GT(vm_owner_enqueue_task(kOwner, "executor_probe", "stop-start-guard-a"), 0u);
+  ASSERT_GT(vm_owner_enqueue_task(kOwner, "executor_probe", "stop-start-guard-b"), 0u);
+  vm_owner_thread_start(1);
+
+  bool saw_active_claim = false;
+  for (int i = 0; i < 200; ++i) {
+    auto *status = vm_owner_thread_status();
+    saw_active_claim =
+        mapping_number(status, "active_owners") == 1 &&
+        mapping_number(status, "executor_active_claims") == 1;
+    free_mapping(status);
+    if (saw_active_claim) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_TRUE(saw_active_claim);
+
+  std::thread stopper([] { vm_owner_thread_stop(); });
+  bool saw_stop_owned_threads = false;
+  for (int i = 0; i < 200; ++i) {
+    auto *status = vm_owner_thread_status();
+    saw_stop_owned_threads =
+        mapping_number(status, "stopping") == 1 &&
+        mapping_number(status, "enabled") == 0;
+    free_mapping(status);
+    if (saw_stop_owned_threads) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+
+  // This start must be rejected while the first stop owns the swapped thread
+  // handles. The second stop must likewise leave the first stop's latch intact.
+  vm_owner_thread_start(1);
+  auto *during = vm_owner_thread_status();
+  const auto during_starts = mapping_number(during, "thread_starts");
+  const auto during_enabled = mapping_number(during, "enabled");
+  const auto during_stopping = mapping_number(during, "stopping");
+  free_mapping(during);
+  vm_owner_thread_stop();
+  stopper.join();
+  test_unset_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS");
+  vm_owner_thread_stop();
+
+  ASSERT_TRUE(saw_stop_owned_threads);
+  ASSERT_EQ(during_starts, before_starts + 1);
+  ASSERT_EQ(during_enabled, 0);
+  ASSERT_EQ(during_stopping, 1);
+
+  auto *stopped = vm_owner_thread_status();
+  ASSERT_EQ(mapping_number(stopped, "stopping"), 0);
+  ASSERT_EQ(mapping_number(stopped, "active_owners"), 0);
+  ASSERT_EQ(mapping_number(stopped, "executor_active_claims"), 0);
+  ASSERT_EQ(mapping_number(stopped, "executor_owner_claims") - before_claims,
+            mapping_number(stopped, "executor_owner_releases") - before_releases);
+  ASSERT_GE(mapping_number(stopped, "executor_probe_executed"), before_probe + 2);
+  free_mapping(stopped);
+
+  ASSERT_GT(vm_owner_enqueue_task(kOwner, "executor_probe", "stop-start-restart"), 0u);
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 200; ++i) {
+    auto *status = vm_owner_thread_status();
+    const auto restarted =
+        mapping_number(status, "executor_probe_executed") >= before_probe + 3;
+    free_mapping(status);
+    if (restarted) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  vm_owner_thread_stop();
+  auto *restarted = vm_owner_thread_status();
+  ASSERT_GE(mapping_number(restarted, "executor_probe_executed"), before_probe + 3);
+  ASSERT_EQ(mapping_number(restarted, "active_owners"), 0);
+  ASSERT_EQ(mapping_number(restarted, "executor_active_claims"), 0);
+  ASSERT_EQ(mapping_number(restarted, "executor_owner_claims") - before_claims,
+            mapping_number(restarted, "executor_owner_releases") - before_releases);
+  free_mapping(restarted);
 }
 
 TEST_F(DriverTest, TestVmOwnerRuntimePerformanceProbesRecordDiagnostics) {
@@ -12383,6 +13394,53 @@ const char *gateway_test_call_string(const char *method, object_t *target) {
   return ret && ret->type == T_STRING ? ret->u.string : "";
 }
 
+const std::string &gateway_test_owner_room_stable_payload() {
+  static const std::string payload =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"owner-room-output\",\"payload\":{}}";
+  return payload;
+}
+
+bool gateway_test_seed_owner_room_event(GatewaySession *session,
+                                        uint64_t reservation_id) {
+  return gateway_append_preencoded_message_event_wave(
+      {session}, {reservation_id}, {1201}, {1202}, {17}, {8101},
+      gateway_test_owner_room_stable_payload(), "player", 222333, 128);
+}
+
+bool gateway_test_encode_owner_room_wire(GatewaySession *session,
+                                         uint64_t reservation_id,
+                                         std::string *wire_bytes,
+                                         const std::string &scope_id =
+                                             "owner-room-player",
+                                         LPC_INT slot_epoch = 19) {
+  GatewayPendingMessageEventProjectionSnapshot snapshot;
+  GatewayPendingMessageEventProjectionColumns columns;
+  return wire_bytes && gateway_snapshot_pending_message_event_batch(
+                           session, reservation_id, scope_id, slot_epoch,
+                           &snapshot, &columns) &&
+      gateway_encode_pending_message_event_projection(snapshot, columns,
+                                                      wire_bytes);
+}
+
+bool gateway_test_drain_owner_room_mailbox(object_t *target,
+                                           const char *task_key) {
+  auto drained = std::make_shared<std::atomic<int>>(0);
+  if (vm_owner_enqueue_executor_task(
+          target, "room_output_projection", task_key,
+          [drained] { drained->store(1, std::memory_order_release); }) == 0) {
+    return false;
+  }
+  for (int i = 0; i < 2000 &&
+                  drained->load(std::memory_order_acquire) == 0;
+       ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return drained->load(std::memory_order_acquire) == 1;
+}
+
 }  // namespace
 
 TEST_F(DriverTest, TestGatewayOutputReservationPublicWrappersAreMainOnly) {
@@ -12473,6 +13531,21 @@ TEST_F(DriverTest, TestGatewayFutureWatchKeepsPendingFutureAndReservation) {
 
   ASSERT_EQ(gateway_destroy_session_internal("gw-test-future-watch-pending", "test_done", "done"), 1);
   ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_reservation_id", ob),
+            static_cast<long>(reservation_id));
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_future_id", ob),
+            future_id);
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_future_cancelled_reason", ob),
+               "gateway session destroyed");
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_callback_off_main", ob),
+            0);
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_release_result", ob),
+            1);
   auto *consumed = vm_owner_future_poll(static_cast<uint64_t>(future_id));
   ASSERT_STREQ(gateway_test_mapping_string(consumed, "state"), "unknown");
   free_mapping(consumed);
@@ -12693,8 +13766,10 @@ TEST_F(DriverTest, TestGatewayEncodedOutputFutureFillsReservationWithoutLpcCallb
   ASSERT_NE(session, nullptr);
   ASSERT_EQ(session->output_fifo.size(), 1u);
   ASSERT_TRUE(session->output_fifo.front().ready);
-  ASSERT_NE(session->output_fifo.front().encoded.find("native-frame-payload"),
-            std::string::npos);
+  const auto wire = nlohmann::json::parse(session->output_fifo.front().wire_bytes);
+  ASSERT_EQ(wire["type"], "output");
+  ASSERT_EQ(wire["cid"], "gw-test-future-output-completed");
+  ASSERT_EQ(wire["data"], "native-frame-payload");
   ASSERT_EQ(gateway_test_call_number("query_last_owner_future_reservation_id", ob), 0);
   ASSERT_EQ(gateway_test_call_number("query_last_owner_future_output_reservation_id", ob),
             static_cast<long>(reservation_id));
@@ -12788,6 +13863,2798 @@ TEST_F(DriverTest, TestGatewayEncodedOutputFutureTimeoutReleasesReservation) {
             1);
   destruct_object(ob);
   free_object(&ob, "TestGatewayEncodedOutputFutureTimeoutReleasesReservation");
+}
+
+TEST_F(DriverTest, TestVmOwnerNativeStringFuturePollReportsFrozenResult) {
+  auto *ob = create_gateway_session_for_test(
+      "gw-test-native-string-frozen-result", "/clone/gateway_login_example", 110);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestVmOwnerNativeStringFuturePollReportsFrozenResult");
+  vm_owner_set_id(ob, "owner/test/gateway/native-string-frozen-result");
+
+  std::atomic<int> projector_runs{0};
+  vm_owner_thread_start(1);
+  const auto submission = vm_owner_submit_frozen_string_task(
+      ob, "room_output_projection", "unit-native-string-frozen-result",
+      [&projector_runs](std::string *output) {
+        projector_runs.fetch_add(1, std::memory_order_relaxed);
+        *output = "native-string-result";
+        return true;
+      });
+  ASSERT_TRUE(submission.queued);
+  ASSERT_GT(submission.future_id, 0u);
+  for (int index = 0; index < 200 &&
+                      vm_owner_future_state(submission.future_id) ==
+                          VM_OWNER_FUTURE_PENDING;
+       ++index) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(vm_owner_future_state(submission.future_id),
+            VM_OWNER_FUTURE_COMPLETED);
+
+  auto *polled = vm_owner_future_poll(submission.future_id);
+  ASSERT_EQ(gateway_test_mapping_number(polled, "frozen_result"), 1);
+  free_mapping(polled);
+  const auto taken = vm_owner_future_take_string(submission.future_id);
+  ASSERT_TRUE(taken.found);
+  ASSERT_TRUE(taken.consumed);
+  ASSERT_TRUE(taken.string_result);
+  ASSERT_EQ(taken.value, "native-string-result");
+  ASSERT_EQ(projector_runs.load(std::memory_order_relaxed), 1);
+
+  vm_owner_thread_stop();
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-native-string-frozen-result", "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(&ob, "TestVmOwnerNativeStringFuturePollReportsFrozenResult");
+}
+
+TEST_F(DriverTest, TestVmOwnerRepeatedTimeoutReportsTerminalChangeOnce) {
+  const auto future_id = vm_owner_register_compute_future(
+      "owner/test/future-terminal-change", 900001,
+      "unit-terminal-change", "unit-terminal-change");
+  ASSERT_GT(future_id, 0u);
+
+  auto *first = vm_owner_future_timeout(future_id, "unit timeout");
+  ASSERT_STREQ(gateway_test_mapping_string(first, "state"), "failed");
+  ASSERT_EQ(gateway_test_mapping_number(first, "terminal_changed"), 1);
+  free_mapping(first);
+
+  auto *repeated = vm_owner_future_timeout(future_id, "repeated unit timeout");
+  ASSERT_STREQ(gateway_test_mapping_string(repeated, "state"), "failed");
+  ASSERT_EQ(gateway_test_mapping_number(repeated, "terminal_changed"), 0);
+  free_mapping(repeated);
+
+  auto *taken = vm_owner_future_take(future_id);
+  ASSERT_EQ(gateway_test_mapping_number(taken, "consumed"), 1);
+  free_mapping(taken);
+  ASSERT_EQ(vm_owner_future_state(future_id), VM_OWNER_FUTURE_UNKNOWN);
+}
+
+TEST_F(DriverTest,
+       TestVmOwnerQueuedFrozenStringCancellationRemovesTaskBeforeProjection) {
+  auto *ob = create_gateway_session_for_test(
+      "gw-test-queued-string-cancel", "/clone/gateway_login_example", 109);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob,
+          "TestVmOwnerQueuedFrozenStringCancellationRemovesTaskBeforeProjection");
+  vm_owner_set_id(ob, "owner/test/gateway/queued-string-cancel");
+
+  std::atomic<int> blocker_started{0};
+  std::atomic<int> release_blocker{0};
+  std::atomic<int> projector_runs{0};
+  vm_owner_thread_start(1);
+  ASSERT_GT(vm_owner_enqueue_executor_task(
+                ob, "room_output_projection", "unit-queued-cancel-blocker",
+                [&] {
+                  blocker_started.store(1, std::memory_order_release);
+                  while (release_blocker.load(std::memory_order_acquire) == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                  }
+                }),
+            0u);
+  for (int index = 0; index < 200 &&
+                      blocker_started.load(std::memory_order_acquire) == 0;
+       ++index) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  auto *before_cancel = vm_owner_thread_status();
+  const auto callback_cancelled_before = gateway_test_mapping_number(
+      before_cancel, "executor_callback_cancelled_before_dispatch");
+  const auto owner_message_cancelled_before = gateway_test_mapping_number(
+      before_cancel, "owner_message_cancelled_before_dispatch");
+  const auto callback_dropped_before = gateway_test_mapping_number(
+      before_cancel, "executor_callback_dropped");
+  free_mapping(before_cancel);
+
+  const auto submission = vm_owner_submit_frozen_string_task(
+      ob, "room_output_projection", "unit-queued-cancel-projector",
+      [&projector_runs](std::string *output) {
+        projector_runs.fetch_add(1, std::memory_order_relaxed);
+        *output = "must-not-run";
+        return true;
+      });
+  ASSERT_TRUE(submission.queued);
+  ASSERT_EQ(vm_owner_future_state(submission.future_id),
+            VM_OWNER_FUTURE_PENDING);
+
+  auto *cancelled = vm_owner_future_cancel_queued_task(
+      submission.future_id, "unit queued cancellation");
+  ASSERT_STREQ(gateway_test_mapping_string(cancelled, "state"), "failed");
+  ASSERT_EQ(gateway_test_mapping_number(cancelled, "terminal_changed"), 1);
+  ASSERT_EQ(gateway_test_mapping_number(cancelled, "queued_task_removed"), 1);
+  ASSERT_STREQ(gateway_test_mapping_string(cancelled, "queued_task_kind"),
+               "executor_callback");
+  free_mapping(cancelled);
+  auto *taken = vm_owner_future_take(submission.future_id);
+  ASSERT_EQ(gateway_test_mapping_number(taken, "consumed"), 1);
+  free_mapping(taken);
+
+  release_blocker.store(1, std::memory_order_release);
+  vm_owner_thread_stop();
+  ASSERT_EQ(projector_runs.load(std::memory_order_relaxed), 0);
+  ASSERT_EQ(vm_owner_future_state(submission.future_id),
+            VM_OWNER_FUTURE_UNKNOWN);
+  auto *status = vm_owner_thread_status();
+  ASSERT_EQ(gateway_test_mapping_number(status, "queue_depth"), 0);
+  ASSERT_EQ(gateway_test_mapping_number(
+                status, "executor_callback_cancelled_before_dispatch"),
+            callback_cancelled_before + 1);
+  ASSERT_EQ(gateway_test_mapping_number(
+                status, "owner_message_cancelled_before_dispatch"),
+            owner_message_cancelled_before);
+  ASSERT_EQ(gateway_test_mapping_number(status, "executor_callback_dropped"),
+            callback_dropped_before + 1);
+  free_mapping(status);
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-queued-string-cancel", "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(
+      &ob,
+      "TestVmOwnerQueuedFrozenStringCancellationRemovesTaskBeforeProjection");
+}
+
+TEST_F(DriverTest,
+       TestVmOwnerQueuedMessageCancellationDoesNotCountAsCallbackDrop) {
+  auto *blocker = create_gateway_session_for_test(
+      "gw-test-queued-message-blocker", "/clone/gateway_login_example", 130);
+  auto *target = create_gateway_session_for_test(
+      "gw-test-queued-message-target", "/clone/gateway_login_example", 131);
+  ASSERT_NE(blocker, nullptr);
+  ASSERT_NE(target, nullptr);
+  add_ref(blocker,
+          "TestVmOwnerQueuedMessageCancellationDoesNotCountAsCallbackDrop");
+  add_ref(target,
+          "TestVmOwnerQueuedMessageCancellationDoesNotCountAsCallbackDrop");
+  vm_owner_set_id(blocker, "owner/test/gateway/queued-message-blocker");
+  vm_owner_set_id(target, "owner/test/gateway/queued-message-target");
+
+  std::atomic<int> blocker_started{0};
+  std::atomic<int> release_blocker{0};
+  vm_owner_thread_start(1);
+  struct OwnerThreadGuard {
+    std::atomic<int> &release;
+    bool active{true};
+    ~OwnerThreadGuard() {
+      if (active) {
+        release.store(1, std::memory_order_release);
+        vm_owner_thread_stop();
+      }
+    }
+    void stop() {
+      release.store(1, std::memory_order_release);
+      vm_owner_thread_stop();
+      active = false;
+    }
+  } owner_thread_guard{release_blocker};
+  ASSERT_GT(vm_owner_enqueue_executor_task(
+                blocker, "room_output_projection",
+                "unit-queued-message-blocker", [&] {
+                  blocker_started.store(1, std::memory_order_release);
+                  while (release_blocker.load(std::memory_order_acquire) == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                  }
+                }),
+            0u);
+  for (int index = 0; index < 200 &&
+                      blocker_started.load(std::memory_order_acquire) == 0;
+       ++index) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  auto *before_cancel = vm_owner_thread_status();
+  const auto callback_cancelled_before = gateway_test_mapping_number(
+      before_cancel, "executor_callback_cancelled_before_dispatch");
+  const auto owner_message_cancelled_before = gateway_test_mapping_number(
+      before_cancel, "owner_message_cancelled_before_dispatch");
+  const auto callback_dropped_before = gateway_test_mapping_number(
+      before_cancel, "executor_callback_dropped");
+  free_mapping(before_cancel);
+
+  push_number(41);
+  auto *submitted = call_lpc_method(target, "submit_gateway_owner_future", 1);
+  ASSERT_NE(submitted, nullptr);
+  ASSERT_EQ(submitted->type, T_MAPPING);
+  const auto future_id = static_cast<uint64_t>(
+      gateway_test_mapping_number(submitted->u.map, "future_id"));
+  ASSERT_GT(future_id, 0u);
+  ASSERT_EQ(vm_owner_future_state(future_id), VM_OWNER_FUTURE_PENDING);
+
+  auto *cancelled = vm_owner_future_cancel_queued_task(
+      future_id, "unit queued owner message cancellation");
+  ASSERT_STREQ(gateway_test_mapping_string(cancelled, "state"), "failed");
+  ASSERT_EQ(gateway_test_mapping_number(cancelled, "terminal_changed"), 1);
+  ASSERT_EQ(gateway_test_mapping_number(cancelled, "queued_task_removed"), 1);
+  ASSERT_STREQ(gateway_test_mapping_string(cancelled, "queued_task_kind"),
+               "owner_message");
+  free_mapping(cancelled);
+  auto *taken = vm_owner_future_take(future_id);
+  ASSERT_EQ(gateway_test_mapping_number(taken, "consumed"), 1);
+  free_mapping(taken);
+
+  owner_thread_guard.stop();
+  ASSERT_EQ(vm_owner_future_state(future_id), VM_OWNER_FUTURE_UNKNOWN);
+  auto *status = vm_owner_thread_status();
+  ASSERT_EQ(gateway_test_mapping_number(
+                status, "executor_callback_cancelled_before_dispatch"),
+            callback_cancelled_before);
+  ASSERT_EQ(gateway_test_mapping_number(
+                status, "owner_message_cancelled_before_dispatch"),
+            owner_message_cancelled_before + 1);
+  ASSERT_EQ(gateway_test_mapping_number(status, "executor_callback_dropped"),
+            callback_dropped_before);
+  free_mapping(status);
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-queued-message-blocker", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-queued-message-target", "test_done", "done"),
+            1);
+  destruct_object(blocker);
+  destruct_object(target);
+  free_object(
+      &blocker,
+      "TestVmOwnerQueuedMessageCancellationDoesNotCountAsCallbackDrop");
+  free_object(
+      &target,
+      "TestVmOwnerQueuedMessageCancellationDoesNotCountAsCallbackDrop");
+}
+
+TEST_F(DriverTest,
+       TestGatewayOwnerOutputQuiesceClosesAllSessionWatchesButKeepsGeneric) {
+  auto *blocker = create_gateway_session_for_test(
+      "gw-test-quiesce-all-blocker", "/clone/gateway_login_example", 132);
+  auto *mapping_target = create_gateway_session_for_test(
+      "gw-test-quiesce-all-mapping", "/clone/gateway_login_example", 133);
+  auto *protocol_target = create_gateway_session_for_test(
+      "gw-test-quiesce-all-protocol", "/clone/gateway_login_example", 134);
+  auto *room_target = create_gateway_session_for_test(
+      "gw-test-quiesce-all-room", "/clone/gateway_login_example", 135);
+  auto *generic_target = clone_object_for_test("clone/gateway_login_example");
+  ASSERT_NE(blocker, nullptr);
+  ASSERT_NE(mapping_target, nullptr);
+  ASSERT_NE(protocol_target, nullptr);
+  ASSERT_NE(room_target, nullptr);
+  ASSERT_NE(generic_target, nullptr);
+  add_ref(blocker,
+          "TestGatewayOwnerOutputQuiesceClosesAllSessionWatchesButKeepsGeneric");
+  add_ref(mapping_target,
+          "TestGatewayOwnerOutputQuiesceClosesAllSessionWatchesButKeepsGeneric");
+  add_ref(protocol_target,
+          "TestGatewayOwnerOutputQuiesceClosesAllSessionWatchesButKeepsGeneric");
+  add_ref(room_target,
+          "TestGatewayOwnerOutputQuiesceClosesAllSessionWatchesButKeepsGeneric");
+  add_ref(generic_target,
+          "TestGatewayOwnerOutputQuiesceClosesAllSessionWatchesButKeepsGeneric");
+  vm_owner_set_id(blocker, "owner/test/gateway/quiesce-all-blocker");
+  vm_owner_set_id(mapping_target, "owner/test/gateway/quiesce-all-mapping");
+  vm_owner_set_id(protocol_target, "owner/test/gateway/quiesce-all-protocol");
+  vm_owner_set_id(room_target, "owner/test/gateway/quiesce-all-room");
+  vm_owner_set_id(generic_target, "owner/test/gateway/quiesce-all-generic");
+
+  auto *mapping_session = gateway_find_session_by_object(mapping_target);
+  auto *protocol_session = gateway_find_session_by_object(protocol_target);
+  auto *room_session = gateway_find_session_by_object(room_target);
+  ASSERT_NE(mapping_session, nullptr);
+  ASSERT_NE(protocol_session, nullptr);
+  ASSERT_NE(room_session, nullptr);
+  const auto mapping_reservation =
+      gateway_reserve_session_output_for_object(mapping_target);
+  const auto protocol_reservation =
+      gateway_reserve_session_output_for_object(protocol_target);
+  const auto room_reservation =
+      gateway_reserve_session_output_for_object(room_target);
+  ASSERT_GT(mapping_reservation, 0u);
+  ASSERT_GT(protocol_reservation, 0u);
+  ASSERT_GT(room_reservation, 0u);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(room_session, room_reservation));
+
+  std::atomic<int> blocker_started{0};
+  std::atomic<int> release_blocker{0};
+  vm_owner_thread_start(1);
+  struct OwnerThreadGuard {
+    std::atomic<int> &release;
+    bool active{true};
+    ~OwnerThreadGuard() {
+      if (active) {
+        release.store(1, std::memory_order_release);
+        vm_owner_thread_stop();
+      }
+    }
+    void stop() {
+      release.store(1, std::memory_order_release);
+      vm_owner_thread_stop();
+      active = false;
+    }
+  } owner_thread_guard{release_blocker};
+  ASSERT_GT(vm_owner_enqueue_executor_task(
+                blocker, "room_output_projection", "unit-quiesce-all-blocker",
+                [&] {
+                  blocker_started.store(1, std::memory_order_release);
+                  while (release_blocker.load(std::memory_order_acquire) == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                  }
+                }),
+            0u);
+  for (int index = 0; index < 200 &&
+                      blocker_started.load(std::memory_order_acquire) == 0;
+       ++index) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  push_number(41);
+  auto *mapping_submitted =
+      call_lpc_method(mapping_target, "submit_gateway_owner_future", 1);
+  ASSERT_NE(mapping_submitted, nullptr);
+  ASSERT_EQ(mapping_submitted->type, T_MAPPING);
+  const auto mapping_future = static_cast<uint64_t>(
+      gateway_test_mapping_number(mapping_submitted->u.map, "future_id"));
+  ASSERT_GT(mapping_future, 0u);
+  ASSERT_EQ(gateway_watch_session_future_for_object(
+                mapping_target, mapping_reservation, mapping_future, 1000),
+            1);
+
+  copy_and_push_string("quiesce-protocol-frame");
+  auto *protocol_submitted = call_lpc_method(
+      protocol_target, "submit_gateway_owner_frame_string", 1);
+  ASSERT_NE(protocol_submitted, nullptr);
+  ASSERT_EQ(protocol_submitted->type, T_MAPPING);
+  const auto protocol_future = static_cast<uint64_t>(
+      gateway_test_mapping_number(protocol_submitted->u.map, "future_id"));
+  ASSERT_GT(protocol_future, 0u);
+  ASSERT_EQ(gateway_watch_session_future_output_for_object(
+                protocol_target, protocol_reservation, protocol_future, 1000),
+            1);
+
+  GatewayPendingMessageEventBatchOwnerSubmitResult room_submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {room_target}, {room_reservation}, {"quiesce-room"}, {23}, 1000,
+      &room_submitted));
+  ASSERT_EQ(room_submitted.submitted, (std::vector<bool>{true}));
+  ASSERT_EQ(room_submitted.future_ids.size(), 1u);
+  const auto room_future = room_submitted.future_ids[0];
+
+  push_number(51);
+  auto *generic_submitted =
+      call_lpc_method(generic_target, "submit_gateway_owner_future", 1);
+  ASSERT_NE(generic_submitted, nullptr);
+  ASSERT_EQ(generic_submitted->type, T_MAPPING);
+  const auto generic_future = static_cast<uint64_t>(
+      gateway_test_mapping_number(generic_submitted->u.map, "future_id"));
+  ASSERT_GT(generic_future, 0u);
+  ASSERT_EQ(gateway_watch_future_for_object(
+                generic_target, 901, generic_future, 1000),
+            1);
+  ASSERT_EQ(gateway_session_future_watch_count(), 3);
+  ASSERT_EQ(gateway_future_watch_count(), 1);
+
+  auto *before = vm_owner_thread_status();
+  const auto callback_cancelled_before = gateway_test_mapping_number(
+      before, "executor_callback_cancelled_before_dispatch");
+  const auto owner_message_cancelled_before = gateway_test_mapping_number(
+      before, "owner_message_cancelled_before_dispatch");
+  const auto callback_dropped_before = gateway_test_mapping_number(
+      before, "executor_callback_dropped");
+  free_mapping(before);
+
+  auto *quiesced = gateway_owner_output_quiesce("unit quiesce all watches");
+  ASSERT_NE(quiesced, nullptr);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced, "success"), 1);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced, "session_watches_before"),
+            3);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced, "session_watches_after"),
+            0);
+  ASSERT_EQ(
+      gateway_test_mapping_number(quiesced, "session_reservations_before"),
+      3);
+  ASSERT_EQ(
+      gateway_test_mapping_number(quiesced, "session_reservations_after"),
+      0);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced, "cancelled_futures"), 3);
+  free_mapping(quiesced);
+
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(gateway_future_watch_count(), 1);
+  ASSERT_EQ(vm_owner_future_state(mapping_future), VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(vm_owner_future_state(protocol_future), VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(vm_owner_future_state(room_future), VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(vm_owner_future_state(generic_future), VM_OWNER_FUTURE_PENDING);
+  ASSERT_TRUE(mapping_session->output_fifo.empty());
+  ASSERT_TRUE(protocol_session->output_fifo.empty());
+  ASSERT_TRUE(room_session->output_fifo.empty());
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_reservation_id",
+                mapping_target),
+            static_cast<long>(mapping_reservation));
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_future_id",
+                mapping_target),
+            static_cast<long>(mapping_future));
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_release_result",
+                mapping_target),
+            1);
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_future_output_state", protocol_target),
+               "released");
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_room_output_state", room_target),
+               "released");
+
+  auto *after = vm_owner_thread_status();
+  ASSERT_EQ(gateway_test_mapping_number(
+                after, "executor_callback_cancelled_before_dispatch"),
+            callback_cancelled_before + 1);
+  ASSERT_EQ(gateway_test_mapping_number(
+                after, "owner_message_cancelled_before_dispatch"),
+            owner_message_cancelled_before + 2);
+  ASSERT_EQ(gateway_test_mapping_number(after, "executor_callback_dropped"),
+            callback_dropped_before + 1);
+  free_mapping(after);
+
+  owner_thread_guard.stop();
+  ASSERT_EQ(vm_owner_future_state(generic_future), VM_OWNER_FUTURE_PENDING);
+  vm_owner_thread_start(1);
+  for (int index = 0; index < 200 &&
+                      vm_owner_future_state(generic_future) ==
+                          VM_OWNER_FUTURE_PENDING;
+       ++index) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  vm_owner_thread_stop();
+  ASSERT_EQ(vm_owner_future_state(generic_future), VM_OWNER_FUTURE_COMPLETED);
+  ASSERT_EQ(gateway_process_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+  ASSERT_EQ(gateway_future_watch_count(), 0);
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_generic_owner_future_context_id", generic_target),
+            901);
+  ASSERT_EQ(vm_owner_future_state(generic_future), VM_OWNER_FUTURE_UNKNOWN);
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-quiesce-all-blocker", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-quiesce-all-mapping", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-quiesce-all-protocol", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-quiesce-all-room", "test_done", "done"),
+            1);
+  destruct_object(blocker);
+  destruct_object(mapping_target);
+  destruct_object(protocol_target);
+  destruct_object(room_target);
+  destruct_object(generic_target);
+  free_object(
+      &blocker,
+      "TestGatewayOwnerOutputQuiesceClosesAllSessionWatchesButKeepsGeneric");
+  free_object(
+      &mapping_target,
+      "TestGatewayOwnerOutputQuiesceClosesAllSessionWatchesButKeepsGeneric");
+  free_object(
+      &protocol_target,
+      "TestGatewayOwnerOutputQuiesceClosesAllSessionWatchesButKeepsGeneric");
+  free_object(
+      &room_target,
+      "TestGatewayOwnerOutputQuiesceClosesAllSessionWatchesButKeepsGeneric");
+  free_object(
+      &generic_target,
+      "TestGatewayOwnerOutputQuiesceClosesAllSessionWatchesButKeepsGeneric");
+}
+
+TEST_F(DriverTest,
+       TestGatewayMappingFutureStaleOwnerNotifiesCancellationAndClosesReservation) {
+  auto *ob = create_gateway_session_for_test(
+      "gw-test-mapping-stale-owner", "/clone/gateway_login_example", 136);
+  ASSERT_NE(ob, nullptr);
+  add_ref(
+      ob,
+      "TestGatewayMappingFutureStaleOwnerNotifiesCancellationAndClosesReservation");
+  vm_owner_set_id(ob, "owner/test/gateway/mapping-stale-a");
+
+  const auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  push_number(41);
+  auto *submitted = call_lpc_method(ob, "submit_gateway_owner_future", 1);
+  ASSERT_NE(submitted, nullptr);
+  ASSERT_EQ(submitted->type, T_MAPPING);
+  const auto future_id = static_cast<uint64_t>(
+      gateway_test_mapping_number(submitted->u.map, "future_id"));
+  ASSERT_GT(future_id, 0u);
+  ASSERT_EQ(gateway_watch_session_future_for_object(
+                ob, reservation_id, future_id, 1000),
+            1);
+
+  vm_owner_set_id(ob, "owner/test/gateway/mapping-stale-b");
+  ASSERT_EQ(gateway_process_session_future_watches_at(0), 1);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(vm_owner_future_state(future_id), VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_reservation_id", ob),
+            static_cast<long>(reservation_id));
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_future_id", ob),
+            static_cast<long>(future_id));
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_future_cancelled_reason", ob),
+               "gateway session stale");
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_release_result", ob),
+            1);
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+  ASSERT_TRUE(session->output_fifo.empty());
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-mapping-stale-owner", "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(
+      &ob,
+      "TestGatewayMappingFutureStaleOwnerNotifiesCancellationAndClosesReservation");
+}
+
+TEST_F(DriverTest,
+       TestGatewayMappingFutureCancellationCallbackMayReenterSessionDestroy) {
+  constexpr const char *kSessionId = "gw-test-mapping-cancel-reentry";
+  auto *ob = create_gateway_session_for_test(
+      kSessionId, "/clone/gateway_login_example", 137);
+  ASSERT_NE(ob, nullptr);
+  add_ref(
+      ob,
+      "TestGatewayMappingFutureCancellationCallbackMayReenterSessionDestroy");
+  vm_owner_set_id(ob, "owner/test/gateway/mapping-cancel-reentry");
+
+  const auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  push_number(41);
+  auto *submitted = call_lpc_method(ob, "submit_gateway_owner_future", 1);
+  ASSERT_NE(submitted, nullptr);
+  ASSERT_EQ(submitted->type, T_MAPPING);
+  const auto future_id = static_cast<uint64_t>(
+      gateway_test_mapping_number(submitted->u.map, "future_id"));
+  ASSERT_GT(future_id, 0u);
+  ASSERT_EQ(gateway_watch_session_future_for_object(
+                ob, reservation_id, future_id, 1000),
+            1);
+
+  copy_and_push_string(kSessionId);
+  auto *configured = call_lpc_method(
+      ob, "configure_owner_future_cancelled_reentry", 1);
+  ASSERT_NE(configured, nullptr);
+  auto *quiesced = gateway_owner_output_quiesce(
+      "unit mapping cancellation reentry");
+  ASSERT_NE(quiesced, nullptr);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced, "success"), 1);
+  free_mapping(quiesced);
+
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_reservation_id", ob),
+            static_cast<long>(reservation_id));
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_future_id", ob),
+            static_cast<long>(future_id));
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_reentry_result", ob),
+            1);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(vm_owner_future_state(future_id), VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(gateway_find_session(kSessionId), nullptr);
+
+  destruct_object(ob);
+  free_object(
+      &ob,
+      "TestGatewayMappingFutureCancellationCallbackMayReenterSessionDestroy");
+}
+
+TEST_F(DriverTest,
+       TestGatewayMappingFutureReservationStaleStillNotifiesCancellation) {
+  auto *ob = create_gateway_session_for_test(
+      "gw-test-mapping-reservation-stale", "/clone/gateway_login_example",
+      138);
+  ASSERT_NE(ob, nullptr);
+  add_ref(
+      ob,
+      "TestGatewayMappingFutureReservationStaleStillNotifiesCancellation");
+  vm_owner_set_id(ob, "owner/test/gateway/mapping-reservation-stale");
+
+  const auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  push_number(41);
+  auto *submitted = call_lpc_method(ob, "submit_gateway_owner_future", 1);
+  ASSERT_NE(submitted, nullptr);
+  ASSERT_EQ(submitted->type, T_MAPPING);
+  const auto future_id = static_cast<uint64_t>(
+      gateway_test_mapping_number(submitted->u.map, "future_id"));
+  ASSERT_GT(future_id, 0u);
+  ASSERT_EQ(gateway_watch_session_future_for_object(
+                ob, reservation_id, future_id, 1000),
+            1);
+  ASSERT_EQ(gateway_release_session_output_for_object(ob, reservation_id), 1);
+
+  ASSERT_EQ(gateway_process_session_future_watches_at(0), 1);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(vm_owner_future_state(future_id), VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_reservation_id", ob),
+            static_cast<long>(reservation_id));
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_future_cancelled_reason", ob),
+               "gateway reservation stale");
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_release_result", ob),
+            0);
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-mapping-reservation-stale", "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(
+      &ob,
+      "TestGatewayMappingFutureReservationStaleStillNotifiesCancellation");
+}
+
+TEST_F(DriverTest,
+       TestGatewayMappingFutureCompletionCallbackFailureRunsCancellationCleanup) {
+  auto *ob = create_gateway_session_for_test(
+      "gw-test-mapping-callback-failure", "/clone/gateway_login_example",
+      139);
+  ASSERT_NE(ob, nullptr);
+  add_ref(
+      ob,
+      "TestGatewayMappingFutureCompletionCallbackFailureRunsCancellationCleanup");
+  vm_owner_set_id(ob, "owner/test/gateway/mapping-callback-failure");
+
+  const auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  push_number(1);
+  auto *configured = call_lpc_method(
+      ob, "configure_owner_future_completed_failure", 1);
+  ASSERT_NE(configured, nullptr);
+  push_number(41);
+  auto *submitted = call_lpc_method(ob, "submit_gateway_owner_future", 1);
+  ASSERT_NE(submitted, nullptr);
+  ASSERT_EQ(submitted->type, T_MAPPING);
+  const auto future_id = static_cast<uint64_t>(
+      gateway_test_mapping_number(submitted->u.map, "future_id"));
+  ASSERT_GT(future_id, 0u);
+  ASSERT_EQ(gateway_watch_session_future_for_object(
+                ob, reservation_id, future_id, 1000),
+            1);
+
+  vm_owner_thread_start(1);
+  for (int index = 0; index < 200 &&
+                      vm_owner_future_state(future_id) ==
+                          VM_OWNER_FUTURE_PENDING;
+       ++index) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  vm_owner_thread_stop();
+  ASSERT_EQ(vm_owner_future_state(future_id), VM_OWNER_FUTURE_COMPLETED);
+  ASSERT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(vm_owner_future_state(future_id), VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_reservation_id", ob),
+            static_cast<long>(reservation_id));
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_future_cancelled_reason", ob),
+               "gateway owner future callback failed");
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_future_cancelled_release_result", ob),
+            1);
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+  ASSERT_TRUE(session->output_fifo.empty());
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-mapping-callback-failure", "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(
+      &ob,
+      "TestGatewayMappingFutureCompletionCallbackFailureRunsCancellationCleanup");
+}
+
+TEST_F(DriverTest, TestGatewayOwnerOutputQuiesceClosesStoppedWorkerWave) {
+  auto *blocker = create_gateway_session_for_test(
+      "gw-test-owner-quiesce-blocker", "/clone/gateway_login_example", 131);
+  auto *first = create_gateway_session_for_test(
+      "gw-test-owner-quiesce-a", "/clone/gateway_login_example", 132);
+  auto *second = create_gateway_session_for_test(
+      "gw-test-owner-quiesce-b", "/clone/gateway_login_example", 133);
+  ASSERT_NE(blocker, nullptr);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  add_ref(blocker, "TestGatewayOwnerOutputQuiesceClosesStoppedWorkerWave");
+  add_ref(first, "TestGatewayOwnerOutputQuiesceClosesStoppedWorkerWave");
+  add_ref(second, "TestGatewayOwnerOutputQuiesceClosesStoppedWorkerWave");
+  vm_owner_set_id(blocker, "owner/test/gateway/quiesce-blocker");
+  vm_owner_set_id(first, "owner/test/gateway/quiesce-a");
+  vm_owner_set_id(second, "owner/test/gateway/quiesce-b");
+  auto *first_session = gateway_find_session_by_object(first);
+  auto *second_session = gateway_find_session_by_object(second);
+  ASSERT_NE(first_session, nullptr);
+  ASSERT_NE(second_session, nullptr);
+  const auto first_reservation = gateway_reserve_session_output_for_object(first);
+  const auto second_reservation = gateway_reserve_session_output_for_object(second);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(first_session, first_reservation));
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(second_session, second_reservation));
+
+  std::atomic<int> blocker_started{0};
+  std::atomic<int> release_blocker{0};
+  vm_owner_thread_start(1);
+  ASSERT_GT(vm_owner_enqueue_executor_task(
+                blocker, "room_output_projection", "unit-quiesce-blocker",
+                [&] {
+                  blocker_started.store(1, std::memory_order_release);
+                  while (release_blocker.load(std::memory_order_acquire) == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                  }
+                }),
+            0u);
+  for (int index = 0; index < 200 &&
+                      blocker_started.load(std::memory_order_acquire) == 0;
+       ++index) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {first, second}, {first_reservation, second_reservation},
+      {"owner-quiesce-a", "owner-quiesce-b"}, {21, 22}, 1000,
+      &submitted));
+  ASSERT_EQ(submitted.submitted, (std::vector<bool>{true, true}));
+  ASSERT_EQ(gateway_session_future_watch_count(), 2);
+  ASSERT_EQ(gateway_room_output_projection_pending_count(), 2);
+
+  std::thread stopper([] { vm_owner_thread_stop(); });
+  for (int index = 0; index < 200; ++index) {
+    auto *status = vm_owner_thread_status();
+    const auto stopping = gateway_test_mapping_number(status, "stopping");
+    free_mapping(status);
+    if (stopping == 1) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  release_blocker.store(1, std::memory_order_release);
+  stopper.join();
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_PENDING);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_PENDING);
+
+  auto *quiesced = call_lpc_method(first, "quiesce_gateway_owner_output");
+  ASSERT_NE(quiesced, nullptr);
+  ASSERT_EQ(quiesced->type, T_MAPPING);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced->u.map, "success"), 1);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced->u.map, "room_waves_before"),
+            1);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced->u.map, "room_pending_before"),
+            2);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced->u.map, "room_watches_after"),
+            0);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced->u.map, "room_reservations_after"),
+            0);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced->u.map, "room_pending_after"),
+            0);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced->u.map,
+                                        "requires_immediate_owner_stop"),
+            1);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(gateway_room_output_projection_pending_count(), 0);
+  ASSERT_TRUE(first_session->output_fifo.empty());
+  ASSERT_TRUE(second_session->output_fifo.empty());
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  auto *status = vm_owner_thread_status();
+  ASSERT_EQ(gateway_test_mapping_number(status, "queue_depth"), 0);
+  free_mapping(status);
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-quiesce-blocker", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-quiesce-a", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-quiesce-b", "test_done", "done"),
+            1);
+  destruct_object(blocker);
+  destruct_object(first);
+  destruct_object(second);
+  free_object(&blocker,
+              "TestGatewayOwnerOutputQuiesceClosesStoppedWorkerWave");
+  free_object(&first, "TestGatewayOwnerOutputQuiesceClosesStoppedWorkerWave");
+  free_object(&second,
+              "TestGatewayOwnerOutputQuiesceClosesStoppedWorkerWave");
+}
+
+TEST_F(DriverTest,
+       TestGatewayOwnerOutputQuiesceCountsDetachedWaveReservation) {
+  auto *first = create_gateway_session_for_test(
+      "gw-test-quiesce-detached-a", "/clone/gateway_login_example", 136);
+  auto *second = create_gateway_session_for_test(
+      "gw-test-quiesce-detached-b", "/clone/gateway_login_example", 137);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  add_ref(first,
+          "TestGatewayOwnerOutputQuiesceCountsDetachedWaveReservation");
+  add_ref(second,
+          "TestGatewayOwnerOutputQuiesceCountsDetachedWaveReservation");
+  vm_owner_set_id(first, "owner/test/gateway/quiesce-detached-a");
+  vm_owner_set_id(second, "owner/test/gateway/quiesce-detached-b");
+  auto *first_session = gateway_find_session_by_object(first);
+  auto *second_session = gateway_find_session_by_object(second);
+  ASSERT_NE(first_session, nullptr);
+  ASSERT_NE(second_session, nullptr);
+  const auto first_reservation = gateway_reserve_session_output_for_object(first);
+  const auto second_reservation =
+      gateway_reserve_session_output_for_object(second);
+  ASSERT_GT(first_reservation, 0u);
+  ASSERT_GT(second_reservation, 0u);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(first_session,
+                                                 first_reservation));
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(second_session,
+                                                 second_reservation));
+
+  std::atomic<int> blocker_started{0};
+  std::atomic<int> release_blocker{0};
+  vm_owner_thread_start(2);
+  struct OwnerThreadGuard {
+    std::atomic<int> &release;
+    bool active{true};
+    ~OwnerThreadGuard() {
+      if (active) {
+        release.store(1, std::memory_order_release);
+        vm_owner_thread_stop();
+      }
+    }
+    void stop() {
+      release.store(1, std::memory_order_release);
+      vm_owner_thread_stop();
+      active = false;
+    }
+  } owner_thread_guard{release_blocker};
+  ASSERT_GT(vm_owner_enqueue_executor_task(
+                second, "room_output_projection",
+                "unit-quiesce-detached-blocker", [&] {
+                  blocker_started.store(1, std::memory_order_release);
+                  while (release_blocker.load(std::memory_order_acquire) == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                  }
+                }),
+            0u);
+  for (int index = 0; index < 200 &&
+                      blocker_started.load(std::memory_order_acquire) == 0;
+       ++index) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {first, second}, {first_reservation, second_reservation},
+      {"quiesce-detached-a", "quiesce-detached-b"}, {24, 25}, 1000,
+      &submitted));
+  ASSERT_EQ(submitted.submitted, (std::vector<bool>{true, true}));
+  ASSERT_EQ(submitted.future_ids.size(), 2u);
+  for (int index = 0; index < 200; ++index) {
+    if (vm_owner_future_state(submitted.future_ids[0]) ==
+        VM_OWNER_FUTURE_COMPLETED) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_COMPLETED);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_PENDING);
+  ASSERT_EQ(gateway_process_session_future_watches_at(0), 1);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(gateway_session_future_watch_count(), 1);
+  ASSERT_EQ(gateway_room_output_projection_pending_count(), 1);
+  ASSERT_EQ(first_session->output_fifo.size(), 1u);
+  ASSERT_EQ(second_session->output_fifo.size(), 1u);
+  ASSERT_EQ(first_session->output_fifo.front().reservation_id,
+            first_reservation);
+  ASSERT_EQ(second_session->output_fifo.front().reservation_id,
+            second_reservation);
+  ASSERT_FALSE(first_session->output_fifo.front().ready);
+  ASSERT_FALSE(second_session->output_fifo.front().ready);
+
+  auto *quiesced =
+      gateway_owner_output_quiesce("unit detached reservation quiesce");
+  ASSERT_NE(quiesced, nullptr);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced, "success"), 1);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced, "room_watches_before"), 1);
+  ASSERT_EQ(
+      gateway_test_mapping_number(quiesced, "room_reservations_before"),
+      2);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced, "released_reservations"),
+            2);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced, "cancelled_futures"), 1);
+  ASSERT_EQ(gateway_test_mapping_number(quiesced, "room_reservations_after"),
+            0);
+  free_mapping(quiesced);
+
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(gateway_room_output_projection_pending_count(), 0);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_TRUE(first_session->output_fifo.empty());
+  ASSERT_TRUE(second_session->output_fifo.empty());
+
+  owner_thread_guard.stop();
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-quiesce-detached-a", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-quiesce-detached-b", "test_done", "done"),
+            1);
+  destruct_object(first);
+  destruct_object(second);
+  free_object(&first,
+              "TestGatewayOwnerOutputQuiesceCountsDetachedWaveReservation");
+  free_object(&second,
+              "TestGatewayOwnerOutputQuiesceCountsDetachedWaveReservation");
+}
+
+TEST_F(DriverTest, TestGatewayOwnerRoomOutputProjectionUsesSameWireAndFifoSlot) {
+  auto *ob = create_gateway_session_for_test(
+      "gw-test-owner-room-output", "/clone/gateway_login_example", 111);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayOwnerRoomOutputProjectionUsesSameWireAndFifoSlot");
+  vm_owner_set_id(ob, "owner/test/gateway/room-output");
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+  const auto worker_wall_samples_before =
+      g_gateway_runtime_counters.room_output_projection_worker_samples.load(
+          std::memory_order_relaxed);
+  const auto worker_cpu_samples_before =
+      g_gateway_runtime_counters
+          .room_output_projection_worker_thread_cpu_samples.load(
+              std::memory_order_relaxed);
+  const auto worker_cpu_unavailable_before =
+      g_gateway_runtime_counters
+          .room_output_projection_worker_thread_cpu_unavailable.load(
+              std::memory_order_relaxed);
+
+  const auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(session, reservation_id));
+  std::string expected_wire;
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      session, reservation_id, &expected_wire));
+
+  vm_owner_thread_start(2);
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {ob}, {reservation_id}, {"owner-room-player"}, {19}, 1000,
+      &submitted));
+  ASSERT_EQ(submitted.submitted, (std::vector<bool>{true}));
+  ASSERT_EQ(submitted.filled_inline, (std::vector<bool>{false}));
+  ASSERT_EQ(submitted.event_counts, (std::vector<LPC_INT>{1}));
+  ASSERT_EQ(submitted.slot_server_seqs, (std::vector<LPC_INT>{1201}));
+  ASSERT_EQ(submitted.future_ids.size(), 1u);
+  ASSERT_GT(submitted.future_ids[0], 0u);
+  ASSERT_FALSE(gateway_append_preencoded_message_event_wave(
+      {session}, {reservation_id}, {1203}, {1204}, {17}, {8102},
+      gateway_test_owner_room_stable_payload(), "player", 222334, 128));
+  ASSERT_EQ(gateway_pending_message_event_count(session, reservation_id), 1u);
+  for (int i = 0; i < 200; ++i) {
+    const auto state = vm_owner_future_state(submitted.future_ids[0]);
+    if (state == VM_OWNER_FUTURE_COMPLETED ||
+        state == VM_OWNER_FUTURE_FAILED) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_COMPLETED);
+  ASSERT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_room_output_reservation_id", ob),
+            static_cast<long>(reservation_id));
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_room_output_state", ob),
+               "completed");
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_room_output_event_count", ob),
+            1);
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_room_output_slot_server_seq", ob),
+            1201);
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_room_output_callback_off_main", ob),
+            0);
+  ASSERT_EQ(session->output_fifo.size(), 1u);
+  ASSERT_TRUE(session->output_fifo.front().ready);
+  ASSERT_EQ(session->output_fifo.front().reservation_id, reservation_id);
+  ASSERT_EQ(session->output_fifo.front().wire_bytes, expected_wire);
+  const auto wire = nlohmann::json::parse(expected_wire);
+  ASSERT_EQ(wire["type"], "output");
+  ASSERT_EQ(wire["cid"], "gw-test-owner-room-output");
+  ASSERT_TRUE(wire["data"].is_string());
+  ASSERT_GT(g_gateway_runtime_counters.room_output_projection_submitted.load(
+                std::memory_order_relaxed),
+            0u);
+  ASSERT_GT(g_gateway_runtime_counters.room_output_projection_worker_samples.load(
+                std::memory_order_relaxed),
+            0u);
+  const auto worker_wall_samples_after =
+      g_gateway_runtime_counters.room_output_projection_worker_samples.load(
+          std::memory_order_relaxed);
+  const auto worker_cpu_samples_after =
+      g_gateway_runtime_counters
+          .room_output_projection_worker_thread_cpu_samples.load(
+              std::memory_order_relaxed);
+  const auto worker_cpu_unavailable_after =
+      g_gateway_runtime_counters
+          .room_output_projection_worker_thread_cpu_unavailable.load(
+              std::memory_order_relaxed);
+  ASSERT_EQ(worker_wall_samples_after - worker_wall_samples_before,
+            (worker_cpu_samples_after - worker_cpu_samples_before) +
+                (worker_cpu_unavailable_after -
+                 worker_cpu_unavailable_before));
+  ASSERT_GT(g_gateway_runtime_counters.room_output_projection_publish_samples.load(
+                std::memory_order_relaxed),
+            0u);
+
+  vm_owner_thread_stop();
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-output", "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(&ob,
+              "TestGatewayOwnerRoomOutputProjectionUsesSameWireAndFifoSlot");
+}
+
+TEST_F(DriverTest, TestGatewayOwnerRoomOutputMissingWaveReleasesExactlyOnce) {
+  const auto cancelled_before =
+      g_gateway_runtime_counters.future_watches_cancelled.load();
+  const auto released_before =
+      g_gateway_runtime_counters.room_output_projection_released.load();
+  auto *ob = create_gateway_session_for_test(
+      "gw-test-owner-room-missing-wave", "/clone/gateway_login_example", 120);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayOwnerRoomOutputMissingWaveReleasesExactlyOnce");
+  vm_owner_set_id(ob, "owner/test/gateway/room-missing-wave");
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+  const auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(session, reservation_id));
+
+  vm_owner_thread_start(1);
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {ob}, {reservation_id}, {"owner-room-player"}, {19}, 1000,
+      &submitted));
+  ASSERT_EQ(submitted.submitted, (std::vector<bool>{true}));
+  ASSERT_EQ(submitted.future_ids.size(), 1u);
+  ASSERT_TRUE(gateway_drop_room_output_wave_for_test(reservation_id));
+  ASSERT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+
+  EXPECT_TRUE(session->output_fifo.empty());
+  EXPECT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  EXPECT_EQ(gateway_session_future_watch_count(), 0);
+  EXPECT_EQ(gateway_test_call_number(
+                "query_last_owner_room_output_reservation_id", ob),
+            static_cast<long>(reservation_id));
+  EXPECT_STREQ(gateway_test_call_string(
+                   "query_last_owner_room_output_state", ob),
+               "released");
+  EXPECT_EQ(g_gateway_runtime_counters.future_watches_cancelled.load() -
+                cancelled_before,
+            1u);
+  EXPECT_EQ(g_gateway_runtime_counters.room_output_projection_released.load() -
+                released_before,
+            1u);
+
+  vm_owner_thread_stop();
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-missing-wave", "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(&ob,
+              "TestGatewayOwnerRoomOutputMissingWaveReleasesExactlyOnce");
+}
+
+TEST_F(DriverTest,
+       TestGatewayOwnerRoomOutputRejectsInvalidUtf8BeforeOwnerSubmit) {
+  auto *ob = create_gateway_session_for_test(
+      "gw-test-owner-room-invalid-utf8", "/clone/gateway_login_example", 141);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob,
+          "TestGatewayOwnerRoomOutputRejectsInvalidUtf8BeforeOwnerSubmit");
+  vm_owner_set_id(ob, "owner/test/gateway/room-invalid-utf8");
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+  const auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(session, reservation_id));
+
+  vm_owner_thread_start(1);
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  const std::string invalid_utf8_scope(1, static_cast<char>(0xc3));
+  const auto accepted = gateway_submit_pending_message_event_batches_for_objects(
+      {ob}, {reservation_id}, {invalid_utf8_scope}, {19}, 1000, &submitted);
+  if (accepted) {
+    auto *quiesced = gateway_owner_output_quiesce(
+        "unit invalid utf8 pre-submit cleanup");
+    ASSERT_NE(quiesced, nullptr);
+    free_mapping(quiesced);
+  }
+  vm_owner_thread_stop();
+
+  EXPECT_FALSE(accepted);
+  EXPECT_EQ(gateway_session_future_watch_count(), 0);
+  EXPECT_EQ(gateway_room_output_projection_pending_count(), 0);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-invalid-utf8", "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(
+      &ob, "TestGatewayOwnerRoomOutputRejectsInvalidUtf8BeforeOwnerSubmit");
+}
+
+TEST_F(DriverTest,
+       TestGatewayOwnerRoomOutputRejectsOversizedWireBeforeOwnerSubmit) {
+  auto *ob = create_gateway_session_for_test(
+      "gw-test-owner-room-oversized", "/clone/gateway_login_example", 142);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob,
+          "TestGatewayOwnerRoomOutputRejectsOversizedWireBeforeOwnerSubmit");
+  vm_owner_set_id(ob, "owner/test/gateway/room-oversized");
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+  const auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  const std::string stable_prefix =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"normal\",\"reliability\":\"important\","
+      "\"display_mode\":\"paced\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"";
+  const std::string stable_suffix = "\",\"payload\":{}}";
+  const std::string oversized_event =
+      stable_prefix + std::string(70 * 1024, 'x') + stable_suffix;
+  for (LPC_INT index = 0; index < 16; ++index) {
+    ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+        {session}, {reservation_id}, {1201 + index * 2},
+        {1202 + index * 2}, {17}, {8101 + index}, oversized_event,
+        "player", 222333 + index, 128));
+  }
+
+  vm_owner_thread_start(1);
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  const auto accepted = gateway_submit_pending_message_event_batches_for_objects(
+      {ob}, {reservation_id}, {"owner-room-player"}, {19}, 1000,
+      &submitted);
+  if (accepted) {
+    auto *quiesced = gateway_owner_output_quiesce(
+        "unit oversized wire pre-submit cleanup");
+    ASSERT_NE(quiesced, nullptr);
+    free_mapping(quiesced);
+  }
+  vm_owner_thread_stop();
+
+  EXPECT_FALSE(accepted);
+  EXPECT_EQ(gateway_session_future_watch_count(), 0);
+  EXPECT_EQ(gateway_room_output_projection_pending_count(), 0);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-oversized", "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(
+      &ob, "TestGatewayOwnerRoomOutputRejectsOversizedWireBeforeOwnerSubmit");
+}
+
+TEST_F(DriverTest, TestGatewayOwnerRoomOutputWaitsForWholeWaveBeforePublish) {
+  const auto submitted_before =
+      g_gateway_runtime_counters.room_output_projection_submitted.load();
+  const auto completed_before =
+      g_gateway_runtime_counters.room_output_projection_completed.load();
+  const auto released_before =
+      g_gateway_runtime_counters.room_output_projection_released.load();
+  auto *first = create_gateway_session_for_test(
+      "gw-test-owner-room-wave-a", "/clone/gateway_login_example", 121);
+  auto *second = create_gateway_session_for_test(
+      "gw-test-owner-room-wave-b", "/clone/gateway_login_example", 122);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  add_ref(first, "TestGatewayOwnerRoomOutputWaitsForWholeWaveBeforePublish");
+  add_ref(second, "TestGatewayOwnerRoomOutputWaitsForWholeWaveBeforePublish");
+  vm_owner_set_id(first, "owner/test/gateway/room-wave-a");
+  vm_owner_set_id(second, "owner/test/gateway/room-wave-b");
+  auto *first_session = gateway_find_session_by_object(first);
+  auto *second_session = gateway_find_session_by_object(second);
+  ASSERT_NE(first_session, nullptr);
+  ASSERT_NE(second_session, nullptr);
+  const auto first_reservation = gateway_reserve_session_output_for_object(first);
+  const auto second_reservation = gateway_reserve_session_output_for_object(second);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(first_session, first_reservation));
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(second_session, second_reservation));
+
+  std::atomic<int> blocker_started{0};
+  std::atomic<int> blocker_finished{0};
+  std::atomic<int> release_blocker{0};
+  vm_owner_thread_start(2);
+  struct OwnerThreadBlockerGuard {
+    std::atomic<int> &release;
+    bool active{true};
+
+    ~OwnerThreadBlockerGuard() {
+      if (!active) {
+        return;
+      }
+      release.store(1, std::memory_order_release);
+      vm_owner_thread_stop();
+    }
+
+    void stop() {
+      release.store(1, std::memory_order_release);
+      vm_owner_thread_stop();
+      active = false;
+    }
+  } owner_thread_guard{release_blocker};
+  ASSERT_GT(vm_owner_enqueue_executor_task(
+                second, "room_output_projection", "unit-wave-blocker", [&] {
+                  blocker_started.store(1, std::memory_order_release);
+                  while (release_blocker.load(std::memory_order_acquire) == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                  }
+                  blocker_finished.store(1, std::memory_order_release);
+                }),
+            0u);
+  for (int index = 0;
+       index < 200 && blocker_started.load(std::memory_order_acquire) == 0;
+       ++index) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {first, second}, {first_reservation, second_reservation},
+      {"owner-room-player-a", "owner-room-player-b"}, {19, 20}, 1000,
+      &submitted));
+  ASSERT_EQ(submitted.submitted, (std::vector<bool>{true, true}));
+  ASSERT_EQ(submitted.future_ids.size(), 2u);
+  ASSERT_EQ(gateway_room_output_projection_pending_count(), 2);
+  ASSERT_EQ(g_gateway_runtime_counters.room_output_projection_submitted.load(),
+            submitted_before + 2);
+  for (int index = 0; index < 200; ++index) {
+    if (vm_owner_future_state(submitted.future_ids[0]) ==
+        VM_OWNER_FUTURE_COMPLETED) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_COMPLETED);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_PENDING);
+
+  ASSERT_EQ(gateway_process_session_future_watches_at(0), 1);
+  ASSERT_EQ(gateway_session_future_watch_count(), 1);
+  ASSERT_EQ(first_session->output_fifo.size(), 1u);
+  ASSERT_EQ(second_session->output_fifo.size(), 1u);
+  ASSERT_FALSE(first_session->output_fifo.front().ready);
+  ASSERT_FALSE(second_session->output_fifo.front().ready);
+  ASSERT_EQ(gateway_room_output_projection_pending_count(), 1);
+
+  release_blocker.store(1, std::memory_order_release);
+  ASSERT_TRUE(gateway_test_drain_owner_room_mailbox(second, "unit-wave-drain"));
+  ASSERT_EQ(blocker_finished.load(std::memory_order_acquire), 1);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_COMPLETED);
+  ASSERT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_TRUE(first_session->output_fifo.front().ready);
+  ASSERT_TRUE(second_session->output_fifo.front().ready);
+  ASSERT_EQ(gateway_room_output_projection_pending_count(), 0);
+  ASSERT_EQ(g_gateway_runtime_counters.room_output_projection_completed.load(),
+            completed_before + 2);
+  ASSERT_EQ(g_gateway_runtime_counters.room_output_projection_released.load(),
+            released_before);
+  owner_thread_guard.stop();
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-wave-a", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-wave-b", "test_done", "done"),
+            1);
+  destruct_object(first);
+  destruct_object(second);
+  free_object(&first, "TestGatewayOwnerRoomOutputWaitsForWholeWaveBeforePublish");
+  free_object(&second, "TestGatewayOwnerRoomOutputWaitsForWholeWaveBeforePublish");
+}
+
+TEST_F(DriverTest,
+       TestGatewayOwnerRoomOutputSupportsSameSessionMultipleReservations) {
+  const auto inline_fallbacks_before =
+      g_gateway_runtime_counters.room_output_projection_inline_fallbacks.load();
+  auto *ob = create_gateway_session_for_test(
+      "gw-test-owner-room-same-session", "/clone/gateway_login_example", 133);
+  ASSERT_NE(ob, nullptr);
+  add_ref(
+      ob,
+      "TestGatewayOwnerRoomOutputSupportsSameSessionMultipleReservations");
+  vm_owner_set_id(ob, "owner/test/gateway/room-same-session");
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+
+  const auto first_reservation = gateway_reserve_session_output_for_object(ob);
+  const auto second_reservation = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(first_reservation, 0u);
+  ASSERT_GT(second_reservation, 0u);
+  ASSERT_NE(first_reservation, second_reservation);
+  ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+      {session}, {first_reservation}, {1201}, {1202}, {17}, {8101},
+      gateway_test_owner_room_stable_payload(), "player", 222333, 128));
+  ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+      {session}, {second_reservation}, {1203}, {1204}, {17}, {8102},
+      gateway_test_owner_room_stable_payload(), "player", 222334, 128));
+  std::string first_expected;
+  std::string second_expected;
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      session, first_reservation, &first_expected,
+      "owner-room-player", 19));
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      session, second_reservation, &second_expected,
+      "owner-room-player", 19));
+
+  vm_owner_thread_start(2);
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {ob, ob}, {first_reservation, second_reservation},
+      {"owner-room-player", "owner-room-player"}, {19, 19}, 1000,
+      &submitted));
+  ASSERT_EQ(submitted.submitted, (std::vector<bool>{true, true}));
+  ASSERT_EQ(submitted.filled_inline, (std::vector<bool>{false, false}));
+  ASSERT_EQ(submitted.future_ids.size(), 2u);
+  ASSERT_NE(submitted.future_ids[0], submitted.future_ids[1]);
+  ASSERT_TRUE(gateway_test_drain_owner_room_mailbox(
+      ob, "unit-same-session-drain"));
+  ASSERT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            2);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(gateway_room_output_projection_pending_count(), 0);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(session->output_fifo.size(), 2u);
+  ASSERT_TRUE(session->output_fifo[0].ready);
+  ASSERT_TRUE(session->output_fifo[1].ready);
+  ASSERT_EQ(session->output_fifo[0].reservation_id, first_reservation);
+  ASSERT_EQ(session->output_fifo[1].reservation_id, second_reservation);
+  ASSERT_EQ(session->output_fifo[0].wire_bytes, first_expected);
+  ASSERT_EQ(session->output_fifo[1].wire_bytes, second_expected);
+  ASSERT_EQ(
+      g_gateway_runtime_counters.room_output_projection_inline_fallbacks.load(),
+      inline_fallbacks_before);
+
+  vm_owner_thread_stop();
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-same-session", "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(
+      &ob,
+      "TestGatewayOwnerRoomOutputSupportsSameSessionMultipleReservations");
+}
+
+TEST_F(DriverTest,
+       TestGatewayOwnerRoomOutputPublishRetryIsBoundedAndPreservesFifo) {
+  const auto retry_enqueued_before =
+      g_gateway_runtime_counters.room_output_projection_retry_enqueued.load();
+  const auto retry_attempted_before =
+      g_gateway_runtime_counters.room_output_projection_retry_attempted.load();
+  auto *ob = create_gateway_session_for_test(
+      "gw-test-owner-room-publish-retry", "/clone/gateway_login_example",
+      145);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob,
+          "TestGatewayOwnerRoomOutputPublishRetryIsBoundedAndPreservesFifo");
+  vm_owner_set_id(ob, "owner/test/gateway/room-publish-retry");
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+  const auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(session, reservation_id));
+  std::string expected_wire;
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      session, reservation_id, &expected_wire));
+
+  vm_owner_thread_start(1);
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {ob}, {reservation_id}, {"owner-room-player"}, {19}, 1000,
+      &submitted));
+  for (int index = 0; index < 200; ++index) {
+    if (vm_owner_future_state(submitted.future_ids[0]) ==
+        VM_OWNER_FUTURE_COMPLETED) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_COMPLETED);
+
+  struct GatewayPacketLimitGuard {
+    size_t original;
+    ~GatewayPacketLimitGuard() { g_gateway_max_packet_size = original; }
+  } packet_limit_guard{g_gateway_max_packet_size};
+  g_gateway_max_packet_size = 1;
+  ASSERT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+  EXPECT_EQ(gateway_session_future_watch_count(), 0);
+  EXPECT_EQ(gateway_room_output_projection_pending_count(), 0);
+  EXPECT_EQ(gateway_room_output_projection_wave_count(), 1);
+  EXPECT_EQ(gateway_room_output_projection_reservation_count(), 1);
+  EXPECT_EQ(gateway_room_output_projection_retry_count(), 1);
+  ASSERT_EQ(session->output_fifo.size(), 1u);
+  EXPECT_FALSE(session->output_fifo.front().ready);
+
+  g_gateway_max_packet_size = packet_limit_guard.original;
+  std::this_thread::sleep_for(std::chrono::milliseconds(3));
+  EXPECT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            0);
+  EXPECT_EQ(gateway_room_output_projection_wave_count(), 0);
+  EXPECT_EQ(gateway_room_output_projection_reservation_count(), 0);
+  EXPECT_EQ(gateway_room_output_projection_retry_count(), 0);
+  ASSERT_EQ(session->output_fifo.size(), 1u);
+  EXPECT_TRUE(session->output_fifo.front().ready);
+  EXPECT_EQ(session->output_fifo.front().wire_bytes, expected_wire);
+  EXPECT_EQ(
+      g_gateway_runtime_counters.room_output_projection_retry_enqueued.load(),
+      retry_enqueued_before + 1);
+  EXPECT_EQ(
+      g_gateway_runtime_counters.room_output_projection_retry_attempted.load(),
+      retry_attempted_before + 1);
+
+  vm_owner_thread_stop();
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-publish-retry", "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(
+      &ob,
+      "TestGatewayOwnerRoomOutputPublishRetryIsBoundedAndPreservesFifo");
+}
+
+TEST_F(DriverTest, TestGatewayRoomOutputRetrySchedulerHasHardBudgets) {
+  const auto source =
+      read_source_file_for_test("../src/packages/gateway/gateway_session.cc");
+  const auto watch_start =
+      source.find("int gateway_process_session_future_watches_at");
+  const auto watch_end =
+      source.find("long gateway_session_future_watch_count", watch_start);
+  ASSERT_NE(watch_start, std::string::npos);
+  ASSERT_NE(watch_end, std::string::npos);
+  const auto watch_body = source.substr(watch_start, watch_end - watch_start);
+  EXPECT_NE(watch_body.find(
+                "gateway_process_room_output_publish_retries("),
+            std::string::npos);
+  EXPECT_EQ(watch_body.find(
+                "for (const auto &[wave_id, wave] : "
+                "g_gateway_room_output_waves)"),
+            std::string::npos);
+
+  const auto retry_start =
+      source.find("void gateway_process_room_output_publish_retries");
+  const auto retry_end =
+      source.find("void gateway_cancel_room_output_wave_session_items",
+                  retry_start);
+  ASSERT_NE(retry_start, std::string::npos);
+  ASSERT_NE(retry_end, std::string::npos);
+  const auto retry_body = source.substr(retry_start, retry_end - retry_start);
+  EXPECT_NE(retry_body.find("kGatewayRoomOutputRetryBudget"),
+            std::string::npos);
+  EXPECT_NE(retry_body.find("kGatewayRoomOutputRetryWallBudgetNs"),
+            std::string::npos);
+  EXPECT_NE(retry_body.find("kGatewayRoomOutputRetryMaxHoldMs"),
+            std::string::npos);
+  EXPECT_NE(source.find("kGatewayRoomOutputRetryMaxAttempts = 12"),
+            std::string::npos);
+  EXPECT_NE(source.find("GatewayRoomOutputRetrySchedule"),
+            std::string::npos);
+}
+
+TEST_F(DriverTest, TestGatewayRoomOutputPreparesFlushSessionsBeforeFifoStage) {
+  const auto source =
+      read_source_file_for_test("../src/packages/gateway/gateway_session.cc");
+  const auto publish_start = source.find(
+      "bool gateway_publish_room_output_wave(uint64_t wave_id) {");
+  const auto publish_end = source.find(
+      "void gateway_process_room_output_publish_retries", publish_start);
+  ASSERT_NE(publish_start, std::string::npos);
+  ASSERT_NE(publish_end, std::string::npos);
+  const auto publish_body =
+      source.substr(publish_start, publish_end - publish_start);
+  const auto flush_insert = publish_body.find("flush_sessions.insert");
+  const auto fifo_stage =
+      publish_body.find("gateway_stage_session_wire_outputs");
+  ASSERT_NE(flush_insert, std::string::npos);
+  ASSERT_NE(fifo_stage, std::string::npos);
+  EXPECT_LT(flush_insert, fifo_stage);
+  EXPECT_EQ(publish_body.find("flush_sessions.insert", fifo_stage),
+            std::string::npos);
+}
+
+TEST_F(DriverTest,
+       TestGatewayRoomOutputPartialWatchRollbackCountsCancellation) {
+  const auto source =
+      read_source_file_for_test("../src/packages/gateway/gateway_session.cc");
+  const auto submit_start = source.find(
+      "bool gateway_submit_pending_message_event_batches_for_objects");
+  const auto submit_end = source.find(
+      "int gateway_fill_pending_message_event_batch_for_object", submit_start);
+  ASSERT_NE(submit_start, std::string::npos);
+  ASSERT_NE(submit_end, std::string::npos);
+  const auto submit_body =
+      source.substr(submit_start, submit_end - submit_start);
+  const auto rollback_start = submit_body.find(
+      "for (size_t index = 0; index < registered_count; ++index)");
+  const auto rollback_end = submit_body.find(
+      "for (size_t index = registered_count; index < submissions.size(); "
+      "++index)",
+      rollback_start);
+  ASSERT_NE(rollback_start, std::string::npos);
+  ASSERT_NE(rollback_end, std::string::npos);
+  const auto rollback_body =
+      submit_body.substr(rollback_start, rollback_end - rollback_start);
+  EXPECT_NE(rollback_body.find("future_watches_cancelled.fetch_add"),
+            std::string::npos);
+}
+
+TEST_F(DriverTest, TestGatewayFutureWatchQueueMutationIsTransactional) {
+  const auto source =
+      read_source_file_for_test("../src/packages/gateway/gateway_session.cc");
+  const auto session_register =
+      source.find("bool gateway_register_session_future_watch_state");
+  const auto session_requeue =
+      source.find("bool gateway_requeue_session_future_watch");
+  const auto generic_register =
+      source.find("bool gateway_register_generic_future_watch_state");
+  const auto generic_requeue =
+      source.find("bool gateway_requeue_generic_future_watch");
+  ASSERT_NE(session_register, std::string::npos);
+  ASSERT_NE(session_requeue, std::string::npos);
+  ASSERT_NE(generic_register, std::string::npos);
+  ASSERT_NE(generic_requeue, std::string::npos);
+
+  const auto watch_register_start = source.find(
+      "int gateway_watch_session_future_for_object_internal");
+  const auto watch_register_end = source.find(
+      "int gateway_watch_session_future_for_object(", watch_register_start);
+  ASSERT_NE(watch_register_start, std::string::npos);
+  ASSERT_NE(watch_register_end, std::string::npos);
+  const auto watch_register_body = source.substr(
+      watch_register_start, watch_register_end - watch_register_start);
+  EXPECT_NE(watch_register_body.find(
+                "gateway_register_session_future_watch_state"),
+            std::string::npos);
+  EXPECT_EQ(watch_register_body.find(
+                "g_gateway_session_future_watches.emplace"),
+            std::string::npos);
+  EXPECT_EQ(watch_register_body.find(
+                "g_gateway_future_watch_queue.push_back"),
+            std::string::npos);
+
+  const auto generic_watch_start =
+      source.find("int gateway_watch_future_for_object");
+  const auto generic_watch_end =
+      source.find("int gateway_process_future_watches_at", generic_watch_start);
+  ASSERT_NE(generic_watch_start, std::string::npos);
+  ASSERT_NE(generic_watch_end, std::string::npos);
+  const auto generic_watch_body = source.substr(
+      generic_watch_start, generic_watch_end - generic_watch_start);
+  EXPECT_NE(generic_watch_body.find(
+                "gateway_register_generic_future_watch_state"),
+            std::string::npos);
+  EXPECT_EQ(generic_watch_body.find("g_gateway_future_watches.emplace"),
+            std::string::npos);
+  EXPECT_EQ(generic_watch_body.find(
+                "g_gateway_generic_future_watch_queue.push_back"),
+            std::string::npos);
+
+  const auto process_session_start =
+      source.find("int gateway_process_session_future_watches_at");
+  const auto process_session_end =
+      source.find("long gateway_session_future_watch_count", process_session_start);
+  ASSERT_NE(process_session_start, std::string::npos);
+  ASSERT_NE(process_session_end, std::string::npos);
+  const auto process_session_body = source.substr(
+      process_session_start, process_session_end - process_session_start);
+  EXPECT_NE(process_session_body.find(
+                "gateway_requeue_session_future_watch"),
+            std::string::npos);
+
+  const auto process_generic_start =
+      source.find("int gateway_process_future_watches_at");
+  const auto process_generic_end =
+      source.find("long gateway_future_watch_count", process_generic_start);
+  ASSERT_NE(process_generic_start, std::string::npos);
+  ASSERT_NE(process_generic_end, std::string::npos);
+  const auto process_generic_body = source.substr(
+      process_generic_start, process_generic_end - process_generic_start);
+  EXPECT_NE(process_generic_body.find(
+                "gateway_requeue_generic_future_watch"),
+            std::string::npos);
+}
+
+TEST_F(DriverTest,
+       TestGatewayOwnerStaleNotificationDoesNotReuseWaveAfterCallback) {
+  const auto source =
+      read_source_file_for_test("../src/packages/gateway/gateway_session.cc");
+  const auto process_start = source.find(
+      "int gateway_process_room_output_wave_watch(\n"
+      "    const GatewaySessionFutureWatch &watch, uint64_t now_ms) {");
+  const auto process_end = source.find("}  // namespace", process_start);
+  ASSERT_NE(process_start, std::string::npos);
+  ASSERT_NE(process_end, std::string::npos);
+  const auto process_body =
+      source.substr(process_start, process_end - process_start);
+  const auto stale_start = process_body.find("if (!owner_current)");
+  const auto stale_end = process_body.find("auto future_state", stale_start);
+  ASSERT_NE(stale_start, std::string::npos);
+  ASSERT_NE(stale_end, std::string::npos);
+  const auto stale_body =
+      process_body.substr(stale_start, stale_end - stale_start);
+  const auto terminal_snapshot =
+      stale_body.find("gateway_room_output_wave_all_terminal");
+  const auto notification =
+      stale_body.find("gateway_notify_room_output_wave_item");
+  ASSERT_NE(terminal_snapshot, std::string::npos);
+  ASSERT_NE(notification, std::string::npos);
+  EXPECT_LT(terminal_snapshot, notification);
+  EXPECT_EQ(stale_body.find("wave_it->", notification), std::string::npos);
+}
+
+TEST_F(DriverTest,
+       TestGatewayOwnerRoomOutputReservationMismatchIsolatesRecipient) {
+  auto *first = create_gateway_session_for_test(
+      "gw-test-owner-room-mismatch-wave-a", "/clone/gateway_login_example",
+      143);
+  auto *second = create_gateway_session_for_test(
+      "gw-test-owner-room-mismatch-wave-b", "/clone/gateway_login_example",
+      144);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  add_ref(first,
+          "TestGatewayOwnerRoomOutputReservationMismatchIsolatesRecipient");
+  add_ref(second,
+          "TestGatewayOwnerRoomOutputReservationMismatchIsolatesRecipient");
+  vm_owner_set_id(first, "owner/test/gateway/room-mismatch-wave-a");
+  vm_owner_set_id(second, "owner/test/gateway/room-mismatch-wave-b");
+  auto *first_session = gateway_find_session_by_object(first);
+  auto *second_session = gateway_find_session_by_object(second);
+  ASSERT_NE(first_session, nullptr);
+  ASSERT_NE(second_session, nullptr);
+  const auto first_reservation = gateway_reserve_session_output_for_object(first);
+  const auto second_reservation =
+      gateway_reserve_session_output_for_object(second);
+  ASSERT_TRUE(
+      gateway_test_seed_owner_room_event(first_session, first_reservation));
+  ASSERT_TRUE(
+      gateway_test_seed_owner_room_event(second_session, second_reservation));
+  std::string second_expected_wire;
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      second_session, second_reservation, &second_expected_wire,
+      "owner-room-player-b", 20));
+
+  std::atomic<int> blocker_started{0};
+  std::atomic<int> release_blocker{0};
+  vm_owner_thread_start(2);
+  ASSERT_GT(vm_owner_enqueue_executor_task(
+                second, "room_output_projection",
+                "unit-reservation-mismatch-wave-blocker", [&] {
+                  blocker_started.store(1, std::memory_order_release);
+                  while (release_blocker.load(std::memory_order_acquire) == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                  }
+                }),
+            0u);
+  for (int index = 0;
+       index < 200 && blocker_started.load(std::memory_order_acquire) == 0;
+       ++index) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {first, second}, {first_reservation, second_reservation},
+      {"owner-room-player-a", "owner-room-player-b"}, {19, 20}, 1000,
+      &submitted));
+  for (int index = 0; index < 200; ++index) {
+    if (vm_owner_future_state(submitted.future_ids[0]) ==
+        VM_OWNER_FUTURE_COMPLETED) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_COMPLETED);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_PENDING);
+  ASSERT_EQ(gateway_release_session_output_for_object(
+                first, first_reservation),
+            1);
+
+  ASSERT_EQ(gateway_process_session_future_watches_at(0), 1);
+  const auto watches_after_mismatch = gateway_session_future_watch_count();
+  const auto pending_after_mismatch =
+      gateway_room_output_projection_pending_count();
+  EXPECT_EQ(watches_after_mismatch, 1);
+  EXPECT_EQ(pending_after_mismatch, 1);
+  EXPECT_EQ(gateway_room_output_projection_wave_count(), 1);
+  EXPECT_EQ(gateway_room_output_projection_reservation_count(), 1);
+  EXPECT_TRUE(first_session->output_fifo.empty());
+  ASSERT_EQ(second_session->output_fifo.size(), 1u);
+  EXPECT_FALSE(second_session->output_fifo.front().ready);
+
+  release_blocker.store(1, std::memory_order_release);
+  for (int index = 0; index < 200; ++index) {
+    if (vm_owner_future_state(submitted.future_ids[1]) ==
+        VM_OWNER_FUTURE_COMPLETED) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_COMPLETED);
+  ASSERT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+  vm_owner_thread_stop();
+
+  EXPECT_EQ(gateway_session_future_watch_count(), 0);
+  EXPECT_EQ(gateway_room_output_projection_pending_count(), 0);
+  EXPECT_EQ(gateway_room_output_projection_wave_count(), 0);
+  EXPECT_EQ(gateway_room_output_projection_reservation_count(), 0);
+  EXPECT_TRUE(first_session->output_fifo.empty());
+  ASSERT_EQ(second_session->output_fifo.size(), 1u);
+  EXPECT_TRUE(second_session->output_fifo.front().ready);
+  EXPECT_EQ(second_session->output_fifo.front().wire_bytes,
+            second_expected_wire);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-mismatch-wave-a", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-mismatch-wave-b", "test_done", "done"),
+            1);
+  destruct_object(first);
+  destruct_object(second);
+  free_object(
+      &first, "TestGatewayOwnerRoomOutputReservationMismatchIsolatesRecipient");
+  free_object(
+      &second, "TestGatewayOwnerRoomOutputReservationMismatchIsolatesRecipient");
+}
+
+TEST_F(DriverTest,
+       TestGatewayOwnerRoomOutputStaleRecipientFallsBackWithSlowPeer) {
+  auto *stale = create_gateway_session_for_test(
+      "gw-test-owner-room-stale-wave-a", "/clone/gateway_login_example", 127);
+  auto *slow = create_gateway_session_for_test(
+      "gw-test-owner-room-stale-wave-b", "/clone/gateway_login_example", 128);
+  ASSERT_NE(stale, nullptr);
+  ASSERT_NE(slow, nullptr);
+  add_ref(
+      stale,
+      "TestGatewayOwnerRoomOutputStaleRecipientFallsBackWithSlowPeer");
+  add_ref(
+      slow,
+      "TestGatewayOwnerRoomOutputStaleRecipientFallsBackWithSlowPeer");
+  vm_owner_set_id(stale, "owner/test/gateway/room-stale-wave-a");
+  vm_owner_set_id(slow, "owner/test/gateway/room-stale-wave-b");
+  auto *stale_session = gateway_find_session_by_object(stale);
+  auto *slow_session = gateway_find_session_by_object(slow);
+  ASSERT_NE(stale_session, nullptr);
+  ASSERT_NE(slow_session, nullptr);
+  const auto stale_reservation =
+      gateway_reserve_session_output_for_object(stale);
+  const auto slow_reservation = gateway_reserve_session_output_for_object(slow);
+  ASSERT_TRUE(
+      gateway_test_seed_owner_room_event(stale_session, stale_reservation));
+  ASSERT_TRUE(
+      gateway_test_seed_owner_room_event(slow_session, slow_reservation));
+  std::string stale_expected;
+  std::string slow_expected;
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      stale_session, stale_reservation, &stale_expected,
+      "owner-room-player-a", 19));
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      slow_session, slow_reservation, &slow_expected,
+      "owner-room-player-b", 20));
+
+  std::atomic<int> blocker_started{0};
+  std::atomic<int> release_blocker{0};
+  vm_owner_thread_start(2);
+  struct OwnerThreadStaleGuard {
+    std::atomic<int> &release;
+    bool active{true};
+
+    ~OwnerThreadStaleGuard() {
+      if (active) {
+        release.store(1, std::memory_order_release);
+        vm_owner_thread_stop();
+      }
+    }
+
+    void stop() {
+      release.store(1, std::memory_order_release);
+      vm_owner_thread_stop();
+      active = false;
+    }
+  } owner_thread_guard{release_blocker};
+  ASSERT_GT(vm_owner_enqueue_executor_task(
+                slow, "room_output_projection", "unit-stale-wave-blocker",
+                [&] {
+                  blocker_started.store(1, std::memory_order_release);
+                  while (release_blocker.load(std::memory_order_acquire) == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                  }
+                }),
+            0u);
+  for (int index = 0;
+       index < 200 && blocker_started.load(std::memory_order_acquire) == 0;
+       ++index) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {stale, slow}, {stale_reservation, slow_reservation},
+      {"owner-room-player-a", "owner-room-player-b"}, {19, 20}, 1000,
+      &submitted));
+  ASSERT_EQ(submitted.submitted, (std::vector<bool>{true, true}));
+  ASSERT_EQ(submitted.future_ids.size(), 2u);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_PENDING);
+
+  vm_owner_set_id(stale, "owner/test/gateway/room-stale-wave-rebound");
+  ASSERT_EQ(gateway_process_session_future_watches_at(0), 1);
+
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_PENDING);
+  ASSERT_EQ(gateway_session_future_watch_count(), 1);
+  ASSERT_EQ(gateway_room_output_projection_pending_count(), 1);
+  ASSERT_EQ(stale_session->output_fifo.size(), 1u);
+  ASSERT_FALSE(stale_session->output_fifo.front().ready);
+  ASSERT_EQ(slow_session->output_fifo.size(), 1u);
+  ASSERT_FALSE(slow_session->output_fifo.front().ready);
+  ASSERT_STRNE(gateway_test_call_string(
+                   "query_last_owner_room_output_state", stale),
+               "released");
+
+  release_blocker.store(1, std::memory_order_release);
+  ASSERT_TRUE(gateway_test_drain_owner_room_mailbox(
+      slow, "unit-stale-wave-drain"));
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_COMPLETED);
+  ASSERT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(gateway_room_output_projection_pending_count(), 0);
+  ASSERT_EQ(stale_session->output_fifo.size(), 1u);
+  ASSERT_TRUE(stale_session->output_fifo.front().ready);
+  ASSERT_EQ(stale_session->output_fifo.front().wire_bytes, stale_expected);
+  ASSERT_EQ(slow_session->output_fifo.size(), 1u);
+  ASSERT_TRUE(slow_session->output_fifo.front().ready);
+  ASSERT_EQ(slow_session->output_fifo.front().wire_bytes, slow_expected);
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_room_output_state", stale),
+               "completed");
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_room_output_state", slow),
+               "completed");
+
+  owner_thread_guard.stop();
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-stale-wave-a", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-stale-wave-b", "test_done", "done"),
+            1);
+  destruct_object(stale);
+  destruct_object(slow);
+  free_object(
+      &stale,
+      "TestGatewayOwnerRoomOutputStaleRecipientFallsBackWithSlowPeer");
+  free_object(
+      &slow,
+      "TestGatewayOwnerRoomOutputStaleRecipientFallsBackWithSlowPeer");
+}
+
+TEST_F(DriverTest,
+       TestGatewayOwnerRoomOutputFailedRecipientFallsBackWithSlowPeer) {
+  auto *failed = create_gateway_session_for_test(
+      "gw-test-owner-room-failed-wave-a", "/clone/gateway_login_example", 129);
+  auto *slow = create_gateway_session_for_test(
+      "gw-test-owner-room-failed-wave-b", "/clone/gateway_login_example", 130);
+  ASSERT_NE(failed, nullptr);
+  ASSERT_NE(slow, nullptr);
+  add_ref(
+      failed,
+      "TestGatewayOwnerRoomOutputFailedRecipientFallsBackWithSlowPeer");
+  add_ref(
+      slow,
+      "TestGatewayOwnerRoomOutputFailedRecipientFallsBackWithSlowPeer");
+  vm_owner_set_id(failed, "owner/test/gateway/room-failed-wave-a");
+  vm_owner_set_id(slow, "owner/test/gateway/room-failed-wave-b");
+  auto *failed_session = gateway_find_session_by_object(failed);
+  auto *slow_session = gateway_find_session_by_object(slow);
+  ASSERT_NE(failed_session, nullptr);
+  ASSERT_NE(slow_session, nullptr);
+  const auto failed_reservation =
+      gateway_reserve_session_output_for_object(failed);
+  const auto slow_reservation = gateway_reserve_session_output_for_object(slow);
+  ASSERT_TRUE(
+      gateway_test_seed_owner_room_event(failed_session, failed_reservation));
+  ASSERT_TRUE(
+      gateway_test_seed_owner_room_event(slow_session, slow_reservation));
+  std::string failed_expected;
+  std::string slow_expected;
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      failed_session, failed_reservation, &failed_expected,
+      "owner-room-player-a", 19));
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      slow_session, slow_reservation, &slow_expected,
+      "owner-room-player-b", 20));
+
+  std::atomic<int> blockers_started{0};
+  std::atomic<int> release_blockers{0};
+  vm_owner_thread_start(2);
+  struct OwnerThreadFailedGuard {
+    std::atomic<int> &release;
+    bool active{true};
+
+    ~OwnerThreadFailedGuard() {
+      if (active) {
+        release.store(1, std::memory_order_release);
+        vm_owner_thread_stop();
+      }
+    }
+
+    void stop() {
+      release.store(1, std::memory_order_release);
+      vm_owner_thread_stop();
+      active = false;
+    }
+  } owner_thread_guard{release_blockers};
+  auto enqueue_blocker = [&](object_t *target, const char *task_key) {
+    return vm_owner_enqueue_executor_task(
+        target, "room_output_projection", task_key, [&] {
+          blockers_started.fetch_add(1, std::memory_order_release);
+          while (release_blockers.load(std::memory_order_acquire) == 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+          }
+        });
+  };
+  ASSERT_GT(enqueue_blocker(failed, "unit-failed-wave-blocker-a"), 0u);
+  ASSERT_GT(enqueue_blocker(slow, "unit-failed-wave-blocker-b"), 0u);
+  for (int index = 0;
+       index < 200 && blockers_started.load(std::memory_order_acquire) != 2;
+       ++index) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(blockers_started.load(std::memory_order_acquire), 2);
+
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {failed, slow}, {failed_reservation, slow_reservation},
+      {"owner-room-player-a", "owner-room-player-b"}, {19, 20}, 1000,
+      &submitted));
+  ASSERT_EQ(submitted.submitted, (std::vector<bool>{true, true}));
+  ASSERT_EQ(submitted.future_ids.size(), 2u);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_PENDING);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_PENDING);
+
+  auto *cancelled = vm_owner_future_cancel(
+      submitted.future_ids[0], "unit room output projection failure");
+  ASSERT_STREQ(gateway_test_mapping_string(cancelled, "state"), "failed");
+  ASSERT_EQ(gateway_test_mapping_number(cancelled, "cancelled"), 1);
+  free_mapping(cancelled);
+  ASSERT_EQ(gateway_process_session_future_watches_at(0), 1);
+
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_PENDING);
+  ASSERT_EQ(gateway_session_future_watch_count(), 1);
+  ASSERT_EQ(failed_session->output_fifo.size(), 1u);
+  ASSERT_FALSE(failed_session->output_fifo.front().ready);
+  ASSERT_EQ(slow_session->output_fifo.size(), 1u);
+  ASSERT_FALSE(slow_session->output_fifo.front().ready);
+  ASSERT_STRNE(gateway_test_call_string(
+                   "query_last_owner_room_output_state", failed),
+               "released");
+
+  release_blockers.store(1, std::memory_order_release);
+  ASSERT_TRUE(gateway_test_drain_owner_room_mailbox(
+      failed, "unit-failed-wave-drain-a"));
+  ASSERT_TRUE(gateway_test_drain_owner_room_mailbox(
+      slow, "unit-failed-wave-drain-b"));
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_COMPLETED);
+  ASSERT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(gateway_room_output_projection_pending_count(), 0);
+  ASSERT_EQ(failed_session->output_fifo.size(), 1u);
+  ASSERT_TRUE(failed_session->output_fifo.front().ready);
+  ASSERT_EQ(failed_session->output_fifo.front().wire_bytes, failed_expected);
+  ASSERT_EQ(slow_session->output_fifo.size(), 1u);
+  ASSERT_TRUE(slow_session->output_fifo.front().ready);
+  ASSERT_EQ(slow_session->output_fifo.front().wire_bytes, slow_expected);
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_room_output_state", failed),
+               "completed");
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_room_output_state", slow),
+               "completed");
+
+  owner_thread_guard.stop();
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-failed-wave-a", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-failed-wave-b", "test_done", "done"),
+            1);
+  destruct_object(failed);
+  destruct_object(slow);
+  free_object(
+      &failed,
+      "TestGatewayOwnerRoomOutputFailedRecipientFallsBackWithSlowPeer");
+  free_object(
+      &slow,
+      "TestGatewayOwnerRoomOutputFailedRecipientFallsBackWithSlowPeer");
+}
+
+TEST_F(DriverTest,
+       TestGatewayOwnerRoomOutputWaveTimeoutPreservesCompletedRecipient) {
+  const auto completed_before =
+      g_gateway_runtime_counters.room_output_projection_completed.load();
+  const auto released_before =
+      g_gateway_runtime_counters.room_output_projection_released.load();
+  auto *first = create_gateway_session_for_test(
+      "gw-test-owner-room-timeout-wave-a", "/clone/gateway_login_example", 123);
+  auto *second = create_gateway_session_for_test(
+      "gw-test-owner-room-timeout-wave-b", "/clone/gateway_login_example", 124);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  add_ref(first,
+          "TestGatewayOwnerRoomOutputWaveTimeoutPreservesCompletedRecipient");
+  add_ref(second,
+          "TestGatewayOwnerRoomOutputWaveTimeoutPreservesCompletedRecipient");
+  vm_owner_set_id(first, "owner/test/gateway/room-timeout-wave-a");
+  vm_owner_set_id(second, "owner/test/gateway/room-timeout-wave-b");
+  auto *first_session = gateway_find_session_by_object(first);
+  auto *second_session = gateway_find_session_by_object(second);
+  ASSERT_NE(first_session, nullptr);
+  ASSERT_NE(second_session, nullptr);
+  const auto first_reservation = gateway_reserve_session_output_for_object(first);
+  const auto second_reservation = gateway_reserve_session_output_for_object(second);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(first_session, first_reservation));
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(second_session, second_reservation));
+  std::string first_expected;
+  std::string second_expected;
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      first_session, first_reservation, &first_expected,
+      "owner-room-player-a", 19));
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      second_session, second_reservation, &second_expected,
+      "owner-room-player-b", 20));
+
+  std::atomic<int> blocker_started{0};
+  std::atomic<int> release_blocker{0};
+  vm_owner_thread_start(2);
+  struct OwnerThreadTimeoutGuard {
+    std::atomic<int> &release;
+    bool active{true};
+
+    ~OwnerThreadTimeoutGuard() {
+      if (active) {
+        release.store(1, std::memory_order_release);
+        vm_owner_thread_stop();
+      }
+    }
+
+    void stop() {
+      release.store(1, std::memory_order_release);
+      vm_owner_thread_stop();
+      active = false;
+    }
+  } owner_thread_guard{release_blocker};
+  ASSERT_GT(vm_owner_enqueue_executor_task(
+                second, "room_output_projection", "unit-timeout-wave-blocker",
+                [&] {
+                  blocker_started.store(1, std::memory_order_release);
+                  while (release_blocker.load(std::memory_order_acquire) == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                  }
+                }),
+            0u);
+  for (int index = 0;
+       index < 200 && blocker_started.load(std::memory_order_acquire) == 0;
+       ++index) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {first, second}, {first_reservation, second_reservation},
+      {"owner-room-player-a", "owner-room-player-b"}, {19, 20}, 1,
+      &submitted));
+  ASSERT_EQ(submitted.submitted, (std::vector<bool>{true, true}));
+  ASSERT_EQ(gateway_room_output_projection_pending_count(), 2);
+  for (int index = 0; index < 200; ++index) {
+    if (vm_owner_future_state(submitted.future_ids[0]) ==
+        VM_OWNER_FUTURE_COMPLETED) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_COMPLETED);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_PENDING);
+
+  ASSERT_GE(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(first_session->output_fifo.size(), 1u);
+  ASSERT_TRUE(first_session->output_fifo.front().ready);
+  ASSERT_EQ(first_session->output_fifo.front().wire_bytes, first_expected);
+  ASSERT_EQ(second_session->output_fifo.size(), 1u);
+  ASSERT_TRUE(second_session->output_fifo.front().ready);
+  ASSERT_EQ(second_session->output_fifo.front().wire_bytes, second_expected);
+  ASSERT_EQ(gateway_room_output_projection_pending_count(), 0);
+  ASSERT_EQ(g_gateway_runtime_counters.room_output_projection_completed.load(),
+            completed_before + 2);
+  ASSERT_EQ(g_gateway_runtime_counters.room_output_projection_released.load(),
+            released_before);
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_room_output_state", first),
+               "completed");
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_room_output_state", second),
+               "completed");
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_room_output_event_count", first),
+            1);
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_room_output_slot_server_seq", first),
+            1201);
+
+  release_blocker.store(1, std::memory_order_release);
+  ASSERT_TRUE(gateway_test_drain_owner_room_mailbox(
+      second, "unit-timeout-wave-drain"));
+  owner_thread_guard.stop();
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-timeout-wave-a", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-timeout-wave-b", "test_done", "done"),
+            1);
+  destruct_object(first);
+  destruct_object(second);
+  free_object(
+      &first, "TestGatewayOwnerRoomOutputWaveTimeoutPreservesCompletedRecipient");
+  free_object(
+      &second, "TestGatewayOwnerRoomOutputWaveTimeoutPreservesCompletedRecipient");
+}
+
+TEST_F(DriverTest,
+       TestGatewayOwnerRoomOutputWaveDisconnectReleasesOtherRecipient) {
+  const auto completed_before =
+      g_gateway_runtime_counters.room_output_projection_completed.load();
+  const auto released_before =
+      g_gateway_runtime_counters.room_output_projection_released.load();
+  auto *first = create_gateway_session_for_test(
+      "gw-test-owner-room-disconnect-wave-a", "/clone/gateway_login_example",
+      125);
+  auto *second = create_gateway_session_for_test(
+      "gw-test-owner-room-disconnect-wave-b", "/clone/gateway_login_example",
+      126);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  add_ref(first,
+          "TestGatewayOwnerRoomOutputWaveDisconnectReleasesOtherRecipient");
+  add_ref(second,
+          "TestGatewayOwnerRoomOutputWaveDisconnectReleasesOtherRecipient");
+  vm_owner_set_id(first, "owner/test/gateway/room-disconnect-wave-a");
+  vm_owner_set_id(second, "owner/test/gateway/room-disconnect-wave-b");
+  auto *first_session = gateway_find_session_by_object(first);
+  auto *second_session = gateway_find_session_by_object(second);
+  ASSERT_NE(first_session, nullptr);
+  ASSERT_NE(second_session, nullptr);
+  const auto first_reservation = gateway_reserve_session_output_for_object(first);
+  const auto second_reservation = gateway_reserve_session_output_for_object(second);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(first_session, first_reservation));
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(second_session, second_reservation));
+
+  std::atomic<int> blocker_started{0};
+  std::atomic<int> release_blocker{0};
+  vm_owner_thread_start(2);
+  struct OwnerThreadDisconnectGuard {
+    std::atomic<int> &release;
+    bool active{true};
+
+    ~OwnerThreadDisconnectGuard() {
+      if (active) {
+        release.store(1, std::memory_order_release);
+        vm_owner_thread_stop();
+      }
+    }
+
+    void stop() {
+      release.store(1, std::memory_order_release);
+      vm_owner_thread_stop();
+      active = false;
+    }
+  } owner_thread_guard{release_blocker};
+  ASSERT_GT(vm_owner_enqueue_executor_task(
+                second, "room_output_projection",
+                "unit-disconnect-wave-blocker", [&] {
+                  blocker_started.store(1, std::memory_order_release);
+                  while (release_blocker.load(std::memory_order_acquire) == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                  }
+                }),
+            0u);
+  for (int index = 0;
+       index < 200 && blocker_started.load(std::memory_order_acquire) == 0;
+       ++index) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {first, second}, {first_reservation, second_reservation},
+      {"owner-room-player-a", "owner-room-player-b"}, {19, 20}, 1000,
+      &submitted));
+  for (int index = 0; index < 200; ++index) {
+    if (vm_owner_future_state(submitted.future_ids[0]) ==
+        VM_OWNER_FUTURE_COMPLETED) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(gateway_process_session_future_watches_at(0), 1);
+  ASSERT_EQ(gateway_session_future_watch_count(), 1);
+  ASSERT_FALSE(first_session->output_fifo.front().ready);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-disconnect-wave-b", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[1]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(first_session->output_fifo.size(), 1u);
+  ASSERT_TRUE(first_session->output_fifo.front().ready);
+  ASSERT_EQ(gateway_room_output_projection_pending_count(), 0);
+  ASSERT_EQ(g_gateway_runtime_counters.room_output_projection_completed.load(),
+            completed_before + 1);
+  ASSERT_EQ(g_gateway_runtime_counters.room_output_projection_released.load(),
+            released_before + 1);
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_room_output_state", first),
+               "completed");
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_room_output_state", second),
+               "released");
+
+  release_blocker.store(1, std::memory_order_release);
+  ASSERT_TRUE(gateway_test_drain_owner_room_mailbox(
+      second, "unit-disconnect-wave-drain"));
+  owner_thread_guard.stop();
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-disconnect-wave-a", "test_done", "done"),
+            1);
+  destruct_object(first);
+  destruct_object(second);
+  free_object(
+      &first,
+      "TestGatewayOwnerRoomOutputWaveDisconnectReleasesOtherRecipient");
+  free_object(
+      &second,
+      "TestGatewayOwnerRoomOutputWaveDisconnectReleasesOtherRecipient");
+}
+
+TEST_F(DriverTest, TestGatewayOwnerRoomOutputRejectsLiveSessionIdMismatch) {
+  constexpr const char *kSessionId = "gw-test-owner-room-mismatch";
+  auto *ob = create_gateway_session_for_test(
+      kSessionId, "/clone/gateway_login_example", 116);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayOwnerRoomOutputRejectsLiveSessionIdMismatch");
+  vm_owner_set_id(ob, "owner/test/gateway/room-output-mismatch");
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+  const auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(session, reservation_id));
+
+  vm_owner_thread_start(1);
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {ob}, {reservation_id}, {"owner-room-player"}, {19}, 1000,
+      &submitted));
+  ASSERT_EQ(submitted.submitted, (std::vector<bool>{true}));
+  for (int i = 0; i < 200; ++i) {
+    const auto state = vm_owner_future_state(submitted.future_ids[0]);
+    if (state == VM_OWNER_FUTURE_COMPLETED ||
+        state == VM_OWNER_FUTURE_FAILED) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_COMPLETED);
+  session->session_id = "live-session-id-mismatch";
+  ASSERT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+  session->session_id = kSessionId;
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_TRUE(session->output_fifo.empty());
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_room_output_reservation_id", ob),
+            static_cast<long>(reservation_id));
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_room_output_state", ob),
+               "released");
+  vm_owner_thread_stop();
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                kSessionId, "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayOwnerRoomOutputRejectsLiveSessionIdMismatch");
+}
+
+TEST_F(DriverTest, TestGatewayOwnerRoomOutputFallsBackInlineByteEquivalent) {
+  auto *ob = create_gateway_session_for_test(
+      "gw-test-owner-room-inline", "/clone/gateway_login_example", 112);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayOwnerRoomOutputFallsBackInlineByteEquivalent");
+  vm_owner_set_id(ob, "owner/test/gateway/room-output-inline");
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+
+  const auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(session, reservation_id));
+  std::string expected_wire;
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      session, reservation_id, &expected_wire));
+
+  ASSERT_FALSE(vm_owner_executor_available());
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {ob}, {reservation_id}, {"owner-room-player"}, {19}, 1000,
+      &submitted));
+  ASSERT_EQ(submitted.submitted, (std::vector<bool>{false}));
+  ASSERT_EQ(submitted.filled_inline, (std::vector<bool>{true}));
+  ASSERT_EQ(submitted.future_ids, (std::vector<uint64_t>{0}));
+  ASSERT_EQ(submitted.event_counts, (std::vector<LPC_INT>{1}));
+  ASSERT_EQ(submitted.slot_server_seqs, (std::vector<LPC_INT>{1201}));
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(session->output_fifo.size(), 1u);
+  ASSERT_TRUE(session->output_fifo.front().ready);
+  ASSERT_EQ(session->output_fifo.front().reservation_id, reservation_id);
+  ASSERT_EQ(session->output_fifo.front().wire_bytes, expected_wire);
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-inline", "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(&ob,
+              "TestGatewayOwnerRoomOutputFallsBackInlineByteEquivalent");
+}
+
+TEST_F(DriverTest, TestGatewayOwnerRoomOutputStagesInlineFallbackBatchBeforeFill) {
+  auto *first = create_gateway_session_for_test(
+      "gw-test-owner-room-inline-batch-a", "/clone/gateway_login_example", 117);
+  auto *second = create_gateway_session_for_test(
+      "gw-test-owner-room-inline-batch-b", "/clone/gateway_login_example", 118);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  add_ref(first, "TestGatewayOwnerRoomOutputStagesInlineFallbackBatchBeforeFill");
+  add_ref(second, "TestGatewayOwnerRoomOutputStagesInlineFallbackBatchBeforeFill");
+  vm_owner_set_id(first, "owner/test/gateway/room-output-inline-batch-a");
+  vm_owner_set_id(second, "owner/test/gateway/room-output-inline-batch-b");
+  auto *first_session = gateway_find_session_by_object(first);
+  auto *second_session = gateway_find_session_by_object(second);
+  ASSERT_NE(first_session, nullptr);
+  ASSERT_NE(second_session, nullptr);
+  const auto first_reservation = gateway_reserve_session_output_for_object(first);
+  const auto second_reservation = gateway_reserve_session_output_for_object(second);
+  ASSERT_GT(first_reservation, 0u);
+  ASSERT_GT(second_reservation, 0u);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(first_session, first_reservation));
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(second_session, second_reservation));
+  std::string first_expected;
+  std::string second_expected;
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      first_session, first_reservation, &first_expected,
+      "owner-room-player-a", 19));
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      second_session, second_reservation, &second_expected,
+      "owner-room-player-b", 20));
+
+  ASSERT_FALSE(vm_owner_executor_available());
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {first, second}, {first_reservation, second_reservation},
+      {"owner-room-player-a", "owner-room-player-b"}, {19, 20}, 1000,
+      &submitted));
+  ASSERT_EQ(submitted.submitted, (std::vector<bool>{false, false}));
+  ASSERT_EQ(submitted.filled_inline, (std::vector<bool>{true, true}));
+  ASSERT_EQ(submitted.future_ids, (std::vector<uint64_t>{0, 0}));
+  ASSERT_EQ(first_session->output_fifo.size(), 1u);
+  ASSERT_EQ(second_session->output_fifo.size(), 1u);
+  ASSERT_TRUE(first_session->output_fifo.front().ready);
+  ASSERT_TRUE(second_session->output_fifo.front().ready);
+  ASSERT_EQ(first_session->output_fifo.front().wire_bytes, first_expected);
+  ASSERT_EQ(second_session->output_fifo.front().wire_bytes, second_expected);
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-inline-batch-a", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-inline-batch-b", "test_done", "done"),
+            1);
+  destruct_object(first);
+  destruct_object(second);
+  free_object(&first,
+              "TestGatewayOwnerRoomOutputStagesInlineFallbackBatchBeforeFill");
+  free_object(&second,
+              "TestGatewayOwnerRoomOutputStagesInlineFallbackBatchBeforeFill");
+}
+
+TEST_F(DriverTest,
+       TestGatewayOwnerRoomOutputInvalidInlineInputWritesNoRecipient) {
+  auto *first = create_gateway_session_for_test(
+      "gw-test-owner-room-inline-failure-a", "/clone/gateway_login_example",
+      119);
+  auto *second = create_gateway_session_for_test(
+      "gw-test-owner-room-inline-failure-b", "/clone/gateway_login_example",
+      120);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  add_ref(
+      first,
+      "TestGatewayOwnerRoomOutputInvalidInlineInputWritesNoRecipient");
+  add_ref(
+      second,
+      "TestGatewayOwnerRoomOutputInvalidInlineInputWritesNoRecipient");
+  vm_owner_set_id(first, "owner/test/gateway/room-output-inline-failure-a");
+  vm_owner_set_id(second, "owner/test/gateway/room-output-inline-failure-b");
+  auto *first_session = gateway_find_session_by_object(first);
+  auto *second_session = gateway_find_session_by_object(second);
+  ASSERT_NE(first_session, nullptr);
+  ASSERT_NE(second_session, nullptr);
+  const auto first_reservation = gateway_reserve_session_output_for_object(first);
+  const auto second_reservation = gateway_reserve_session_output_for_object(second);
+  ASSERT_GT(first_reservation, 0u);
+  ASSERT_GT(second_reservation, 0u);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(first_session, first_reservation));
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(second_session, second_reservation));
+
+  ASSERT_FALSE(vm_owner_executor_available());
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  const std::string invalid_utf8_scope(1, static_cast<char>(0xc3));
+  ASSERT_FALSE(gateway_submit_pending_message_event_batches_for_objects(
+      {first, second}, {first_reservation, second_reservation},
+      {"owner-room-player-a", invalid_utf8_scope}, {19, 20}, 1000,
+      &submitted));
+  ASSERT_TRUE(submitted.submitted.empty());
+  ASSERT_TRUE(submitted.filled_inline.empty());
+  ASSERT_TRUE(submitted.future_ids.empty());
+  ASSERT_EQ(first_session->output_fifo.size(), 1u);
+  ASSERT_EQ(second_session->output_fifo.size(), 1u);
+  ASSERT_FALSE(first_session->output_fifo.front().ready);
+  ASSERT_FALSE(second_session->output_fifo.front().ready);
+  ASSERT_TRUE(first_session->output_fifo.front().wire_bytes.empty());
+  ASSERT_TRUE(second_session->output_fifo.front().wire_bytes.empty());
+  ASSERT_EQ(gateway_fill_pending_message_event_batch_for_object(
+                first, first_reservation, "owner-room-player-a",
+                std::strlen("owner-room-player-a"), 19),
+            1);
+  ASSERT_TRUE(first_session->output_fifo.front().ready);
+  ASSERT_FALSE(first_session->output_fifo.front().wire_bytes.empty());
+  ASSERT_EQ(gateway_release_session_output(second_session, second_reservation),
+            1);
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-inline-failure-a", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-inline-failure-b", "test_done", "done"),
+            1);
+  destruct_object(first);
+  destruct_object(second);
+  free_object(
+      &first,
+      "TestGatewayOwnerRoomOutputInvalidInlineInputWritesNoRecipient");
+  free_object(
+      &second,
+      "TestGatewayOwnerRoomOutputInvalidInlineInputWritesNoRecipient");
+}
+
+TEST_F(DriverTest, TestGatewayOwnerRoomOutputTimeoutFallsBackInline) {
+  auto *ob = create_gateway_session_for_test(
+      "gw-test-owner-room-timeout", "/clone/gateway_login_example", 113);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayOwnerRoomOutputTimeoutFallsBackInline");
+  vm_owner_set_id(ob, "owner/test/gateway/room-output-timeout");
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+
+  const auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(session, reservation_id));
+  std::string expected_wire;
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      session, reservation_id, &expected_wire));
+
+  vm_owner_thread_start(1);
+  std::atomic<int> blocker_started{0};
+  ASSERT_GT(vm_owner_enqueue_executor_task(
+                ob, "room_output_projection", "unit-timeout-blocker", [&] {
+                  blocker_started.store(1, std::memory_order_release);
+                  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                }),
+            0u);
+  for (int i = 0; i < 200 &&
+                  blocker_started.load(std::memory_order_acquire) == 0;
+       ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {ob}, {reservation_id}, {"owner-room-player"}, {19}, 1,
+      &submitted));
+  ASSERT_EQ(submitted.submitted, (std::vector<bool>{true}));
+  ASSERT_EQ(submitted.future_ids.size(), 1u);
+  ASSERT_GT(submitted.future_ids[0], 0u);
+  ASSERT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(session->output_fifo.size(), 1u);
+  ASSERT_TRUE(session->output_fifo.front().ready);
+  ASSERT_EQ(session->output_fifo.front().wire_bytes, expected_wire);
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_room_output_reservation_id", ob),
+            static_cast<long>(reservation_id));
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_room_output_state", ob),
+               "completed");
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_room_output_event_count", ob),
+            1);
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_room_output_slot_server_seq", ob),
+            1201);
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_room_output_callback_off_main", ob),
+            0);
+  ASSERT_TRUE(gateway_test_drain_owner_room_mailbox(
+      ob, "unit-timeout-drain"));
+  vm_owner_thread_stop();
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-timeout", "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(
+      &ob, "TestGatewayOwnerRoomOutputTimeoutFallsBackInline");
+}
+
+TEST_F(DriverTest, TestGatewayOwnerRoomOutputDisconnectConsumesFuture) {
+  auto *ob = create_gateway_session_for_test(
+      "gw-test-owner-room-disconnect", "/clone/gateway_login_example", 114);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayOwnerRoomOutputDisconnectConsumesFuture");
+  vm_owner_set_id(ob, "owner/test/gateway/room-output-disconnect");
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+
+  const auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(session, reservation_id));
+
+  vm_owner_thread_start(1);
+  std::atomic<int> blocker_started{0};
+  ASSERT_GT(vm_owner_enqueue_executor_task(
+                ob, "room_output_projection", "unit-disconnect-blocker", [&] {
+                  blocker_started.store(1, std::memory_order_release);
+                  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                }),
+            0u);
+  for (int i = 0; i < 200 &&
+                  blocker_started.load(std::memory_order_acquire) == 0;
+       ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {ob}, {reservation_id}, {"owner-room-player"}, {19}, 1000,
+      &submitted));
+  ASSERT_EQ(submitted.submitted, (std::vector<bool>{true}));
+  ASSERT_EQ(gateway_session_future_watch_count(), 1);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-disconnect", "test_done", "done"),
+            1);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(gateway_find_session("gw-test-owner-room-disconnect"), nullptr);
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_room_output_reservation_id", ob),
+            static_cast<long>(reservation_id));
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_room_output_state", ob),
+               "released");
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_room_output_callback_off_main", ob),
+            0);
+  ASSERT_TRUE(gateway_test_drain_owner_room_mailbox(
+      ob, "unit-disconnect-drain"));
+  vm_owner_thread_stop();
+
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayOwnerRoomOutputDisconnectConsumesFuture");
+}
+
+TEST_F(DriverTest, TestGatewayOwnerRoomOutputStaleOwnerEpochFallsBackInline) {
+  auto *ob = create_gateway_session_for_test(
+      "gw-test-owner-room-stale", "/clone/gateway_login_example", 115);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayOwnerRoomOutputStaleOwnerEpochFallsBackInline");
+  vm_owner_set_id(ob, "owner/test/gateway/room-output-stale-a");
+  auto *session = gateway_find_session_by_object(ob);
+  ASSERT_NE(session, nullptr);
+
+  const auto reservation_id = gateway_reserve_session_output_for_object(ob);
+  ASSERT_GT(reservation_id, 0u);
+  ASSERT_TRUE(gateway_test_seed_owner_room_event(session, reservation_id));
+  std::string expected_wire;
+  ASSERT_TRUE(gateway_test_encode_owner_room_wire(
+      session, reservation_id, &expected_wire));
+
+  vm_owner_thread_start(1);
+  std::atomic<int> blocker_started{0};
+  ASSERT_GT(vm_owner_enqueue_executor_task(
+                ob, "room_output_projection", "unit-stale-blocker", [&] {
+                  blocker_started.store(1, std::memory_order_release);
+                  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                }),
+            0u);
+  for (int i = 0; i < 200 &&
+                  blocker_started.load(std::memory_order_acquire) == 0;
+       ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(blocker_started.load(std::memory_order_acquire), 1);
+
+  GatewayPendingMessageEventBatchOwnerSubmitResult submitted;
+  ASSERT_TRUE(gateway_submit_pending_message_event_batches_for_objects(
+      {ob}, {reservation_id}, {"owner-room-player"}, {19}, 1000,
+      &submitted));
+  ASSERT_EQ(submitted.submitted, (std::vector<bool>{true}));
+  vm_owner_set_id(ob, "owner/test/gateway/room-output-stale-b");
+  ASSERT_EQ(gateway_process_session_future_watches_at(
+                std::numeric_limits<uint64_t>::max()),
+            1);
+  ASSERT_EQ(vm_owner_future_state(submitted.future_ids[0]),
+            VM_OWNER_FUTURE_UNKNOWN);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(session->output_fifo.size(), 1u);
+  ASSERT_TRUE(session->output_fifo.front().ready);
+  ASSERT_EQ(session->output_fifo.front().wire_bytes, expected_wire);
+  ASSERT_EQ(gateway_test_call_number(
+                "query_last_owner_room_output_reservation_id", ob),
+            static_cast<long>(reservation_id));
+  ASSERT_STREQ(gateway_test_call_string(
+                   "query_last_owner_room_output_state", ob),
+               "completed");
+  vm_owner_set_id(ob, "owner/test/gateway/room-output-stale-a");
+  ASSERT_TRUE(gateway_test_drain_owner_room_mailbox(
+      ob, "unit-stale-drain"));
+  vm_owner_thread_stop();
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-owner-room-stale", "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayOwnerRoomOutputStaleOwnerEpochFallsBackInline");
 }
 
 TEST_F(DriverTest, TestGatewayFutureWatchTimesOutAndReleasesReservation) {
@@ -12925,6 +16792,97 @@ TEST_F(DriverTest, TestGatewayGenericFutureWatchDispatchesNonSessionObjectOnMain
 
   destruct_object(ob);
   free_object(&ob, "TestGatewayGenericFutureWatchDispatchesNonSessionObjectOnMain");
+}
+
+TEST_F(DriverTest, TestGatewaySessionWatchCancellationKeepsGenericWatchWakeups) {
+  auto *generic_ob = clone_object_for_test("clone/gateway_login_example");
+  auto *session_ob = create_gateway_session_for_test(
+      "gw-test-mixed-future-watch", "/clone/gateway_login_example", 117);
+  ASSERT_NE(generic_ob, nullptr);
+  ASSERT_NE(session_ob, nullptr);
+  add_ref(generic_ob,
+          "TestGatewaySessionWatchCancellationKeepsGenericWatchWakeups/generic");
+  add_ref(session_ob,
+          "TestGatewaySessionWatchCancellationKeepsGenericWatchWakeups/session");
+  vm_owner_set_id(generic_ob, "owner/test/gateway/mixed-watch-generic");
+  vm_owner_set_id(session_ob, "owner/test/gateway/mixed-watch-session");
+
+  push_number(41);
+  auto *generic_submitted =
+      call_lpc_method(generic_ob, "submit_gateway_owner_future", 1);
+  ASSERT_NE(generic_submitted, nullptr);
+  ASSERT_EQ(generic_submitted->type, T_MAPPING);
+  const auto generic_future_id =
+      gateway_test_mapping_number(generic_submitted->u.map, "future_id");
+  ASSERT_GT(generic_future_id, 0);
+  ASSERT_EQ(gateway_watch_future_for_object(
+                generic_ob, 706, static_cast<uint64_t>(generic_future_id), 1000),
+            1);
+
+  push_number(51);
+  auto *session_submitted =
+      call_lpc_method(session_ob, "submit_gateway_owner_future", 1);
+  ASSERT_NE(session_submitted, nullptr);
+  ASSERT_EQ(session_submitted->type, T_MAPPING);
+  const auto session_future_id =
+      gateway_test_mapping_number(session_submitted->u.map, "future_id");
+  ASSERT_GT(session_future_id, 0);
+  const auto reservation_id =
+      gateway_reserve_session_output_for_object(session_ob);
+  ASSERT_GT(reservation_id, 0u);
+  ASSERT_EQ(gateway_watch_session_future_for_object(
+                session_ob, reservation_id,
+                static_cast<uint64_t>(session_future_id), 1000),
+            1);
+  ASSERT_EQ(gateway_future_watch_count(), 1);
+  ASSERT_EQ(gateway_session_future_watch_count(), 1);
+
+  // The timer is the required fallback when terminal notifications are
+  // temporarily unavailable. Cancelling an unrelated session watch must not
+  // delete that timer while the generic watch is still live.
+  vm_owner_set_future_terminal_notifier(nullptr);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                "gw-test-mixed-future-watch", "test_done", "done"),
+            1);
+  ASSERT_EQ(gateway_session_future_watch_count(), 0);
+  ASSERT_EQ(gateway_future_watch_count(), 1);
+
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 200; ++i) {
+    if (vm_owner_future_state(static_cast<uint64_t>(generic_future_id)) ==
+        VM_OWNER_FUTURE_COMPLETED) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  for (int i = 0; i < 200; ++i) {
+    event_base_loop(g_event_base, EVLOOP_ONCE | EVLOOP_NONBLOCK);
+    if (gateway_test_call_number(
+            "query_last_generic_owner_future_context_id", generic_ob) == 706) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  vm_owner_thread_stop();
+
+  const auto dispatched = gateway_test_call_number(
+      "query_last_generic_owner_future_context_id", generic_ob);
+  EXPECT_EQ(dispatched, 706);
+  if (gateway_future_watch_count() != 0) {
+    gateway_process_future_watches_at(std::numeric_limits<uint64_t>::max());
+  }
+  EXPECT_EQ(gateway_future_watch_count(), 0);
+  EXPECT_EQ(vm_owner_future_state(static_cast<uint64_t>(generic_future_id)),
+            VM_OWNER_FUTURE_UNKNOWN);
+
+  destruct_object(generic_ob);
+  destruct_object(session_ob);
+  free_object(
+      &generic_ob,
+      "TestGatewaySessionWatchCancellationKeepsGenericWatchWakeups/generic");
+  free_object(
+      &session_ob,
+      "TestGatewaySessionWatchCancellationKeepsGenericWatchWakeups/session");
 }
 
 TEST_F(DriverTest, TestGatewayGenericFutureWatchRejectsAnotherObjectFuture) {
@@ -13164,6 +17122,44 @@ TEST_F(DriverTest, TestGatewaySessionDestroyCallsGatewayDisconnected) {
   free_object(&ob, "TestGatewaySessionDestroyCallsGatewayDisconnected");
 }
 
+TEST_F(DriverTest, TestGatewaySessionDestroyAccountsReadyAndPendingFifoEntries) {
+  const char *session_id = "gw-test-destroy-fifo-accounting";
+  auto *ob = create_gateway_session_for_test(
+      session_id, "/clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewaySessionDestroyAccountsReadyAndPendingFifoEntries");
+  auto *session = gateway_find_session(session_id);
+  ASSERT_NE(session, nullptr);
+  ASSERT_EQ(gateway_enqueue_session_protocol_output(
+                session, "ready-on-destroy", 16),
+            1);
+  ASSERT_GT(gateway_reserve_session_output(session), 0u);
+  ASSERT_EQ(session->output_fifo.size(), 2u);
+  ASSERT_TRUE(session->output_fifo.front().ready);
+  ASSERT_FALSE(session->output_fifo.back().ready);
+
+  const auto ready_before =
+      g_gateway_runtime_counters.output_fifo_destroyed_ready.load(
+          std::memory_order_relaxed);
+  const auto pending_before =
+      g_gateway_runtime_counters.output_fifo_destroyed_pending.load(
+          std::memory_order_relaxed);
+  ASSERT_EQ(gateway_destroy_session_internal(
+                session_id, "client_close", "bye"),
+            1);
+  ASSERT_EQ(gateway_find_session(session_id), nullptr);
+  ASSERT_EQ(g_gateway_runtime_counters.output_fifo_destroyed_ready.load(
+                std::memory_order_relaxed),
+            ready_before + 1);
+  ASSERT_EQ(g_gateway_runtime_counters.output_fifo_destroyed_pending.load(
+                std::memory_order_relaxed),
+            pending_before + 1);
+
+  destruct_object(ob);
+  free_object(&ob,
+              "TestGatewaySessionDestroyAccountsReadyAndPendingFifoEntries");
+}
+
 TEST_F(DriverTest, TestGatewaySessionDestroyAllowsNetDeadSelfDestruct) {
   auto *ob = create_gateway_session_for_test("gw-test-net-dead-destruct",
                                              "/clone/gateway_net_dead_destruct_user");
@@ -13237,7 +17233,10 @@ TEST_F(DriverTest, TestGatewayMasterReconnectRebindsExistingSessionWithoutLosing
   ASSERT_NE(ob->interactive, nullptr);
   ASSERT_TRUE(gateway_is_session(ob));
 
-  ASSERT_EQ(gateway_enqueue_session_output(session, "queued-while-detached"), 1);
+  ASSERT_EQ(gateway_enqueue_session_protocol_output(
+                session, "queued-while-detached",
+                sizeof("queued-while-detached") - 1),
+            1);
   ASSERT_EQ(session->output_fifo.size(), 1u);
 
   ASSERT_TRUE(gateway_dispatch_message_for_test(
@@ -13250,8 +17249,12 @@ TEST_F(DriverTest, TestGatewayMasterReconnectRebindsExistingSessionWithoutLosing
   ASSERT_STREQ(ob->interactive->gateway_real_ip, "127.0.0.2");
   ASSERT_EQ(ob->interactive->gateway_real_port, 6041);
   ASSERT_EQ(gateway_flush_session_output_fifo_with_writer(session, writer), 1);
-  ASSERT_EQ(writes, (std::vector<std::pair<int, std::string>>{
-                        {new_master_fd, "queued-while-detached"}}));
+  ASSERT_EQ(writes.size(), 1u);
+  ASSERT_EQ(writes[0].first, new_master_fd);
+  const auto queued_wire = nlohmann::json::parse(writes[0].second);
+  ASSERT_EQ(queued_wire["type"], "output");
+  ASSERT_EQ(queued_wire["cid"], session_id);
+  ASSERT_EQ(queued_wire["data"], "queued-while-detached");
 
   ASSERT_TRUE(gateway_dispatch_message_for_test(
       old_master_fd,

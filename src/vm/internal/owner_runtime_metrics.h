@@ -76,6 +76,9 @@
   X(owner_executor_callback_queued, 0)                            \
   X(owner_executor_callback_dispatched, 0)                        \
   X(owner_executor_callback_dropped, 0)                           \
+  X(owner_executor_callback_cancelled_before_dispatch, 0)         \
+  X(owner_message_cancelled_before_dispatch, 0)                   \
+  X(owner_other_task_cancelled_before_dispatch, 0)                \
   X(owner_executor_callback_main_cleanup_queued, 0)               \
   X(owner_executor_callback_main_cleanup_dispatched, 0)           \
   X(owner_executor_admission_accepted, 0)                         \

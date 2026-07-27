@@ -27,3 +27,6 @@ target_compile_definitions(lpc_vm_bench PRIVATE -DTESTSUITE_DIR="${CMAKE_SOURCE_
 add_executable(object_store_bench object_store_bench.cc)
 target_link_libraries(object_store_bench PRIVATE ${FLUFFOS_LINK})
 target_compile_definitions(object_store_bench PRIVATE -DTESTSUITE_DIR="${CMAKE_SOURCE_DIR}/testsuite")
+
+add_executable(gateway_full_wire_bench gateway_full_wire_bench.cc)
+target_link_libraries(gateway_full_wire_bench PRIVATE ${FLUFFOS_LINK})

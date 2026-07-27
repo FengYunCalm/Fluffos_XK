@@ -178,6 +178,12 @@ void shutdownMudOS(int exit_code) {
   complete_all_asyncio();
 #endif
   vm_worker_stop();
+#ifdef PACKAGE_GATEWAY
+  auto *owner_output_quiesce =
+      gateway_owner_output_quiesce("driver shutdown");
+  free_mapping(owner_output_quiesce);
+#endif
+  vm_owner_thread_stop();
 
 #ifdef PACKAGE_DB
   db_cleanup();

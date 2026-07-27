@@ -24,7 +24,9 @@
 #include <functional>
 #include <limits>
 #include <list>
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -41,15 +43,51 @@ std::atomic<uint64_t> g_gateway_next_output_reservation_id{1};
 std::atomic<uint64_t> g_gateway_next_message_event_wave_id{1};
 std::atomic<long> g_gateway_command_input_pending_sessions{0};
 std::atomic<long> g_gateway_command_task_pending_sessions{0};
+enum class GatewayFutureOutputKind : uint8_t {
+  kMapping = 0,
+  kProtocolPayload,
+  kValidatedWire,
+};
 struct GatewaySessionFutureWatch {
   std::string session_id;
   std::string user_ob_name;
+  std::string owner_id;
   int64_t user_ob_load_time{0};
+  uint64_t owner_epoch{0};
   uint64_t reservation_id{0};
   uint64_t future_id{0};
   uint64_t deadline_ms{0};
   uint64_t registered_at_ns{0};
-  bool encoded_output{false};
+  LPC_INT event_count{0};
+  LPC_INT slot_server_seq{0};
+  uint64_t projection_generation{0};
+  uint64_t room_output_wave_id{0};
+  size_t room_output_wave_index{0};
+  GatewayFutureOutputKind output_kind{GatewayFutureOutputKind::kMapping};
+};
+struct GatewayPendingMessageEventProjectionWork {
+  GatewayPendingMessageEventProjectionSnapshot snapshot;
+  GatewayPendingMessageEventProjectionColumns columns;
+  std::string prevalidated_wire_bytes;
+};
+using GatewayRoomOutputRetrySchedule = std::multimap<uint64_t, uint64_t>;
+struct GatewayRoomOutputWaveItem {
+  GatewaySessionFutureWatch watch;
+  std::shared_ptr<const GatewayPendingMessageEventProjectionWork> work;
+  bool terminal{false};
+  bool completed{false};
+  bool inline_fallback{false};
+  bool reservation_closed{false};
+  bool notification_finalized{false};
+  std::string wire_bytes;
+};
+struct GatewayRoomOutputWave {
+  uint64_t wave_id{0};
+  std::vector<GatewayRoomOutputWaveItem> items;
+  uint64_t retry_started_at_ms{0};
+  uint64_t retry_due_at_ms{0};
+  uint32_t retry_attempts{0};
+  std::optional<GatewayRoomOutputRetrySchedule::iterator> retry_schedule;
 };
 struct GatewayFutureWatch {
   std::string target_ob_name;
@@ -61,6 +99,9 @@ struct GatewayFutureWatch {
 };
 std::unordered_map<uint64_t, GatewaySessionFutureWatch> g_gateway_session_future_watches;
 std::unordered_map<uint64_t, uint64_t> g_gateway_future_to_reservation;
+std::unordered_map<uint64_t, GatewayRoomOutputWave> g_gateway_room_output_waves;
+GatewayRoomOutputRetrySchedule g_gateway_room_output_retry_schedule;
+uint64_t g_gateway_next_room_output_wave_id = 1;
 std::list<uint64_t> g_gateway_future_watch_queue;
 std::unordered_map<uint64_t, std::list<uint64_t>::iterator> g_gateway_future_watch_queue_positions;
 std::unordered_map<uint64_t, GatewayFutureWatch> g_gateway_future_watches;
@@ -73,13 +114,47 @@ constexpr int kGatewayCommandMainDrainBudget = 16;
 constexpr size_t kGatewayMaxFutureWatches = 65536;
 constexpr int kGatewayFutureWatchPollIntervalMs = 1;
 constexpr size_t kGatewayFutureWatchPollBudget = 64;
+constexpr size_t kGatewayRoomOutputRetryBudget = 16;
+constexpr uint64_t kGatewayRoomOutputRetryWallBudgetNs = 500000;
+constexpr uint64_t kGatewayRoomOutputRetryBaseDelayMs = 2;
+constexpr uint64_t kGatewayRoomOutputRetryMaxDelayMs = 128;
+constexpr uint64_t kGatewayRoomOutputRetryMaxHoldMs = 2000;
+constexpr uint32_t kGatewayRoomOutputRetryMaxAttempts = 12;
 constexpr size_t kGatewayMessageEventTemplateCacheMaxEntries = 256;
 constexpr size_t kGatewayMessageEventTemplateCacheMaxBytes = 4 * 1024 * 1024;
 constexpr size_t kGatewayMessageEventTemplateCacheMaxItemBytes = 64 * 1024;
+constexpr LPC_INT kGatewayOwnerRoomOutputMaxEvents = 128;
 
 std::unordered_multimap<size_t, GatewayMessageEventTemplate>
     g_gateway_message_event_template_cache;
 size_t g_gateway_message_event_template_cache_bytes = 0;
+
+class GatewayWireOutput;
+bool gateway_dispatch_future_output_notification(
+    object_t *ob, uint64_t reservation_id, const char *state,
+    LPC_INT event_count, LPC_INT slot_server_seq);
+void gateway_finalize_cancelled_session_future_watch(
+    const GatewaySessionFutureWatch &watch, const char *reason,
+    bool release_non_mapping_reservation);
+bool gateway_pending_message_event_projection_matches(
+    const GatewaySession *sess, uint64_t reservation_id, uint64_t generation,
+    bool require_sealed);
+bool gateway_stage_session_wire_output(GatewaySession *sess,
+                                       uint64_t reservation_id,
+                                       GatewayWireOutput wire_output);
+std::optional<GatewaySessionFutureWatch>
+gateway_detach_session_future_watch(uint64_t reservation_id);
+size_t gateway_abort_room_output_wave(uint64_t wave_id, const char *reason,
+                                      const std::string *skip_release_session);
+void gateway_cancel_room_output_wave_session_items(
+    const std::string &session_id, GatewaySession *sess, const char *reason,
+    bool release_reservations);
+int gateway_process_room_output_wave_watch(
+    const GatewaySessionFutureWatch &watch, uint64_t now_ms);
+bool gateway_room_output_wave_all_terminal(
+    const GatewayRoomOutputWave &wave);
+bool gateway_publish_room_output_wave(uint64_t wave_id);
+void gateway_process_room_output_publish_retries(uint64_t now_ms);
 
 uint64_t gateway_session_now_ns() {
   return static_cast<uint64_t>(
@@ -105,6 +180,19 @@ void gateway_session_record_latency(std::atomic<uint64_t> &total, std::atomic<ui
   total.fetch_add(elapsed_ns, std::memory_order_relaxed);
   samples.fetch_add(1, std::memory_order_relaxed);
   gateway_session_record_max(max, elapsed_ns);
+}
+
+void gateway_session_record_thread_cpu(
+    std::atomic<uint64_t> &total, std::atomic<uint64_t> &max,
+    std::atomic<uint64_t> &samples, std::atomic<uint64_t> &unavailable,
+    int64_t started_ns) {
+  const auto finished_ns = get_current_thread_cpu_time_ns();
+  if (started_ns < 0 || finished_ns < started_ns) {
+    unavailable.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+  gateway_session_record_latency(
+      total, max, samples, static_cast<uint64_t>(finished_ns - started_ns));
 }
 
 void gateway_record_future_completion_thread_cpu(int64_t started_ns) {
@@ -219,6 +307,43 @@ bool gateway_append_json_string(const char *value, size_t length, std::string *o
   return true;
 }
 
+bool gateway_escape_json_string_content(std::string_view value,
+                                        std::string *escaped) {
+  if (!escaped) {
+    return false;
+  }
+  std::string quoted;
+  try {
+    quoted.reserve(value.size() + 2);
+    if (!gateway_append_json_string(value.data(), value.size(), &quoted) ||
+        quoted.size() < 2) {
+      return false;
+    }
+    escaped->assign(quoted.data() + 1, quoted.size() - 2);
+  } catch (const std::exception &) {
+    escaped->clear();
+    return false;
+  }
+  return true;
+}
+
+bool gateway_encode_inner_json_string_for_outer(std::string_view value,
+                                                std::string *escaped) {
+  if (!escaped) {
+    return false;
+  }
+  std::string inner_json;
+  try {
+    inner_json.reserve(value.size() + 2);
+    if (!gateway_append_json_string(value.data(), value.size(), &inner_json)) {
+      return false;
+    }
+  } catch (const std::exception &) {
+    return false;
+  }
+  return gateway_escape_json_string_content(inner_json, escaped);
+}
+
 std::string gateway_encode_output_envelope_slow(const std::string &session_id, const char *data,
                                                 size_t len) {
   nlohmann::json payload{
@@ -246,12 +371,174 @@ std::string gateway_encode_output_envelope(const std::string &session_id,
   return encoded;
 }
 
+class GatewayWireOutput {
+ public:
+  GatewayWireOutput(GatewayWireOutput &&) noexcept = default;
+  GatewayWireOutput &operator=(GatewayWireOutput &&) noexcept = default;
+  GatewayWireOutput(const GatewayWireOutput &) = delete;
+  GatewayWireOutput &operator=(const GatewayWireOutput &) = delete;
+
+  bool empty() const { return wire_bytes_.empty(); }
+  bool bound_to(const GatewaySession *sess) const {
+    return sess && !session_id_.empty() && session_id_ == sess->session_id;
+  }
+  std::string release() && { return std::move(wire_bytes_); }
+
+ private:
+  GatewayWireOutput(std::string session_id, std::string wire_bytes)
+      : session_id_(std::move(session_id)), wire_bytes_(std::move(wire_bytes)) {}
+
+  std::string session_id_;
+  std::string wire_bytes_;
+
+  friend class GatewayWireOutputFactory;
+};
+
+class GatewayWireOutputFactory {
+ public:
+  static std::optional<GatewayWireOutput> protocol_output(
+      const GatewaySession *sess, std::string_view data) {
+    if (!sess || sess->session_id.empty()) {
+      return std::nullopt;
+    }
+    try {
+      auto wire_bytes = gateway_encode_output_envelope(
+          sess->session_id, data.data(), data.size());
+      if (!valid_wire_bytes(wire_bytes)) {
+        return std::nullopt;
+      }
+      return GatewayWireOutput(sess->session_id, std::move(wire_bytes));
+    } catch (const std::exception &) {
+      return std::nullopt;
+    }
+  }
+
+  static std::optional<GatewayWireOutput> southbound_json(
+      const GatewaySession *sess, const nlohmann::json &payload) {
+    if (!sess || sess->session_id.empty() || !payload.is_object() ||
+        payload.size() != 3 || payload.value("type", "") != "output" ||
+        payload.value("cid", "") != sess->session_id ||
+        !payload.contains("data") || !payload["data"].is_string()) {
+      return std::nullopt;
+    }
+    try {
+      auto wire_bytes = payload.dump();
+      if (!valid_wire_bytes(wire_bytes)) {
+        return std::nullopt;
+      }
+      return GatewayWireOutput(sess->session_id, std::move(wire_bytes));
+    } catch (const std::exception &) {
+      return std::nullopt;
+    }
+  }
+
+  static std::optional<GatewayWireOutput> trusted_projected_wire(
+      const GatewaySession *sess, std::string wire_bytes) {
+    if (!sess || sess->session_id.empty() ||
+        !valid_wire_bytes(wire_bytes)) {
+      return std::nullopt;
+    }
+    try {
+      const auto payload = nlohmann::json::parse(wire_bytes);
+      if (!valid_output_envelope(sess, payload)) {
+        return std::nullopt;
+      }
+    } catch (const std::exception &) {
+      return std::nullopt;
+    }
+    return GatewayWireOutput(sess->session_id, std::move(wire_bytes));
+  }
+
+  static std::optional<GatewayWireOutput> session_send(
+      const GatewaySession *sess, nlohmann::json payload) {
+    if (!sess || sess->session_id.empty()) {
+      return std::nullopt;
+    }
+    if (payload.is_object()) {
+      payload["cid"] = sess->session_id;
+    } else {
+      payload = nlohmann::json{{"type", "output"},
+                               {"cid", sess->session_id},
+                               {"data", std::move(payload)}};
+    }
+    try {
+      auto wire_bytes = payload.dump();
+      if (!valid_wire_bytes(wire_bytes) || !payload.is_object() ||
+          payload.value("cid", "") != sess->session_id) {
+        return std::nullopt;
+      }
+      return GatewayWireOutput(sess->session_id, std::move(wire_bytes));
+    } catch (const std::exception &) {
+      return std::nullopt;
+    }
+  }
+
+ private:
+  static bool valid_wire_bytes(const std::string &wire_bytes) {
+    return !wire_bytes.empty() &&
+        wire_bytes.size() <= g_gateway_max_packet_size;
+  }
+
+  static bool valid_output_envelope(const GatewaySession *sess,
+                                    const nlohmann::json &payload) {
+    return sess && payload.is_object() && payload.size() == 3 &&
+        payload.value("type", "") == "output" &&
+        payload.value("cid", "") == sess->session_id &&
+        payload.contains("data") && payload["data"].is_string();
+  }
+};
+
+std::optional<GatewayWireOutput> gateway_prepare_session_send_wire(
+    GatewaySession *sess, nlohmann::json payload) {
+  return GatewayWireOutputFactory::session_send(sess, std::move(payload));
+}
+
+int gateway_enqueue_session_wire_output(GatewaySession *sess,
+                                        GatewayWireOutput wire_output);
+int gateway_fill_session_wire_output_with_writer(
+    GatewaySession *sess, uint64_t reservation_id,
+    GatewayWireOutput wire_output, GatewayOutputWriter writer);
+bool gateway_stage_session_wire_outputs(
+    const std::vector<GatewaySession *> &sessions,
+    const std::vector<uint64_t> &reservation_ids,
+    std::vector<GatewayWireOutput> *wire_outputs);
+
 bool gateway_json_object_members(std::string_view encoded, std::string_view *members) {
   if (!members || encoded.size() < 2 || encoded.front() != '{' || encoded.back() != '}') {
     return false;
   }
   *members = encoded.substr(1, encoded.size() - 2);
   return true;
+}
+
+bool gateway_parse_json_object(std::string_view encoded,
+                               nlohmann::json *object) {
+  if (encoded.empty()) {
+    return false;
+  }
+  auto parsed = nlohmann::json::parse(
+      encoded.begin(), encoded.end(), nullptr, false);
+  if (parsed.is_discarded() || !parsed.is_object()) {
+    return false;
+  }
+  if (object) {
+    *object = std::move(parsed);
+  }
+  return true;
+}
+
+bool gateway_validate_chat_stable_child_json(std::string_view encoded) {
+  nlohmann::json payload;
+  return gateway_parse_json_object(encoded, &payload) &&
+      !payload.contains("meta");
+}
+
+bool gateway_validate_chat_outer_dynamic_json(
+    std::string_view encoded, std::string_view *members) {
+  nlohmann::json payload;
+  return gateway_parse_json_object(encoded, &payload) && payload.size() == 1 &&
+      payload.contains("meta") && payload["meta"].is_object() &&
+      gateway_json_object_members(encoded, members);
 }
 
 bool gateway_append_lpc_int(LPC_INT value, std::string *out) {
@@ -279,6 +566,7 @@ bool gateway_build_preencoded_chat_batch_frame(
   constexpr std::string_view kChildSuffix =
       ",\"reliability\":\"important\"}}}";
   std::string_view outer_members;
+  std::vector<std::string_view> stable_members_json;
   const auto child_overhead = kChildPrefix.size() + kChildMetaPrefix.size() +
                               kSentAtPrefix.size() + kEpochPrefix.size() +
                               kChildSuffix.size() + 72;
@@ -286,24 +574,29 @@ bool gateway_build_preencoded_chat_batch_frame(
   size_t estimated_size;
 
   if (!frame || stable_children_json.empty() || message_epoch < 0 || first_server_seq <= 0 ||
-      sent_at <= 0 || !gateway_json_object_members(outer_dynamic_json, &outer_members) ||
+      sent_at <= 0 ||
+      !gateway_validate_chat_outer_dynamic_json(outer_dynamic_json,
+                                                &outer_members) ||
       stable_children_json.size() > static_cast<size_t>(std::numeric_limits<LPC_INT>::max()) ||
       first_server_seq > std::numeric_limits<LPC_INT>::max() -
                              static_cast<LPC_INT>(stable_children_json.size() - 1)) {
     return false;
   }
 
+  stable_members_json.reserve(stable_children_json.size());
   if (outer_members.size() > maximum_size - kFramePrefix.size() - 4) {
     return false;
   }
   estimated_size = kFramePrefix.size() + outer_members.size() + 4;
   for (const auto stable_json : stable_children_json) {
     std::string_view stable_members;
-    if (!gateway_json_object_members(stable_json, &stable_members) ||
+    if (!gateway_validate_chat_stable_child_json(stable_json) ||
+        !gateway_json_object_members(stable_json, &stable_members) ||
         stable_json.size() > maximum_size - estimated_size ||
         child_overhead > maximum_size - estimated_size - stable_json.size()) {
       return false;
     }
+    stable_members_json.push_back(stable_members);
     estimated_size += stable_json.size() + child_overhead;
   }
 
@@ -311,8 +604,7 @@ bool gateway_build_preencoded_chat_batch_frame(
   frame->reserve(estimated_size);
   frame->append(kFramePrefix);
   for (size_t index = 0; index < stable_children_json.size(); ++index) {
-    std::string_view stable_members;
-    gateway_json_object_members(stable_children_json[index], &stable_members);
+    const auto stable_members = stable_members_json[index];
     if (index > 0) {
       frame->push_back(',');
     }
@@ -406,19 +698,32 @@ bool gateway_parse_and_validate_stable_message_event(
       canonical.back() != '}') {
     return false;
   }
-  message_template->encoded.assign(encoded.data(), encoded.size());
-  message_template->stable_members.assign(canonical.data() + 1,
-                                          canonical.size() - 2);
-  message_template->reliability_json = event["reliability"].dump();
-  message_template->priority_json = event["priority"].dump();
+  GatewayMessageEventTemplate parsed;
+  parsed.encoded.assign(encoded.data(), encoded.size());
+  parsed.stable_members.assign(canonical.data() + 1, canonical.size() - 2);
+  parsed.reliability_json = event["reliability"].dump();
+  parsed.priority_json = event["priority"].dump();
   if (!event["collapse_key"].get_ref<const std::string &>().empty()) {
-    message_template->collapse_key_json = event["collapse_key"].dump();
+    parsed.collapse_key_json = event["collapse_key"].dump();
   }
-  message_template->ttl_ms = event["ttl_ms"].get<LPC_INT>();
-  message_template->has_id = event.contains("id");
-  message_template->has_scope = event.contains("scope");
-  message_template->has_causation_id = event.contains("causation_id");
-  message_template->has_correlation_id = event.contains("correlation_id");
+  if (!gateway_escape_json_string_content(
+          parsed.stable_members, &parsed.outer_escaped_stable_members) ||
+      !gateway_escape_json_string_content(
+          parsed.reliability_json, &parsed.outer_escaped_reliability_json) ||
+      !gateway_escape_json_string_content(
+          parsed.priority_json, &parsed.outer_escaped_priority_json) ||
+      (!parsed.collapse_key_json.empty() &&
+       !gateway_escape_json_string_content(
+           parsed.collapse_key_json,
+           &parsed.outer_escaped_collapse_key_json))) {
+    return false;
+  }
+  parsed.ttl_ms = event["ttl_ms"].get<LPC_INT>();
+  parsed.has_id = event.contains("id");
+  parsed.has_scope = event.contains("scope");
+  parsed.has_causation_id = event.contains("causation_id");
+  parsed.has_correlation_id = event.contains("correlation_id");
+  *message_template = std::move(parsed);
   return true;
 }
 
@@ -428,7 +733,11 @@ size_t gateway_message_event_template_bytes(
          message_template.stable_members.size() +
          message_template.reliability_json.size() +
          message_template.priority_json.size() +
-         message_template.collapse_key_json.size();
+         message_template.collapse_key_json.size() +
+         message_template.outer_escaped_stable_members.size() +
+         message_template.outer_escaped_reliability_json.size() +
+         message_template.outer_escaped_priority_json.size() +
+         message_template.outer_escaped_collapse_key_json.size();
 }
 
 const GatewayMessageEventTemplate *gateway_resolve_message_event_template(
@@ -697,9 +1006,34 @@ bool gateway_session_has_pending_reservation(GatewaySession *sess, uint64_t rese
   return false;
 }
 
+void gateway_discard_session_output_fifo(GatewaySession *sess) {
+  if (!sess || sess->output_fifo.empty()) {
+    return;
+  }
+  uint64_t ready = 0;
+  uint64_t pending = 0;
+  for (const auto &entry : sess->output_fifo) {
+    if (entry.ready) {
+      ready++;
+    } else {
+      pending++;
+    }
+  }
+  g_gateway_runtime_counters.output_fifo_destroyed_ready.fetch_add(
+      ready, std::memory_order_relaxed);
+  g_gateway_runtime_counters.output_fifo_destroyed_pending.fetch_add(
+      pending, std::memory_order_relaxed);
+  sess->output_fifo.clear();
+}
+
 std::string gateway_future_mapping_state(mapping_t *future) {
   auto *state = future ? find_string_in_mapping(future, "state") : nullptr;
   return state && state->type == T_STRING && state->u.string ? state->u.string : "unknown";
+}
+
+bool gateway_future_mapping_flag(mapping_t *future, const char *key) {
+  auto *value = future && key ? find_string_in_mapping(future, key) : nullptr;
+  return value && value->type == T_NUMBER && value->u.number != 0;
 }
 
 void gateway_stop_future_watch_timer() {
@@ -710,7 +1044,8 @@ void gateway_stop_future_watch_timer() {
 }
 
 bool gateway_has_future_watches() {
-  return !g_gateway_session_future_watches.empty() || !g_gateway_future_watches.empty();
+  return !g_gateway_session_future_watches.empty() ||
+      !g_gateway_future_watches.empty() || !g_gateway_room_output_waves.empty();
 }
 
 void gateway_future_watch_timer_cb(evutil_socket_t /*fd*/, short /*what*/, void * /*ctx*/);
@@ -755,7 +1090,16 @@ void gateway_schedule_future_watch_timer() {
   if (!g_gateway_future_watch_timer || event_pending(g_gateway_future_watch_timer, EV_TIMEOUT, nullptr)) {
     return;
   }
-  timeval delay{0, kGatewayFutureWatchPollIntervalMs * 1000};
+  uint64_t delay_ms = kGatewayFutureWatchPollIntervalMs;
+  if (g_gateway_session_future_watches.empty() &&
+      g_gateway_future_watches.empty() &&
+      !g_gateway_room_output_retry_schedule.empty()) {
+    const auto now_ms = gateway_session_now_ms();
+    const auto due_at_ms = g_gateway_room_output_retry_schedule.begin()->first;
+    delay_ms = due_at_ms > now_ms ? due_at_ms - now_ms : 1;
+  }
+  timeval delay{static_cast<time_t>(delay_ms / 1000),
+                static_cast<suseconds_t>((delay_ms % 1000) * 1000)};
   evtimer_add(g_gateway_future_watch_timer, &delay);
 }
 
@@ -789,7 +1133,7 @@ void gateway_cleanup_future_watch_timer() {
 }
 
 void gateway_consume_cancelled_future(uint64_t future_id, const char *reason) {
-  auto *cancelled = vm_owner_future_cancel(future_id, reason);
+  auto *cancelled = vm_owner_future_cancel_queued_task(future_id, reason);
   free_mapping(cancelled);
   auto *consumed = vm_owner_future_take(future_id);
   free_mapping(consumed);
@@ -797,6 +1141,9 @@ void gateway_consume_cancelled_future(uint64_t future_id, const char *reason) {
 
 void gateway_cancel_session_future_watches(const std::string &session_id, GatewaySession *sess,
                                            const char *reason, bool release_reservations) {
+  gateway_cancel_room_output_wave_session_items(
+      session_id, sess, reason, release_reservations);
+
   std::vector<GatewaySessionFutureWatch> cancelled;
   for (auto it = g_gateway_session_future_watches.begin();
        it != g_gateway_session_future_watches.end();) {
@@ -816,15 +1163,16 @@ void gateway_cancel_session_future_watches(const std::string &session_id, Gatewa
 
   for (const auto &watch : cancelled) {
     gateway_consume_cancelled_future(watch.future_id, reason);
-    if (release_reservations && sess) {
-      gateway_release_session_output(sess, watch.reservation_id);
-    }
+    gateway_finalize_cancelled_session_future_watch(
+        watch, reason, release_reservations);
     g_gateway_runtime_counters.future_watches_cancelled.fetch_add(1, std::memory_order_relaxed);
   }
   if (g_gateway_session_future_watches.empty()) {
     g_gateway_future_watch_queue.clear();
     g_gateway_future_watch_queue_positions.clear();
-    gateway_stop_future_watch_timer();
+    if (!gateway_has_future_watches()) {
+      gateway_stop_future_watch_timer();
+    }
   }
 }
 
@@ -851,10 +1199,60 @@ bool gateway_dispatch_future_watch_callback(object_t *ob, uint64_t reservation_i
   return callback_ok;
 }
 
-bool gateway_dispatch_future_output_notification(object_t *ob, uint64_t reservation_id,
-                                                 const char *state) {
+bool gateway_dispatch_future_watch_cancelled_callback(
+    object_t *ob, uint64_t reservation_id, uint64_t future_id,
+    const char *reason) {
+  if (!gateway_object_valid(ob) ||
+      !function_exists("gateway_owner_future_cancelled", ob, 0)) {
+    return false;
+  }
+
+  bool callback_ok = false;
+  save_command_giver(ob);
+  {
+    VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob),
+                             vm_owner_epoch(ob));
+    VMCurrentInteractiveScope interactive_scope(vm_context(), ob);
+    GatewayControlledLpcScope controlled_scope;
+    set_eval(max_eval_cost);
+    push_number(static_cast<LPC_INT>(reservation_id));
+    push_number(static_cast<LPC_INT>(future_id));
+    copy_and_push_string(reason && reason[0] ? reason
+                                             : "gateway owner future cancelled");
+    auto *ret = safe_apply("gateway_owner_future_cancelled", ob, 3,
+                           ORIGIN_DRIVER);
+    callback_ok = ret && ret->type == T_NUMBER && ret->u.number != 0;
+  }
+  restore_command_giver();
+  return callback_ok;
+}
+
+bool gateway_dispatch_future_output_notification(
+    object_t *ob, uint64_t reservation_id, const char *state,
+    LPC_INT event_count = 0, LPC_INT slot_server_seq = 0) {
   if (!gateway_object_valid(ob)) {
     return false;
+  }
+  if (event_count > 0 && event_count <= kGatewayOwnerRoomOutputMaxEvents &&
+      slot_server_seq > 0 &&
+      function_exists("gateway_owner_room_output_completed", ob, 0)) {
+    bool callback_ok = false;
+    save_command_giver(ob);
+    {
+      VMOwnerScope owner_scope(vm_context(), vm_owner_id(ob), vm_owner_epoch(ob));
+      VMCurrentInteractiveScope interactive_scope(vm_context(), ob);
+      GatewayControlledLpcScope controlled_scope;
+      set_eval(max_eval_cost);
+      push_number(static_cast<LPC_INT>(reservation_id));
+      copy_and_push_string(state && state[0] ? state : "released");
+      push_number(event_count);
+      push_number(slot_server_seq);
+      auto *ret = safe_apply("gateway_owner_room_output_completed", ob, 4,
+                             ORIGIN_DRIVER);
+      callback_ok = ret && ret->type == T_NUMBER && ret->u.number != 0;
+    }
+    restore_command_giver();
+    return callback_ok;
   }
   if (!function_exists("gateway_owner_future_output_completed", ob, 0)) {
     return true;
@@ -1249,6 +1647,55 @@ object_t *resolve_active_session_owner(const char *session_id, object_t *fallbac
 
 int gateway_get_session_count() { return static_cast<int>(g_gateway_sessions.size()); }
 
+long gateway_room_output_projection_pending_count() {
+  size_t pending = 0;
+  for (const auto &[wave_id, wave] : g_gateway_room_output_waves) {
+    (void)wave_id;
+    for (const auto &item : wave.items) {
+      if (item.terminal) {
+        continue;
+      }
+      if (pending == static_cast<size_t>(std::numeric_limits<long>::max())) {
+        return std::numeric_limits<long>::max();
+      }
+      ++pending;
+    }
+  }
+  return static_cast<long>(pending);
+}
+
+long gateway_room_output_projection_wave_count() {
+  return g_gateway_room_output_waves.size() >
+          static_cast<size_t>(std::numeric_limits<long>::max())
+      ? std::numeric_limits<long>::max()
+      : static_cast<long>(g_gateway_room_output_waves.size());
+}
+
+long gateway_room_output_projection_reservation_count() {
+  size_t reservations = 0;
+  for (const auto &[wave_id, wave] : g_gateway_room_output_waves) {
+    (void)wave_id;
+    for (const auto &item : wave.items) {
+      if (item.reservation_closed) {
+        continue;
+      }
+      if (reservations ==
+          static_cast<size_t>(std::numeric_limits<long>::max())) {
+        return std::numeric_limits<long>::max();
+      }
+      ++reservations;
+    }
+  }
+  return static_cast<long>(reservations);
+}
+
+long gateway_room_output_projection_retry_count() {
+  return g_gateway_room_output_retry_schedule.size() >
+          static_cast<size_t>(std::numeric_limits<long>::max())
+      ? std::numeric_limits<long>::max()
+      : static_cast<long>(g_gateway_room_output_retry_schedule.size());
+}
+
 GatewaySession *gateway_find_session(const char *session_id) {
   if (!session_id || session_id[0] == '\0') {
     return nullptr;
@@ -1274,9 +1721,105 @@ GatewaySession *gateway_find_session_by_object(object_t *ob) {
   return sess;
 }
 
-int gateway_watch_session_future_for_object_internal(object_t *ob, uint64_t reservation_id,
-                                                     uint64_t future_id, int timeout_ms,
-                                                     bool encoded_output) {
+bool gateway_register_session_future_watch_state(
+    GatewaySessionFutureWatch watch) {
+  const auto reservation_id = watch.reservation_id;
+  const auto future_id = watch.future_id;
+  bool watch_inserted = false;
+  bool future_inserted = false;
+  bool queue_inserted = false;
+  try {
+    watch_inserted =
+        g_gateway_session_future_watches
+            .emplace(reservation_id, std::move(watch))
+            .second;
+    if (!watch_inserted) {
+      return false;
+    }
+    future_inserted =
+        g_gateway_future_to_reservation.emplace(future_id, reservation_id)
+            .second;
+    if (!future_inserted) {
+      g_gateway_session_future_watches.erase(reservation_id);
+      return false;
+    }
+    g_gateway_future_watch_queue.push_back(reservation_id);
+    queue_inserted = true;
+    const auto queue_position = std::prev(g_gateway_future_watch_queue.end());
+    if (!g_gateway_future_watch_queue_positions
+             .emplace(reservation_id, queue_position)
+             .second) {
+      g_gateway_future_watch_queue.erase(queue_position);
+      g_gateway_future_to_reservation.erase(future_id);
+      g_gateway_session_future_watches.erase(reservation_id);
+      return false;
+    }
+  } catch (const std::exception &) {
+    if (queue_inserted) {
+      g_gateway_future_watch_queue.pop_back();
+    }
+    if (future_inserted) {
+      g_gateway_future_to_reservation.erase(future_id);
+    }
+    if (watch_inserted) {
+      g_gateway_session_future_watches.erase(reservation_id);
+    }
+    return false;
+  }
+  return true;
+}
+
+bool gateway_requeue_session_future_watch(uint64_t reservation_id) {
+  try {
+    g_gateway_future_watch_queue.push_back(reservation_id);
+  } catch (const std::exception &) {
+    return false;
+  }
+  const auto queue_position = std::prev(g_gateway_future_watch_queue.end());
+  try {
+    if (g_gateway_future_watch_queue_positions
+            .emplace(reservation_id, queue_position)
+            .second) {
+      return true;
+    }
+  } catch (const std::exception &) {
+  }
+  g_gateway_future_watch_queue.erase(queue_position);
+  return false;
+}
+
+bool gateway_register_generic_future_watch_state(GatewayFutureWatch watch) {
+  const auto future_id = watch.future_id;
+  try {
+    if (!g_gateway_future_watches.emplace(future_id, std::move(watch)).second) {
+      return false;
+    }
+    try {
+      g_gateway_generic_future_watch_queue.push_back(future_id);
+    } catch (const std::exception &) {
+      g_gateway_future_watches.erase(future_id);
+      return false;
+    }
+  } catch (const std::exception &) {
+    return false;
+  }
+  return true;
+}
+
+bool gateway_requeue_generic_future_watch(uint64_t future_id) {
+  try {
+    g_gateway_generic_future_watch_queue.push_back(future_id);
+    return true;
+  } catch (const std::exception &) {
+    return false;
+  }
+}
+
+int gateway_watch_session_future_for_object_internal(
+    object_t *ob, uint64_t reservation_id, uint64_t future_id, int timeout_ms,
+    GatewayFutureOutputKind output_kind, LPC_INT event_count = 0,
+    LPC_INT slot_server_seq = 0, uint64_t projection_generation = 0,
+    uint64_t room_output_wave_id = 0, size_t room_output_wave_index = 0) {
   auto register_started_ns = gateway_session_now_ns();
   if (!vm_context_is_main_thread() || reservation_id == 0 || future_id == 0 || timeout_ms <= 0 ||
       g_gateway_session_future_watches.size() >= kGatewayMaxFutureWatches) {
@@ -1286,6 +1829,14 @@ int gateway_watch_session_future_for_object_internal(object_t *ob, uint64_t rese
 
   auto *sess = gateway_find_session_by_object(ob);
   if (!sess || !gateway_session_has_pending_reservation(sess, reservation_id) ||
+      (output_kind == GatewayFutureOutputKind::kMapping &&
+       (!function_exists("gateway_owner_future_completed", ob, 0) ||
+        !function_exists("gateway_owner_future_cancelled", ob, 0))) ||
+      (output_kind == GatewayFutureOutputKind::kValidatedWire &&
+       (event_count <= 0 || event_count > kGatewayOwnerRoomOutputMaxEvents ||
+        slot_server_seq <= 0 || room_output_wave_id == 0 ||
+        !gateway_pending_message_event_projection_matches(
+            sess, reservation_id, projection_generation, true))) ||
       g_gateway_session_future_watches.find(reservation_id) !=
           g_gateway_session_future_watches.end() ||
       g_gateway_future_to_reservation.find(future_id) != g_gateway_future_to_reservation.end() ||
@@ -1300,26 +1851,39 @@ int gateway_watch_session_future_for_object_internal(object_t *ob, uint64_t rese
   }
 
   auto now_ms = gateway_session_now_ms();
-  auto completion_event_ready = gateway_enable_future_watch_completion_event();
   auto timeout = static_cast<uint64_t>(timeout_ms);
   auto deadline_ms = timeout > std::numeric_limits<uint64_t>::max() - now_ms
                          ? std::numeric_limits<uint64_t>::max()
                          : now_ms + timeout;
-  GatewaySessionFutureWatch watch;
-  watch.session_id = sess->session_id;
-  watch.user_ob_name = sess->user_ob_name;
-  watch.user_ob_load_time = sess->user_ob_load_time;
-  watch.reservation_id = reservation_id;
-  watch.future_id = future_id;
-  watch.deadline_ms = deadline_ms;
-  watch.registered_at_ns = register_started_ns;
-  watch.encoded_output = encoded_output;
-  g_gateway_session_future_watches.emplace(reservation_id, std::move(watch));
-  g_gateway_future_to_reservation.emplace(future_id, reservation_id);
-  g_gateway_future_watch_queue.push_back(reservation_id);
-  g_gateway_future_watch_queue_positions.emplace(
-      reservation_id, std::prev(g_gateway_future_watch_queue.end()));
+  try {
+    GatewaySessionFutureWatch watch;
+    watch.session_id = sess->session_id;
+    watch.user_ob_name = sess->user_ob_name;
+    watch.user_ob_load_time = sess->user_ob_load_time;
+    watch.owner_id = vm_owner_id(ob);
+    watch.owner_epoch = vm_owner_epoch(ob);
+    watch.reservation_id = reservation_id;
+    watch.future_id = future_id;
+    watch.deadline_ms = deadline_ms;
+    watch.registered_at_ns = register_started_ns;
+    watch.event_count = event_count;
+    watch.slot_server_seq = slot_server_seq;
+    watch.projection_generation = projection_generation;
+    watch.room_output_wave_id = room_output_wave_id;
+    watch.room_output_wave_index = room_output_wave_index;
+    watch.output_kind = output_kind;
+    if (!gateway_register_session_future_watch_state(std::move(watch))) {
+      g_gateway_runtime_counters.future_watches_rejected.fetch_add(
+          1, std::memory_order_relaxed);
+      return 0;
+    }
+  } catch (const std::exception &) {
+    g_gateway_runtime_counters.future_watches_rejected.fetch_add(
+        1, std::memory_order_relaxed);
+    return 0;
+  }
   g_gateway_runtime_counters.future_watches_registered.fetch_add(1, std::memory_order_relaxed);
+  auto completion_event_ready = gateway_enable_future_watch_completion_event();
   if (completion_event_ready && vm_owner_future_state(future_id) != VM_OWNER_FUTURE_PENDING) {
     gateway_owner_future_terminal_notified();
   }
@@ -1334,13 +1898,15 @@ int gateway_watch_session_future_for_object_internal(object_t *ob, uint64_t rese
 int gateway_watch_session_future_for_object(object_t *ob, uint64_t reservation_id,
                                             uint64_t future_id, int timeout_ms) {
   return gateway_watch_session_future_for_object_internal(ob, reservation_id, future_id,
-                                                          timeout_ms, false);
+                                                          timeout_ms,
+                                                          GatewayFutureOutputKind::kMapping);
 }
 
 int gateway_watch_session_future_output_for_object(object_t *ob, uint64_t reservation_id,
                                                    uint64_t future_id, int timeout_ms) {
   return gateway_watch_session_future_for_object_internal(ob, reservation_id, future_id,
-                                                          timeout_ms, true);
+                                                          timeout_ms,
+                                                          GatewayFutureOutputKind::kProtocolPayload);
 }
 
 int gateway_process_session_future_watches_at(uint64_t now_ms) {
@@ -1355,7 +1921,8 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
     g_gateway_runtime_counters.future_watch_poll_budget_hits.fetch_add(1, std::memory_order_relaxed);
   }
   int processed = 0;
-  for (size_t index = 0; index < poll_count; index++) {
+  for (size_t index = 0;
+       index < poll_count && !g_gateway_future_watch_queue.empty(); index++) {
     auto reservation_id = g_gateway_future_watch_queue.front();
     g_gateway_future_watch_queue.pop_front();
     g_gateway_future_watch_queue_positions.erase(reservation_id);
@@ -1365,19 +1932,46 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
     }
     g_gateway_runtime_counters.future_watch_poll_items.fetch_add(1, std::memory_order_relaxed);
     auto watch = watch_it->second;
+    if (watch.output_kind == GatewayFutureOutputKind::kValidatedWire &&
+        watch.room_output_wave_id != 0) {
+      processed += gateway_process_room_output_wave_watch(watch, now_ms);
+      continue;
+    }
     auto completion_cpu_started_ns = get_current_thread_cpu_time_ns();
     auto *sess = gateway_find_session(watch.session_id.c_str());
     auto *ob = gateway_resolve_session_object(sess);
-    auto session_current = sess && ob && sess->user_ob_name == watch.user_ob_name &&
-                           sess->user_ob_load_time == watch.user_ob_load_time;
+    auto session_current =
+        sess && ob && sess->session_id == watch.session_id &&
+        sess->user_ob_name == watch.user_ob_name &&
+        sess->user_ob_load_time == watch.user_ob_load_time &&
+        watch.owner_id == vm_owner_id(ob) &&
+        vm_owner_epoch_matches(ob, watch.owner_id.c_str(), watch.owner_epoch);
     if (!session_current) {
       g_gateway_future_to_reservation.erase(watch.future_id);
       g_gateway_session_future_watches.erase(watch_it);
       gateway_consume_cancelled_future(watch.future_id, "gateway session stale");
-      if (sess) {
-        gateway_release_session_output(sess, watch.reservation_id);
-      }
+      gateway_finalize_cancelled_session_future_watch(
+          watch, "gateway session stale", true);
       g_gateway_runtime_counters.future_watches_cancelled.fetch_add(1, std::memory_order_relaxed);
+      gateway_record_future_completion_thread_cpu(completion_cpu_started_ns);
+      processed++;
+      continue;
+    }
+    const auto reservation_pending =
+        gateway_session_has_pending_reservation(sess, watch.reservation_id);
+    const auto projection_current =
+        watch.output_kind != GatewayFutureOutputKind::kValidatedWire ||
+        gateway_pending_message_event_projection_matches(
+            sess, watch.reservation_id, watch.projection_generation, true);
+    if (!reservation_pending || !projection_current) {
+      g_gateway_future_to_reservation.erase(watch.future_id);
+      g_gateway_session_future_watches.erase(watch_it);
+      gateway_consume_cancelled_future(watch.future_id,
+                                       "gateway reservation stale");
+      gateway_finalize_cancelled_session_future_watch(
+          watch, "gateway reservation stale", reservation_pending);
+      g_gateway_runtime_counters.future_watches_cancelled.fetch_add(
+          1, std::memory_order_relaxed);
       gateway_record_future_completion_thread_cpu(completion_cpu_started_ns);
       processed++;
       continue;
@@ -1385,9 +1979,18 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
 
     auto future_state = vm_owner_future_state(watch.future_id);
     if (future_state == VM_OWNER_FUTURE_PENDING && now_ms < watch.deadline_ms) {
-      g_gateway_future_watch_queue.push_back(reservation_id);
-      g_gateway_future_watch_queue_positions.emplace(
-          reservation_id, std::prev(g_gateway_future_watch_queue.end()));
+      if (!gateway_requeue_session_future_watch(reservation_id)) {
+        g_gateway_future_to_reservation.erase(watch.future_id);
+        g_gateway_session_future_watches.erase(watch_it);
+        gateway_consume_cancelled_future(
+            watch.future_id, "gateway future watch requeue failed");
+        gateway_finalize_cancelled_session_future_watch(
+            watch, "gateway future watch requeue failed", true);
+        g_gateway_runtime_counters.future_watches_cancelled.fetch_add(
+            1, std::memory_order_relaxed);
+        gateway_record_future_completion_thread_cpu(completion_cpu_started_ns);
+        ++processed;
+      }
       continue;
     }
 
@@ -1398,20 +2001,25 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
     uint64_t take_finished_ns = 0;
     if (future_state == VM_OWNER_FUTURE_PENDING) {
       auto *timed_out = vm_owner_future_timeout(watch.future_id, "gateway owner future timed out");
+      const auto terminal_changed =
+          gateway_future_mapping_flag(timed_out, "terminal_changed");
       free_mapping(timed_out);
       take_started_ns = gateway_session_now_ns();
-      if (watch.encoded_output) {
+      if (watch.output_kind != GatewayFutureOutputKind::kMapping) {
         output_future = vm_owner_future_take_string(watch.future_id);
         terminal_at_ns = output_future.terminal_at_ns;
       } else {
         future = vm_owner_future_take(watch.future_id, &terminal_at_ns);
       }
       take_finished_ns = gateway_session_now_ns();
-      g_gateway_runtime_counters.future_watches_timed_out.fetch_add(1, std::memory_order_relaxed);
+      if (terminal_changed) {
+        g_gateway_runtime_counters.future_watches_timed_out.fetch_add(
+            1, std::memory_order_relaxed);
+      }
     } else if (future_state == VM_OWNER_FUTURE_COMPLETED ||
                future_state == VM_OWNER_FUTURE_FAILED) {
       take_started_ns = gateway_session_now_ns();
-      if (watch.encoded_output) {
+      if (watch.output_kind != GatewayFutureOutputKind::kMapping) {
         output_future = vm_owner_future_take_string(watch.future_id);
         terminal_at_ns = output_future.terminal_at_ns;
       } else {
@@ -1419,7 +2027,7 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
       }
       take_finished_ns = gateway_session_now_ns();
     } else {
-      if (watch.encoded_output) {
+      if (watch.output_kind != GatewayFutureOutputKind::kMapping) {
         output_future = vm_owner_future_take_string(watch.future_id);
       } else {
         future = vm_owner_future_poll(watch.future_id);
@@ -1438,7 +2046,7 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
                                      take_started_ns - terminal_at_ns);
     }
     std::string state;
-    if (watch.encoded_output) {
+    if (watch.output_kind != GatewayFutureOutputKind::kMapping) {
       if (output_future.state == VM_OWNER_FUTURE_COMPLETED && output_future.string_result) {
         state = "completed";
       } else if (output_future.state == VM_OWNER_FUTURE_PENDING) {
@@ -1464,17 +2072,44 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
     g_gateway_runtime_counters.future_watch_callbacks.fetch_add(1, std::memory_order_relaxed);
     auto callback_started_ns = gateway_session_now_ns();
     bool callback_ok = false;
-    if (watch.encoded_output) {
+    if (watch.output_kind != GatewayFutureOutputKind::kMapping) {
+      const auto publish_started_ns = gateway_session_now_ns();
+      bool output_filled = false;
       if (state == "completed") {
-        callback_ok = gateway_fill_session_output_for_object(
-            ob, watch.reservation_id, output_future.value.data(), output_future.value.size()) != 0;
+        if (watch.output_kind == GatewayFutureOutputKind::kValidatedWire) {
+          auto wire_output = GatewayWireOutputFactory::trusted_projected_wire(
+              sess, std::move(output_future.value));
+          output_filled = wire_output &&
+              gateway_fill_session_wire_output_with_writer(
+                  sess, watch.reservation_id, std::move(*wire_output),
+                  gateway_send_raw_to_fd) != 0;
+        } else {
+          output_filled = gateway_fill_session_output_for_object(
+              ob, watch.reservation_id, output_future.value.data(),
+              output_future.value.size()) != 0;
+        }
+        callback_ok = output_filled ||
+            gateway_release_session_output_for_object(
+                ob, watch.reservation_id) != 0;
       } else {
         callback_ok = gateway_release_session_output_for_object(ob, watch.reservation_id) != 0;
       }
-      auto *output_state = state == "completed" && callback_ok ? "completed" : "released";
+      auto *output_state = output_filled ? "completed" : "released";
       callback_ok = gateway_dispatch_future_output_notification(
-                        ob, watch.reservation_id, output_state) &&
+                        ob, watch.reservation_id, output_state,
+                        watch.event_count, watch.slot_server_seq) &&
                     callback_ok;
+      if (watch.output_kind == GatewayFutureOutputKind::kValidatedWire) {
+        gateway_session_record_latency(
+            g_gateway_runtime_counters.room_output_projection_publish_ns_total,
+            g_gateway_runtime_counters.room_output_projection_publish_ns_max,
+            g_gateway_runtime_counters.room_output_projection_publish_samples,
+            gateway_session_now_ns() - publish_started_ns);
+        if (!callback_ok) {
+          g_gateway_runtime_counters.room_output_projection_failed.fetch_add(
+              1, std::memory_order_relaxed);
+        }
+      }
     } else {
       callback_ok = gateway_dispatch_future_watch_callback(ob, watch.reservation_id, future);
     }
@@ -1493,10 +2128,19 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
       free_mapping(future);
     }
 
+    if (!callback_ok && watch.output_kind == GatewayFutureOutputKind::kMapping) {
+      gateway_finalize_cancelled_session_future_watch(
+          watch, "gateway owner future callback failed", true);
+    }
+
     sess = gateway_find_session(watch.session_id.c_str());
     ob = gateway_resolve_session_object(sess);
-    session_current = sess && ob && sess->user_ob_name == watch.user_ob_name &&
-                      sess->user_ob_load_time == watch.user_ob_load_time;
+    session_current =
+        sess && ob && sess->session_id == watch.session_id &&
+        sess->user_ob_name == watch.user_ob_name &&
+        sess->user_ob_load_time == watch.user_ob_load_time &&
+        watch.owner_id == vm_owner_id(ob) &&
+        vm_owner_epoch_matches(ob, watch.owner_id.c_str(), watch.owner_epoch);
     if (!callback_ok) {
       g_gateway_runtime_counters.future_watch_callback_failures.fetch_add(1, std::memory_order_relaxed);
     }
@@ -1505,6 +2149,8 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
     }
     gateway_record_future_completion_thread_cpu(completion_cpu_started_ns);
   }
+
+  gateway_process_room_output_publish_retries(gateway_session_now_ms());
 
   if (g_gateway_session_future_watches.empty()) {
     g_gateway_future_watch_queue.clear();
@@ -1545,15 +2191,24 @@ int gateway_watch_future_for_object(object_t *ob, uint64_t context_id,
   auto deadline_ms = timeout > std::numeric_limits<uint64_t>::max() - now_ms
                          ? std::numeric_limits<uint64_t>::max()
                          : now_ms + timeout;
-  GatewayFutureWatch watch;
-  watch.target_ob_name = ob->obname;
-  watch.target_ob_load_time = ob->load_time;
-  watch.context_id = context_id;
-  watch.future_id = future_id;
-  watch.deadline_ms = deadline_ms;
-  watch.registered_at_ns = gateway_session_now_ns();
-  g_gateway_future_watches.emplace(future_id, std::move(watch));
-  g_gateway_generic_future_watch_queue.push_back(future_id);
+  try {
+    GatewayFutureWatch watch;
+    watch.target_ob_name = ob->obname;
+    watch.target_ob_load_time = ob->load_time;
+    watch.context_id = context_id;
+    watch.future_id = future_id;
+    watch.deadline_ms = deadline_ms;
+    watch.registered_at_ns = gateway_session_now_ns();
+    if (!gateway_register_generic_future_watch_state(std::move(watch))) {
+      g_gateway_runtime_counters.generic_future_watches_rejected.fetch_add(
+          1, std::memory_order_relaxed);
+      return 0;
+    }
+  } catch (const std::exception &) {
+    g_gateway_runtime_counters.generic_future_watches_rejected.fetch_add(
+        1, std::memory_order_relaxed);
+    return 0;
+  }
   g_gateway_runtime_counters.generic_future_watches_registered.fetch_add(
       1, std::memory_order_relaxed);
 
@@ -1595,17 +2250,29 @@ int gateway_process_future_watches_at(uint64_t now_ms) {
 
     auto future_state = vm_owner_future_state(future_id);
     if (future_state == VM_OWNER_FUTURE_PENDING && now_ms < watch.deadline_ms) {
-      g_gateway_generic_future_watch_queue.push_back(future_id);
+      if (!gateway_requeue_generic_future_watch(future_id)) {
+        g_gateway_future_watches.erase(watch_it);
+        gateway_consume_cancelled_future(
+            future_id, "gateway generic future watch requeue failed");
+        g_gateway_runtime_counters.generic_future_watches_cancelled.fetch_add(
+            1, std::memory_order_relaxed);
+        gateway_record_future_completion_thread_cpu(completion_cpu_started_ns);
+        ++processed;
+      }
       continue;
     }
 
     mapping_t *future = nullptr;
     if (future_state == VM_OWNER_FUTURE_PENDING) {
       auto *timed_out = vm_owner_future_timeout(future_id, "gateway future watch timed out");
+      const auto terminal_changed =
+          gateway_future_mapping_flag(timed_out, "terminal_changed");
       free_mapping(timed_out);
       future = vm_owner_future_take(future_id);
-      g_gateway_runtime_counters.generic_future_watches_timed_out.fetch_add(
-          1, std::memory_order_relaxed);
+      if (terminal_changed) {
+        g_gateway_runtime_counters.generic_future_watches_timed_out.fetch_add(
+            1, std::memory_order_relaxed);
+      }
     } else if (future_state == VM_OWNER_FUTURE_COMPLETED ||
                future_state == VM_OWNER_FUTURE_FAILED) {
       future = vm_owner_future_take(future_id);
@@ -1713,7 +2380,15 @@ int gateway_flush_session_output_fifo_with_writer(GatewaySession *sess, GatewayO
     if (!entry.ready) {
       break;
     }
-    if (!writer(sess->master_fd, entry.encoded.c_str(), entry.encoded.size())) {
+    if (entry.wire_bytes.size() > g_gateway_max_packet_size) {
+      sess->output_fifo.pop_front();
+      g_gateway_runtime_counters.output_fifo_oversize_dropped.fetch_add(
+          1, std::memory_order_relaxed);
+      continue;
+    }
+    if (!writer(sess->master_fd, entry.wire_bytes.c_str(), entry.wire_bytes.size())) {
+      g_gateway_runtime_counters.output_fifo_writer_failures.fetch_add(
+          1, std::memory_order_relaxed);
       break;
     }
     sess->output_fifo.pop_front();
@@ -1728,8 +2403,10 @@ int gateway_flush_session_output_fifo(GatewaySession *sess) {
   return gateway_flush_session_output_fifo_with_writer(sess, gateway_send_raw_to_fd);
 }
 
-int gateway_enqueue_session_output(GatewaySession *sess, std::string encoded) {
-  if (!sess || encoded.empty()) {
+namespace {
+int gateway_enqueue_session_wire_output(GatewaySession *sess,
+                                        GatewayWireOutput wire_output) {
+  if (!sess || wire_output.empty() || !wire_output.bound_to(sess)) {
     return 0;
   }
   if (sess->output_fifo.size() >= sess->output_fifo_max_depth) {
@@ -1738,13 +2415,26 @@ int gateway_enqueue_session_output(GatewaySession *sess, std::string encoded) {
     return 0;
   }
   GatewayOutputEntry entry;
-  entry.encoded = std::move(encoded);
+  entry.wire_bytes = std::move(wire_output).release();
   sess->output_fifo.push_back(std::move(entry));
   sess->output_fifo_enqueued++;
   g_gateway_runtime_counters.output_fifo_enqueued.fetch_add(1, std::memory_order_relaxed);
   sess->last_active = get_current_time();
   gateway_flush_session_output_fifo(sess);
   return 1;
+}
+}  // namespace
+
+int gateway_enqueue_session_protocol_output(GatewaySession *sess, const char *data,
+                                            size_t len) {
+  if (!data) {
+    return 0;
+  }
+  auto wire_output = GatewayWireOutputFactory::protocol_output(
+      sess, std::string_view(data, len));
+  return wire_output
+      ? gateway_enqueue_session_wire_output(sess, std::move(*wire_output))
+      : 0;
 }
 
 uint64_t gateway_reserve_session_output(GatewaySession *sess) {
@@ -1808,7 +2498,10 @@ bool gateway_reserve_session_outputs(
     }
     const bool can_reuse = existing_id > 0 && !sess->output_fifo.empty() &&
                            sess->output_fifo.back().reservation_id == existing_id &&
-                           !sess->output_fifo.back().ready;
+                           !sess->output_fifo.back().ready &&
+                           (!sess->output_fifo.back().pending_message_batch ||
+                            !sess->output_fifo.back()
+                                 .pending_message_batch->projection_sealed);
     if (!can_reuse && sess->output_fifo.size() >= sess->output_fifo_max_depth) {
       return false;
     }
@@ -1819,7 +2512,10 @@ bool gateway_reserve_session_outputs(
     const auto existing_id = existing_reservation_ids[index];
     const bool can_reuse = existing_id > 0 && !sess->output_fifo.empty() &&
                            sess->output_fifo.back().reservation_id == existing_id &&
-                           !sess->output_fifo.back().ready;
+                           !sess->output_fifo.back().ready &&
+                           (!sess->output_fifo.back().pending_message_batch ||
+                            !sess->output_fifo.back()
+                                 .pending_message_batch->projection_sealed);
     if (can_reuse) {
       result->reservation_ids.push_back(existing_id);
       result->reused.push_back(true);
@@ -1870,6 +2566,48 @@ const GatewayOutputEntry *gateway_find_pending_output_entry(
   }
   return nullptr;
 }
+
+bool gateway_pending_message_event_projection_matches(
+    const GatewaySession *sess, uint64_t reservation_id, uint64_t generation,
+    bool require_sealed) {
+  const auto *entry = gateway_find_pending_output_entry(sess, reservation_id);
+  const auto *batch = entry && entry->pending_message_batch
+      ? entry->pending_message_batch.get()
+      : nullptr;
+  return generation > 0 && batch && !batch->events.empty() &&
+      batch->projection_generation == generation &&
+      (!require_sealed || batch->projection_sealed);
+}
+
+bool gateway_seal_pending_message_event_projections(
+    const std::vector<GatewaySession *> &sessions,
+    const std::vector<uint64_t> &reservation_ids,
+    const std::vector<uint64_t> &generations) {
+  const auto count = sessions.size();
+  std::vector<GatewayPendingMessageEventBatch *> batches;
+  if (count == 0 || reservation_ids.size() != count ||
+      generations.size() != count) {
+    return false;
+  }
+  batches.reserve(count);
+  for (size_t index = 0; index < count; ++index) {
+    auto *entry = gateway_find_pending_output_entry(
+        sessions[index], reservation_ids[index]);
+    auto *batch = entry && entry->pending_message_batch
+        ? entry->pending_message_batch.get()
+        : nullptr;
+    if (!batch || batch->events.empty() || batch->projection_sealed ||
+        generations[index] == 0 ||
+        batch->projection_generation != generations[index]) {
+      return false;
+    }
+    batches.push_back(batch);
+  }
+  for (auto *batch : batches) {
+    batch->projection_sealed = true;
+  }
+  return true;
+}
 }  // namespace
 
 uint64_t gateway_next_message_event_wave_id() {
@@ -1896,6 +2634,7 @@ bool gateway_append_validated_message_event_wave(
   std::unordered_set<GatewaySession *> unique_sessions;
   std::vector<GatewayOutputEntry *> entries;
   std::vector<std::unique_ptr<GatewayPendingMessageEventBatch>> new_batches;
+  std::vector<uint64_t> next_generations;
 
   if (count == 0 || reservation_ids.size() != count ||
       slot_server_seqs.size() != count || message_server_seqs.size() != count ||
@@ -1906,6 +2645,7 @@ bool gateway_append_validated_message_event_wave(
   }
 
   entries.reserve(count);
+  next_generations.reserve(count);
   unique_sessions.reserve(count);
   for (size_t index = 0; index < count; ++index) {
     auto *sess = sessions[index];
@@ -1918,15 +2658,24 @@ bool gateway_append_validated_message_event_wave(
     const auto pending_count = entry && entry->pending_message_batch
         ? entry->pending_message_batch->events.size()
         : 0;
-    if (!entry || pending_count >= batch_limit) {
+    if (!entry || pending_count >= batch_limit ||
+        (entry->pending_message_batch &&
+         entry->pending_message_batch->projection_sealed)) {
       return false;
     }
     if (entry->pending_message_batch &&
         (entry->pending_message_batch->slot_server_seq <= 0 ||
-         entry->pending_message_batch->slot_sent_at <= 0)) {
+         entry->pending_message_batch->slot_sent_at <= 0 ||
+         entry->pending_message_batch->projection_generation ==
+             std::numeric_limits<uint64_t>::max())) {
       return false;
     }
     entries.push_back(entry);
+    next_generations.push_back(entry->pending_message_batch
+                                   ? entry->pending_message_batch
+                                             ->projection_generation +
+                                         1
+                                   : 1);
   }
 
   std::shared_ptr<const GatewayPreencodedMessageEventWave> wave;
@@ -1934,11 +2683,23 @@ bool gateway_append_validated_message_event_wave(
     new_batches.resize(count);
     auto mutable_wave = std::make_shared<GatewayPreencodedMessageEventWave>();
     mutable_wave->scope_type = scope_type;
+    if (!gateway_encode_inner_json_string_for_outer(
+            scope_type, &mutable_wave->outer_escaped_scope_type_json)) {
+      return false;
+    }
     auto &stored_template = mutable_wave->message_template;
     stored_template.stable_members = message_template.stable_members;
     stored_template.reliability_json = message_template.reliability_json;
     stored_template.priority_json = message_template.priority_json;
     stored_template.collapse_key_json = message_template.collapse_key_json;
+    stored_template.outer_escaped_stable_members =
+        message_template.outer_escaped_stable_members;
+    stored_template.outer_escaped_reliability_json =
+        message_template.outer_escaped_reliability_json;
+    stored_template.outer_escaped_priority_json =
+        message_template.outer_escaped_priority_json;
+    stored_template.outer_escaped_collapse_key_json =
+        message_template.outer_escaped_collapse_key_json;
     stored_template.ttl_ms = message_template.ttl_ms;
     stored_template.has_id = message_template.has_id;
     stored_template.has_scope = message_template.has_scope;
@@ -1976,6 +2737,8 @@ bool gateway_append_validated_message_event_wave(
     entry->pending_message_batch->events.push_back(
         {wave, message_seqs[index], message_server_seqs[index],
          message_epochs[index], reservation_origin});
+    entry->pending_message_batch->projection_generation =
+        next_generations[index];
   }
   return true;
 }
@@ -2092,12 +2855,16 @@ bool gateway_rollback_preencoded_message_event_wave_with_writer(
         ? GatewayMessageEventReservationOrigin::kReused
         : GatewayMessageEventReservationOrigin::kCreated;
     if (!entry || !entry->pending_message_batch ||
+        entry->pending_message_batch->projection_sealed ||
         entry->pending_message_batch->events.empty() ||
         !entry->pending_message_batch->events.back().wave ||
         entry->pending_message_batch->events.back().wave->wave_id != wave_id ||
         entry->pending_message_batch->events.back().reservation_origin !=
             expected_origin ||
-        (!reused[index] && entry->pending_message_batch->events.size() != 1)) {
+        (!reused[index] && entry->pending_message_batch->events.size() != 1) ||
+        (reused[index] &&
+         entry->pending_message_batch->projection_generation ==
+             std::numeric_limits<uint64_t>::max())) {
       return false;
     }
     entries.push_back(entry);
@@ -2112,6 +2879,7 @@ bool gateway_rollback_preencoded_message_event_wave_with_writer(
       continue;
     }
     entries[index]->pending_message_batch->events.pop_back();
+    entries[index]->pending_message_batch->projection_generation++;
     if (entries[index]->pending_message_batch->events.empty()) {
       entries[index]->pending_message_batch.reset();
     }
@@ -2127,72 +2895,476 @@ size_t gateway_pending_message_event_count(const GatewaySession *sess,
       : 0;
 }
 
-bool gateway_build_pending_message_event_batch_frame(
-    GatewaySession *sess, uint64_t reservation_id, const std::string &scope_id,
-    LPC_INT slot_epoch, std::string *frame, LPC_INT *event_count,
-    LPC_INT *slot_server_seq) {
-  auto *entry = gateway_find_pending_output_entry(sess, reservation_id);
-  std::vector<const GatewayMessageEventTemplate *> validated_templates;
-  const std::vector<std::string_view> stable_children;
-  std::vector<std::string_view> scope_types;
-  std::vector<LPC_INT> message_seqs;
-  std::vector<LPC_INT> server_seqs;
-  std::vector<LPC_INT> message_epochs;
-  std::vector<LPC_INT> sent_ats;
-
-  if (!entry || !entry->pending_message_batch ||
+bool gateway_snapshot_pending_message_event_batch(
+    const GatewaySession *sess, uint64_t reservation_id,
+    const std::string &scope_id, LPC_INT slot_epoch,
+    GatewayPendingMessageEventProjectionSnapshot *snapshot,
+    GatewayPendingMessageEventProjectionColumns *columns) {
+  const auto snapshot_started_ns = gateway_session_now_ns();
+  const auto *entry = gateway_find_pending_output_entry(sess, reservation_id);
+  if (!snapshot || !columns || !sess || sess->session_id.empty() || !entry ||
+      !entry->pending_message_batch ||
       entry->pending_message_batch->events.empty() || scope_id.empty() ||
-      slot_epoch < 0 || !frame || !event_count || !slot_server_seq ||
+      slot_epoch < 0 ||
+      entry->pending_message_batch->projection_generation == 0 ||
       entry->pending_message_batch->slot_server_seq <= 0 ||
       entry->pending_message_batch->slot_sent_at <= 0) {
     return false;
   }
+
+  GatewayPendingMessageEventProjectionSnapshot next_snapshot;
+  GatewayPendingMessageEventProjectionColumns next_columns;
   const auto &batch = *entry->pending_message_batch;
   const auto count = batch.events.size();
+  std::unordered_map<const GatewayPreencodedMessageEventWave *, size_t>
+      wave_indices;
+  try {
+    next_snapshot.wave_table.reserve(count);
+    next_snapshot.event_wave_indices.reserve(count);
+    next_columns.message_seqs.reserve(count);
+    next_columns.server_seqs.reserve(count);
+    next_columns.message_epochs.reserve(count);
+    wave_indices.reserve(count);
+    for (const auto &event : batch.events) {
+      if (!event.wave || event.wave->scope_type.empty() ||
+          event.wave->sent_at <= 0 || event.message_seq <= 0 ||
+          event.server_seq <= 0 || event.epoch < 0) {
+        return false;
+      }
+      const auto *wave_key = event.wave.get();
+      auto [wave_it, inserted] =
+          wave_indices.emplace(wave_key, next_snapshot.wave_table.size());
+      if (inserted) {
+        next_snapshot.wave_table.push_back(event.wave);
+      }
+      next_snapshot.event_wave_indices.push_back(wave_it->second);
+      next_columns.message_seqs.push_back(event.message_seq);
+      next_columns.server_seqs.push_back(event.server_seq);
+      next_columns.message_epochs.push_back(event.epoch);
+    }
+    next_columns.session_id = sess->session_id;
+    next_columns.scope_id = scope_id;
+    next_columns.slot_server_seq = batch.slot_server_seq;
+    next_columns.slot_epoch = slot_epoch;
+    next_columns.slot_sent_at = batch.slot_sent_at;
+    next_snapshot.generation = batch.projection_generation;
+  } catch (const std::exception &) {
+    return false;
+  }
+
+  *snapshot = std::move(next_snapshot);
+  *columns = std::move(next_columns);
+  gateway_session_record_latency(
+      g_gateway_runtime_counters.room_output_projection_snapshot_ns_total,
+      g_gateway_runtime_counters.room_output_projection_snapshot_ns_max,
+      g_gateway_runtime_counters.room_output_projection_snapshot_samples,
+      gateway_session_now_ns() - snapshot_started_ns);
+  return true;
+}
+
+namespace {
+struct GatewayPendingMessageEventProjectionPrepared {
+  std::string session_id_json;
+  std::string outer_escaped_scope_id_json;
+  size_t estimated_wire_size{0};
+};
+
+bool gateway_prepare_pending_message_event_projection(
+    const GatewayPendingMessageEventProjectionSnapshot &snapshot,
+    const GatewayPendingMessageEventProjectionColumns &columns,
+    GatewayPendingMessageEventProjectionPrepared *prepared) {
+  const auto count = snapshot.event_wave_indices.size();
+  if (!prepared || count == 0 || snapshot.wave_table.empty() ||
+      snapshot.generation == 0 || columns.session_id.empty() ||
+      columns.scope_id.empty() || columns.message_seqs.size() != count ||
+      columns.server_seqs.size() != count ||
+      columns.message_epochs.size() != count ||
+      columns.slot_server_seq <= 0 || columns.slot_epoch < 0 ||
+      columns.slot_sent_at <= 0) {
+    return false;
+  }
+
+  GatewayPendingMessageEventProjectionPrepared next;
+  try {
+    next.session_id_json.reserve(columns.session_id.size() + 2);
+    if (!gateway_append_json_string(columns.session_id.data(),
+                                    columns.session_id.size(),
+                                    &next.session_id_json) ||
+        !gateway_encode_inner_json_string_for_outer(
+            columns.scope_id, &next.outer_escaped_scope_id_json)) {
+      return false;
+    }
+    // The fixed envelope and batch trailer are smaller than this base. Each
+    // event then receives a deliberately conservative 512-byte allowance for
+    // literals and all decimal dynamic fields, in addition to the exact
+    // escaped stable/scope components below. Therefore an estimate within the
+    // configured packet limit proves the final wire also fits without doing
+    // the expensive projection on the main thread.
+    next.estimated_wire_size = next.session_id_json.size() + 128;
+    for (size_t index = 0; index < count; ++index) {
+      const auto wave_index = snapshot.event_wave_indices[index];
+      if (wave_index >= snapshot.wave_table.size() ||
+          !snapshot.wave_table[wave_index] || columns.message_seqs[index] <= 0 ||
+          columns.server_seqs[index] <= 0 ||
+          columns.message_epochs[index] < 0) {
+        return false;
+      }
+      const auto &wave = *snapshot.wave_table[wave_index];
+      const auto &message_template = wave.message_template;
+      if (wave.sent_at <= 0 || wave.outer_escaped_scope_type_json.empty() ||
+          message_template.outer_escaped_stable_members.empty() ||
+          message_template.outer_escaped_reliability_json.empty() ||
+          message_template.outer_escaped_priority_json.empty() ||
+          (!message_template.collapse_key_json.empty() &&
+           message_template.outer_escaped_collapse_key_json.empty())) {
+        return false;
+      }
+      const auto addition =
+          message_template.outer_escaped_stable_members.size() +
+          message_template.outer_escaped_reliability_json.size() +
+          message_template.outer_escaped_priority_json.size() +
+          message_template.outer_escaped_collapse_key_json.size() +
+          wave.outer_escaped_scope_type_json.size() +
+          next.outer_escaped_scope_id_json.size() + 512;
+      if (addition > std::numeric_limits<size_t>::max() -
+                         next.estimated_wire_size) {
+        return false;
+      }
+      next.estimated_wire_size += addition;
+    }
+  } catch (const std::exception &) {
+    return false;
+  }
+  *prepared = std::move(next);
+  return true;
+}
+
+bool gateway_append_outer_escaped_message_event(
+    const GatewayPreencodedMessageEventWave &wave,
+    std::string_view outer_escaped_scope_id_json, LPC_INT message_seq,
+    LPC_INT server_seq, LPC_INT epoch, LPC_INT sent_at, std::string *wire) {
+  const auto &message_template = wave.message_template;
+  if (!wire || message_template.outer_escaped_stable_members.empty() ||
+      wave.outer_escaped_scope_type_json.empty() || message_seq <= 0 ||
+      server_seq <= 0 || epoch < 0 || sent_at <= 0) {
+    return false;
+  }
+
+  wire->push_back('{');
+  wire->append(message_template.outer_escaped_stable_members);
+  if (!message_template.has_id) {
+    wire->append(",\\\"id\\\":\\\"msg_");
+    if (!gateway_append_lpc_int(sent_at, wire)) {
+      return false;
+    }
+    wire->push_back('_');
+    if (!gateway_append_lpc_int(message_seq, wire)) {
+      return false;
+    }
+    wire->append("\\\"");
+  }
+  wire->append(",\\\"seq\\\":");
+  if (!gateway_append_lpc_int(message_seq, wire)) {
+    return false;
+  }
+  if (!message_template.has_scope) {
+    if (outer_escaped_scope_id_json.empty()) {
+      return false;
+    }
+    wire->append(",\\\"scope\\\":{\\\"type\\\":");
+    wire->append(wave.outer_escaped_scope_type_json);
+    wire->append(",\\\"id\\\":");
+    wire->append(outer_escaped_scope_id_json);
+    wire->push_back('}');
+  }
+  if (!message_template.has_causation_id) {
+    wire->append(",\\\"causation_id\\\":\\\"cmd_");
+    if (!gateway_append_lpc_int(message_seq, wire)) {
+      return false;
+    }
+    wire->append("\\\"");
+  }
+  if (!message_template.has_correlation_id) {
+    wire->append(",\\\"correlation_id\\\":\\\"txn_");
+    if (!gateway_append_lpc_int(message_seq, wire)) {
+      return false;
+    }
+    wire->append("\\\"");
+  }
+  wire->append(",\\\"timestamp\\\":");
+  if (!gateway_append_lpc_int(sent_at, wire)) {
+    return false;
+  }
+  wire->append(",\\\"meta\\\":{\\\"server_seq\\\":");
+  if (!gateway_append_lpc_int(server_seq, wire)) {
+    return false;
+  }
+  wire->append(",\\\"stream\\\":\\\"message\\\",\\\"epoch\\\":");
+  if (!gateway_append_lpc_int(epoch, wire)) {
+    return false;
+  }
+  wire->append(",\\\"reliability\\\":");
+  wire->append(message_template.outer_escaped_reliability_json);
+  wire->append(",\\\"priority\\\":");
+  wire->append(message_template.outer_escaped_priority_json);
+  wire->append(",\\\"sent_at\\\":");
+  if (!gateway_append_lpc_int(sent_at, wire)) {
+    return false;
+  }
+  if (!message_template.collapse_key_json.empty()) {
+    if (message_template.outer_escaped_collapse_key_json.empty()) {
+      return false;
+    }
+    wire->append(",\\\"collapse_key\\\":");
+    wire->append(message_template.outer_escaped_collapse_key_json);
+  }
+  wire->append(",\\\"ttl_ms\\\":");
+  if (!gateway_append_lpc_int(message_template.ttl_ms, wire)) {
+    return false;
+  }
+  wire->append("}}");
+  return true;
+}
+
+bool gateway_encode_pending_message_event_projection_wire(
+    const GatewayPendingMessageEventProjectionSnapshot &snapshot,
+    const GatewayPendingMessageEventProjectionColumns &columns,
+    std::string *wire_bytes) {
+  const auto count = snapshot.event_wave_indices.size();
+  GatewayPendingMessageEventProjectionPrepared prepared;
+  if (!wire_bytes || !gateway_prepare_pending_message_event_projection(
+                         snapshot, columns, &prepared)) {
+    return false;
+  }
+
+  try {
+    std::string next;
+    next.reserve(prepared.estimated_wire_size);
+    next.append("{\"cid\":");
+    next.append(prepared.session_id_json);
+    next.append(",\"data\":\"");
+    next.append(count == 1 ? "\\u001bXKMSGE"
+                           : "\\u001bXKBACH{\\\"messages\\\":[");
+    for (size_t index = 0; index < count; ++index) {
+      const auto &wave = *snapshot.wave_table[snapshot.event_wave_indices[index]];
+      if (count > 1) {
+        if (index > 0) {
+          next.push_back(',');
+        }
+        next.append("{\\\"type\\\":\\\"MSGE\\\",\\\"payload\\\":");
+      }
+      if (!gateway_append_outer_escaped_message_event(
+              wave, prepared.outer_escaped_scope_id_json,
+              columns.message_seqs[index],
+              count == 1 ? columns.slot_server_seq
+                         : columns.server_seqs[index],
+              columns.message_epochs[index], wave.sent_at, &next)) {
+        return false;
+      }
+      if (count > 1) {
+        next.push_back('}');
+      }
+    }
+    if (count > 1) {
+      next.append("],\\\"meta\\\":{\\\"server_seq\\\":");
+      if (!gateway_append_lpc_int(columns.slot_server_seq, &next)) {
+        return false;
+      }
+      next.append(",\\\"stream\\\":\\\"system\\\",\\\"epoch\\\":");
+      if (!gateway_append_lpc_int(columns.slot_epoch, &next)) {
+        return false;
+      }
+      next.append(
+          ",\\\"reliability\\\":\\\"important\\\",\\\"priority\\\":"
+          "\\\"normal\\\",\\\"sent_at\\\":");
+      if (!gateway_append_lpc_int(columns.slot_sent_at, &next)) {
+        return false;
+      }
+      next.append("}}");
+    }
+    next.append("\\u001b\\n\",\"type\":\"output\"}");
+    *wire_bytes = std::move(next);
+  } catch (const std::exception &) {
+    wire_bytes->clear();
+    return false;
+  }
+  return !wire_bytes->empty();
+}
+
+bool gateway_encode_pending_message_event_projection_inner(
+    const GatewayPendingMessageEventProjectionSnapshot &snapshot,
+    const GatewayPendingMessageEventProjectionColumns &columns,
+    std::string *frame) {
+  const auto count = snapshot.event_wave_indices.size();
+  if (!frame || count == 0 || snapshot.wave_table.empty() ||
+      snapshot.generation == 0 ||
+      columns.scope_id.empty() || columns.message_seqs.size() != count ||
+      columns.server_seqs.size() != count ||
+      columns.message_epochs.size() != count ||
+      columns.slot_server_seq <= 0 || columns.slot_epoch < 0 ||
+      columns.slot_sent_at <= 0) {
+    return false;
+  }
+
+  std::vector<const GatewayMessageEventTemplate *> templates;
+  std::vector<std::string_view> scope_types;
+  std::vector<LPC_INT> sent_ats;
+  try {
+    templates.reserve(count);
+    scope_types.reserve(count);
+    sent_ats.reserve(count);
+    for (const auto wave_index : snapshot.event_wave_indices) {
+      if (wave_index >= snapshot.wave_table.size() ||
+          !snapshot.wave_table[wave_index]) {
+        return false;
+      }
+      const auto &wave = *snapshot.wave_table[wave_index];
+      templates.push_back(&wave.message_template);
+      scope_types.emplace_back(wave.scope_type);
+      sent_ats.push_back(wave.sent_at);
+    }
+  } catch (const std::exception &) {
+    return false;
+  }
+
+  const std::vector<std::string_view> stable_children;
+  return gateway_build_preencoded_message_event_batch_frame_impl(
+      stable_children, &templates, scope_types, columns.scope_id,
+      columns.message_seqs, columns.server_seqs, columns.message_epochs,
+      sent_ats, columns.slot_server_seq, columns.slot_epoch,
+      columns.slot_sent_at, frame);
+}
+
+bool gateway_prevalidate_pending_message_event_projection_work(
+    GatewaySession *sess, GatewayPendingMessageEventProjectionWork *work) {
+  GatewayPendingMessageEventProjectionPrepared prepared;
+  if (!sess || !work ||
+      !gateway_prepare_pending_message_event_projection(
+          work->snapshot, work->columns, &prepared)) {
+    return false;
+  }
+  if (prepared.estimated_wire_size <= g_gateway_max_packet_size) {
+    return true;
+  }
+
+  // Near the packet limit, resolve the conservative estimate exactly once.
+  // Retain a valid exact wire so neither the worker nor an inline fallback has
+  // to repeat this exceptional main-thread projection.
+  std::string wire_bytes;
+  if (!gateway_encode_pending_message_event_projection_wire(
+          work->snapshot, work->columns, &wire_bytes)) {
+    return false;
+  }
+  auto wire_output = GatewayWireOutputFactory::trusted_projected_wire(
+      sess, std::move(wire_bytes));
+  if (!wire_output) {
+    return false;
+  }
+  work->prevalidated_wire_bytes = std::move(*wire_output).release();
+  return true;
+}
+}  // namespace
+
+bool gateway_encode_pending_message_event_projection(
+    const GatewayPendingMessageEventProjectionSnapshot &snapshot,
+    const GatewayPendingMessageEventProjectionColumns &columns,
+    std::string *wire_bytes) {
+  return gateway_encode_pending_message_event_projection_wire(snapshot, columns,
+                                                              wire_bytes);
+}
+
+bool gateway_encode_pending_message_event_projection_inline(
+    const GatewayPendingMessageEventProjectionSnapshot &snapshot,
+    const GatewayPendingMessageEventProjectionColumns &columns,
+    std::string *wire_bytes) {
+  const auto cpu_started_ns = get_current_thread_cpu_time_ns();
+  const auto projected = gateway_encode_pending_message_event_projection(
+      snapshot, columns, wire_bytes);
+  gateway_session_record_thread_cpu(
+      g_gateway_runtime_counters
+          .room_output_projection_inline_thread_cpu_ns_total,
+      g_gateway_runtime_counters
+          .room_output_projection_inline_thread_cpu_ns_max,
+      g_gateway_runtime_counters
+          .room_output_projection_inline_thread_cpu_samples,
+      g_gateway_runtime_counters
+          .room_output_projection_inline_thread_cpu_unavailable,
+      cpu_started_ns);
+  return projected;
+}
+
+bool gateway_build_pending_message_event_batch_frame(
+    GatewaySession *sess, uint64_t reservation_id, const std::string &scope_id,
+    LPC_INT slot_epoch, std::string *frame, LPC_INT *event_count,
+    LPC_INT *slot_server_seq) {
+  GatewayPendingMessageEventProjectionSnapshot snapshot;
+  GatewayPendingMessageEventProjectionColumns columns;
+  if (!frame || !event_count || !slot_server_seq ||
+      !gateway_snapshot_pending_message_event_batch(
+          sess, reservation_id, scope_id, slot_epoch, &snapshot, &columns)) {
+    return false;
+  }
+  const auto count = snapshot.event_wave_indices.size();
   if (count > static_cast<size_t>(std::numeric_limits<LPC_INT>::max())) {
     return false;
   }
-  validated_templates.reserve(count);
-  scope_types.reserve(count);
-  message_seqs.reserve(count);
-  server_seqs.reserve(count);
-  message_epochs.reserve(count);
-  sent_ats.reserve(count);
-  for (const auto &event : batch.events) {
-    if (!event.wave) {
-      return false;
-    }
-    validated_templates.push_back(&event.wave->message_template);
-    scope_types.emplace_back(event.wave->scope_type);
-    message_seqs.push_back(event.message_seq);
-    server_seqs.push_back(event.server_seq);
-    message_epochs.push_back(event.epoch);
-    sent_ats.push_back(event.wave->sent_at);
-  }
-  if (!gateway_build_preencoded_message_event_batch_frame_impl(
-          stable_children, &validated_templates, scope_types, scope_id,
-          message_seqs, server_seqs, message_epochs, sent_ats,
-          batch.slot_server_seq, slot_epoch, batch.slot_sent_at, frame)) {
+  if (!gateway_encode_pending_message_event_projection_inner(snapshot, columns,
+                                                             frame)) {
     return false;
   }
   *event_count = static_cast<LPC_INT>(count);
-  *slot_server_seq = batch.slot_server_seq;
+  *slot_server_seq = columns.slot_server_seq;
   return true;
 }
 
 int gateway_fill_pending_message_event_batch_with_writer(
     GatewaySession *sess, uint64_t reservation_id, const std::string &scope_id,
     LPC_INT slot_epoch, GatewayOutputWriter writer) {
-  std::string frame;
-  LPC_INT event_count = 0;
-  LPC_INT slot_server_seq = 0;
-  if (!writer || !gateway_build_pending_message_event_batch_frame(
-                     sess, reservation_id, scope_id, slot_epoch, &frame,
-                     &event_count, &slot_server_seq)) {
+  GatewayPendingMessageEventProjectionSnapshot snapshot;
+  GatewayPendingMessageEventProjectionColumns columns;
+  std::string wire_bytes;
+  std::optional<GatewayWireOutput> wire_output;
+  try {
+    if (!writer || !gateway_snapshot_pending_message_event_batch(
+                       sess, reservation_id, scope_id, slot_epoch, &snapshot,
+                       &columns) ||
+        !gateway_encode_pending_message_event_projection_inline(
+            snapshot, columns, &wire_bytes)) {
+      return 0;
+    }
+    wire_output = GatewayWireOutputFactory::trusted_projected_wire(
+        sess, std::move(wire_bytes));
+  } catch (const std::exception &) {
     return 0;
   }
-  return gateway_fill_session_output_with_writer(
-      sess, reservation_id, std::move(frame), writer);
+  if (!wire_output) {
+    return 0;
+  }
+  const auto already_sealed = gateway_pending_message_event_projection_matches(
+      sess, reservation_id, snapshot.generation, true);
+  if (already_sealed) {
+    const auto watched = g_gateway_session_future_watches.find(reservation_id) !=
+        g_gateway_session_future_watches.end();
+    const auto owned_by_wave = std::any_of(
+        g_gateway_room_output_waves.begin(), g_gateway_room_output_waves.end(),
+        [reservation_id](const auto &wave_entry) {
+          return std::any_of(
+              wave_entry.second.items.begin(), wave_entry.second.items.end(),
+              [reservation_id](const GatewayRoomOutputWaveItem &item) {
+                return item.watch.reservation_id == reservation_id;
+              });
+        });
+    if (watched || owned_by_wave) {
+      return 0;
+    }
+  } else if (!gateway_seal_pending_message_event_projections(
+                 {sess}, {reservation_id}, {snapshot.generation})) {
+    return 0;
+  }
+  return wire_output
+      ? gateway_fill_session_wire_output_with_writer(
+            sess, reservation_id, std::move(*wire_output), writer)
+      : 0;
 }
 
 bool gateway_fill_pending_message_event_batches_with_writer(
@@ -2202,8 +3374,11 @@ bool gateway_fill_pending_message_event_batches_with_writer(
     const std::vector<LPC_INT> &slot_epochs, GatewayOutputWriter writer,
     GatewayPendingMessageEventBatchFillResult *result) {
   const auto count = sessions.size();
-  std::unordered_set<GatewaySession *> unique_sessions;
-  std::vector<std::string> frames;
+  std::unordered_set<uint64_t> unique_reservation_ids;
+  std::vector<GatewayPendingMessageEventProjectionSnapshot> snapshots;
+  std::vector<GatewayPendingMessageEventProjectionColumns> columns;
+  std::vector<GatewayWireOutput> wire_outputs;
+  std::vector<uint64_t> generations;
 
   if (!result) {
     return false;
@@ -2217,37 +3392,371 @@ bool gateway_fill_pending_message_event_batches_with_writer(
   }
 
   try {
-    unique_sessions.reserve(count);
-    frames.resize(count);
+    unique_reservation_ids.reserve(count);
+    snapshots.resize(count);
+    columns.resize(count);
+    wire_outputs.reserve(count);
+    generations.reserve(count);
     result->filled.assign(count, false);
     result->event_counts.resize(count);
     result->slot_server_seqs.resize(count);
     for (size_t index = 0; index < count; ++index) {
       auto *sess = sessions[index];
-      if (!sess || !unique_sessions.insert(sess).second ||
-          reservation_ids[index] == 0 || scope_ids[index].empty() ||
+      std::string wire_bytes;
+      std::optional<GatewayWireOutput> wire_output;
+      if (!sess || reservation_ids[index] == 0 ||
+          !unique_reservation_ids.insert(reservation_ids[index]).second ||
+          scope_ids[index].empty() ||
           slot_epochs[index] < 0 ||
-          !gateway_build_pending_message_event_batch_frame(
+          !gateway_snapshot_pending_message_event_batch(
               sess, reservation_ids[index], scope_ids[index], slot_epochs[index],
-              &frames[index], &result->event_counts[index],
-              &result->slot_server_seqs[index])) {
+              &snapshots[index], &columns[index]) ||
+          !gateway_encode_pending_message_event_projection_inline(
+              snapshots[index], columns[index], &wire_bytes)) {
         result->filled.clear();
         result->event_counts.clear();
         result->slot_server_seqs.clear();
         return false;
       }
+      result->event_counts[index] = static_cast<LPC_INT>(
+          snapshots[index].event_wave_indices.size());
+      result->slot_server_seqs[index] = columns[index].slot_server_seq;
+      wire_output = GatewayWireOutputFactory::trusted_projected_wire(
+          sess, std::move(wire_bytes));
+      if (!wire_output) {
+        result->filled.clear();
+        result->event_counts.clear();
+        result->slot_server_seqs.clear();
+        return false;
+      }
+      wire_outputs.push_back(std::move(*wire_output));
+      generations.push_back(snapshots[index].generation);
     }
-  } catch (const std::bad_alloc &) {
+  } catch (const std::exception &) {
     result->filled.clear();
     result->event_counts.clear();
     result->slot_server_seqs.clear();
     return false;
   }
 
+  // No recipient may be written until every wire frame is valid and every
+  // original FIFO reservation is still pending.
   for (size_t index = 0; index < count; ++index) {
-    result->filled[index] = gateway_fill_session_output_with_writer(
-                                sessions[index], reservation_ids[index],
-                                std::move(frames[index]), writer) == 1;
+    if (!gateway_session_has_pending_reservation(sessions[index],
+                                                 reservation_ids[index])) {
+      result->filled.clear();
+      result->event_counts.clear();
+      result->slot_server_seqs.clear();
+      return false;
+    }
+  }
+  if (!gateway_seal_pending_message_event_projections(
+          sessions, reservation_ids, generations)) {
+    result->filled.clear();
+    result->event_counts.clear();
+    result->slot_server_seqs.clear();
+    return false;
+  }
+
+  if (!gateway_stage_session_wire_outputs(sessions, reservation_ids,
+                                          &wire_outputs)) {
+    result->filled.clear();
+    result->event_counts.clear();
+    result->slot_server_seqs.clear();
+    return false;
+  }
+  std::fill(result->filled.begin(), result->filled.end(), true);
+  for (auto *sess : sessions) {
+    gateway_flush_session_output_fifo_with_writer(sess, writer);
+  }
+  return true;
+}
+
+namespace {
+std::optional<GatewayWireOutput> gateway_prepare_projection_wire(
+    GatewaySession *sess,
+    const std::shared_ptr<const GatewayPendingMessageEventProjectionWork> &work) {
+  std::string wire_bytes;
+  if (!sess || !work) {
+    return std::nullopt;
+  }
+  if (!work->prevalidated_wire_bytes.empty()) {
+    wire_bytes = work->prevalidated_wire_bytes;
+  } else if (!gateway_encode_pending_message_event_projection_inline(
+                 work->snapshot, work->columns, &wire_bytes)) {
+    return std::nullopt;
+  }
+  return GatewayWireOutputFactory::trusted_projected_wire(
+      sess, std::move(wire_bytes));
+}
+}  // namespace
+
+bool gateway_submit_pending_message_event_batches_for_objects(
+    const std::vector<object_t *> &targets,
+    const std::vector<uint64_t> &reservation_ids,
+    const std::vector<std::string> &scope_ids,
+    const std::vector<LPC_INT> &slot_epochs, int timeout_ms,
+    GatewayPendingMessageEventBatchOwnerSubmitResult *result) {
+  const auto count = targets.size();
+  std::vector<GatewaySession *> sessions;
+  std::vector<std::shared_ptr<GatewayPendingMessageEventProjectionWork>> works;
+  std::vector<std::string> owner_ids;
+  std::vector<uint64_t> owner_epochs;
+  std::vector<uint64_t> generations;
+  std::vector<VMOwnerStringTaskSubmission> submissions;
+  std::vector<GatewayWireOutput> inline_wire_outputs;
+  std::unordered_set<uint64_t> unique_reservation_ids;
+
+  if (!result) {
+    return false;
+  }
+  *result = {};
+  if (!vm_context_is_main_thread() || count == 0 || timeout_ms <= 0 ||
+      reservation_ids.size() != count || scope_ids.size() != count ||
+      slot_epochs.size() != count) {
+    return false;
+  }
+
+  try {
+    sessions.reserve(count);
+    works.reserve(count);
+    owner_ids.reserve(count);
+    owner_epochs.reserve(count);
+    generations.reserve(count);
+    submissions.resize(count);
+    inline_wire_outputs.reserve(count);
+    unique_reservation_ids.reserve(count);
+    for (size_t index = 0; index < count; ++index) {
+      auto *target = targets[index];
+      auto *sess = gateway_find_session_by_object(target);
+      auto work = std::make_shared<GatewayPendingMessageEventProjectionWork>();
+      if (!gateway_object_valid(target) || !sess ||
+          reservation_ids[index] == 0 ||
+          !unique_reservation_ids.insert(reservation_ids[index]).second ||
+          scope_ids[index].empty() || slot_epochs[index] < 0 ||
+          !gateway_snapshot_pending_message_event_batch(
+              sess, reservation_ids[index], scope_ids[index],
+              slot_epochs[index], &work->snapshot, &work->columns)) {
+        return false;
+      }
+      sessions.push_back(sess);
+      works.push_back(std::move(work));
+      owner_ids.emplace_back(vm_owner_id(target));
+      owner_epochs.push_back(vm_owner_epoch(target));
+      generations.push_back(works.back()->snapshot.generation);
+    }
+    result->submitted.assign(count, false);
+    result->filled_inline.assign(count, false);
+    result->event_counts.resize(count);
+    result->slot_server_seqs.resize(count);
+    result->future_ids.assign(count, 0);
+  } catch (const std::exception &) {
+    *result = {};
+    return false;
+  }
+
+  for (size_t index = 0; index < count; ++index) {
+    result->event_counts[index] = static_cast<LPC_INT>(
+        works[index]->snapshot.event_wave_indices.size());
+    result->slot_server_seqs[index] =
+        works[index]->columns.slot_server_seq;
+  }
+
+  // Snapshot every recipient before any owner submit or inline fallback can
+  // fill a FIFO slot.
+  for (size_t index = 0; index < count; ++index) {
+    if (!gateway_prevalidate_pending_message_event_projection_work(
+            sessions[index], works[index].get()) ||
+        !gateway_session_has_pending_reservation(sessions[index],
+                                                 reservation_ids[index]) ||
+        owner_ids[index] != vm_owner_id(targets[index]) ||
+        !vm_owner_epoch_matches(targets[index], owner_ids[index].c_str(),
+                                owner_epochs[index])) {
+      *result = {};
+      return false;
+    }
+  }
+  if (!gateway_seal_pending_message_event_projections(
+          sessions, reservation_ids, generations)) {
+    *result = {};
+    return false;
+  }
+
+  bool owner_batch_ready = true;
+  for (size_t index = 0; index < count; ++index) {
+    const auto submit_started_ns = gateway_session_now_ns();
+    const auto work = works[index];
+    submissions[index] = vm_owner_submit_frozen_string_task(
+        targets[index], "room_output_projection", "pending-message-event",
+        [work](std::string *wire_bytes) {
+          const auto worker_started_ns = gateway_session_now_ns();
+          const auto worker_cpu_started_ns = get_current_thread_cpu_time_ns();
+          const auto projected = wire_bytes &&
+              (!work->prevalidated_wire_bytes.empty()
+                   ? (*wire_bytes = work->prevalidated_wire_bytes, true)
+                   : gateway_encode_pending_message_event_projection(
+                         work->snapshot, work->columns, wire_bytes));
+          gateway_session_record_thread_cpu(
+              g_gateway_runtime_counters
+                  .room_output_projection_worker_thread_cpu_ns_total,
+              g_gateway_runtime_counters
+                  .room_output_projection_worker_thread_cpu_ns_max,
+              g_gateway_runtime_counters
+                  .room_output_projection_worker_thread_cpu_samples,
+              g_gateway_runtime_counters
+                  .room_output_projection_worker_thread_cpu_unavailable,
+              worker_cpu_started_ns);
+          gateway_session_record_latency(
+              g_gateway_runtime_counters
+                  .room_output_projection_worker_ns_total,
+              g_gateway_runtime_counters.room_output_projection_worker_ns_max,
+              g_gateway_runtime_counters
+                  .room_output_projection_worker_samples,
+              gateway_session_now_ns() - worker_started_ns);
+          return projected;
+        });
+    gateway_session_record_latency(
+        g_gateway_runtime_counters
+            .room_output_projection_submit_watch_ns_total,
+        g_gateway_runtime_counters.room_output_projection_submit_watch_ns_max,
+        g_gateway_runtime_counters
+            .room_output_projection_submit_watch_samples,
+        gateway_session_now_ns() - submit_started_ns);
+    if (!submissions[index].queued || submissions[index].future_id == 0 ||
+        submissions[index].target_owner_epoch != owner_epochs[index]) {
+      owner_batch_ready = false;
+      break;
+    }
+  }
+
+  uint64_t room_output_wave_id = 0;
+  GatewayRoomOutputWave room_output_wave;
+  if (owner_batch_ready) {
+    room_output_wave_id = g_gateway_next_room_output_wave_id++;
+    if (room_output_wave_id == 0) {
+      owner_batch_ready = false;
+    } else {
+      try {
+        room_output_wave.wave_id = room_output_wave_id;
+        room_output_wave.items.resize(count);
+      } catch (const std::exception &) {
+        owner_batch_ready = false;
+      }
+    }
+  }
+
+  size_t registered_count = 0;
+  if (owner_batch_ready) {
+    for (size_t index = 0; index < count; ++index) {
+      if (!gateway_watch_session_future_for_object_internal(
+              targets[index], reservation_ids[index],
+              submissions[index].future_id, timeout_ms,
+              GatewayFutureOutputKind::kValidatedWire,
+              result->event_counts[index], result->slot_server_seqs[index],
+              generations[index], room_output_wave_id, index)) {
+        owner_batch_ready = false;
+        break;
+      }
+      ++registered_count;
+      const auto watch_it =
+          g_gateway_session_future_watches.find(reservation_ids[index]);
+      if (watch_it == g_gateway_session_future_watches.end()) {
+        owner_batch_ready = false;
+        break;
+      }
+      room_output_wave.items[index].watch = watch_it->second;
+      room_output_wave.items[index].work = works[index];
+    }
+  }
+
+  if (owner_batch_ready) {
+    try {
+      owner_batch_ready =
+          g_gateway_room_output_waves
+              .emplace(room_output_wave_id, std::move(room_output_wave))
+              .second;
+    } catch (const std::exception &) {
+      owner_batch_ready = false;
+    }
+  }
+
+  if (owner_batch_ready) {
+    for (size_t index = 0; index < count; ++index) {
+      result->submitted[index] = true;
+      result->future_ids[index] = submissions[index].future_id;
+    }
+    g_gateway_runtime_counters.room_output_projection_submitted.fetch_add(
+        count, std::memory_order_relaxed);
+    return true;
+  }
+
+  for (size_t index = 0; index < registered_count; ++index) {
+    auto detached =
+        gateway_detach_session_future_watch(reservation_ids[index]);
+    if (detached) {
+      gateway_consume_cancelled_future(
+          detached->future_id, "room output wave watch fallback");
+      g_gateway_runtime_counters.future_watches_cancelled.fetch_add(
+          1, std::memory_order_relaxed);
+    }
+  }
+  for (size_t index = registered_count; index < submissions.size(); ++index) {
+    if (submissions[index].future_id != 0) {
+      gateway_consume_cancelled_future(
+          submissions[index].future_id, "room output wave submission fallback");
+    }
+  }
+  if (room_output_wave_id != 0) {
+    g_gateway_room_output_waves.erase(room_output_wave_id);
+  }
+  g_gateway_runtime_counters.room_output_projection_inline_fallbacks.fetch_add(
+      count, std::memory_order_relaxed);
+
+  bool inline_batch_ready = true;
+  for (size_t index = 0; index < count; ++index) {
+    if (!gateway_pending_message_event_projection_matches(
+            sessions[index], reservation_ids[index], generations[index], true)) {
+      inline_batch_ready = false;
+      break;
+    }
+    auto wire_output =
+        gateway_prepare_projection_wire(sessions[index], works[index]);
+    if (!wire_output) {
+      inline_batch_ready = false;
+      break;
+    }
+    inline_wire_outputs.push_back(std::move(*wire_output));
+  }
+  if (inline_batch_ready) {
+    for (size_t index = 0; index < count; ++index) {
+      if (!gateway_pending_message_event_projection_matches(
+              sessions[index], reservation_ids[index], generations[index],
+              true) ||
+          !gateway_session_has_pending_reservation(sessions[index],
+                                                   reservation_ids[index])) {
+        inline_batch_ready = false;
+        break;
+      }
+    }
+  }
+  if (inline_batch_ready) {
+    inline_batch_ready = gateway_stage_session_wire_outputs(
+        sessions, reservation_ids, &inline_wire_outputs);
+    if (inline_batch_ready) {
+      for (size_t index = 0; index < count; ++index) {
+        result->filled_inline[index] = true;
+      }
+    }
+  }
+  if (inline_batch_ready) {
+    for (auto *sess : sessions) {
+      gateway_flush_session_output_fifo_with_writer(sess,
+                                                    gateway_send_raw_to_fd);
+    }
+  } else {
+    std::fill(result->filled_inline.begin(), result->filled_inline.end(), false);
+    g_gateway_runtime_counters.room_output_projection_failed.fetch_add(
+        count, std::memory_order_relaxed);
   }
   return true;
 }
@@ -2265,17 +3774,20 @@ int gateway_fill_pending_message_event_batch_for_object(
       gateway_send_raw_to_fd);
 }
 
-int gateway_fill_session_output_with_writer(GatewaySession *sess, uint64_t reservation_id,
-                                            std::string encoded, GatewayOutputWriter writer) {
-  if (!sess || reservation_id == 0 || encoded.empty() || !writer) {
-    return 0;
+namespace {
+bool gateway_stage_session_wire_output(GatewaySession *sess,
+                                       uint64_t reservation_id,
+                                       GatewayWireOutput wire_output) {
+  if (!sess || reservation_id == 0 || wire_output.empty() ||
+      !wire_output.bound_to(sess)) {
+    return false;
   }
   for (auto it = sess->output_fifo.begin(); it != sess->output_fifo.end(); ++it) {
     auto &entry = *it;
     if (entry.reservation_id != reservation_id || entry.ready) {
       continue;
     }
-    entry.encoded = std::move(encoded);
+    entry.wire_bytes = std::move(wire_output).release();
     entry.ready = true;
     g_gateway_runtime_counters.output_fifo_filled.fetch_add(1, std::memory_order_relaxed);
     if (it != sess->output_fifo.begin() && !sess->output_fifo.front().ready) {
@@ -2291,16 +3803,1106 @@ int gateway_fill_session_output_with_writer(GatewaySession *sess, uint64_t reser
       }
     }
     sess->last_active = get_current_time();
-    gateway_flush_session_output_fifo_with_writer(sess, writer);
-    return 1;
+    return true;
   }
   g_gateway_runtime_counters.output_fifo_reservation_misses.fetch_add(1, std::memory_order_relaxed);
-  return 0;
+  return false;
 }
 
-int gateway_fill_session_output(GatewaySession *sess, uint64_t reservation_id, std::string encoded) {
-  return gateway_fill_session_output_with_writer(sess, reservation_id, std::move(encoded),
-                                                 gateway_send_raw_to_fd);
+bool gateway_stage_session_wire_outputs(
+    const std::vector<GatewaySession *> &sessions,
+    const std::vector<uint64_t> &reservation_ids,
+    std::vector<GatewayWireOutput> *wire_outputs) {
+  struct PendingStage {
+    GatewaySession *session{nullptr};
+    GatewayOutputEntry *entry{nullptr};
+    uint64_t preceding_count{0};
+  };
+  const auto count = sessions.size();
+  std::vector<PendingStage> stages;
+  std::unordered_set<uint64_t> unique_reservations;
+  if (!wire_outputs || count == 0 || reservation_ids.size() != count ||
+      wire_outputs->size() != count) {
+    return false;
+  }
+  try {
+    stages.reserve(count);
+    unique_reservations.reserve(count);
+    for (size_t index = 0; index < count; ++index) {
+      auto *sess = sessions[index];
+      const auto reservation_id = reservation_ids[index];
+      if (!sess || reservation_id == 0 || (*wire_outputs)[index].empty() ||
+          !(*wire_outputs)[index].bound_to(sess) ||
+          !unique_reservations.insert(reservation_id).second) {
+        return false;
+      }
+      auto *entry = gateway_find_pending_output_entry(sess, reservation_id);
+      if (!entry) {
+        return false;
+      }
+      uint64_t preceding_count = 0;
+      for (auto it = sess->output_fifo.begin(); it != sess->output_fifo.end();
+           ++it) {
+        if (&*it == entry) {
+          break;
+        }
+        ++preceding_count;
+      }
+      stages.push_back({sess, entry, preceding_count});
+    }
+  } catch (const std::exception &) {
+    return false;
+  }
+
+  // No operation below this point can reject an item. The complete wave is
+  // committed before any writer is invoked.
+  for (size_t index = 0; index < count; ++index) {
+    auto &stage = stages[index];
+    stage.entry->wire_bytes = std::move((*wire_outputs)[index]).release();
+    stage.entry->ready = true;
+    g_gateway_runtime_counters.output_fifo_filled.fetch_add(
+        1, std::memory_order_relaxed);
+    if (stage.preceding_count > 0 &&
+        !stage.session->output_fifo.front().ready) {
+      auto &counters = g_gateway_runtime_counters;
+      counters.output_fifo_head_blocked_fills.fetch_add(
+          1, std::memory_order_relaxed);
+      counters.output_fifo_head_blocked_predecessors_total.fetch_add(
+          stage.preceding_count, std::memory_order_relaxed);
+      auto observed = counters.output_fifo_head_blocked_predecessors_max.load(
+          std::memory_order_relaxed);
+      while (observed < stage.preceding_count &&
+             !counters.output_fifo_head_blocked_predecessors_max
+                  .compare_exchange_weak(observed, stage.preceding_count,
+                                         std::memory_order_relaxed,
+                                         std::memory_order_relaxed)) {
+      }
+    }
+    stage.session->last_active = get_current_time();
+  }
+  return true;
+}
+
+int gateway_fill_session_wire_output_with_writer(
+    GatewaySession *sess, uint64_t reservation_id,
+    GatewayWireOutput wire_output, GatewayOutputWriter writer) {
+  if (!writer || !gateway_stage_session_wire_output(
+                     sess, reservation_id, std::move(wire_output))) {
+    return 0;
+  }
+  gateway_flush_session_output_fifo_with_writer(sess, writer);
+  return 1;
+}
+
+std::optional<GatewaySessionFutureWatch>
+gateway_detach_session_future_watch(uint64_t reservation_id) {
+  auto watch_it = g_gateway_session_future_watches.find(reservation_id);
+  if (watch_it == g_gateway_session_future_watches.end()) {
+    return std::nullopt;
+  }
+  auto watch = watch_it->second;
+  g_gateway_future_to_reservation.erase(watch.future_id);
+  auto queue_it = g_gateway_future_watch_queue_positions.find(reservation_id);
+  if (queue_it != g_gateway_future_watch_queue_positions.end()) {
+    g_gateway_future_watch_queue.erase(queue_it->second);
+    g_gateway_future_watch_queue_positions.erase(queue_it);
+  }
+  g_gateway_session_future_watches.erase(watch_it);
+  if (g_gateway_session_future_watches.empty() && !gateway_has_future_watches()) {
+    gateway_stop_future_watch_timer();
+  }
+  return watch;
+}
+
+bool gateway_session_future_watch_session_is_current(
+    const GatewaySessionFutureWatch &watch, GatewaySession **session,
+    object_t **target) {
+  auto *sess = gateway_find_session(watch.session_id.c_str());
+  auto *ob = gateway_resolve_session_object(sess);
+  if (session) {
+    *session = sess;
+  }
+  if (target) {
+    *target = ob;
+  }
+  return sess && ob && sess->session_id == watch.session_id &&
+      sess->user_ob_name == watch.user_ob_name &&
+      sess->user_ob_load_time == watch.user_ob_load_time;
+}
+
+bool gateway_session_future_watch_is_current(
+    const GatewaySessionFutureWatch &watch, GatewaySession **session,
+    object_t **target) {
+  GatewaySession *sess = nullptr;
+  object_t *ob = nullptr;
+  const auto session_current = gateway_session_future_watch_session_is_current(
+      watch, &sess, &ob);
+  if (session) {
+    *session = sess;
+  }
+  if (target) {
+    *target = ob;
+  }
+  return session_current && watch.owner_id == vm_owner_id(ob) &&
+      vm_owner_epoch_matches(ob, watch.owner_id.c_str(), watch.owner_epoch);
+}
+
+GatewaySession *gateway_session_future_watch_cleanup_session(
+    const GatewaySessionFutureWatch &watch) {
+  auto *sess = gateway_find_session(watch.session_id.c_str());
+  if (!sess || sess->user_ob_name != watch.user_ob_name ||
+      sess->user_ob_load_time != watch.user_ob_load_time) {
+    return nullptr;
+  }
+  return sess;
+}
+
+bool gateway_session_future_watch_cleanup_target(
+    const GatewaySessionFutureWatch &watch, GatewaySession **session,
+    object_t **target) {
+  auto *sess = gateway_session_future_watch_cleanup_session(watch);
+  auto *ob = gateway_resolve_session_object(sess);
+  if (session) {
+    *session = sess;
+  }
+  if (target) {
+    *target = ob;
+  }
+  return sess && ob;
+}
+
+void gateway_finalize_cancelled_session_future_watch(
+    const GatewaySessionFutureWatch &watch, const char *reason,
+    bool release_non_mapping_reservation) {
+  if (watch.output_kind == GatewayFutureOutputKind::kMapping) {
+    GatewaySession *callback_session = nullptr;
+    object_t *callback_target = nullptr;
+    if (gateway_session_future_watch_cleanup_target(
+            watch, &callback_session, &callback_target) &&
+        !gateway_dispatch_future_watch_cancelled_callback(
+            callback_target, watch.reservation_id, watch.future_id, reason)) {
+      g_gateway_runtime_counters.future_watch_callback_failures.fetch_add(
+          1, std::memory_order_relaxed);
+    }
+
+    // The callback may release, destruct, disconnect, or recursively destroy
+    // the session. Never reuse callback_session or callback_target here.
+    auto *release_session =
+        gateway_session_future_watch_cleanup_session(watch);
+    if (gateway_session_has_pending_reservation(release_session,
+                                                watch.reservation_id)) {
+      gateway_release_session_output(release_session, watch.reservation_id);
+    }
+    return;
+  }
+
+  if (release_non_mapping_reservation) {
+    auto *release_session =
+        gateway_session_future_watch_cleanup_session(watch);
+    if (gateway_session_has_pending_reservation(release_session,
+                                                watch.reservation_id)) {
+      gateway_release_session_output(release_session, watch.reservation_id);
+    }
+  }
+
+  GatewaySession *notification_session = nullptr;
+  object_t *notification_target = nullptr;
+  if (gateway_session_future_watch_cleanup_target(
+          watch, &notification_session, &notification_target) &&
+      !gateway_dispatch_future_output_notification(
+          notification_target, watch.reservation_id, "released",
+          watch.event_count, watch.slot_server_seq)) {
+    g_gateway_runtime_counters.future_watch_callback_failures.fetch_add(
+        1, std::memory_order_relaxed);
+  }
+}
+
+bool gateway_force_remove_session_output(GatewaySession *sess,
+                                         uint64_t reservation_id) {
+  if (!sess || reservation_id == 0) {
+    return false;
+  }
+  for (auto it = sess->output_fifo.begin(); it != sess->output_fifo.end();
+       ++it) {
+    if (it->reservation_id != reservation_id) {
+      continue;
+    }
+    if (it->ready) {
+      g_gateway_runtime_counters.output_fifo_destroyed_ready.fetch_add(
+          1, std::memory_order_relaxed);
+    } else {
+      g_gateway_runtime_counters.output_fifo_destroyed_pending.fetch_add(
+          1, std::memory_order_relaxed);
+    }
+    sess->output_fifo.erase(it);
+    g_gateway_runtime_counters.room_output_projection_forced_cleanup.fetch_add(
+        1, std::memory_order_relaxed);
+    return true;
+  }
+  return false;
+}
+
+bool gateway_stage_session_output_release(GatewaySession *sess,
+                                          uint64_t reservation_id) {
+  if (!sess || reservation_id == 0) {
+    return false;
+  }
+  for (auto it = sess->output_fifo.begin(); it != sess->output_fifo.end();
+       ++it) {
+    if (it->reservation_id != reservation_id || it->ready) {
+      continue;
+    }
+    sess->output_fifo.erase(it);
+    g_gateway_runtime_counters.output_fifo_released.fetch_add(
+        1, std::memory_order_relaxed);
+    sess->last_active = get_current_time();
+    return true;
+  }
+  return false;
+}
+
+bool gateway_notify_room_output_wave_item(GatewayRoomOutputWaveItem *item,
+                                          const char *state,
+                                          bool require_current) {
+  if (!item || item->notification_finalized) {
+    return item != nullptr;
+  }
+  GatewaySession *sess = nullptr;
+  object_t *ob = nullptr;
+  const auto target_ready = require_current
+      ? gateway_session_future_watch_is_current(item->watch, &sess, &ob)
+      : gateway_session_future_watch_cleanup_target(item->watch, &sess, &ob);
+  if (!target_ready) {
+    return false;
+  }
+  // Mark before entering LPC: the callback may destruct or disconnect its
+  // session and re-enter wave cleanup. The watcher remains the sole terminal
+  // consumer, and a re-entrant cleanup must not send the notification twice.
+  item->notification_finalized = true;
+  const auto callback_ok = gateway_dispatch_future_output_notification(
+      ob, item->watch.reservation_id, state, item->watch.event_count,
+      item->watch.slot_server_seq);
+  if (!callback_ok) {
+    g_gateway_runtime_counters.future_watch_callback_failures.fetch_add(
+        1, std::memory_order_relaxed);
+  }
+  return callback_ok;
+}
+
+bool gateway_release_room_output_wave_item(
+    GatewayRoomOutputWaveItem *item, GatewaySession *known_session = nullptr) {
+  if (!item) {
+    return false;
+  }
+  item->terminal = true;
+  item->completed = false;
+  item->inline_fallback = false;
+  item->wire_bytes.clear();
+
+  if (!item->reservation_closed) {
+    auto *sess = known_session
+        ? known_session
+        : gateway_session_future_watch_cleanup_session(item->watch);
+    if (!sess ||
+        !gateway_session_has_pending_reservation(
+            sess, item->watch.reservation_id)) {
+      item->reservation_closed = true;
+    } else {
+      item->reservation_closed =
+          gateway_release_session_output(
+              sess, item->watch.reservation_id) != 0 ||
+          gateway_force_remove_session_output(
+              sess, item->watch.reservation_id);
+    }
+  }
+  return item->reservation_closed;
+}
+
+bool gateway_fail_room_output_wave_item(
+    uint64_t wave_id, size_t item_index,
+    const GatewaySessionFutureWatch &observed_watch, const char *reason) {
+  auto wave_it = g_gateway_room_output_waves.find(wave_id);
+  if (wave_it == g_gateway_room_output_waves.end() ||
+      item_index >= wave_it->second.items.size()) {
+    return false;
+  }
+
+  const auto item_watch = wave_it->second.items[item_index].watch;
+  auto detached =
+      gateway_detach_session_future_watch(observed_watch.reservation_id);
+  if (detached) {
+    gateway_consume_cancelled_future(
+        detached->future_id,
+        reason && reason[0] ? reason : "room output wave item failed");
+    g_gateway_runtime_counters.future_watches_cancelled.fetch_add(
+        1, std::memory_order_relaxed);
+  } else if (!wave_it->second.items[item_index].terminal &&
+             vm_owner_future_state(item_watch.future_id) !=
+                 VM_OWNER_FUTURE_UNKNOWN) {
+    gateway_consume_cancelled_future(
+        item_watch.future_id,
+        reason && reason[0] ? reason : "room output wave item failed");
+    g_gateway_runtime_counters.future_watches_cancelled.fetch_add(
+        1, std::memory_order_relaxed);
+  }
+
+  // Future cancellation does not enter LPC, but re-find the wave before any
+  // release or notification so this helper stays correct if that changes.
+  wave_it = g_gateway_room_output_waves.find(wave_id);
+  if (wave_it == g_gateway_room_output_waves.end() ||
+      item_index >= wave_it->second.items.size()) {
+    return true;
+  }
+  auto &item = wave_it->second.items[item_index];
+  auto *release_session =
+      gateway_session_future_watch_cleanup_session(item.watch);
+  gateway_release_room_output_wave_item(&item, release_session);
+  const auto all_terminal =
+      gateway_room_output_wave_all_terminal(wave_it->second);
+  const auto notify_released =
+      item.reservation_closed && !item.notification_finalized;
+
+  if (all_terminal) {
+    gateway_publish_room_output_wave(wave_id);
+  } else if (notify_released) {
+    // The callback can destruct a target and erase the wave. Do not touch the
+    // item or wave after dispatch.
+    gateway_notify_room_output_wave_item(&item, "released", false);
+  }
+  return true;
+}
+
+bool gateway_mark_room_output_wave_item_inline_fallback(
+    GatewayRoomOutputWaveItem *item, GatewaySession *sess) {
+  if (!item || !item->work || !sess || item->reservation_closed ||
+      !gateway_session_has_pending_reservation(
+          sess, item->watch.reservation_id) ||
+      !gateway_pending_message_event_projection_matches(
+          sess, item->watch.reservation_id,
+          item->watch.projection_generation, true)) {
+    return false;
+  }
+  item->terminal = true;
+  item->completed = false;
+  item->inline_fallback = true;
+  item->wire_bytes.clear();
+  return true;
+}
+
+bool gateway_room_output_wave_all_terminal(
+    const GatewayRoomOutputWave &wave) {
+  return !wave.items.empty() &&
+      std::all_of(wave.items.begin(), wave.items.end(),
+                  [](const GatewayRoomOutputWaveItem &item) {
+                    return item.terminal;
+                  });
+}
+
+size_t gateway_abort_room_output_wave(uint64_t wave_id, const char *reason,
+                                      const std::string *skip_release_session) {
+  auto wave_it = g_gateway_room_output_waves.find(wave_id);
+  if (wave_it == g_gateway_room_output_waves.end()) {
+    return 0;
+  }
+  if (wave_it->second.retry_schedule) {
+    g_gateway_room_output_retry_schedule.erase(
+        *wave_it->second.retry_schedule);
+    wave_it->second.retry_schedule.reset();
+  }
+  auto wave = std::move(wave_it->second);
+  g_gateway_room_output_waves.erase(wave_it);
+
+  size_t cancelled = 0;
+  for (auto &item : wave.items) {
+    auto detached =
+        gateway_detach_session_future_watch(item.watch.reservation_id);
+    if (detached) {
+      gateway_consume_cancelled_future(
+          detached->future_id,
+          reason && reason[0] ? reason : "room output wave aborted");
+      g_gateway_runtime_counters.future_watches_cancelled.fetch_add(
+          1, std::memory_order_relaxed);
+      ++cancelled;
+    } else if (!item.terminal &&
+               vm_owner_future_state(item.watch.future_id) !=
+                   VM_OWNER_FUTURE_UNKNOWN) {
+      gateway_consume_cancelled_future(
+          item.watch.future_id,
+          reason && reason[0] ? reason : "room output wave aborted");
+      g_gateway_runtime_counters.future_watches_cancelled.fetch_add(
+          1, std::memory_order_relaxed);
+      ++cancelled;
+    }
+    item.terminal = true;
+    item.completed = false;
+    item.wire_bytes.clear();
+  }
+
+  for (auto &item : wave.items) {
+    auto *sess = gateway_find_session(item.watch.session_id.c_str());
+    if (item.reservation_closed || !sess ||
+        (skip_release_session &&
+         item.watch.session_id == *skip_release_session)) {
+      continue;
+    }
+    if (gateway_session_has_pending_reservation(
+            sess, item.watch.reservation_id)) {
+      if (!gateway_release_session_output(sess, item.watch.reservation_id)) {
+        gateway_force_remove_session_output(sess,
+                                            item.watch.reservation_id);
+      }
+    } else {
+      gateway_force_remove_session_output(sess, item.watch.reservation_id);
+    }
+    item.reservation_closed = true;
+  }
+  for (auto &item : wave.items) {
+    gateway_notify_room_output_wave_item(&item, "released", false);
+  }
+  g_gateway_runtime_counters.room_output_projection_failed.fetch_add(
+      wave.items.size(), std::memory_order_relaxed);
+  g_gateway_runtime_counters.room_output_projection_released.fetch_add(
+      wave.items.size(), std::memory_order_relaxed);
+  return cancelled;
+}
+
+bool gateway_queue_room_output_publish_retry(uint64_t wave_id) {
+  auto wave_it = g_gateway_room_output_waves.find(wave_id);
+  if (wave_it == g_gateway_room_output_waves.end() ||
+      !gateway_room_output_wave_all_terminal(wave_it->second)) {
+    return false;
+  }
+  auto &wave = wave_it->second;
+  if (wave.retry_schedule) {
+    return true;
+  }
+  const auto now_ms = gateway_session_now_ms();
+  if (wave.retry_started_at_ms == 0) {
+    wave.retry_started_at_ms = now_ms;
+  }
+  if (wave.retry_attempts >= kGatewayRoomOutputRetryMaxAttempts ||
+      now_ms - wave.retry_started_at_ms >=
+          kGatewayRoomOutputRetryMaxHoldMs) {
+    g_gateway_runtime_counters.room_output_projection_retry_exhausted.fetch_add(
+        1, std::memory_order_relaxed);
+    gateway_abort_room_output_wave(
+        wave_id, "room output wave publish retry exhausted", nullptr);
+    return false;
+  }
+
+  const auto shift = std::min<uint32_t>(wave.retry_attempts, 6);
+  const auto delay_ms = std::min<uint64_t>(
+      kGatewayRoomOutputRetryBaseDelayMs << shift,
+      kGatewayRoomOutputRetryMaxDelayMs);
+  wave.retry_due_at_ms = now_ms + delay_ms;
+  ++wave.retry_attempts;
+  try {
+    wave.retry_schedule = g_gateway_room_output_retry_schedule.emplace(
+        wave.retry_due_at_ms, wave_id);
+  } catch (const std::exception &) {
+    wave.retry_schedule.reset();
+    g_gateway_runtime_counters.room_output_projection_retry_exhausted.fetch_add(
+        1, std::memory_order_relaxed);
+    gateway_abort_room_output_wave(
+        wave_id, "room output wave retry scheduling failed", nullptr);
+    return false;
+  }
+  g_gateway_runtime_counters.room_output_projection_retry_enqueued.fetch_add(
+      1, std::memory_order_relaxed);
+  gateway_schedule_future_watch_timer();
+  return true;
+}
+
+bool gateway_publish_room_output_wave(uint64_t wave_id) {
+  auto wave_it = g_gateway_room_output_waves.find(wave_id);
+  if (wave_it == g_gateway_room_output_waves.end() ||
+      !gateway_room_output_wave_all_terminal(wave_it->second)) {
+    return false;
+  }
+  auto &wave = wave_it->second;
+  std::vector<GatewaySession *> sessions;
+  std::vector<uint64_t> reservation_ids;
+  std::vector<GatewayWireOutput> wire_outputs;
+  std::vector<size_t> staged_indices;
+  std::unordered_set<GatewaySession *> flush_sessions;
+  size_t inline_fallback_count = 0;
+  try {
+    sessions.reserve(wave.items.size());
+    reservation_ids.reserve(wave.items.size());
+    wire_outputs.reserve(wave.items.size());
+    staged_indices.reserve(wave.items.size());
+    flush_sessions.reserve(wave.items.size());
+    for (size_t index = 0; index < wave.items.size(); ++index) {
+      auto &item = wave.items[index];
+      if (item.reservation_closed) {
+        continue;
+      }
+      GatewaySession *sess = nullptr;
+      object_t *ob = nullptr;
+      if (!gateway_session_future_watch_session_is_current(
+              item.watch, &sess, &ob) ||
+          !gateway_pending_message_event_projection_matches(
+              sess, item.watch.reservation_id,
+              item.watch.projection_generation, true) ||
+          !gateway_session_has_pending_reservation(
+              sess, item.watch.reservation_id)) {
+        gateway_release_room_output_wave_item(
+            &item, gateway_session_future_watch_cleanup_session(item.watch));
+        continue;
+      }
+
+      const auto owner_current = item.watch.owner_id == vm_owner_id(ob) &&
+          vm_owner_epoch_matches(ob, item.watch.owner_id.c_str(),
+                                 item.watch.owner_epoch);
+      auto use_inline = item.inline_fallback || !item.completed ||
+          !owner_current || item.wire_bytes.empty();
+      std::optional<GatewayWireOutput> wire_output;
+      if (!use_inline) {
+        wire_output = GatewayWireOutputFactory::trusted_projected_wire(
+            sess, item.wire_bytes);
+        use_inline = !wire_output.has_value();
+      }
+      if (use_inline) {
+        wire_output = gateway_prepare_projection_wire(sess, item.work);
+      }
+      if (!wire_output) {
+        // Nothing has been staged or released yet. A dedicated bounded retry
+        // schedule retains the complete wave and every original reservation.
+        gateway_queue_room_output_publish_retry(wave_id);
+        return false;
+      }
+      sessions.push_back(sess);
+      reservation_ids.push_back(item.watch.reservation_id);
+      wire_outputs.push_back(std::move(*wire_output));
+      staged_indices.push_back(index);
+      flush_sessions.insert(sess);
+      if (use_inline) {
+        ++inline_fallback_count;
+      }
+    }
+  } catch (const std::exception &) {
+    gateway_queue_room_output_publish_retry(wave_id);
+    return false;
+  }
+
+  if (!sessions.empty() &&
+      !gateway_stage_session_wire_outputs(sessions, reservation_ids,
+                                          &wire_outputs)) {
+    gateway_queue_room_output_publish_retry(wave_id);
+    return false;
+  }
+  for (size_t index = 0; index < staged_indices.size(); ++index) {
+    auto &item = wave.items[staged_indices[index]];
+    item.completed = true;
+    item.reservation_closed = true;
+    item.wire_bytes.clear();
+  }
+  if (inline_fallback_count > 0) {
+    g_gateway_runtime_counters.room_output_projection_inline_fallbacks.fetch_add(
+        inline_fallback_count, std::memory_order_relaxed);
+  }
+
+  const auto completed_count = static_cast<size_t>(std::count_if(
+      wave.items.begin(), wave.items.end(),
+      [](const GatewayRoomOutputWaveItem &item) { return item.completed; }));
+  const auto released_count = wave.items.size() - completed_count;
+  if (wave.retry_schedule) {
+    g_gateway_room_output_retry_schedule.erase(*wave.retry_schedule);
+    wave.retry_schedule.reset();
+  }
+  auto completed_wave = std::move(wave);
+  g_gateway_room_output_waves.erase(wave_it);
+  g_gateway_runtime_counters.room_output_projection_completed.fetch_add(
+      completed_count, std::memory_order_relaxed);
+  g_gateway_runtime_counters.room_output_projection_released.fetch_add(
+      released_count, std::memory_order_relaxed);
+  g_gateway_runtime_counters.room_output_projection_failed.fetch_add(
+      released_count, std::memory_order_relaxed);
+  for (auto *sess : flush_sessions) {
+    gateway_flush_session_output_fifo_with_writer(sess,
+                                                  gateway_send_raw_to_fd);
+  }
+  for (auto &item : completed_wave.items) {
+    gateway_notify_room_output_wave_item(
+        &item, item.completed ? "completed" : "released", false);
+  }
+  return true;
+}
+
+void gateway_process_room_output_publish_retries(uint64_t now_ms) {
+  const auto started_at_ns = gateway_session_now_ns();
+  size_t examined = 0;
+  bool wall_budget_hit = false;
+  while (examined < kGatewayRoomOutputRetryBudget &&
+         !g_gateway_room_output_retry_schedule.empty()) {
+    if (gateway_session_now_ns() - started_at_ns >=
+        kGatewayRoomOutputRetryWallBudgetNs) {
+      wall_budget_hit = true;
+      break;
+    }
+    auto scheduled = g_gateway_room_output_retry_schedule.begin();
+    if (scheduled->first > now_ms) {
+      break;
+    }
+    const auto wave_id = scheduled->second;
+    g_gateway_room_output_retry_schedule.erase(scheduled);
+    auto wave_it = g_gateway_room_output_waves.find(wave_id);
+    if (wave_it == g_gateway_room_output_waves.end()) {
+      ++examined;
+      continue;
+    }
+    wave_it->second.retry_schedule.reset();
+    ++examined;
+    g_gateway_runtime_counters.room_output_projection_retry_attempted.fetch_add(
+        1, std::memory_order_relaxed);
+    if (now_ms - wave_it->second.retry_started_at_ms >=
+        kGatewayRoomOutputRetryMaxHoldMs) {
+      g_gateway_runtime_counters.room_output_projection_retry_exhausted.fetch_add(
+          1, std::memory_order_relaxed);
+      gateway_abort_room_output_wave(
+          wave_id, "room output wave retry deadline exceeded", nullptr);
+      continue;
+    }
+    gateway_publish_room_output_wave(wave_id);
+  }
+  if (wall_budget_hit) {
+    g_gateway_runtime_counters
+        .room_output_projection_retry_wall_budget_hits.fetch_add(
+            1, std::memory_order_relaxed);
+  } else if (examined >= kGatewayRoomOutputRetryBudget &&
+             !g_gateway_room_output_retry_schedule.empty() &&
+             g_gateway_room_output_retry_schedule.begin()->first <= now_ms) {
+    g_gateway_runtime_counters.room_output_projection_retry_budget_hits.fetch_add(
+        1, std::memory_order_relaxed);
+  }
+}
+
+void gateway_cancel_room_output_wave_session_items(
+    const std::string &session_id, GatewaySession *sess, const char *reason,
+    bool release_reservations) {
+  std::vector<uint64_t> wave_ids;
+  for (const auto &[wave_id, wave] : g_gateway_room_output_waves) {
+    if (std::any_of(wave.items.begin(), wave.items.end(),
+                    [&session_id](const GatewayRoomOutputWaveItem &item) {
+                      return item.watch.session_id == session_id;
+                    })) {
+      wave_ids.push_back(wave_id);
+    }
+  }
+
+  for (const auto wave_id : wave_ids) {
+    auto wave_it = g_gateway_room_output_waves.find(wave_id);
+    if (wave_it == g_gateway_room_output_waves.end()) {
+      continue;
+    }
+    std::vector<GatewaySessionFutureWatch> release_notifications;
+    for (auto &item : wave_it->second.items) {
+      if (item.watch.session_id != session_id) {
+        continue;
+      }
+      auto detached =
+          gateway_detach_session_future_watch(item.watch.reservation_id);
+      if (detached) {
+        gateway_consume_cancelled_future(detached->future_id, reason);
+        g_gateway_runtime_counters.future_watches_cancelled.fetch_add(
+            1, std::memory_order_relaxed);
+      } else if (!item.terminal &&
+                 vm_owner_future_state(item.watch.future_id) !=
+                     VM_OWNER_FUTURE_UNKNOWN) {
+        gateway_consume_cancelled_future(item.watch.future_id, reason);
+        g_gateway_runtime_counters.future_watches_cancelled.fetch_add(
+            1, std::memory_order_relaxed);
+      }
+      item.terminal = true;
+      item.completed = false;
+      item.wire_bytes.clear();
+      if (release_reservations && sess) {
+        if (gateway_session_has_pending_reservation(
+                sess, item.watch.reservation_id)) {
+          item.reservation_closed =
+              gateway_release_session_output(
+                  sess, item.watch.reservation_id) != 0 ||
+              gateway_force_remove_session_output(
+                  sess, item.watch.reservation_id);
+        } else {
+          item.reservation_closed = true;
+        }
+      } else if (!release_reservations) {
+        // The caller immediately discards the dying session FIFO. Keep this
+        // wave from writing that session while the remaining recipients drain.
+        item.reservation_closed = true;
+      }
+      GatewaySession *notification_session = nullptr;
+      object_t *notification_target = nullptr;
+      if (!item.notification_finalized &&
+          gateway_session_future_watch_cleanup_target(
+              item.watch, &notification_session, &notification_target)) {
+        item.notification_finalized = true;
+        release_notifications.push_back(item.watch);
+      }
+    }
+    for (const auto &notification : release_notifications) {
+      GatewaySession *notification_session = nullptr;
+      object_t *notification_target = nullptr;
+      if (gateway_session_future_watch_cleanup_target(
+              notification, &notification_session, &notification_target) &&
+          !gateway_dispatch_future_output_notification(
+              notification_target, notification.reservation_id, "released",
+              notification.event_count, notification.slot_server_seq)) {
+        g_gateway_runtime_counters.future_watch_callback_failures.fetch_add(
+            1, std::memory_order_relaxed);
+      }
+    }
+    gateway_publish_room_output_wave(wave_id);
+  }
+}
+
+int gateway_process_room_output_wave_watch(
+    const GatewaySessionFutureWatch &watch, uint64_t now_ms) {
+  auto completion_cpu_started_ns = get_current_thread_cpu_time_ns();
+  auto wave_it =
+      g_gateway_room_output_waves.find(watch.room_output_wave_id);
+  if (wave_it == g_gateway_room_output_waves.end() ||
+      watch.room_output_wave_index >= wave_it->second.items.size()) {
+    auto detached =
+        gateway_detach_session_future_watch(watch.reservation_id);
+    if (detached) {
+      gateway_consume_cancelled_future(detached->future_id,
+                                       "room output wave missing");
+      g_gateway_runtime_counters.future_watches_cancelled.fetch_add(
+          1, std::memory_order_relaxed);
+    }
+    auto *sess = gateway_find_session(watch.session_id.c_str());
+    if (sess && gateway_session_has_pending_reservation(
+                    sess, watch.reservation_id)) {
+      gateway_release_session_output(sess, watch.reservation_id);
+    }
+    GatewaySession *notification_session = nullptr;
+    object_t *notification_target = nullptr;
+    if (gateway_session_future_watch_cleanup_target(
+            watch, &notification_session, &notification_target) &&
+        !gateway_dispatch_future_output_notification(
+            notification_target, watch.reservation_id, "released",
+            watch.event_count, watch.slot_server_seq)) {
+      g_gateway_runtime_counters.future_watch_callback_failures.fetch_add(
+          1, std::memory_order_relaxed);
+    }
+    g_gateway_runtime_counters.room_output_projection_failed.fetch_add(
+        1, std::memory_order_relaxed);
+    g_gateway_runtime_counters.room_output_projection_released.fetch_add(
+        1, std::memory_order_relaxed);
+    gateway_record_future_completion_thread_cpu(completion_cpu_started_ns);
+    return 1;
+  }
+  auto &item = wave_it->second.items[watch.room_output_wave_index];
+  GatewaySession *sess = nullptr;
+  object_t *ob = nullptr;
+  const auto watch_matches = item.watch.future_id == watch.future_id &&
+      item.watch.reservation_id == watch.reservation_id;
+  const auto session_current = gateway_session_future_watch_session_is_current(
+      watch, &sess, &ob);
+  const auto projection_current = session_current &&
+      gateway_pending_message_event_projection_matches(
+          sess, watch.reservation_id, watch.projection_generation, true) &&
+      gateway_session_has_pending_reservation(sess, watch.reservation_id);
+  if (!watch_matches || !projection_current) {
+    gateway_fail_room_output_wave_item(
+        watch.room_output_wave_id, watch.room_output_wave_index, watch,
+        watch_matches ? "room output wave live validation failed"
+                      : "room output wave watch identity failed");
+    gateway_record_future_completion_thread_cpu(completion_cpu_started_ns);
+    return 1;
+  }
+
+  const auto owner_current = watch.owner_id == vm_owner_id(ob) &&
+      vm_owner_epoch_matches(ob, watch.owner_id.c_str(), watch.owner_epoch);
+  if (!owner_current) {
+    auto detached =
+        gateway_detach_session_future_watch(watch.reservation_id);
+    if (detached) {
+      gateway_consume_cancelled_future(detached->future_id,
+                                       "room output wave owner stale");
+      g_gateway_runtime_counters.future_watches_cancelled.fetch_add(
+          1, std::memory_order_relaxed);
+    }
+    const auto fallback_ready =
+        gateway_mark_room_output_wave_item_inline_fallback(&item, sess);
+    if (!fallback_ready) {
+      gateway_release_room_output_wave_item(&item, sess);
+    }
+    const auto all_terminal =
+        gateway_room_output_wave_all_terminal(wave_it->second);
+    const auto notify_released =
+        !fallback_ready && item.reservation_closed;
+    if (all_terminal) {
+      gateway_publish_room_output_wave(watch.room_output_wave_id);
+    } else if (notify_released) {
+      gateway_notify_room_output_wave_item(&item, "released", false);
+    }
+    gateway_record_future_completion_thread_cpu(completion_cpu_started_ns);
+    return 1;
+  }
+
+  auto future_state = vm_owner_future_state(watch.future_id);
+  if (future_state == VM_OWNER_FUTURE_PENDING && now_ms < watch.deadline_ms) {
+    if (gateway_requeue_session_future_watch(watch.reservation_id)) {
+      return 0;
+    }
+    gateway_fail_room_output_wave_item(
+        watch.room_output_wave_id, watch.room_output_wave_index, watch,
+        "room output wave watch requeue failed");
+    gateway_record_future_completion_thread_cpu(completion_cpu_started_ns);
+    return 1;
+  }
+
+  if (future_state == VM_OWNER_FUTURE_PENDING) {
+    auto *timed_out = vm_owner_future_timeout(
+        watch.future_id, "gateway room output wave timed out");
+    const auto terminal_changed =
+        gateway_future_mapping_flag(timed_out, "terminal_changed");
+    free_mapping(timed_out);
+    if (terminal_changed) {
+      g_gateway_runtime_counters.future_watches_timed_out.fetch_add(
+          1, std::memory_order_relaxed);
+    }
+  }
+  const auto take_started_ns = gateway_session_now_ns();
+  auto output_future = vm_owner_future_take_string(watch.future_id);
+  const auto take_finished_ns = gateway_session_now_ns();
+  gateway_session_record_latency(
+      g_gateway_runtime_counters.future_watch_take_ns_total,
+      g_gateway_runtime_counters.future_watch_take_ns_max,
+      g_gateway_runtime_counters.future_watch_take_samples,
+      take_finished_ns - take_started_ns);
+  if (output_future.terminal_at_ns > 0 &&
+      take_started_ns >= output_future.terminal_at_ns) {
+    gateway_session_record_latency(
+        g_gateway_runtime_counters.future_watch_terminal_lag_ns_total,
+        g_gateway_runtime_counters.future_watch_terminal_lag_ns_max,
+        g_gateway_runtime_counters.future_watch_terminal_lag_samples,
+        take_started_ns - output_future.terminal_at_ns);
+  }
+  gateway_detach_session_future_watch(watch.reservation_id);
+  item.terminal = true;
+  item.completed = output_future.state == VM_OWNER_FUTURE_COMPLETED &&
+      output_future.string_result && !output_future.value.empty();
+  if (item.completed) {
+    item.inline_fallback = false;
+    item.wire_bytes = std::move(output_future.value);
+    g_gateway_runtime_counters.future_watches_completed.fetch_add(
+        1, std::memory_order_relaxed);
+  } else {
+    g_gateway_runtime_counters.future_watches_failed.fetch_add(
+        1, std::memory_order_relaxed);
+    if (!gateway_mark_room_output_wave_item_inline_fallback(&item, sess)) {
+      gateway_release_room_output_wave_item(&item, sess);
+    }
+  }
+
+  const auto all_terminal = gateway_room_output_wave_all_terminal(
+      wave_it->second);
+  const auto notify_released = !item.completed && item.reservation_closed;
+  if (notify_released) {
+    gateway_notify_room_output_wave_item(&item, "released", false);
+  }
+  if (all_terminal) {
+    const auto publish_started_ns = gateway_session_now_ns();
+    gateway_publish_room_output_wave(watch.room_output_wave_id);
+    gateway_session_record_latency(
+        g_gateway_runtime_counters.room_output_projection_publish_ns_total,
+        g_gateway_runtime_counters.room_output_projection_publish_ns_max,
+        g_gateway_runtime_counters.room_output_projection_publish_samples,
+        gateway_session_now_ns() - publish_started_ns);
+  }
+  gateway_record_future_completion_thread_cpu(completion_cpu_started_ns);
+  return 1;
+}
+
+}  // namespace
+
+mapping_t *gateway_owner_output_quiesce(const char *reason) {
+  if (!vm_context_is_main_thread()) {
+    auto *result = allocate_mapping(24);
+    add_mapping_pair(result, "success", 0);
+    add_mapping_string(result, "state", "main_thread_required");
+    add_mapping_string(result, "quiesce_model",
+                       "drain_then_immediate_owner_stop_v1");
+    add_mapping_pair(result, "counts_available", 0);
+    add_mapping_pair(result, "room_waves_before", -1);
+    add_mapping_pair(result, "room_pending_before", -1);
+    add_mapping_pair(result, "room_watches_before", -1);
+    add_mapping_pair(result, "room_reservations_before", -1);
+    add_mapping_pair(result, "session_watches_before", -1);
+    add_mapping_pair(result, "session_reservations_before", -1);
+    add_mapping_pair(result, "cancelled_futures", 0);
+    add_mapping_pair(result, "released_reservations", 0);
+    add_mapping_pair(result, "room_waves_after", -1);
+    add_mapping_pair(result, "room_pending_after", -1);
+    add_mapping_pair(result, "room_watches_after", -1);
+    add_mapping_pair(result, "room_reservations_after", -1);
+    add_mapping_pair(result, "session_watches_after", -1);
+    add_mapping_pair(result, "session_reservations_after", -1);
+    add_mapping_pair(result, "requires_immediate_owner_stop", 1);
+    add_mapping_pair(result, "main_thread", 0);
+    return result;
+  }
+
+  const auto count_room_watches = [] {
+    long count = 0;
+    for (const auto &[reservation_id, watch] :
+         g_gateway_session_future_watches) {
+      (void)reservation_id;
+      if (watch.output_kind == GatewayFutureOutputKind::kValidatedWire &&
+          watch.room_output_wave_id != 0) {
+        ++count;
+      }
+    }
+    return count;
+  };
+  const auto count_session_watches = [] {
+    return g_gateway_session_future_watches.size() >
+            static_cast<size_t>(std::numeric_limits<long>::max())
+        ? std::numeric_limits<long>::max()
+        : static_cast<long>(g_gateway_session_future_watches.size());
+  };
+  const auto count_reservations = [](bool room_only) {
+    long count = 0;
+    const auto increment = [&count] {
+      if (count < std::numeric_limits<long>::max()) {
+        ++count;
+      }
+    };
+    for (const auto &[reservation_id, watch] :
+         g_gateway_session_future_watches) {
+      (void)reservation_id;
+      const auto room_watch =
+          watch.output_kind == GatewayFutureOutputKind::kValidatedWire &&
+          watch.room_output_wave_id != 0;
+      if (room_only && !room_watch) {
+        continue;
+      }
+      auto *sess = gateway_find_session(watch.session_id.c_str());
+      if (gateway_session_has_pending_reservation(sess,
+                                                  watch.reservation_id)) {
+        increment();
+      }
+    }
+    for (const auto &[wave_id, wave] : g_gateway_room_output_waves) {
+      (void)wave_id;
+      for (const auto &item : wave.items) {
+        if (item.reservation_closed ||
+            g_gateway_session_future_watches.find(
+                item.watch.reservation_id) !=
+                g_gateway_session_future_watches.end()) {
+          continue;
+        }
+        auto *sess =
+            gateway_find_session(item.watch.session_id.c_str());
+        if (gateway_session_has_pending_reservation(
+                sess, item.watch.reservation_id)) {
+          increment();
+        }
+      }
+    }
+    return count;
+  };
+
+  const auto waves_before =
+      static_cast<long>(g_gateway_room_output_waves.size());
+  const auto pending_before = gateway_room_output_projection_pending_count();
+  const auto watches_before = count_room_watches();
+  const auto reservations_before = count_reservations(true);
+  const auto session_watches_before = count_session_watches();
+  const auto session_reservations_before = count_reservations(false);
+  size_t cancelled_futures = 0;
+
+  while (!g_gateway_room_output_waves.empty()) {
+    cancelled_futures += gateway_abort_room_output_wave(
+        g_gateway_room_output_waves.begin()->first,
+        reason && reason[0] ? reason : "gateway owner output quiesce",
+        nullptr);
+  }
+
+  while (!g_gateway_session_future_watches.empty()) {
+    const auto reservation_id =
+        g_gateway_session_future_watches.begin()->first;
+    auto detached = gateway_detach_session_future_watch(reservation_id);
+    if (!detached) {
+      break;
+    }
+    gateway_consume_cancelled_future(
+        detached->future_id,
+        reason && reason[0] ? reason : "gateway owner output quiesce");
+    gateway_finalize_cancelled_session_future_watch(
+        *detached,
+        reason && reason[0] ? reason : "gateway owner output quiesce",
+        true);
+    ++cancelled_futures;
+    g_gateway_runtime_counters.future_watches_cancelled.fetch_add(
+        1, std::memory_order_relaxed);
+    if (detached->output_kind == GatewayFutureOutputKind::kValidatedWire) {
+      g_gateway_runtime_counters.room_output_projection_failed.fetch_add(
+          1, std::memory_order_relaxed);
+      g_gateway_runtime_counters.room_output_projection_released.fetch_add(
+          1, std::memory_order_relaxed);
+    }
+  }
+
+  const auto waves_after =
+      static_cast<long>(g_gateway_room_output_waves.size());
+  const auto pending_after = gateway_room_output_projection_pending_count();
+  const auto watches_after = count_room_watches();
+  const auto reservations_after = count_reservations(true);
+  const auto session_watches_after = count_session_watches();
+  const auto session_reservations_after = count_reservations(false);
+  const auto success = waves_after == 0 && pending_after == 0 &&
+                       watches_after == 0 && reservations_after == 0 &&
+                       session_watches_after == 0 &&
+                       session_reservations_after == 0;
+  auto *result = allocate_mapping(24);
+  add_mapping_pair(result, "success", success ? 1 : 0);
+  add_mapping_string(result, "state",
+                     success ? "quiesced" : "quiesce_incomplete");
+  add_mapping_string(result, "quiesce_model",
+                     "drain_then_immediate_owner_stop_v1");
+  add_mapping_pair(result, "counts_available", 1);
+  add_mapping_pair(result, "room_waves_before", waves_before);
+  add_mapping_pair(result, "room_pending_before", pending_before);
+  add_mapping_pair(result, "room_watches_before", watches_before);
+  add_mapping_pair(result, "room_reservations_before", reservations_before);
+  add_mapping_pair(result, "session_watches_before", session_watches_before);
+  add_mapping_pair(result, "session_reservations_before",
+                   session_reservations_before);
+  add_mapping_pair(result, "cancelled_futures",
+                   static_cast<long>(cancelled_futures));
+  add_mapping_pair(result, "released_reservations",
+                   std::max<long>(
+                       0, session_reservations_before -
+                              session_reservations_after));
+  add_mapping_pair(result, "room_waves_after", waves_after);
+  add_mapping_pair(result, "room_pending_after", pending_after);
+  add_mapping_pair(result, "room_watches_after", watches_after);
+  add_mapping_pair(result, "room_reservations_after", reservations_after);
+  add_mapping_pair(result, "session_watches_after", session_watches_after);
+  add_mapping_pair(result, "session_reservations_after",
+                   session_reservations_after);
+  add_mapping_pair(result, "requires_immediate_owner_stop", 1);
+  add_mapping_pair(result, "main_thread", 1);
+  return result;
+}
+
+int gateway_fill_session_protocol_output_with_writer(
+    GatewaySession *sess, uint64_t reservation_id, const char *data, size_t len,
+    GatewayOutputWriter writer) {
+  if (!data || !writer) {
+    return 0;
+  }
+  auto wire_output = GatewayWireOutputFactory::protocol_output(
+      sess, std::string_view(data, len));
+  return wire_output
+      ? gateway_fill_session_wire_output_with_writer(
+            sess, reservation_id, std::move(*wire_output), writer)
+      : 0;
 }
 
 int gateway_release_session_output_with_writer(GatewaySession *sess, uint64_t reservation_id,
@@ -2341,9 +4943,8 @@ int gateway_fill_session_output_for_object(object_t *ob, uint64_t reservation_id
     return 0;
   }
 
-  if (!gateway_fill_session_output(
-          sess, reservation_id,
-          gateway_encode_output_envelope(sess->session_id, data, len))) {
+  if (!gateway_fill_session_protocol_output_with_writer(
+          sess, reservation_id, data, len, gateway_send_raw_to_fd)) {
     return 0;
   }
   return 1;
@@ -2429,9 +5030,17 @@ void gateway_unbind_session_object(object_t *ob) {
   }
   std::string session_id = sess->session_id;
   gateway_cancel_session_future_watches(session_id, sess, "gateway session unbound", false);
+  sess = gateway_find_session(session_id.c_str());
+  auto object_it = g_gateway_obj_to_session.find(ob);
+  if (!sess || gateway_resolve_session_object(sess) != ob ||
+      object_it == g_gateway_obj_to_session.end() ||
+      object_it->second != sess) {
+    return;
+  }
   gateway_release_command_input_pending(sess);
   gateway_release_command_task_pending(sess);
-  g_gateway_obj_to_session.erase(ob);
+  g_gateway_obj_to_session.erase(object_it);
+  gateway_discard_session_output_fifo(sess);
   g_gateway_sessions.erase(session_id);
 }
 
@@ -2562,7 +5171,14 @@ void gateway_session_exec_update(object_t *new_ob, object_t *old_ob) {
   if (!sess || !new_ob || !old_ob || !new_ob->interactive) {
     return;
   }
-  gateway_cancel_session_future_watches(sess->session_id, sess, "gateway session exec", true);
+  const std::string session_id = sess->session_id;
+  gateway_cancel_session_future_watches(session_id, sess, "gateway session exec", true);
+  sess = gateway_find_session(session_id.c_str());
+  if (!sess || !gateway_object_valid(new_ob) ||
+      !gateway_object_valid(old_ob) || !new_ob->interactive ||
+      gateway_resolve_session_object(sess) != old_ob) {
+    return;
+  }
   new_ob->interactive->ob = new_ob;
   g_gateway_obj_to_session.erase(old_ob);
   g_gateway_obj_to_session[new_ob] = sess;
@@ -2580,22 +5196,94 @@ void gateway_handle_remove_interactive(interactive_t *ip) {
 
 int gateway_send_to_session(const char *session_id, const char *data, size_t len) {
   auto *sess = gateway_find_session(session_id);
-  std::string encoded;
 
   if (!sess || !data) {
     return 0;
   }
 
-  encoded = gateway_encode_output_envelope(sess->session_id, data, len);
   if (g_gateway_debug) {
     debug_message("[gateway] output sid=%s len=%zu\n", session_id, len);
   }
-  return gateway_enqueue_session_output(sess, std::move(encoded));
+  return gateway_enqueue_session_protocol_output(sess, data, len);
 }
 
 std::string gateway_encode_output_envelope_for_test(const std::string &session_id,
                                                     const char *data, size_t len) {
   return gateway_encode_output_envelope(session_id, data, len);
+}
+
+int gateway_enqueue_session_wire_json_for_test(
+    GatewaySession *sess, const std::string &wire_json) {
+  try {
+    auto payload = nlohmann::json::parse(wire_json);
+    auto wire_output = GatewayWireOutputFactory::southbound_json(sess, payload);
+    return wire_output
+        ? gateway_enqueue_session_wire_output(sess, std::move(*wire_output))
+        : 0;
+  } catch (const std::exception &) {
+    return 0;
+  }
+}
+
+int gateway_enqueue_session_payload_json_for_test(
+    GatewaySession *sess, const std::string &payload_json) {
+  try {
+    auto wire_output = gateway_prepare_session_send_wire(
+        sess, nlohmann::json::parse(payload_json));
+    return wire_output
+        ? gateway_enqueue_session_wire_output(sess, std::move(*wire_output))
+        : 0;
+  } catch (const std::exception &) {
+    return 0;
+  }
+}
+
+bool gateway_fill_projected_wires_for_test(
+    const std::vector<GatewaySession *> &sessions,
+    const std::vector<uint64_t> &reservation_ids,
+    const std::vector<std::string> &wire_json,
+    GatewayOutputWriter writer) {
+  if (sessions.empty() || sessions.size() != reservation_ids.size() ||
+      sessions.size() != wire_json.size() || !writer) {
+    return false;
+  }
+  std::vector<GatewayWireOutput> wire_outputs;
+  wire_outputs.reserve(sessions.size());
+  for (size_t index = 0; index < sessions.size(); ++index) {
+    auto wire_output = GatewayWireOutputFactory::trusted_projected_wire(
+        sessions[index], wire_json[index]);
+    if (!wire_output) {
+      return false;
+    }
+    wire_outputs.push_back(std::move(*wire_output));
+  }
+  if (!gateway_stage_session_wire_outputs(sessions, reservation_ids,
+                                          &wire_outputs)) {
+    return false;
+  }
+  for (auto *sess : sessions) {
+    gateway_flush_session_output_fifo_with_writer(sess, writer);
+  }
+  return true;
+}
+
+bool gateway_drop_room_output_wave_for_test(uint64_t reservation_id) {
+  const auto watch_it = g_gateway_session_future_watches.find(reservation_id);
+  if (watch_it == g_gateway_session_future_watches.end() ||
+      watch_it->second.room_output_wave_id == 0) {
+    return false;
+  }
+  const auto wave_it =
+      g_gateway_room_output_waves.find(watch_it->second.room_output_wave_id);
+  if (wave_it == g_gateway_room_output_waves.end()) {
+    return false;
+  }
+  if (wave_it->second.retry_schedule) {
+    g_gateway_room_output_retry_schedule.erase(
+        *wave_it->second.retry_schedule);
+  }
+  g_gateway_room_output_waves.erase(wave_it);
+  return true;
 }
 
 std::string gateway_encode_preencoded_chat_batch_for_test(
@@ -2763,7 +5451,8 @@ object_t *gateway_create_session_internal(const char *session_id, svalue_t *data
 
 int gateway_destroy_session_internal(const char *session_id, const char *reason_code,
                                      const char *reason_text) {
-  auto *sess = gateway_find_session(session_id);
+  const std::string session_key = session_id ? session_id : "";
+  auto *sess = gateway_find_session(session_key.c_str());
   auto *ob = gateway_resolve_session_object(sess);
   const char *reason_code_str = reason_code && reason_code[0] ? reason_code : "client_disconnected";
   const char *reason_text_str = reason_text && reason_text[0] ? reason_text : reason_code_str;
@@ -2771,7 +5460,13 @@ int gateway_destroy_session_internal(const char *session_id, const char *reason_
   if (!sess) {
     return 0;
   }
-  gateway_cancel_session_future_watches(session_id, sess, "gateway session destroyed", false);
+  gateway_cancel_session_future_watches(
+      session_key, sess, "gateway session destroyed", false);
+  sess = gateway_find_session(session_key.c_str());
+  if (!sess) {
+    return 1;
+  }
+  ob = gateway_resolve_session_object(sess);
   if (gateway_object_valid(ob) && ob->interactive) {
     save_command_giver(ob);
     {
@@ -2786,18 +5481,25 @@ int gateway_destroy_session_internal(const char *session_id, const char *reason_
     }
     restore_command_giver();
 
-    if ((sess = gateway_find_session(session_id))) {
-      sess->master_fd = -1;
+    sess = gateway_find_session(session_key.c_str());
+    if (!sess) {
+      return 1;
     }
-    ob = resolve_active_session_owner(session_id, ob);
+    sess->master_fd = -1;
+    ob = resolve_active_session_owner(session_key.c_str(), ob);
     if (!ob || !ob->interactive) {
       auto *session_ob = gateway_resolve_session_object(sess);
       if (session_ob) {
         gateway_unbind_session_object(session_ob);
       } else {
+        sess = gateway_find_session(session_key.c_str());
+        if (!sess) {
+          return 1;
+        }
         gateway_release_command_input_pending(sess);
         gateway_release_command_task_pending(sess);
-        g_gateway_sessions.erase(session_id);
+        gateway_discard_session_output_fifo(sess);
+        g_gateway_sessions.erase(session_key);
       }
       return 1;
     }
@@ -2807,9 +5509,14 @@ int gateway_destroy_session_internal(const char *session_id, const char *reason_
   if (gateway_object_valid(ob)) {
     gateway_unbind_session_object(ob);
   } else {
+    sess = gateway_find_session(session_key.c_str());
+    if (!sess) {
+      return 1;
+    }
     gateway_release_command_input_pending(sess);
     gateway_release_command_task_pending(sess);
-    g_gateway_sessions.erase(session_id);
+    gateway_discard_session_output_fifo(sess);
+    g_gateway_sessions.erase(session_key);
   }
   return 1;
 }
@@ -2899,6 +5606,8 @@ void gateway_check_session_timeouts() {
 }
 
 void cleanup_gateway_sessions() {
+  auto *quiesced = gateway_owner_output_quiesce("gateway cleanup");
+  free_mapping(quiesced);
   std::vector<std::string> session_ids;
 
   session_ids.reserve(g_gateway_sessions.size());
@@ -2909,7 +5618,15 @@ void cleanup_gateway_sessions() {
   for (const auto &session_id : session_ids) {
     gateway_destroy_session_internal(session_id.c_str(), "gateway_cleanup", "gateway cleanup");
   }
+  while (!g_gateway_room_output_waves.empty()) {
+    gateway_abort_room_output_wave(g_gateway_room_output_waves.begin()->first,
+                                   "gateway cleanup", nullptr);
+  }
+  g_gateway_room_output_retry_schedule.clear();
 
+  for (const auto &entry : g_gateway_sessions) {
+    gateway_discard_session_output_fifo(entry.second.get());
+  }
   g_gateway_sessions.clear();
   g_gateway_obj_to_session.clear();
   g_gateway_command_input_pending_sessions.store(0, std::memory_order_release);
@@ -2931,7 +5648,6 @@ void f_gateway_session_send() {
   GatewaySession *sess = gateway_find_session_by_object(ob);
   nlohmann::json payload;
   std::string payload_json;
-  std::string encoded;
   int result = 0;
 
   if (!sess || !data_sv || !gateway_svalue_to_json_string(data_sv, &payload_json)) {
@@ -2948,18 +5664,11 @@ void f_gateway_session_send() {
     return;
   }
 
-  if (payload.is_object()) {
-    payload["cid"] = sess->session_id;
-  } else {
-    payload = nlohmann::json{
-        {"type", "output"},
-        {"cid", sess->session_id},
-        {"data", payload},
-    };
-  }
+  auto wire_output = gateway_prepare_session_send_wire(sess, std::move(payload));
 
-  encoded = payload.dump();
-  result = gateway_enqueue_session_output(sess, std::move(encoded));
+  if (wire_output) {
+    result = gateway_enqueue_session_wire_output(sess, std::move(*wire_output));
+  }
 
   pop_n_elems(num_args);
   push_number(result);
@@ -3486,6 +6195,92 @@ void f_gateway_sessions_fill_pending_message_event_batches() {
   push_refed_mapping(response);
 }
 
+void f_gateway_sessions_submit_pending_message_event_batches() {
+  const auto timeout_ms = static_cast<int>(sp->u.number);
+  auto *slot_epochs = (sp - 1)->u.arr;
+  auto *scope_ids = (sp - 2)->u.arr;
+  auto *reservation_ids = (sp - 3)->u.arr;
+  auto *targets = (sp - 4)->u.arr;
+  std::vector<object_t *> target_objects;
+  std::vector<uint64_t> ids;
+  std::vector<std::string> scopes;
+  std::vector<LPC_INT> epochs;
+  GatewayPendingMessageEventBatchOwnerSubmitResult result;
+  bool ok = false;
+
+  if (targets && reservation_ids && scope_ids && slot_epochs &&
+      targets->size > 0 && reservation_ids->size == targets->size &&
+      scope_ids->size == targets->size &&
+      slot_epochs->size == targets->size && timeout_ms > 0 &&
+      vm_context_is_main_thread()) {
+    const auto count = static_cast<size_t>(targets->size);
+    target_objects.reserve(count);
+    ids.reserve(count);
+    scopes.reserve(count);
+    epochs.reserve(count);
+    ok = true;
+    for (int index = 0; index < targets->size; ++index) {
+      const auto *target = &targets->item[index];
+      const auto *reservation = &reservation_ids->item[index];
+      const auto *scope = &scope_ids->item[index];
+      const auto *epoch = &slot_epochs->item[index];
+      if (target->type != T_OBJECT || !gateway_object_valid(target->u.ob) ||
+          reservation->type != T_NUMBER || reservation->u.number <= 0 ||
+          scope->type != T_STRING || !scope->u.string ||
+          SVALUE_STRLEN(scope) == 0 || epoch->type != T_NUMBER ||
+          epoch->u.number < 0) {
+        ok = false;
+        break;
+      }
+      target_objects.push_back(target->u.ob);
+      ids.push_back(static_cast<uint64_t>(reservation->u.number));
+      scopes.emplace_back(scope->u.string, SVALUE_STRLEN(scope));
+      epochs.push_back(epoch->u.number);
+    }
+    if (ok) {
+      ok = gateway_submit_pending_message_event_batches_for_objects(
+          target_objects, ids, scopes, epochs, timeout_ms, &result);
+    }
+  }
+
+  const auto result_count =
+      ok ? static_cast<int>(result.submitted.size()) : 0;
+  auto *submitted = allocate_array(result_count);
+  auto *filled_inline = allocate_array(result_count);
+  auto *event_counts = allocate_array(result_count);
+  auto *slot_server_seqs = allocate_array(result_count);
+  auto *future_ids = allocate_array(result_count);
+  for (int index = 0; index < result_count; ++index) {
+    submitted->item[index].type = T_NUMBER;
+    submitted->item[index].u.number = result.submitted[index] ? 1 : 0;
+    filled_inline->item[index].type = T_NUMBER;
+    filled_inline->item[index].u.number =
+        result.filled_inline[index] ? 1 : 0;
+    event_counts->item[index].type = T_NUMBER;
+    event_counts->item[index].u.number = result.event_counts[index];
+    slot_server_seqs->item[index].type = T_NUMBER;
+    slot_server_seqs->item[index].u.number =
+        result.slot_server_seqs[index];
+    future_ids->item[index].type = T_NUMBER;
+    future_ids->item[index].u.number =
+        static_cast<LPC_INT>(result.future_ids[index]);
+  }
+  auto *response = allocate_mapping(6);
+  add_mapping_pair(response, "ok", ok ? 1 : 0);
+  add_mapping_array(response, "submitted", submitted);
+  add_mapping_array(response, "filled_inline", filled_inline);
+  add_mapping_array(response, "event_counts", event_counts);
+  add_mapping_array(response, "slot_server_seqs", slot_server_seqs);
+  add_mapping_array(response, "future_ids", future_ids);
+  free_array(submitted);
+  free_array(filled_inline);
+  free_array(event_counts);
+  free_array(slot_server_seqs);
+  free_array(future_ids);
+  pop_n_elems(5);
+  push_refed_mapping(response);
+}
+
 void f_gateway_session_release() {
   auto reservation_id = static_cast<uint64_t>(sp->u.number);
   auto *ob = (sp - 1)->u.ob;
@@ -3523,6 +6318,12 @@ void f_gateway_future_watch() {
   auto result = gateway_watch_future_for_object(ob, context_id, future_id, timeout_ms);
   pop_n_elems(4);
   push_number(result);
+}
+
+void f_gateway_owner_output_quiesce() {
+  auto *result = gateway_owner_output_quiesce(
+      "gateway owner output quiesce efun");
+  push_refed_mapping(result);
 }
 
 void f_gateway_create_session() {

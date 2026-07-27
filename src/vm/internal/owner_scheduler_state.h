@@ -155,6 +155,7 @@ class OwnerSchedulerState {
   bool enqueue_main_task(OwnerMainTask task);
 
   OwnerSchedulerReleaseResult release_active_owner(const std::string &owner_id, OwnerMailboxPredicate runnable);
+  long release_all_active_owners(OwnerMailboxPredicate runnable);
   bool release_active_main_owner(const std::string &owner_id);
   OwnerSchedulerPopResult pop_next_schedulable_task(OwnerMailboxTask *out, bool claim_owner,
                                                     OwnerMailboxPredicate runnable);
@@ -163,6 +164,7 @@ class OwnerSchedulerState {
                                                            OwnerMailboxPredicate runnable);
 
   std::vector<OwnerMailboxTask> drain_owner_mailbox(const std::string &owner_id, size_t limit);
+  bool remove_owner_task(uint64_t task_id, OwnerMailboxTask *removed);
   std::vector<OwnerMailboxTask> remove_owner_mailbox(const std::string &owner_id);
   void erase_owner_mailbox(const std::string &owner_id);
 

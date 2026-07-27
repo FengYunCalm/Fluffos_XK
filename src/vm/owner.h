@@ -48,6 +48,13 @@ struct VMOwnerFutureStringTakeResult {
   std::string value;
 };
 
+struct VMOwnerStringTaskSubmission {
+  bool queued{false};
+  uint64_t task_id{0};
+  uint64_t future_id{0};
+  uint64_t target_owner_epoch{0};
+};
+
 struct VMOwnerMainDrainResult {
   int dispatched{0};
   long remaining_main_tasks{0};
@@ -123,6 +130,9 @@ long vm_owner_main_queue_total_depth();
 uint64_t vm_owner_enqueue_executor_task(object_t *target, const char *task_type, const char *task_key,
                                         std::function<void()> callback,
                                         std::function<void()> drop_callback = nullptr);
+VMOwnerStringTaskSubmission vm_owner_submit_frozen_string_task(
+    object_t *target, const char *task_type, const char *task_key,
+    std::function<bool(std::string *)> projector);
 uint64_t vm_owner_enqueue_executor_callback_cleanup(const char *owner_id, uint64_t owner_epoch,
                                                     const char *task_type, const char *task_key,
                                                     std::function<void()> callback);
@@ -177,6 +187,8 @@ void vm_owner_set_future_terminal_notifier(VMOwnerFutureTerminalNotifier notifie
 VMOwnerFutureState vm_owner_future_state(uint64_t future_id);
 bool vm_owner_future_targets_object(uint64_t future_id, object_t *target);
 mapping_t *vm_owner_future_cancel(uint64_t future_id, const char *reason);
+mapping_t *vm_owner_future_cancel_queued_task(uint64_t future_id,
+                                             const char *reason);
 mapping_t *vm_owner_future_timeout(uint64_t future_id, const char *reason);
 mapping_t *vm_owner_record_commit_boundary(const char *source_owner_id, const char *target_owner_id,
                                              const char *operation, uint64_t message_id, const char *state);

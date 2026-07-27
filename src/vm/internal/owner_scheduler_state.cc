@@ -200,6 +200,19 @@ OwnerSchedulerReleaseResult OwnerSchedulerState::release_active_owner(const std:
   return result;
 }
 
+long OwnerSchedulerState::release_all_active_owners(
+    OwnerMailboxPredicate runnable) {
+  const auto released = static_cast<long>(active_owner_set_.size());
+  active_owner_set_.clear();
+  active_owner_claim_counts_.clear();
+  for (const auto &entry : owner_mailboxes_) {
+    if (owner_mailbox_queue_has_task(entry.second, runnable)) {
+      mark_owner_schedulable(entry.first);
+    }
+  }
+  return released;
+}
+
 bool OwnerSchedulerState::release_active_main_owner(const std::string &owner_id) {
   auto released = active_main_owner_set_.erase(owner_id) > 0;
   auto it = owner_main_queues_.find(owner_id);
@@ -338,6 +351,33 @@ std::vector<OwnerMailboxTask> OwnerSchedulerState::drain_owner_mailbox(const std
     schedulable_owner_set_.erase(owner_id);
   }
   return tasks;
+}
+
+bool OwnerSchedulerState::remove_owner_task(uint64_t task_id,
+                                            OwnerMailboxTask *removed) {
+  if (!removed) {
+    return false;
+  }
+  for (auto mailbox_it = owner_mailboxes_.begin();
+       mailbox_it != owner_mailboxes_.end(); ++mailbox_it) {
+    auto &queue = mailbox_it->second;
+    auto task_it = std::find_if(
+        queue.begin(), queue.end(),
+        [task_id](const OwnerMailboxTask &task) { return task.task_id == task_id; });
+    if (task_it == queue.end()) {
+      continue;
+    }
+
+    *removed = std::move(*task_it);
+    queue.erase(task_it);
+    if (queue.empty()) {
+      const auto owner_id = mailbox_it->first;
+      owner_mailboxes_.erase(mailbox_it);
+      schedulable_owner_set_.erase(owner_id);
+    }
+    return true;
+  }
+  return false;
 }
 
 std::vector<OwnerMailboxTask> OwnerSchedulerState::remove_owner_mailbox(const std::string &owner_id) {
