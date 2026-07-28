@@ -2239,7 +2239,7 @@ TEST_F(DriverTest, TestGatewayReadBatchDrainsAdmittedTasksBeforeDeferredRemainde
   ASSERT_EQ(deferred_source.find("gateway_now_ns() - scheduled_at"),
             std::string::npos);
 
-  const auto schedule_pos = source.find("void gateway_schedule_buffered_read");
+  const auto schedule_pos = source.find("void gateway_schedule_buffered_read(int fd) {");
   const auto readcb_pos = source.find("void gateway_readcb", schedule_pos);
   ASSERT_NE(schedule_pos, std::string::npos);
   ASSERT_NE(readcb_pos, std::string::npos);
@@ -2363,6 +2363,29 @@ TEST_F(DriverTest, TestGatewayReadDispatchPressureIsTransitionCountedAndUnderflo
     ASSERT_EQ(gateway_read_dispatch_pending_count(), before + 1);
   }
   ASSERT_EQ(gateway_read_dispatch_pending_count(), before);
+}
+
+TEST_F(DriverTest, TestGatewayStatusSnapshotDefersPastCurrentReadDispatch) {
+  const auto source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
+  const auto schedule_pos = source.find("void gateway_schedule_status_response");
+  const auto schedule_end = source.find("\nvoid gateway_handle_sys", schedule_pos);
+  const auto status_branch = source.find("if (action == \"status\")");
+  const auto status_branch_end = source.find("\n  if (action == \"pong\")", status_branch);
+
+  ASSERT_NE(schedule_pos, std::string::npos);
+  ASSERT_NE(schedule_end, std::string::npos);
+  const auto schedule_source = source.substr(schedule_pos, schedule_end - schedule_pos);
+  ASSERT_NE(schedule_source.find("add_walltime_event("), std::string::npos);
+  ASSERT_NE(schedule_source.find("BackendEventPriority::kGateway"), std::string::npos);
+  ASSERT_NE(schedule_source.find("gateway_has_master(fd)"), std::string::npos);
+  ASSERT_NE(schedule_source.find("gateway_status_to_json(&status)"), std::string::npos);
+
+  ASSERT_NE(status_branch, std::string::npos);
+  ASSERT_NE(status_branch_end, std::string::npos);
+  const auto status_source = source.substr(status_branch, status_branch_end - status_branch);
+  ASSERT_NE(status_source.find("gateway_schedule_status_response(fd, msg)"),
+            std::string::npos);
+  ASSERT_EQ(status_source.find("gateway_status_to_json(&status)"), std::string::npos);
 }
 
 TEST_F(DriverTest, TestGatewayBufferedInputPressureRequiresACompleteFrame) {
@@ -2519,7 +2542,7 @@ TEST_F(DriverTest, TestGatewayReadCallbackYieldsBoundedFrameBatches) {
   ASSERT_NE(source.find("gateway_schedule_buffered_read(master->fd)"), std::string::npos);
   ASSERT_NE(source.find("g_gateway_masters.find(fd)"), std::string::npos);
 
-  const auto schedule_pos = source.find("void gateway_schedule_buffered_read");
+  const auto schedule_pos = source.find("void gateway_schedule_buffered_read(int fd) {");
   const auto readcb_pos = source.find("void gateway_readcb", schedule_pos);
   ASSERT_NE(schedule_pos, std::string::npos);
   ASSERT_NE(readcb_pos, std::string::npos);

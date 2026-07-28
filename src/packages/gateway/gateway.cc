@@ -764,6 +764,26 @@ void gateway_handle_discon(int fd, const nlohmann::json &msg) {
                                    reason_code.c_str(), reason_text.c_str());
 }
 
+void gateway_schedule_status_response(int fd, const nlohmann::json &msg) {
+  nlohmann::json response = {
+      {"type", "sys"},
+      {"action", "status"},
+  };
+  if (msg.contains("ts")) {
+    response["ts"] = msg["ts"];
+  }
+  add_walltime_event(std::chrono::milliseconds(0), [fd, response = std::move(response)]() mutable {
+    if (!gateway_has_master(fd)) {
+      return;
+    }
+    nlohmann::json status;
+    if (gateway_status_to_json(&status)) {
+      response["data"] = std::move(status);
+    }
+    gateway_send_json_to_fd(fd, response);
+  }, BackendEventPriority::kGateway);
+}
+
 void gateway_handle_sys(int fd, const nlohmann::json &msg) {
   std::string action;
 
@@ -794,18 +814,7 @@ void gateway_handle_sys(int fd, const nlohmann::json &msg) {
   }
 
   if (action == "status") {
-    nlohmann::json response = {
-        {"type", "sys"},
-        {"action", "status"},
-    };
-    if (msg.contains("ts")) {
-      response["ts"] = msg["ts"];
-    }
-    nlohmann::json status;
-    if (gateway_status_to_json(&status)) {
-      response["data"] = std::move(status);
-    }
-    gateway_send_json_to_fd(fd, response);
+    gateway_schedule_status_response(fd, msg);
     return;
   }
 
