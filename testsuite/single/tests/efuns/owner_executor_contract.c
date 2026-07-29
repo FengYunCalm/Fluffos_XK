@@ -1474,6 +1474,17 @@ void assert_owner_trace_models() {
     ASSERT_EQ("trace_commit", event["operation"]);
     ASSERT_EQ("prepared", event["state"]);
 
+    ASSERT(vm_owner_commit_observe(source_owner, target_owner,
+                                   "trace_commit", message_id, "committed") > 0);
+    trace = vm_owner_commit_trace(1);
+    events = trace["events"];
+    ASSERT(arrayp(events));
+    ASSERT_EQ(1, sizeof(events));
+    event = events[0];
+    ASSERT_EQ(message_id, event["message_id"]);
+    ASSERT_EQ("trace_commit", event["operation"]);
+    ASSERT_EQ("committed", event["state"]);
+
     vm_owner_purge(target_owner);
 }
 

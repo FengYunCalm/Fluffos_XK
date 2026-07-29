@@ -406,6 +406,7 @@ mapping vm_owner_access_trace(int);
 mapping vm_owner_message_submit(string, string, string, string);
 mapping vm_owner_message_trace(int);
 mapping vm_owner_commit_record(string, string, string, int, string);
+int vm_owner_commit_observe(string, string, string, int, string);
 mapping vm_owner_commit_trace(int);
 mapping vm_owner_runtime_status();
 mapping vm_object_handle(object default: F__THIS_OBJECT);

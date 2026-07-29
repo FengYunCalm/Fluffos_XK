@@ -65,6 +65,16 @@ OwnerCommitTrace OwnerTraceStore::append_commit(OwnerCommitTrace trace) {
   return stored_trace;
 }
 
+uint64_t OwnerTraceStore::append_commit_observed(OwnerCommitTrace trace) {
+  trace.commit_id = next_commit_trace_id_.fetch_add(1, std::memory_order_relaxed);
+  trace.sequence = total_commit_traced_.fetch_add(1, std::memory_order_relaxed) + 1;
+  auto commit_id = trace.commit_id;
+  std::lock_guard<std::mutex> lock(mutex_);
+  commit_traces_.push_back(std::move(trace));
+  trim_trace_deque(commit_traces_, kOwnerCommitTraceLimit);
+  return commit_id;
+}
+
 uint64_t OwnerTraceStore::next_message_id() {
   return next_message_trace_id_.fetch_add(1, std::memory_order_relaxed);
 }

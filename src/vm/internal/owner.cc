@@ -2218,6 +2218,19 @@ mapping_t *owner_commit_trace_mapping(const OwnerCommitTrace &trace) {
   return map;
 }
 
+OwnerCommitTrace build_owner_commit_trace(const char *source_owner_id, const char *target_owner_id,
+                                          const char *operation, uint64_t message_id,
+                                          const char *state) {
+  OwnerCommitTrace trace;
+  trace.message_id = message_id;
+  trace.direct_write = false;
+  trace.source_owner_id = normalize_owner_id(source_owner_id);
+  trace.target_owner_id = normalize_owner_id(target_owner_id);
+  trace.operation = normalize_task_text(operation, "commit");
+  trace.state = normalize_task_text(state, "commit_guarded");
+  return trace;
+}
+
 mapping_t *owner_executor_trace_mapping(const OwnerExecutorTrace &trace) {
   auto *map = allocate_mapping(18);
   add_mapping_pair(map, "trace_id", static_cast<long>(trace.trace_id));
@@ -5280,14 +5293,8 @@ mapping_t *vm_owner_future_timeout(uint64_t future_id, const char *reason) {
 
 mapping_t *vm_owner_record_commit_boundary(const char *source_owner_id, const char *target_owner_id,
                                            const char *operation, uint64_t message_id, const char *state) {
-  OwnerCommitTrace trace;
-  trace.message_id = message_id;
-  trace.direct_write = false;
-  trace.source_owner_id = normalize_owner_id(source_owner_id);
-  trace.target_owner_id = normalize_owner_id(target_owner_id);
-  trace.operation = normalize_task_text(operation, "commit");
-  trace.state = normalize_task_text(state, "commit_guarded");
-  auto result = owner_trace_store.append_commit(std::move(trace));
+  auto result = owner_trace_store.append_commit(
+      build_owner_commit_trace(source_owner_id, target_owner_id, operation, message_id, state));
   auto *map = allocate_mapping(9);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "commit_id", static_cast<long>(result.commit_id));
@@ -5299,6 +5306,13 @@ mapping_t *vm_owner_record_commit_boundary(const char *source_owner_id, const ch
   add_mapping_string(map, "state", result.state.c_str());
   add_mapping_pair(map, "commit_boundary_only", 1);
   return map;
+}
+
+uint64_t vm_owner_observe_commit_boundary(const char *source_owner_id, const char *target_owner_id,
+                                          const char *operation, uint64_t message_id,
+                                          const char *state) {
+  return owner_trace_store.append_commit_observed(
+      build_owner_commit_trace(source_owner_id, target_owner_id, operation, message_id, state));
 }
 
 mapping_t *vm_owner_commit_trace(int limit) {

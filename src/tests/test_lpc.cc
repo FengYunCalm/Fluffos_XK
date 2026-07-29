@@ -10729,6 +10729,10 @@ TEST_F(DriverTest, TestVmOwnerMessageAndCommitTracesAreSpecOnly) {
   ASSERT_STREQ(mapping_string(commit, "state"), "prepared");
   free_mapping(commit);
 
+  const auto observed_commit_id = vm_owner_observe_commit_boundary(
+      source_owner, target_owner, "move_object", message_id, "committed");
+  ASSERT_GT(observed_commit_id, 0u);
+
   auto* commit_trace = vm_owner_commit_trace(1);
   ASSERT_STREQ(mapping_string(commit_trace, "trace_kind"), "owner_commit_trace");
   ASSERT_STREQ(mapping_string(commit_trace, "trace_model"), "owner_commit_boundary_trace");
@@ -10742,6 +10746,7 @@ TEST_F(DriverTest, TestVmOwnerMessageAndCommitTracesAreSpecOnly) {
   ASSERT_EQ(mapping_number(commit_event, "direct_write"), 0);
   ASSERT_EQ(mapping_number(commit_event, "commit_boundary_only"), 1);
   ASSERT_STREQ(mapping_string(commit_event, "operation"), "move_object");
+  ASSERT_STREQ(mapping_string(commit_event, "state"), "committed");
   free_mapping(commit_trace);
 
   auto* drained = vm_owner_drain_mailbox(target_owner, 1);

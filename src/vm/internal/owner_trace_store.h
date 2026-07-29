@@ -128,6 +128,7 @@ class OwnerTraceStore {
   uint64_t append_access(OwnerAccessTrace trace);
   void append_message(OwnerMessageTrace trace);
   OwnerCommitTrace append_commit(OwnerCommitTrace trace);
+  uint64_t append_commit_observed(OwnerCommitTrace trace);
 
   uint64_t next_message_id();
 

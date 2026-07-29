@@ -192,6 +192,8 @@ mapping_t *vm_owner_future_cancel_queued_task(uint64_t future_id,
 mapping_t *vm_owner_future_timeout(uint64_t future_id, const char *reason);
 mapping_t *vm_owner_record_commit_boundary(const char *source_owner_id, const char *target_owner_id,
                                              const char *operation, uint64_t message_id, const char *state);
+uint64_t vm_owner_observe_commit_boundary(const char *source_owner_id, const char *target_owner_id,
+                                          const char *operation, uint64_t message_id, const char *state);
 mapping_t *vm_owner_commit_trace(int limit);
 mapping_t *vm_owner_lpc_probe(object_t *target, const char *owner_id, const char *method);
 mapping_t *vm_owner_lpc_canary(object_t *target, const char *owner_id, const char *method);

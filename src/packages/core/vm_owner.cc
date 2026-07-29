@@ -305,6 +305,21 @@ void f_vm_owner_commit_record() {
 }
 #endif
 
+#ifdef F_VM_OWNER_COMMIT_OBSERVE
+void f_vm_owner_commit_observe() {
+  auto *state = sp;
+  auto message_id = (sp - 1)->u.number;
+  auto *operation = sp - 2;
+  auto *target_owner_id = sp - 3;
+  auto *source_owner_id = sp - 4;
+  auto commit_id = vm_owner_observe_commit_boundary(source_owner_id->u.string, target_owner_id->u.string,
+                                                    operation->u.string, static_cast<uint64_t>(message_id),
+                                                    state->u.string);
+  pop_n_elems(5);
+  push_number(static_cast<long>(commit_id));
+}
+#endif
+
 #ifdef F_VM_OWNER_COMMIT_TRACE
 void f_vm_owner_commit_trace() {
   auto *result = vm_owner_commit_trace(static_cast<int>(sp->u.number));
