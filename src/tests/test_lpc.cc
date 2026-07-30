@@ -2164,7 +2164,7 @@ TEST_F(DriverTest, TestGatewayPreencodedMessageEventTemplateCacheEvictsAtBound) 
 
 TEST_F(DriverTest, TestGatewayReceiveDoesNotDrainMainTasksInsideReadCallback) {
   const auto source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
-  const auto apply_pos = source.find("void gateway_apply_receive");
+  const auto apply_pos = source.find("bool gateway_apply_receive");
   ASSERT_NE(apply_pos, std::string::npos);
   const auto next_function_pos = source.find("\nsvalue_t json_to_gateway_svalue", apply_pos);
   ASSERT_NE(next_function_pos, std::string::npos);
@@ -2190,7 +2190,7 @@ TEST_F(DriverTest, TestGatewayReadBatchDrainsAdmittedTasksBeforeDeferredRemainde
   const auto header = read_source_file_for_test("../src/packages/gateway/gateway.h");
 
   const auto helper_pos = source.find("void gateway_service_admitted_receive_tasks()");
-  const auto helper_end = source.find("\nvoid gateway_apply_receive", helper_pos);
+  const auto helper_end = source.find("\nbool gateway_apply_receive", helper_pos);
   ASSERT_NE(helper_pos, std::string::npos);
   ASSERT_NE(helper_end, std::string::npos);
   const auto helper_source = source.substr(helper_pos, helper_end - helper_pos);
@@ -2414,6 +2414,8 @@ TEST_F(DriverTest, TestGatewayBufferedInputPressureRequiresACompleteFrame) {
   ASSERT_EQ(bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, pair), 0);
   ASSERT_NE(pair[0], nullptr);
   ASSERT_NE(pair[1], nullptr);
+  ASSERT_EQ(bufferevent_enable(pair[0], EV_WRITE), 0);
+  ASSERT_EQ(bufferevent_enable(pair[1], EV_READ), 0);
   native_master.bev = pair[0];
   ASSERT_EQ(bufferevent_enable(pair[0], EV_READ), 0);
   ASSERT_EQ(bufferevent_enable(pair[1], EV_WRITE), 0);
@@ -2487,7 +2489,7 @@ TEST_F(DriverTest, TestGatewayMainQueueReadAdmissionUsesComposedHighLowWaterBack
             std::string::npos);
 
   const auto service_pos = source.find("void gateway_service_admitted_receive_tasks");
-  const auto service_end = source.find("\nvoid gateway_apply_receive", service_pos);
+  const auto service_end = source.find("\nbool gateway_apply_receive", service_pos);
   ASSERT_NE(service_pos, std::string::npos);
   ASSERT_NE(service_end, std::string::npos);
   const auto service_source = source.substr(service_pos, service_end - service_pos);
@@ -17316,6 +17318,234 @@ TEST_F(DriverTest, TestGatewayMasterReconnectRebindsExistingSessionWithoutLosing
   ASSERT_EQ(ob->interactive, nullptr);
   destruct_object(ob);
   free_object(&ob, "TestGatewayMasterReconnectRebindsExistingSessionWithoutLosingState");
+}
+
+TEST_F(DriverTest, TestGatewayReliableIngressExecutesContinuousSequenceExactlyOnce) {
+  const char *session_id = "gw-test-reliable-ingress";
+  auto *ob = create_gateway_session_for_test(session_id, "/clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  ASSERT_NE(ob->interactive, nullptr);
+  add_ref(ob, "TestGatewayReliableIngressExecutesContinuousSequenceExactlyOnce");
+
+  gateway_reset_ingress_sequence_for_test();
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1, R"({"type":"hello","data":{"ingress_id":"stream-a","version":2}})"));
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1,
+      R"({"type":"data","cid":"gw-test-reliable-ingress","ingress_id":"stream-a","ingress_seq":1,"data":{"cmd":"first"}})"));
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+
+  auto *payload = call_lpc_method(ob, "query_last_gateway_payload");
+  ASSERT_NE(payload, nullptr);
+  auto *command = find_string_in_mapping(payload->u.map, "cmd");
+  ASSERT_NE(command, nullptr);
+  ASSERT_STREQ(command->u.string, "first");
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1,
+      R"({"type":"data","cid":"gw-test-reliable-ingress","ingress_id":"stream-a","ingress_seq":1,"data":{"cmd":"duplicate"}})"));
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1,
+      R"({"type":"data","cid":"gw-test-reliable-ingress","ingress_id":"stream-a","ingress_seq":3,"data":{"cmd":"gap"}})"));
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 0);
+  payload = call_lpc_method(ob, "query_last_gateway_payload");
+  command = find_string_in_mapping(payload->u.map, "cmd");
+  ASSERT_STREQ(command->u.string, "first");
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1,
+      R"({"type":"data","cid":"gw-test-reliable-ingress","ingress_id":"stream-a","ingress_seq":2,"data":{"cmd":"second"}})"));
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+  payload = call_lpc_method(ob, "query_last_gateway_payload");
+  command = find_string_in_mapping(payload->u.map, "cmd");
+  ASSERT_STREQ(command->u.string, "second");
+
+  auto *status = gateway_status_internal();
+  ASSERT_NE(status, nullptr);
+  auto mapping_number = [](mapping_t *map, const char *key) -> long {
+    auto *value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  ASSERT_EQ(mapping_number(status, "gateway_ingress_sequence_last_accepted"), 2);
+  ASSERT_EQ(mapping_number(status, "gateway_ingress_sequence_duplicates"), 1);
+  ASSERT_EQ(mapping_number(status, "gateway_ingress_sequence_gaps"), 1);
+  free_mapping(status);
+
+  gateway_reset_ingress_sequence_for_test();
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayReliableIngressExecutesContinuousSequenceExactlyOnce");
+}
+
+TEST_F(DriverTest, TestGatewayReliableIngressResetsOnlyForNewStreamIdentity) {
+  const char *session_id = "gw-test-reliable-stream";
+  auto *ob = create_gateway_session_for_test(session_id, "/clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  ASSERT_NE(ob->interactive, nullptr);
+  add_ref(ob, "TestGatewayReliableIngressResetsOnlyForNewStreamIdentity");
+
+  gateway_reset_ingress_sequence_for_test();
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1, R"({"type":"hello","data":{"ingress_id":"stream-a","version":2}})"));
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1,
+      R"({"type":"data","cid":"gw-test-reliable-stream","ingress_id":"stream-a","ingress_seq":1,"data":{"cmd":"a-one"}})"));
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1, R"({"type":"hello","data":{"ingress_id":"stream-a","version":2}})"));
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1,
+      R"({"type":"data","cid":"gw-test-reliable-stream","ingress_id":"stream-a","ingress_seq":1,"data":{"cmd":"a-duplicate"}})"));
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 0);
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1, R"({"type":"hello","data":{"ingress_id":"stream-b","version":2}})"));
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1,
+      R"({"type":"data","cid":"gw-test-reliable-stream","ingress_id":"stream-b","ingress_seq":1,"data":{"cmd":"b-one"}})"));
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1,
+      R"({"type":"data","cid":"gw-test-reliable-stream","ingress_id":"stream-a","ingress_seq":2,"data":{"cmd":"stale-a"}})"));
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 0);
+
+  auto *payload = call_lpc_method(ob, "query_last_gateway_payload");
+  ASSERT_NE(payload, nullptr);
+  auto *command = find_string_in_mapping(payload->u.map, "cmd");
+  ASSERT_NE(command, nullptr);
+  ASSERT_STREQ(command->u.string, "b-one");
+
+  gateway_reset_ingress_sequence_for_test();
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayReliableIngressResetsOnlyForNewStreamIdentity");
+}
+
+TEST_F(DriverTest, TestGatewayReliableIngressNacksExpectedSequenceUntilSessionExists) {
+  const int master_fd = 992;
+  const char *session_id = "gw-test-reliable-late-session";
+  bufferevent *pair[2] = {nullptr, nullptr};
+
+  gateway_reset_ingress_sequence_for_test();
+  ASSERT_EQ(bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, pair), 0);
+  ASSERT_NE(pair[0], nullptr);
+  ASSERT_NE(pair[1], nullptr);
+  auto *master = gateway_register_master_for_test(master_fd, pair[0]);
+  ASSERT_NE(master, nullptr);
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      master_fd,
+      R"({"type":"hello","data":{"ingress_id":"late-session-stream","version":2}})"));
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      master_fd,
+      R"({"type":"data","cid":"gw-test-reliable-late-session","ingress_id":"late-session-stream","ingress_seq":1,"data":{"cmd":"retry-me"}})"));
+  ASSERT_TRUE(master->ingress_ack_pending);
+  ASSERT_EQ(master->ingress_ack_sequence, 0);
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 0);
+
+  auto *ob = create_gateway_session_for_test(
+      session_id, "/clone/gateway_login_example", master_fd);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob,
+          "TestGatewayReliableIngressNacksExpectedSequenceUntilSessionExists");
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      master_fd,
+      R"({"type":"data","cid":"gw-test-reliable-late-session","ingress_id":"late-session-stream","ingress_seq":1,"data":{"cmd":"retry-me"}})"));
+  ASSERT_TRUE(master->ingress_ack_pending);
+  ASSERT_EQ(master->ingress_ack_sequence, 1);
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+  auto *payload = call_lpc_method(ob, "query_last_gateway_payload");
+  ASSERT_NE(payload, nullptr);
+  auto *command = find_string_in_mapping(payload->u.map, "cmd");
+  ASSERT_NE(command, nullptr);
+  ASSERT_STREQ(command->u.string, "retry-me");
+
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
+  gateway_remove_master_for_test(master_fd);
+  pair[0] = nullptr;
+  bufferevent_free(pair[1]);
+  pair[1] = nullptr;
+  destruct_object(ob);
+  free_object(
+      &ob,
+      "TestGatewayReliableIngressNacksExpectedSequenceUntilSessionExists");
+  gateway_reset_ingress_sequence_for_test();
+}
+
+TEST_F(DriverTest, TestGatewayReliableIngressBatchFlushesOneFramedCumulativeAck) {
+  const int master_fd = 991;
+  const char *session_id = "gw-test-reliable-wire";
+  bufferevent *pair[2] = {nullptr, nullptr};
+
+  gateway_reset_ingress_sequence_for_test();
+  ASSERT_EQ(bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, pair), 0);
+  ASSERT_NE(pair[0], nullptr);
+  ASSERT_NE(pair[1], nullptr);
+  ASSERT_EQ(bufferevent_enable(pair[0], EV_WRITE), 0);
+  ASSERT_EQ(bufferevent_enable(pair[1], EV_READ), 0);
+  auto *master = gateway_register_master_for_test(master_fd, pair[0]);
+  ASSERT_NE(master, nullptr);
+  auto *ob = create_gateway_session_for_test(
+      session_id, "/clone/gateway_login_example", master_fd);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayReliableIngressBatchFlushesOneFramedCumulativeAck");
+
+  const auto frame = [](const std::string &payload) {
+    const auto size = static_cast<uint32_t>(payload.size());
+    std::string encoded(sizeof(uint32_t), '\0');
+    const auto network_size = htonl(size);
+    memcpy(encoded.data(), &network_size, sizeof(network_size));
+    encoded += payload;
+    return encoded;
+  };
+  master->read_buffer =
+      frame(R"({"type":"hello","data":{"ingress_id":"wire-stream","version":2}})") +
+      frame(R"({"type":"data","cid":"gw-test-reliable-wire","ingress_id":"wire-stream","ingress_seq":1,"data":{"cmd":"first"}})") +
+      frame(R"({"type":"data","cid":"gw-test-reliable-wire","ingress_id":"wire-stream","ingress_seq":2,"data":{"cmd":"second"}})");
+  ASSERT_EQ(gateway_dispatch_buffered_frames_for_test(master, 16), 3);
+  ASSERT_FALSE(master->ingress_ack_pending);
+  ASSERT_EQ(g_gateway_runtime_counters.ingress_ack_frames_sent.load(), 1);
+
+  auto *input = bufferevent_get_input(pair[1]);
+  ASSERT_NE(input, nullptr);
+  for (int attempt = 0; attempt < 8 && evbuffer_get_length(input) == 0;
+       ++attempt) {
+    event_base_loop(g_event_base, EVLOOP_ONCE | EVLOOP_NONBLOCK);
+  }
+  const auto framed_size = evbuffer_get_length(input);
+  ASSERT_GT(framed_size, sizeof(uint32_t));
+  std::string framed(framed_size, '\0');
+  ASSERT_EQ(evbuffer_copyout(input, framed.data(), framed.size()),
+            static_cast<int>(framed.size()));
+  uint32_t network_length = 0;
+  memcpy(&network_length, framed.data(), sizeof(network_length));
+  const auto payload_length = ntohl(network_length);
+  ASSERT_EQ(payload_length, framed.size() - sizeof(network_length));
+  const auto ack = nlohmann::json::parse(
+      framed.substr(sizeof(network_length), payload_length));
+  ASSERT_EQ(ack.at("type"), "ingress_ack");
+  ASSERT_EQ(ack.at("ingress_id"), "wire-stream");
+  ASSERT_EQ(ack.at("ingress_seq"), 2);
+
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 2);
+  auto *payload = call_lpc_method(ob, "query_last_gateway_payload");
+  ASSERT_NE(payload, nullptr);
+  auto *command = find_string_in_mapping(payload->u.map, "cmd");
+  ASSERT_NE(command, nullptr);
+  ASSERT_STREQ(command->u.string, "second");
+
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
+  gateway_remove_master_for_test(master_fd);
+  pair[0] = nullptr;
+  bufferevent_free(pair[1]);
+  pair[1] = nullptr;
+  destruct_object(ob);
+  free_object(&ob,
+              "TestGatewayReliableIngressBatchFlushesOneFramedCumulativeAck");
+  gateway_reset_ingress_sequence_for_test();
 }
 
 TEST_F(DriverTest, TestGatewayDetachedSessionExpiresAfterReconnectGrace) {

@@ -35,6 +35,12 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> data_frames_received{0};
   std::atomic<uint64_t> data_frames_applied{0};
   std::atomic<uint64_t> data_frames_rejected{0};
+  std::atomic<uint64_t> ingress_sequence_duplicates{0};
+  std::atomic<uint64_t> ingress_sequence_gaps{0};
+  std::atomic<uint64_t> ingress_sequence_stream_mismatches{0};
+  std::atomic<uint64_t> ingress_sequence_stream_resets{0};
+  std::atomic<uint64_t> ingress_ack_frames_sent{0};
+  std::atomic<uint64_t> ingress_ack_frames_failed{0};
   std::atomic<uint64_t> stale_master_frames_rejected{0};
   std::atomic<uint64_t> sessions_detached{0};
   std::atomic<uint64_t> session_rebind_attempts{0};
@@ -267,6 +273,8 @@ struct GatewayMaster {
   bool read_dispatch_pending{false};
   bool read_dispatch_input_paused{false};
   uint8_t read_dispatch_pause_reasons{0};
+  bool ingress_ack_pending{false};
+  uint64_t ingress_ack_sequence{0};
 
   ~GatewayMaster();
 };
@@ -501,6 +509,9 @@ int gateway_dispatch_buffered_frames_for_test(GatewayMaster *master, int budget)
 void gateway_set_read_dispatch_pending_for_test(GatewayMaster *master, bool pending);
 void gateway_service_admitted_receive_tasks_for_test();
 bool gateway_master_has_buffered_input_for_test(const GatewayMaster *master);
+GatewayMaster *gateway_register_master_for_test(int fd, bufferevent *bev);
+void gateway_remove_master_for_test(int fd);
+void gateway_reset_ingress_sequence_for_test();
 int gateway_append_framed_output_for_test(evbuffer *output, const char *data,
                                           size_t len);
 std::string gateway_encode_output_envelope_for_test(const std::string &session_id,

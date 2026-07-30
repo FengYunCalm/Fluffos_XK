@@ -88,6 +88,20 @@ time_t g_gateway_started_at = 0;
 bool g_gateway_main_drain_scheduled = false;
 TickEvent *g_gateway_main_drain_event = nullptr;
 
+struct GatewayIngressSequenceState {
+  std::string stream_id;
+  uint64_t last_accepted{0};
+};
+
+GatewayIngressSequenceState g_gateway_ingress_sequence;
+
+enum class GatewayIngressSequenceDecision : uint8_t {
+  kLegacy,
+  kAccept,
+  kDuplicate,
+  kReject,
+};
+
 void gateway_handle_hello(int fd, const nlohmann::json &msg);
 void gateway_handle_login(int fd, const nlohmann::json &msg);
 void gateway_handle_data(int fd, const nlohmann::json &msg);
@@ -352,10 +366,10 @@ void gateway_service_admitted_receive_tasks() {
   gateway_resume_main_queue_reads_if_below_low_watermark();
 }
 
-void gateway_apply_receive(object_t *user, svalue_t *data_sv) {
+bool gateway_apply_receive(object_t *user, svalue_t *data_sv) {
   if (!gateway_object_valid_local(user) || !data_sv) {
     g_gateway_runtime_counters.receive_tasks_rejected.fetch_add(1, std::memory_order_relaxed);
-    return;
+    return false;
   }
 
   auto copy_started_at = gateway_now_ns();
@@ -416,8 +430,10 @@ void gateway_apply_receive(object_t *user, svalue_t *data_sv) {
       g_gateway_runtime_counters.receive_inline_drain_calls.fetch_add(1, std::memory_order_relaxed);
       gateway_drain_owner_main_tasks_now(kGatewayDeferredMainDrainBudget);
     }
+    return true;
   } else {
     g_gateway_runtime_counters.receive_tasks_rejected.fetch_add(1, std::memory_order_relaxed);
+    return false;
   }
 }
 
@@ -559,6 +575,97 @@ void gateway_send_json_to_fd(int fd, const nlohmann::json &payload) {
   gateway_send_raw_to_fd(fd, encoded.c_str(), encoded.size());
 }
 
+void gateway_begin_ingress_stream(const std::string &stream_id) {
+  if (stream_id.empty() || stream_id.size() > 128 ||
+      stream_id == g_gateway_ingress_sequence.stream_id) {
+    return;
+  }
+  g_gateway_ingress_sequence.stream_id = stream_id;
+  g_gateway_ingress_sequence.last_accepted = 0;
+  g_gateway_runtime_counters.ingress_sequence_stream_resets.fetch_add(
+      1, std::memory_order_relaxed);
+}
+
+GatewayIngressSequenceDecision gateway_classify_ingress_sequence(
+    const nlohmann::json &msg, uint64_t *sequence) {
+  const auto has_id = msg.contains("ingress_id");
+  const auto has_sequence = msg.contains("ingress_seq");
+  if (!has_id && !has_sequence && g_gateway_ingress_sequence.stream_id.empty()) {
+    return GatewayIngressSequenceDecision::kLegacy;
+  }
+  if (!has_id || !has_sequence || !msg["ingress_id"].is_string() ||
+      !msg["ingress_seq"].is_number_unsigned()) {
+    return GatewayIngressSequenceDecision::kReject;
+  }
+  const auto &stream_id = msg["ingress_id"].get_ref<const std::string &>();
+  if (stream_id.empty() || stream_id != g_gateway_ingress_sequence.stream_id) {
+    g_gateway_runtime_counters.ingress_sequence_stream_mismatches.fetch_add(
+        1, std::memory_order_relaxed);
+    return GatewayIngressSequenceDecision::kReject;
+  }
+  const auto incoming = msg["ingress_seq"].get<uint64_t>();
+  if (incoming == 0) {
+    return GatewayIngressSequenceDecision::kReject;
+  }
+  if (sequence) {
+    *sequence = incoming;
+  }
+  if (incoming <= g_gateway_ingress_sequence.last_accepted) {
+    g_gateway_runtime_counters.ingress_sequence_duplicates.fetch_add(
+        1, std::memory_order_relaxed);
+    return GatewayIngressSequenceDecision::kDuplicate;
+  }
+  if (incoming != g_gateway_ingress_sequence.last_accepted + 1) {
+    g_gateway_runtime_counters.ingress_sequence_gaps.fetch_add(
+        1, std::memory_order_relaxed);
+    return GatewayIngressSequenceDecision::kReject;
+  }
+  return GatewayIngressSequenceDecision::kAccept;
+}
+
+void gateway_queue_ingress_ack(int fd) {
+  auto it = g_gateway_masters.find(fd);
+  if (it == g_gateway_masters.end() || !it->second ||
+      g_gateway_ingress_sequence.stream_id.empty()) {
+    return;
+  }
+  it->second->ingress_ack_pending = true;
+  it->second->ingress_ack_sequence = g_gateway_ingress_sequence.last_accepted;
+}
+
+bool gateway_encode_ingress_ack(const GatewayMaster *master, std::string *encoded) {
+  if (!master || !encoded || !master->ingress_ack_pending ||
+      g_gateway_ingress_sequence.stream_id.empty()) {
+    return false;
+  }
+  nlohmann::json ack = {
+      {"type", "ingress_ack"},
+      {"ingress_id", g_gateway_ingress_sequence.stream_id},
+      {"ingress_seq", master->ingress_ack_sequence},
+  };
+  *encoded = ack.dump();
+  return true;
+}
+
+bool gateway_flush_ingress_ack(GatewayMaster *master) {
+  if (!master || !master->ingress_ack_pending) {
+    return true;
+  }
+  std::string encoded;
+  if (!gateway_encode_ingress_ack(master, &encoded)) {
+    return false;
+  }
+  if (!gateway_send_raw_to_fd(master->fd, encoded.c_str(), encoded.size())) {
+    g_gateway_runtime_counters.ingress_ack_frames_failed.fetch_add(
+        1, std::memory_order_relaxed);
+    return false;
+  }
+  master->ingress_ack_pending = false;
+  g_gateway_runtime_counters.ingress_ack_frames_sent.fetch_add(
+      1, std::memory_order_relaxed);
+  return true;
+}
+
 bool gateway_status_to_json(nlohmann::json *out) {
   if (!out) {
     return false;
@@ -614,6 +721,13 @@ void gateway_remove_master(int fd) {
 void gateway_handle_hello(int fd, const nlohmann::json &msg) {
   if (g_gateway_debug) {
     debug_message("[gateway] hello fd=%d\n", fd);
+  }
+  if (msg.contains("data") && msg["data"].is_object()) {
+    const auto &data = msg["data"];
+    if (data.contains("ingress_id") && data["ingress_id"].is_string()) {
+      gateway_begin_ingress_stream(
+          data["ingress_id"].get_ref<const std::string &>());
+    }
   }
   gateway_handle_heartbeat(fd);
 }
@@ -692,9 +806,11 @@ void gateway_handle_data(int fd, const nlohmann::json &msg) {
   GatewaySession *sess = nullptr;
   object_t *user = nullptr;
   svalue_t data_sv = {};
+  uint64_t ingress_sequence = 0;
 
   if (!msg.contains("cid") || !msg["cid"].is_string() || !msg.contains("data")) {
     g_gateway_runtime_counters.data_frames_rejected.fetch_add(1, std::memory_order_relaxed);
+    gateway_queue_ingress_ack(fd);
     return;
   }
   g_gateway_runtime_counters.data_frames_received.fetch_add(1, std::memory_order_relaxed);
@@ -704,17 +820,32 @@ void gateway_handle_data(int fd, const nlohmann::json &msg) {
   session_id = msg["cid"].get<std::string>();
   if (session_id.empty()) {
     g_gateway_runtime_counters.data_frames_rejected.fetch_add(1, std::memory_order_relaxed);
+    gateway_queue_ingress_ack(fd);
+    return;
+  }
+  const auto ingress_decision =
+      gateway_classify_ingress_sequence(msg, &ingress_sequence);
+  if (ingress_decision == GatewayIngressSequenceDecision::kDuplicate) {
+    gateway_queue_ingress_ack(fd);
+    return;
+  }
+  if (ingress_decision == GatewayIngressSequenceDecision::kReject) {
+    g_gateway_runtime_counters.data_frames_rejected.fetch_add(
+        1, std::memory_order_relaxed);
+    gateway_queue_ingress_ack(fd);
     return;
   }
   sess = gateway_find_session(session_id.c_str());
   if (!sess || sess->master_fd != fd) {
     g_gateway_runtime_counters.data_frames_rejected.fetch_add(1, std::memory_order_relaxed);
     g_gateway_runtime_counters.stale_master_frames_rejected.fetch_add(1, std::memory_order_relaxed);
+    gateway_queue_ingress_ack(fd);
     return;
   }
   user = sess ? sess->user_ob : nullptr;
   if (!gateway_object_valid_local(user)) {
     g_gateway_runtime_counters.data_frames_rejected.fetch_add(1, std::memory_order_relaxed);
+    gateway_queue_ingress_ack(fd);
     return;
   }
   sess->last_active = get_current_time();
@@ -729,8 +860,19 @@ void gateway_handle_data(int fd, const nlohmann::json &msg) {
                            g_gateway_runtime_counters.receive_decode_samples,
                            gateway_now_ns() - decode_started_at);
   }
-  g_gateway_runtime_counters.data_frames_applied.fetch_add(1, std::memory_order_relaxed);
-  gateway_apply_receive(user, &data_sv);
+  const auto accepted = gateway_apply_receive(user, &data_sv);
+  if (accepted) {
+    g_gateway_runtime_counters.data_frames_applied.fetch_add(
+        1, std::memory_order_relaxed);
+    if (ingress_decision == GatewayIngressSequenceDecision::kAccept) {
+      g_gateway_ingress_sequence.last_accepted = ingress_sequence;
+      gateway_queue_ingress_ack(fd);
+    }
+  } else {
+    g_gateway_runtime_counters.data_frames_rejected.fetch_add(
+        1, std::memory_order_relaxed);
+    gateway_queue_ingress_ack(fd);
+  }
   free_svalue(&data_sv, "gateway_data");
 }
 
@@ -1067,6 +1209,11 @@ int gateway_dispatch_buffered_frames(GatewayMaster *master, int budget) {
     } catch (...) {
       continue;
     }
+  }
+  if (!gateway_flush_ingress_ack(master)) {
+    const auto fd = master->fd;
+    gateway_remove_master(fd);
+    return -1;
   }
   if (!gateway_buffer_has_complete_frame(master)) {
     gateway_compact_read_buffer(master);
@@ -1424,6 +1571,36 @@ bool gateway_master_has_buffered_input_for_test(const GatewayMaster *master) {
   return gateway_master_has_buffered_input(master);
 }
 
+GatewayMaster *gateway_register_master_for_test(int fd, bufferevent *bev) {
+  if (fd < 0 || !bev || g_gateway_masters.count(fd)) {
+    return nullptr;
+  }
+  auto master = std::make_unique<GatewayMaster>();
+  master->fd = fd;
+  master->bev = bev;
+  auto *result = master.get();
+  g_gateway_masters[fd] = std::move(master);
+  return result;
+}
+
+void gateway_remove_master_for_test(int fd) { gateway_remove_master(fd); }
+
+void gateway_reset_ingress_sequence_for_test() {
+  g_gateway_ingress_sequence = {};
+  g_gateway_runtime_counters.ingress_sequence_duplicates.store(
+      0, std::memory_order_relaxed);
+  g_gateway_runtime_counters.ingress_sequence_gaps.store(
+      0, std::memory_order_relaxed);
+  g_gateway_runtime_counters.ingress_sequence_stream_mismatches.store(
+      0, std::memory_order_relaxed);
+  g_gateway_runtime_counters.ingress_sequence_stream_resets.store(
+      0, std::memory_order_relaxed);
+  g_gateway_runtime_counters.ingress_ack_frames_sent.store(
+      0, std::memory_order_relaxed);
+  g_gateway_runtime_counters.ingress_ack_frames_failed.store(
+      0, std::memory_order_relaxed);
+}
+
 GatewayMaster::~GatewayMaster() {
   gateway_release_read_dispatch_pending(this);
   if (read_dispatch_event) {
@@ -1469,6 +1646,7 @@ void cleanup_gateway(void) {
     g_gateway_main_drain_event = nullptr;
   }
   g_gateway_main_drain_scheduled = false;
+  g_gateway_ingress_sequence = {};
   cleanup_gateway_sessions();
   g_gateway_masters.clear();
   g_gateway_read_dispatch_pending_masters.store(0, std::memory_order_release);
@@ -1626,7 +1804,7 @@ mapping_t *gateway_status_internal() {
   int uptime;
 
   uptime = g_gateway_started_at ? static_cast<int>(get_current_time() - g_gateway_started_at) : 0;
-  map = allocate_mapping(171);
+  map = allocate_mapping(178);
   add_mapping_pair(map, "listening", g_gateway_listener ? 1 : 0);
   add_mapping_pair(map, "gateway_event_priority_levels",
                    kBackendEventPriorityLevels);
@@ -1659,6 +1837,20 @@ mapping_t *gateway_status_internal() {
                    static_cast<long>(g_gateway_runtime_counters.data_frames_applied.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_data_frames_rejected",
                    static_cast<long>(g_gateway_runtime_counters.data_frames_rejected.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_ingress_sequence_last_accepted",
+                   static_cast<long>(g_gateway_ingress_sequence.last_accepted));
+  add_mapping_pair(map, "gateway_ingress_sequence_duplicates",
+                   static_cast<long>(g_gateway_runtime_counters.ingress_sequence_duplicates.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_ingress_sequence_gaps",
+                   static_cast<long>(g_gateway_runtime_counters.ingress_sequence_gaps.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_ingress_sequence_stream_mismatches",
+                   static_cast<long>(g_gateway_runtime_counters.ingress_sequence_stream_mismatches.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_ingress_sequence_stream_resets",
+                   static_cast<long>(g_gateway_runtime_counters.ingress_sequence_stream_resets.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_ingress_ack_frames_sent",
+                   static_cast<long>(g_gateway_runtime_counters.ingress_ack_frames_sent.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_ingress_ack_frames_failed",
+                   static_cast<long>(g_gateway_runtime_counters.ingress_ack_frames_failed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_stale_master_frames_rejected",
                    static_cast<long>(g_gateway_runtime_counters.stale_master_frames_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_sessions_detached_total",
