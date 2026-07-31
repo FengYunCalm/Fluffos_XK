@@ -677,7 +677,33 @@ bool gateway_status_to_json(nlohmann::json *out) {
   status_sv.u.map = status;
   auto ok = gateway_svalue_to_json_impl(&status_sv, out, 0);
   free_mapping(status);
-  return ok;
+  if (!ok || !out->is_object() || !master_ob ||
+      (master_ob->flags & O_DESTRUCTED)) {
+    return ok;
+  }
+
+  save_command_giver(master_ob);
+  VMOwnerScope owner_scope(vm_context(), vm_owner_id(master_ob),
+                           vm_owner_epoch(master_ob));
+  set_eval(max_eval_cost);
+  auto *extension_sv = safe_apply("query_gateway_status_extension", master_ob, 0,
+                                  ORIGIN_DRIVER);
+  restore_command_giver();
+  if (!extension_sv || extension_sv->type != T_MAPPING) {
+    return true;
+  }
+
+  nlohmann::json extension;
+  if (!gateway_svalue_to_json_impl(extension_sv, &extension, 0) ||
+      !extension.is_object()) {
+    return true;
+  }
+  for (const auto &[key, value] : extension.items()) {
+    if (!out->contains(key) && value.is_number()) {
+      (*out)[key] = value;
+    }
+  }
+  return true;
 }
 
 void gateway_remove_master(int fd);

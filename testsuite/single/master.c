@@ -39,6 +39,21 @@ public void reset_test_login_ob() {
   test_login_ob = 0;
 }
 
+mapping query_gateway_status_extension() {
+  return ([
+    "client_sync_pending_entries": 37,
+    "client_sync_chat_pending": 31,
+    "client_sync_chat_queue_depth": 31,
+    "client_sync_chat_active_wave_remaining": 7,
+    "client_sync_chat_fanout_queue_depth": 5,
+    "client_sync_chat_fanout_pending_targets": 23,
+    "client_sync_chat_fanout_active_wave_jobs_remaining": 3,
+    "client_sync_chat_fanout_wave_recipient_count": 19,
+    "client_sync_score_refresh_pending": 11,
+    "client_sync_score_refresh_queue_depth": 11,
+  ]);
+}
+
 void flag(string str) {
   mixed error;
   string cmd, arg;

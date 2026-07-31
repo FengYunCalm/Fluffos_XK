@@ -419,6 +419,8 @@ int gateway_flush_session_output_fifo(GatewaySession *sess);
 int gateway_enqueue_session_protocol_output(GatewaySession *sess, const char *data,
                                             size_t len);
 uint64_t gateway_reserve_session_output(GatewaySession *sess);
+bool gateway_session_pending_reservation_has_ready_successor(
+    const GatewaySession *sess, uint64_t reservation_id);
 bool gateway_reserve_session_outputs(
     const std::vector<GatewaySession *> &sessions,
     const std::vector<uint64_t> &existing_reservation_ids,
@@ -482,6 +484,8 @@ int gateway_release_session_output(GatewaySession *sess, uint64_t reservation_id
 uint64_t gateway_reserve_session_output_for_object(object_t *ob);
 int gateway_fill_session_output_for_object(object_t *ob, uint64_t reservation_id, const char *data, size_t len);
 int gateway_release_session_output_for_object(object_t *ob, uint64_t reservation_id);
+int gateway_session_pending_reservation_has_ready_successor_for_object(
+    object_t *ob, uint64_t reservation_id);
 int gateway_watch_session_future_for_object(object_t *ob, uint64_t reservation_id,
                                             uint64_t future_id, int timeout_ms);
 int gateway_watch_session_future_output_for_object(object_t *ob, uint64_t reservation_id,

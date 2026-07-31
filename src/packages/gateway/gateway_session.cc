@@ -1645,6 +1645,30 @@ object_t *resolve_active_session_owner(const char *session_id, object_t *fallbac
 }
 }  // namespace
 
+bool gateway_session_pending_reservation_has_ready_successor(
+    const GatewaySession *sess, uint64_t reservation_id) {
+  if (!sess || reservation_id == 0) {
+    return false;
+  }
+  bool found_pending_reservation = false;
+  for (const auto &entry : sess->output_fifo) {
+    if (!found_pending_reservation) {
+      if (entry.reservation_id != reservation_id) {
+        continue;
+      }
+      if (entry.ready) {
+        return false;
+      }
+      found_pending_reservation = true;
+      continue;
+    }
+    if (entry.ready) {
+      return true;
+    }
+  }
+  return false;
+}
+
 int gateway_get_session_count() { return static_cast<int>(g_gateway_sessions.size()); }
 
 long gateway_room_output_projection_pending_count() {
@@ -4961,6 +4985,17 @@ int gateway_release_session_output_for_object(object_t *ob, uint64_t reservation
   return 1;
 }
 
+int gateway_session_pending_reservation_has_ready_successor_for_object(
+    object_t *ob, uint64_t reservation_id) {
+  if (!vm_context_is_main_thread() || !gateway_object_valid(ob)) {
+    return 0;
+  }
+  return gateway_session_pending_reservation_has_ready_successor(
+             gateway_find_session_by_object(ob), reservation_id)
+             ? 1
+             : 0;
+}
+
 int gateway_bind_session_object(const char *session_id, object_t *ob, const char *ip, int port,
                                 int master_fd) {
   GatewaySession *sess;
@@ -5694,6 +5729,16 @@ void f_gateway_session_reserve() {
   auto reservation_id = gateway_reserve_session_output_for_object(ob);
   pop_stack();
   push_number(static_cast<LPC_INT>(reservation_id));
+}
+
+void f_gateway_session_pending_reservation_has_ready_successor() {
+  auto reservation_id = static_cast<uint64_t>(sp->u.number);
+  auto *ob = (sp - 1)->u.ob;
+  auto result =
+      gateway_session_pending_reservation_has_ready_successor_for_object(
+          ob, reservation_id);
+  pop_2_elems();
+  push_number(result);
 }
 
 void f_gateway_sessions_reserve_or_reuse() {

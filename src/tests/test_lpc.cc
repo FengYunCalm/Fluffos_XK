@@ -732,6 +732,37 @@ TEST_F(DriverTest, TestGatewayOutputReservationBlocksAndPreservesFifo) {
   ASSERT_TRUE(session.output_fifo.empty());
 }
 
+TEST_F(DriverTest, TestGatewayPendingReservationDetectsReadySuccessor) {
+  auto writer = [](int, const char*, size_t) -> int { return 1; };
+
+  GatewaySession session;
+  session.session_id = "ready-successor-session";
+  session.master_fd = 78;
+  auto first_reservation_id = gateway_reserve_session_output(&session);
+  auto second_reservation_id = gateway_reserve_session_output(&session);
+  ASSERT_GT(first_reservation_id, 0u);
+  ASSERT_GT(second_reservation_id, 0u);
+
+  ASSERT_FALSE(gateway_session_pending_reservation_has_ready_successor(
+      nullptr, first_reservation_id));
+  ASSERT_FALSE(gateway_session_pending_reservation_has_ready_successor(
+      &session, 0));
+  ASSERT_FALSE(gateway_session_pending_reservation_has_ready_successor(
+      &session, second_reservation_id + 1));
+  ASSERT_FALSE(gateway_session_pending_reservation_has_ready_successor(
+      &session, first_reservation_id));
+  ASSERT_FALSE(gateway_session_pending_reservation_has_ready_successor(
+      &session, second_reservation_id));
+
+  ASSERT_EQ(gateway_fill_session_protocol_output_with_writer(
+                &session, second_reservation_id, "second", 6, writer),
+            1);
+  ASSERT_TRUE(gateway_session_pending_reservation_has_ready_successor(
+      &session, first_reservation_id));
+  ASSERT_FALSE(gateway_session_pending_reservation_has_ready_successor(
+      &session, second_reservation_id));
+}
+
 TEST_F(DriverTest, TestGatewayOutputReservationTimeoutReleaseUnblocksFollowingOutput) {
   static std::vector<std::string> writes;
   writes.clear();
@@ -2386,6 +2417,53 @@ TEST_F(DriverTest, TestGatewayStatusSnapshotDefersPastCurrentReadDispatch) {
   ASSERT_NE(status_source.find("gateway_schedule_status_response(fd, msg)"),
             std::string::npos);
   ASSERT_EQ(status_source.find("gateway_status_to_json(&status)"), std::string::npos);
+}
+
+TEST_F(DriverTest, TestGatewayStatusWireIncludesMudlibRuntimeExtension) {
+  constexpr int master_fd = 993;
+  bufferevent *pair[2] = {nullptr, nullptr};
+
+  ASSERT_EQ(bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, pair), 0);
+  ASSERT_NE(pair[0], nullptr);
+  ASSERT_NE(pair[1], nullptr);
+  ASSERT_EQ(bufferevent_enable(pair[0], EV_WRITE), 0);
+  ASSERT_EQ(bufferevent_enable(pair[1], EV_READ), 0);
+  ASSERT_NE(gateway_register_master_for_test(master_fd, pair[0]), nullptr);
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      master_fd,
+      R"({"type":"sys","action":"status","ts":1700000000123456})"));
+
+  auto *input = bufferevent_get_input(pair[1]);
+  ASSERT_NE(input, nullptr);
+  for (int attempt = 0; attempt < 16 && evbuffer_get_length(input) == 0;
+       ++attempt) {
+    event_base_loop(g_event_base, EVLOOP_ONCE | EVLOOP_NONBLOCK);
+  }
+  const auto framed_size = evbuffer_get_length(input);
+  ASSERT_GT(framed_size, sizeof(uint32_t));
+  std::string framed(framed_size, '\0');
+  ASSERT_EQ(evbuffer_copyout(input, framed.data(), framed.size()),
+            static_cast<int>(framed.size()));
+  uint32_t network_length = 0;
+  memcpy(&network_length, framed.data(), sizeof(network_length));
+  const auto payload_length = ntohl(network_length);
+  ASSERT_EQ(payload_length, framed.size() - sizeof(network_length));
+  const auto response = nlohmann::json::parse(
+      framed.substr(sizeof(network_length), payload_length));
+  ASSERT_EQ(response.at("type"), "sys");
+  ASSERT_EQ(response.at("action"), "status");
+  ASSERT_EQ(response.at("ts"), 1700000000123456);
+  const auto &data = response.at("data");
+  ASSERT_EQ(data.at("client_sync_pending_entries"), 37);
+  ASSERT_EQ(data.at("client_sync_chat_pending"), 31);
+  ASSERT_EQ(data.at("client_sync_chat_fanout_pending_targets"), 23);
+  ASSERT_EQ(data.at("client_sync_score_refresh_pending"), 11);
+
+  gateway_remove_master_for_test(master_fd);
+  pair[0] = nullptr;
+  bufferevent_free(pair[1]);
+  pair[1] = nullptr;
 }
 
 TEST_F(DriverTest, TestGatewayBufferedInputPressureRequiresACompleteFrame) {

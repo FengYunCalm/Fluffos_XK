@@ -16,6 +16,7 @@ object *gateway_sessions();
 mapping gateway_session_info(object);
 int gateway_session_send(object, mixed, mixed default:0);
 int gateway_session_reserve(object);
+int gateway_session_pending_reservation_has_ready_successor(object, int);
 mapping gateway_sessions_reserve_or_reuse(object *, int *);
 int gateway_sessions_append_preencoded_message_event_wave(object *, int *, int *, string, string, int *, int *, int *, int, int);
 mapping gateway_sessions_reserve_and_append_preencoded_message_event_wave(object *, int *, int, string, string, int *, int *, int, int);
