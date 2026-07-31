@@ -20,20 +20,49 @@ struct event_base *init_backend();
 // This is the main game loop.
 void backend(struct event_base *);
 
-constexpr int kBackendEventPriorityLevels = 3;
+constexpr int kBackendEventPriorityLevels = 2;
 
 enum class BackendEventPriority : int {
   kNormal = 0,
-  kGateway = 1,
-  kBackground = 2,
+  kGateway = 0,
+  kBackground = 1,
 };
+
+constexpr size_t kBackendTickEventCallbackBudget = 64;
+constexpr auto kBackendTickEventWallBudget = std::chrono::milliseconds(4);
+constexpr auto kBackendTickContinuationDelay = std::chrono::milliseconds(1);
+constexpr int kBackendOwnerMainDrainTaskBudget = 64;
+constexpr auto kBackendOwnerMainDrainWallBudget = std::chrono::milliseconds(8);
+constexpr auto kBackendOwnerMainDrainContinuationDelay =
+    std::chrono::milliseconds(1);
+
+struct BackendRuntimeStatus {
+  uint64_t tick_slice_runs{0};
+  uint64_t tick_slice_callbacks_total{0};
+  uint64_t tick_slice_callbacks_max{0};
+  uint64_t tick_slice_budget_yields{0};
+  uint64_t tick_slice_wall_yields{0};
+  uint64_t tick_continuations_scheduled{0};
+  uint64_t tick_continuations_executed{0};
+  uint64_t owner_main_slice_runs{0};
+  uint64_t owner_main_slice_tasks_total{0};
+  uint64_t owner_main_slice_tasks_max{0};
+  uint64_t owner_main_slice_task_budget_yields{0};
+  uint64_t owner_main_slice_wall_yields{0};
+  uint64_t owner_main_tasks_exceeding_wall_budget{0};
+  uint64_t owner_main_continuations_scheduled{0};
+  uint64_t owner_main_continuations_executed{0};
+  bool owner_main_continuation_pending{false};
+};
+
+BackendRuntimeStatus backend_runtime_status();
 
 // Re-poll after a bounded Gateway/background batch so newly due normal work,
 // or newly ready Gateway I/O ahead of optional warmups, can be admitted.
 constexpr auto kBackendBackgroundDispatchMaxInterval = std::chrono::milliseconds(2);
 constexpr int kBackendBackgroundDispatchMaxCallbacks = 8;
 constexpr auto kBackendBackgroundDispatchMinPriority =
-    BackendEventPriority::kGateway;
+    BackendEventPriority::kBackground;
 
 // API for registering game tick event.
 // Game ticks provides guaranteed spacing intervals between each invocation.

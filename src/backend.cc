@@ -21,7 +21,6 @@
 #endif
 #endif
 #include <sys/types.h>  // for int64_t
-#include <deque>        // for deque
 #include <functional>   // for _Bind, less, bind, function
 #include <map>          // for multimap, _Rb_tree_iterator
 #include <utility>      // for pair, make_pair
@@ -138,59 +137,224 @@ inline struct timeval gametick_timeval() {
 using TickQueue = std::multimap<uint64_t, TickEvent *, std::less<>>;
 TickQueue g_tick_queue;
 std::mutex g_tick_queue_mutex;
+bool g_backend_owner_main_drain_scheduled = false;
+TickEvent *g_backend_owner_main_drain_event = nullptr;
+std::atomic<uint64_t> g_backend_tick_slice_runs{0};
+std::atomic<uint64_t> g_backend_tick_slice_callbacks_total{0};
+std::atomic<uint64_t> g_backend_tick_slice_callbacks_max{0};
+std::atomic<uint64_t> g_backend_tick_slice_budget_yields{0};
+std::atomic<uint64_t> g_backend_tick_slice_wall_yields{0};
+std::atomic<uint64_t> g_backend_tick_continuations_scheduled{0};
+std::atomic<uint64_t> g_backend_tick_continuations_executed{0};
+std::atomic<uint64_t> g_backend_owner_main_slice_runs{0};
+std::atomic<uint64_t> g_backend_owner_main_slice_tasks_total{0};
+std::atomic<uint64_t> g_backend_owner_main_slice_tasks_max{0};
+std::atomic<uint64_t> g_backend_owner_main_slice_task_budget_yields{0};
+std::atomic<uint64_t> g_backend_owner_main_slice_wall_yields{0};
+std::atomic<uint64_t> g_backend_owner_main_tasks_exceeding_wall_budget{0};
+std::atomic<uint64_t> g_backend_owner_main_continuations_scheduled{0};
+std::atomic<uint64_t> g_backend_owner_main_continuations_executed{0};
 
-// Call all events for current tick
-inline size_t call_tick_events() {
-  size_t processed = 0;
-  // Loop until there are no more events to run.
-  //
-  // NOTE: some event, like call_out(0), will add event to tick_queue during
-  // callback, We need to keep looping until there isn't any eligible events
-  // left.
-  while (true) {
-    std::deque<TickEvent *> all_events;
+void backend_record_max(std::atomic<uint64_t> &target, uint64_t value) {
+  auto current = target.load(std::memory_order_relaxed);
+  while (value > current &&
+         !target.compare_exchange_weak(current, value,
+                                       std::memory_order_relaxed)) {
+  }
+}
+
+struct TickEventDrainResult {
+  size_t processed{0};
+  bool due_events_remaining{false};
+  bool callback_budget_yielded{false};
+  bool wall_budget_yielded{false};
+};
+
+bool tick_events_due() {
+  std::lock_guard<std::mutex> lock(g_tick_queue_mutex);
+  return !g_tick_queue.empty() &&
+         g_tick_queue.begin()->first <= current_gametick();
+}
+
+// Run one bounded slice. Pulling one event at a time keeps equivalent-key
+// insertion order intact when callbacks enqueue more work for the same tick.
+TickEventDrainResult call_tick_events_slice() {
+  TickEventDrainResult result;
+  const auto started_at = std::chrono::steady_clock::now();
+
+  while (result.processed < kBackendTickEventCallbackBudget) {
+    TickEvent *event = nullptr;
     {
       std::lock_guard<std::mutex> lock(g_tick_queue_mutex);
-      auto iter_end = g_tick_queue.upper_bound(current_gametick());
-      // No more eligible events.
-      if (iter_end == g_tick_queue.begin()) {
+      auto iter = g_tick_queue.begin();
+      if (iter == g_tick_queue.end() || iter->first > current_gametick()) {
         break;
       }
-      auto iter_start = g_tick_queue.begin();
-
-      // Extract and erase eligible events while the queue is stable. Callbacks run below.
-      for (auto iter = iter_start; iter != iter_end; iter++) {
-        all_events.push_back(iter->second);
-      }
-      g_tick_queue.erase(iter_start, iter_end);
+      event = iter->second;
+      g_tick_queue.erase(iter);
     }
 
-    // TODO: randomly shuffle the events
+    if (event->is_valid()) {
+      event->callback();
+    }
+    delete event;
+    result.processed++;
 
-    for (auto *event : all_events) {
-      if (event->is_valid()) {
-        event->callback();
-      }
-      delete event;
-      processed++;
+    if (std::chrono::steady_clock::now() - started_at >=
+        kBackendTickEventWallBudget) {
+      break;
     }
   }
-  return processed;
+  const auto elapsed = std::chrono::steady_clock::now() - started_at;
+  result.due_events_remaining = tick_events_due();
+  result.callback_budget_yielded =
+      result.due_events_remaining &&
+      result.processed >= kBackendTickEventCallbackBudget;
+  result.wall_budget_yielded =
+      result.due_events_remaining && !result.callback_budget_yielded &&
+      elapsed >= kBackendTickEventWallBudget;
+  g_backend_tick_slice_runs.fetch_add(1, std::memory_order_relaxed);
+  g_backend_tick_slice_callbacks_total.fetch_add(result.processed,
+                                                  std::memory_order_relaxed);
+  backend_record_max(g_backend_tick_slice_callbacks_max, result.processed);
+  if (result.callback_budget_yielded) {
+    g_backend_tick_slice_budget_yields.fetch_add(1, std::memory_order_relaxed);
+  }
+  if (result.wall_budget_yielded) {
+    g_backend_tick_slice_wall_yields.fetch_add(1, std::memory_order_relaxed);
+  }
+  return result;
+}
+
+void drain_backend_owner_main_tasks_slice(bool continuation);
+
+void schedule_backend_owner_main_drain() {
+  if (!g_event_base || g_backend_owner_main_drain_scheduled) {
+    return;
+  }
+  g_backend_owner_main_drain_scheduled = true;
+  g_backend_owner_main_continuations_scheduled.fetch_add(
+      1, std::memory_order_relaxed);
+  g_backend_owner_main_drain_event = add_walltime_event(
+      kBackendOwnerMainDrainContinuationDelay,
+      [] {
+        g_backend_owner_main_drain_event = nullptr;
+        g_backend_owner_main_drain_scheduled = false;
+        drain_backend_owner_main_tasks_slice(true);
+      },
+      BackendEventPriority::kNormal);
+}
+
+void drain_backend_owner_main_tasks_slice(bool continuation) {
+  if (continuation) {
+    g_backend_owner_main_continuations_executed.fetch_add(
+        1, std::memory_order_relaxed);
+  }
+  auto result = vm_owner_drain_main_tasks_with_budget(
+      kBackendOwnerMainDrainTaskBudget,
+      static_cast<uint64_t>(kBackendOwnerMainDrainWallBudget.count()) *
+          1000000);
+  g_backend_owner_main_slice_runs.fetch_add(1, std::memory_order_relaxed);
+  g_backend_owner_main_slice_tasks_total.fetch_add(
+      static_cast<uint64_t>(result.dispatched), std::memory_order_relaxed);
+  backend_record_max(g_backend_owner_main_slice_tasks_max,
+                     static_cast<uint64_t>(result.dispatched));
+  if (result.task_budget_yielded) {
+    g_backend_owner_main_slice_task_budget_yields.fetch_add(
+        1, std::memory_order_relaxed);
+  }
+  if (result.wall_budget_yielded) {
+    g_backend_owner_main_slice_wall_yields.fetch_add(
+        1, std::memory_order_relaxed);
+  }
+  g_backend_owner_main_tasks_exceeding_wall_budget.fetch_add(
+      static_cast<uint64_t>(result.main_tasks_exceeding_wall_budget),
+      std::memory_order_relaxed);
+  if (result.remaining_main_tasks > 0 || result.remaining_cleanup_tasks > 0) {
+    schedule_backend_owner_main_drain();
+  }
+}
+
+void finish_game_tick(struct event **tick_event) {
+  remove_destructed_objects_bounded(kDestructedObjectCleanupTickBudget);
+  auto next_gametick =
+      g_current_gametick.fetch_add(1, std::memory_order_relaxed) + 1;
+  vm_context_set_current_gametick(vm_context(), next_gametick);
+
+  auto t = gametick_timeval();
+  event_add(*tick_event, &t);
+}
+
+void drain_game_tick_slice(struct event **tick_event, bool continuation) {
+  if (continuation) {
+    g_backend_tick_continuations_executed.fetch_add(1,
+                                                     std::memory_order_relaxed);
+  }
+  auto result = call_tick_events_slice();
+  drain_backend_owner_main_tasks_slice(false);
+  if (result.due_events_remaining) {
+    g_backend_tick_continuations_scheduled.fetch_add(
+        1, std::memory_order_relaxed);
+    add_walltime_event(
+        kBackendTickContinuationDelay,
+        [tick_event] { drain_game_tick_slice(tick_event, true); },
+        BackendEventPriority::kNormal);
+    return;
+  }
+  finish_game_tick(tick_event);
+}
+
+// Call one bounded event slice for the current tick.
+inline size_t call_tick_events() {
+  return call_tick_events_slice().processed;
 }
 
 void on_game_tick(evutil_socket_t /*fd*/, short /*what*/, void *arg) {
-  call_tick_events();
-  vm_owner_drain_main_tasks(1024);
-  remove_destructed_objects_bounded(kDestructedObjectCleanupTickBudget);
-  auto next_gametick = g_current_gametick.fetch_add(1, std::memory_order_relaxed) + 1;
-  vm_context_set_current_gametick(vm_context(), next_gametick);
-
-  auto *ev = *(reinterpret_cast<struct event **>(arg));
-  auto t = gametick_timeval();
-  event_add(ev, &t);
+  drain_game_tick_slice(reinterpret_cast<struct event **>(arg), false);
 }
 
 }  // namespace
+
+BackendRuntimeStatus backend_runtime_status() {
+  BackendRuntimeStatus status;
+  status.tick_slice_runs =
+      g_backend_tick_slice_runs.load(std::memory_order_relaxed);
+  status.tick_slice_callbacks_total =
+      g_backend_tick_slice_callbacks_total.load(std::memory_order_relaxed);
+  status.tick_slice_callbacks_max =
+      g_backend_tick_slice_callbacks_max.load(std::memory_order_relaxed);
+  status.tick_slice_budget_yields =
+      g_backend_tick_slice_budget_yields.load(std::memory_order_relaxed);
+  status.tick_slice_wall_yields =
+      g_backend_tick_slice_wall_yields.load(std::memory_order_relaxed);
+  status.tick_continuations_scheduled =
+      g_backend_tick_continuations_scheduled.load(std::memory_order_relaxed);
+  status.tick_continuations_executed =
+      g_backend_tick_continuations_executed.load(std::memory_order_relaxed);
+  status.owner_main_slice_runs =
+      g_backend_owner_main_slice_runs.load(std::memory_order_relaxed);
+  status.owner_main_slice_tasks_total =
+      g_backend_owner_main_slice_tasks_total.load(std::memory_order_relaxed);
+  status.owner_main_slice_tasks_max =
+      g_backend_owner_main_slice_tasks_max.load(std::memory_order_relaxed);
+  status.owner_main_slice_task_budget_yields =
+      g_backend_owner_main_slice_task_budget_yields.load(
+          std::memory_order_relaxed);
+  status.owner_main_slice_wall_yields =
+      g_backend_owner_main_slice_wall_yields.load(std::memory_order_relaxed);
+  status.owner_main_tasks_exceeding_wall_budget =
+      g_backend_owner_main_tasks_exceeding_wall_budget.load(
+          std::memory_order_relaxed);
+  status.owner_main_continuations_scheduled =
+      g_backend_owner_main_continuations_scheduled.load(
+          std::memory_order_relaxed);
+  status.owner_main_continuations_executed =
+      g_backend_owner_main_continuations_executed.load(
+          std::memory_order_relaxed);
+  status.owner_main_continuation_pending =
+      g_backend_owner_main_drain_scheduled;
+  return status;
+}
 
 TickEvent *add_gametick_event(int delay_ticks, TickEvent::callback_type callback) {
   auto *event = new TickEvent(callback);
@@ -290,6 +454,8 @@ void clear_tick_events() {
     }
     g_walltime_events.clear();
   }
+  g_backend_owner_main_drain_event = nullptr;
+  g_backend_owner_main_drain_scheduled = false;
   int i = 0;
   for (auto &iter : leftover_events) {
     delete iter.second;

@@ -446,9 +446,9 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
 
   mapping_t* status = gateway_status_internal();
   ASSERT_NE(status, nullptr);
-  ASSERT_EQ(mapping_number(status, "gateway_event_priority_levels"), 3);
+  ASSERT_EQ(mapping_number(status, "gateway_event_priority_levels"), 2);
   ASSERT_EQ(mapping_number(status, "gateway_normal_event_priority"), 0);
-  ASSERT_EQ(mapping_number(status, "gateway_io_event_priority"), 1);
+  ASSERT_EQ(mapping_number(status, "gateway_io_event_priority"), 0);
   ASSERT_EQ(mapping_number(status,
                            "gateway_background_dispatch_max_interval_us"),
             2000);
@@ -458,6 +458,64 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_EQ(mapping_number(status,
                            "gateway_background_dispatch_min_priority"),
             1);
+  ASSERT_EQ(mapping_number(status, "gateway_backend_tick_slice_budget"), 64);
+  ASSERT_EQ(mapping_number(status, "gateway_backend_tick_slice_wall_budget_us"),
+            4000);
+  ASSERT_EQ(mapping_number(status,
+                           "gateway_backend_tick_continuation_delay_us"),
+            1000);
+  ASSERT_EQ(mapping_number(status, "gateway_backend_owner_main_slice_budget"),
+            64);
+  ASSERT_EQ(mapping_number(status,
+                           "gateway_backend_owner_main_slice_wall_budget_us"),
+            8000);
+  ASSERT_EQ(mapping_number(status,
+                           "gateway_backend_owner_main_continuation_delay_us"),
+            1000);
+  ASSERT_GE(mapping_number(status, "gateway_backend_tick_slice_runs"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_backend_tick_slice_callbacks_total"),
+            0);
+  ASSERT_GE(mapping_number(status, "gateway_backend_tick_slice_callbacks_max"),
+            0);
+  ASSERT_GE(mapping_number(status, "gateway_backend_tick_slice_budget_yields"),
+            0);
+  ASSERT_GE(mapping_number(status, "gateway_backend_tick_slice_wall_yields"),
+            0);
+  ASSERT_GE(mapping_number(
+                status, "gateway_backend_tick_continuations_scheduled"),
+            0);
+  ASSERT_GE(mapping_number(
+                status, "gateway_backend_tick_continuations_executed"),
+            0);
+  ASSERT_GE(mapping_number(status, "gateway_backend_owner_main_slice_runs"), 0);
+  ASSERT_GE(mapping_number(
+                status, "gateway_backend_owner_main_slice_tasks_total"),
+            0);
+  ASSERT_GE(mapping_number(
+                status, "gateway_backend_owner_main_slice_tasks_max"),
+            0);
+  ASSERT_GE(mapping_number(
+                status,
+                "gateway_backend_owner_main_slice_task_budget_yields"),
+            0);
+  ASSERT_GE(mapping_number(
+                status, "gateway_backend_owner_main_slice_wall_yields"),
+            0);
+  ASSERT_GE(mapping_number(
+                status,
+                "gateway_backend_owner_main_tasks_exceeding_wall_budget"),
+            0);
+  ASSERT_GE(mapping_number(
+                status,
+                "gateway_backend_owner_main_continuations_scheduled"),
+            0);
+  ASSERT_GE(mapping_number(
+                status,
+                "gateway_backend_owner_main_continuations_executed"),
+            0);
+  ASSERT_GE(mapping_number(
+                status, "gateway_backend_owner_main_continuation_pending"),
+            0);
   ASSERT_EQ(mapping_number(status, "session_fifo_contract_ready"), 1);
   ASSERT_GE(mapping_number(status, "session_fifo_depth"), 0);
   ASSERT_GE(mapping_number(status, "session_fifo_pending_reservations"), 0);
@@ -588,8 +646,8 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_coalesced"), 0);
   ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_executed"), 0);
   ASSERT_EQ(mapping_number(status, "gateway_main_drain_deferred_task_budget"), 64);
-  ASSERT_EQ(mapping_number(status, "gateway_main_drain_deferred_base_wall_budget_us"), 24000);
-  ASSERT_EQ(mapping_number(status, "gateway_main_drain_deferred_backlog_wall_budget_us"), 48000);
+  ASSERT_EQ(mapping_number(status, "gateway_main_drain_deferred_base_wall_budget_us"), 8000);
+  ASSERT_EQ(mapping_number(status, "gateway_main_drain_deferred_backlog_wall_budget_us"), 8000);
   ASSERT_EQ(mapping_number(status, "gateway_main_drain_deferred_backlog_threshold"), 64);
   ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_backlog_boosted"), 0);
   ASSERT_GE(mapping_number(status, "gateway_main_drain_deferred_tasks_total"), 0);
@@ -2240,9 +2298,9 @@ TEST_F(DriverTest, TestGatewayReadBatchDrainsAdmittedTasksBeforeDeferredRemainde
             std::string::npos);
   ASSERT_NE(source.find("gateway_deferred_main_drain_wall_budget(backlog_before)"),
             std::string::npos);
-  ASSERT_NE(source.find("kGatewayDeferredMainDrainBaseWallBudget = std::chrono::milliseconds(24)"),
+  ASSERT_NE(source.find("kGatewayDeferredMainDrainBaseWallBudget = std::chrono::milliseconds(8)"),
             std::string::npos);
-  ASSERT_NE(source.find("kGatewayDeferredMainDrainBacklogWallBudget = std::chrono::milliseconds(48)"),
+  ASSERT_NE(source.find("kGatewayDeferredMainDrainBacklogWallBudget = std::chrono::milliseconds(8)"),
             std::string::npos);
   ASSERT_NE(source.find("kGatewayDeferredMainDrainBacklogThreshold = 64"),
             std::string::npos);
@@ -3144,7 +3202,17 @@ TEST_F(DriverTest, TestGameTickQueueSupportsConcurrentProducersAndFullDrain) {
   }
 
   ASSERT_EQ(tick_event_queue_size_for_test(), kExpectedEvents);
-  ASSERT_EQ(run_tick_events_for_test(), kExpectedEvents);
+  size_t total_drained = 0;
+  size_t drain_slices = 0;
+  while (tick_event_queue_size_for_test() > 0) {
+    auto drained = run_tick_events_for_test();
+    ASSERT_GT(drained, 0u);
+    ASSERT_LE(drained, kBackendTickEventCallbackBudget);
+    total_drained += drained;
+    drain_slices++;
+  }
+  ASSERT_EQ(total_drained, kExpectedEvents);
+  ASSERT_GT(drain_slices, 1u);
   ASSERT_EQ(callbacks.load(std::memory_order_relaxed), kExpectedEvents);
   ASSERT_EQ(tick_event_queue_size_for_test(), 0u);
 }
@@ -3169,7 +3237,40 @@ TEST_F(DriverTest, TestGameTickQueueRunsReentrantCallbacksOutsideLockAndHonorsCa
   ASSERT_EQ(tick_event_queue_size_for_test(), 0u);
 }
 
-TEST_F(DriverTest, TestWalltimeEventsExposeThreePrioritiesAndCleanup) {
+TEST_F(DriverTest, TestGameTickAndOwnerMainDrainsUseBoundedPositiveDelaySlices) {
+  const auto source = read_source_file_for_test("../src/backend.cc");
+
+  ASSERT_EQ(kBackendTickEventCallbackBudget, 64u);
+  ASSERT_EQ(kBackendTickEventWallBudget, std::chrono::milliseconds(4));
+  ASSERT_EQ(kBackendTickContinuationDelay, std::chrono::milliseconds(1));
+  ASSERT_EQ(kBackendOwnerMainDrainTaskBudget, 64);
+  ASSERT_EQ(kBackendOwnerMainDrainWallBudget, std::chrono::milliseconds(8));
+  ASSERT_EQ(kBackendOwnerMainDrainContinuationDelay,
+            std::chrono::milliseconds(1));
+  ASSERT_NE(source.find("vm_owner_drain_main_tasks_with_budget("),
+            std::string::npos);
+  ASSERT_EQ(source.find("vm_owner_drain_main_tasks(1024)"),
+            std::string::npos);
+  ASSERT_NE(source.find("kBackendTickContinuationDelay"), std::string::npos);
+  ASSERT_NE(source.find("kBackendOwnerMainDrainContinuationDelay"),
+            std::string::npos);
+  const auto tick_slice_start = source.find("void drain_game_tick_slice(");
+  const auto tick_slice_end = source.find("// Call one bounded event slice", tick_slice_start);
+  const auto tick_slice_source = source.substr(
+      tick_slice_start, tick_slice_end - tick_slice_start);
+  const auto tick_drain = tick_slice_source.find("call_tick_events_slice()");
+  const auto owner_drain = tick_slice_source.find(
+      "drain_backend_owner_main_tasks_slice(false)");
+  const auto continuation_check = tick_slice_source.find(
+      "if (result.due_events_remaining)");
+  ASSERT_NE(tick_drain, std::string::npos);
+  ASSERT_NE(owner_drain, std::string::npos);
+  ASSERT_NE(continuation_check, std::string::npos);
+  ASSERT_LT(tick_drain, owner_drain);
+  ASSERT_LT(owner_drain, continuation_check);
+}
+
+TEST_F(DriverTest, TestWalltimeEventsShareInteractivePriorityAndCleanup) {
   clear_tick_events();
   struct TickQueueGuard {
     ~TickQueueGuard() { clear_tick_events(); }
@@ -3192,12 +3293,67 @@ TEST_F(DriverTest, TestWalltimeEventsExposeThreePrioritiesAndCleanup) {
             static_cast<int>(BackendEventPriority::kGateway));
   ASSERT_EQ(walltime_event_priority_for_test(background),
             static_cast<int>(BackendEventPriority::kBackground));
+  ASSERT_EQ(walltime_event_priority_for_test(normal),
+            walltime_event_priority_for_test(gateway));
+  ASSERT_LT(walltime_event_priority_for_test(gateway),
+            walltime_event_priority_for_test(background));
 
   normal->cancel();
   gateway->cancel();
   background->cancel();
   clear_tick_events();
   ASSERT_EQ(walltime_event_queue_size_for_test(), 0u);
+}
+
+TEST_F(DriverTest, TestNormalAndGatewaySelfReschedulingAreBidirectionallyFair) {
+  struct FairnessProbe {
+    event *pressure_event{nullptr};
+    int pressure_callbacks{0};
+    int observer_after{-1};
+  };
+  constexpr int kPressureCallbacks = 64;
+
+  auto run_probe = [&](BackendEventPriority pressure_priority,
+                       BackendEventPriority observer_priority) {
+    FairnessProbe probe;
+    probe.pressure_event = evtimer_new(
+        g_event_base,
+        [](evutil_socket_t, short, void *arg) {
+          auto *state = static_cast<FairnessProbe *>(arg);
+          state->pressure_callbacks++;
+          if (state->pressure_callbacks < kPressureCallbacks) {
+            event_active(state->pressure_event, EV_TIMEOUT, 1);
+          }
+        },
+        &probe);
+    auto *observer_event = evtimer_new(
+        g_event_base,
+        [](evutil_socket_t, short, void *arg) {
+          auto *state = static_cast<FairnessProbe *>(arg);
+          state->observer_after = state->pressure_callbacks;
+        },
+        &probe);
+    ASSERT_NE(probe.pressure_event, nullptr);
+    ASSERT_NE(observer_event, nullptr);
+    ASSERT_EQ(event_priority_set(probe.pressure_event,
+                                 static_cast<int>(pressure_priority)),
+              0);
+    ASSERT_EQ(event_priority_set(observer_event,
+                                 static_cast<int>(observer_priority)),
+              0);
+
+    event_active(probe.pressure_event, EV_TIMEOUT, 1);
+    event_active(observer_event, EV_TIMEOUT, 1);
+    ASSERT_EQ(event_base_loop(g_event_base, EVLOOP_ONCE | EVLOOP_NONBLOCK), 0);
+    EXPECT_EQ(probe.pressure_callbacks, kPressureCallbacks);
+    EXPECT_EQ(probe.observer_after, 1);
+
+    event_free(probe.pressure_event);
+    event_free(observer_event);
+  };
+
+  run_probe(BackendEventPriority::kNormal, BackendEventPriority::kGateway);
+  run_probe(BackendEventPriority::kGateway, BackendEventPriority::kNormal);
 }
 
 TEST_F(DriverTest, TestPrioritizedWalltimeCalloutsPreserveHandleLifecycle) {

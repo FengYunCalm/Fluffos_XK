@@ -68,12 +68,11 @@ constexpr auto kGatewayReadContinuationDelay = std::chrono::milliseconds(1);
 constexpr int kGatewayReadBatchMainDrainBudget = 32;
 constexpr auto kGatewayReadBatchMainDrainWallBudget = std::chrono::milliseconds(12);
 constexpr int kGatewayDeferredMainDrainBudget = 64;
-// Keep the read callback's first-service slice small, but let the timer-queue
-// continuation retire a useful backlog quantum without returning every few
-// tasks. The positive delay still gives socket, flush and timer callbacks a
-// Libevent scheduling point between deferred quanta.
-constexpr auto kGatewayDeferredMainDrainBaseWallBudget = std::chrono::milliseconds(24);
-constexpr auto kGatewayDeferredMainDrainBacklogWallBudget = std::chrono::milliseconds(48);
+// Keep both ordinary and backlog continuations within the same wall budget.
+// The positive delay gives socket, flush and timer callbacks a Libevent
+// scheduling point between deferred quanta.
+constexpr auto kGatewayDeferredMainDrainBaseWallBudget = std::chrono::milliseconds(8);
+constexpr auto kGatewayDeferredMainDrainBacklogWallBudget = std::chrono::milliseconds(8);
 constexpr long kGatewayDeferredMainDrainBacklogThreshold = 64;
 constexpr auto kGatewayDeferredMainDrainContinuationDelay = std::chrono::milliseconds(1);
 constexpr int kGatewayDeferredMainDrainWaitTimerQueueOnly = 1;
@@ -1828,9 +1827,10 @@ long gateway_main_queue_pending_count() {
 mapping_t *gateway_status_internal() {
   mapping_t *map;
   int uptime;
+  const auto backend_status = backend_runtime_status();
 
   uptime = g_gateway_started_at ? static_cast<int>(get_current_time() - g_gateway_started_at) : 0;
-  map = allocate_mapping(178);
+  map = allocate_mapping(204);
   add_mapping_pair(map, "listening", g_gateway_listener ? 1 : 0);
   add_mapping_pair(map, "gateway_event_priority_levels",
                    kBackendEventPriorityLevels);
@@ -1847,6 +1847,73 @@ mapping_t *gateway_status_internal() {
                    kBackendBackgroundDispatchMaxCallbacks);
   add_mapping_pair(map, "gateway_background_dispatch_min_priority",
                    static_cast<int>(kBackendBackgroundDispatchMinPriority));
+  add_mapping_pair(map, "gateway_backend_tick_slice_budget",
+                   static_cast<long>(kBackendTickEventCallbackBudget));
+  add_mapping_pair(
+      map, "gateway_backend_tick_slice_wall_budget_us",
+      static_cast<long>(std::chrono::duration_cast<std::chrono::microseconds>(
+                            kBackendTickEventWallBudget)
+                            .count()));
+  add_mapping_pair(
+      map, "gateway_backend_tick_continuation_delay_us",
+      static_cast<long>(std::chrono::duration_cast<std::chrono::microseconds>(
+                            kBackendTickContinuationDelay)
+                            .count()));
+  add_mapping_pair(map, "gateway_backend_tick_slice_runs",
+                   static_cast<long>(backend_status.tick_slice_runs));
+  add_mapping_pair(
+      map, "gateway_backend_tick_slice_callbacks_total",
+      static_cast<long>(backend_status.tick_slice_callbacks_total));
+  add_mapping_pair(map, "gateway_backend_tick_slice_callbacks_max",
+                   static_cast<long>(backend_status.tick_slice_callbacks_max));
+  add_mapping_pair(map, "gateway_backend_tick_slice_budget_yields",
+                   static_cast<long>(backend_status.tick_slice_budget_yields));
+  add_mapping_pair(map, "gateway_backend_tick_slice_wall_yields",
+                   static_cast<long>(backend_status.tick_slice_wall_yields));
+  add_mapping_pair(
+      map, "gateway_backend_tick_continuations_scheduled",
+      static_cast<long>(backend_status.tick_continuations_scheduled));
+  add_mapping_pair(
+      map, "gateway_backend_tick_continuations_executed",
+      static_cast<long>(backend_status.tick_continuations_executed));
+  add_mapping_pair(map, "gateway_backend_owner_main_slice_budget",
+                   kBackendOwnerMainDrainTaskBudget);
+  add_mapping_pair(
+      map, "gateway_backend_owner_main_slice_wall_budget_us",
+      static_cast<long>(std::chrono::duration_cast<std::chrono::microseconds>(
+                            kBackendOwnerMainDrainWallBudget)
+                            .count()));
+  add_mapping_pair(
+      map, "gateway_backend_owner_main_continuation_delay_us",
+      static_cast<long>(std::chrono::duration_cast<std::chrono::microseconds>(
+                            kBackendOwnerMainDrainContinuationDelay)
+                            .count()));
+  add_mapping_pair(map, "gateway_backend_owner_main_slice_runs",
+                   static_cast<long>(backend_status.owner_main_slice_runs));
+  add_mapping_pair(
+      map, "gateway_backend_owner_main_slice_tasks_total",
+      static_cast<long>(backend_status.owner_main_slice_tasks_total));
+  add_mapping_pair(
+      map, "gateway_backend_owner_main_slice_tasks_max",
+      static_cast<long>(backend_status.owner_main_slice_tasks_max));
+  add_mapping_pair(
+      map, "gateway_backend_owner_main_slice_task_budget_yields",
+      static_cast<long>(backend_status.owner_main_slice_task_budget_yields));
+  add_mapping_pair(
+      map, "gateway_backend_owner_main_slice_wall_yields",
+      static_cast<long>(backend_status.owner_main_slice_wall_yields));
+  add_mapping_pair(
+      map, "gateway_backend_owner_main_tasks_exceeding_wall_budget",
+      static_cast<long>(backend_status.owner_main_tasks_exceeding_wall_budget));
+  add_mapping_pair(
+      map, "gateway_backend_owner_main_continuations_scheduled",
+      static_cast<long>(backend_status.owner_main_continuations_scheduled));
+  add_mapping_pair(
+      map, "gateway_backend_owner_main_continuations_executed",
+      static_cast<long>(backend_status.owner_main_continuations_executed));
+  add_mapping_pair(
+      map, "gateway_backend_owner_main_continuation_pending",
+      backend_status.owner_main_continuation_pending ? 1 : 0);
   add_mapping_pair(map, "port", g_gateway_listen_port);
   add_mapping_pair(map, "masters", static_cast<int>(g_gateway_masters.size()));
   add_mapping_pair(map, "sessions", gateway_get_session_count());
