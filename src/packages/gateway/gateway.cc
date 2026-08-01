@@ -47,11 +47,12 @@ constexpr int kGatewayDefaultHeartbeatInterval = 15;
 constexpr int kGatewayDefaultHeartbeatTimeout = 45;
 constexpr int kGatewayDefaultReconnectGrace = 60;
 constexpr int kGatewayMaxJsonDepth = 20;
-// A synchronized gameplay wave can make each admitted receive task reserve
-// output for hundreds of sessions. Keep socket admission to one small
-// cross-session quantum so later command phases cannot run far ahead of
-// unresolved FIFO predecessors from the current phase.
-constexpr int kGatewayReadFrameBudget = 16;
+// One admitted gameplay frame can execute a tens-of-milliseconds LPC command
+// and reserve output for hundreds of sessions. Yield after every complete
+// frame so buffered ingress cannot multiply one command tail into a multi-
+// second main-queue head wait. The cursor buffer and the positive-delay
+// continuation retain the remaining frames in FIFO order.
+constexpr int kGatewayReadFrameBudget = 1;
 // Bound the owner-main ingress queue to two admission quanta. Resume at one
 // quantum so a newly admitted batch cannot cross the high watermark and every
 // read callback returns to Libevent before phase skew grows without bound.

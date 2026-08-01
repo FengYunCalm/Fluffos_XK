@@ -676,7 +676,7 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status,
                            "gateway_read_batch_drain_main_tasks_exceeding_wall_budget"),
             0);
-  ASSERT_EQ(mapping_number(status, "gateway_read_dispatch_budget"), 16);
+  ASSERT_EQ(mapping_number(status, "gateway_read_dispatch_budget"), 1);
   ASSERT_GE(mapping_number(status, "gateway_read_dispatch_runs"), 0);
   ASSERT_GE(mapping_number(status, "gateway_read_dispatch_frames_total"), 0);
   ASSERT_GE(mapping_number(status, "gateway_read_dispatch_frames_max"), 0);
@@ -2666,11 +2666,11 @@ TEST_F(DriverTest, TestGatewayMainQueueReadAdmissionUsesComposedHighLowWaterBack
             std::string::npos);
 }
 
-TEST_F(DriverTest, TestGatewayReadCallbackYieldsBoundedFrameBatches) {
+TEST_F(DriverTest, TestGatewayReadCallbackYieldsAfterEveryCompleteFrame) {
   const auto source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
   const auto header = read_source_file_for_test("../src/packages/gateway/gateway.h");
 
-  ASSERT_NE(source.find("constexpr int kGatewayReadFrameBudget = 16"), std::string::npos);
+  ASSERT_NE(source.find("constexpr int kGatewayReadFrameBudget = 1"), std::string::npos);
   ASSERT_NE(source.find("constexpr auto kGatewayReadContinuationDelay = std::chrono::milliseconds(1)"),
             std::string::npos);
   ASSERT_NE(header.find("bool read_dispatch_scheduled{false}"), std::string::npos);
