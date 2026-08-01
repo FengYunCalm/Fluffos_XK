@@ -431,6 +431,11 @@ std::string read_source_file_for_test(const char* path);
 }
 
 TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
+  const auto gateway_status_source =
+      read_source_file_for_test("../src/packages/gateway/gateway.cc");
+  ASSERT_NE(gateway_status_source.find(
+                "gateway_receive_enqueue_to_dispatch_total_us"),
+            std::string::npos);
   auto mapping_number = [](mapping_t* map, const char* key) -> long {
     svalue_t* value = find_string_in_mapping(map, key);
     EXPECT_NE(value, nullptr) << key;
@@ -706,6 +711,10 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_receive_payload_copy_avg_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_payload_copy_max_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_enqueue_to_dispatch_samples"), 0);
+  ASSERT_NE(find_string_in_mapping(status,
+                                   "gateway_receive_enqueue_to_dispatch_total_us"),
+            nullptr);
+  ASSERT_GE(mapping_number(status, "gateway_receive_enqueue_to_dispatch_total_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_enqueue_to_dispatch_avg_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_enqueue_to_dispatch_max_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_receive_apply_samples"), 0);

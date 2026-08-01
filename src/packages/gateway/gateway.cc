@@ -2461,6 +2461,11 @@ mapping_t *gateway_status_internal() {
       map, "gateway_receive_enqueue_to_dispatch_samples",
       static_cast<long>(
           g_gateway_runtime_counters.receive_enqueue_to_dispatch_samples.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_receive_enqueue_to_dispatch_total_us",
+      static_cast<long>(g_gateway_runtime_counters.receive_enqueue_to_dispatch_ns_total.load(
+                            std::memory_order_relaxed) /
+                        1000));
   add_mapping_pair(map, "gateway_receive_enqueue_to_dispatch_avg_us",
                    gateway_avg_us(g_gateway_runtime_counters.receive_enqueue_to_dispatch_ns_total,
                                   g_gateway_runtime_counters.receive_enqueue_to_dispatch_samples));
