@@ -5,6 +5,7 @@
 #include "base/internal/rc.h"
 #include "base/internal/rusage.h"
 
+#include <chrono>
 #include <random>
 #include <unistd.h>
 #include <cstring>
@@ -78,6 +79,50 @@ long get_cpu_times(unsigned long *secs, unsigned long *usecs) {
   *usecs = rus.ru_utime.tv_usec + rus.ru_stime.tv_usec;
 
   return 1;
+}
+
+int64_t get_current_performance_wall_time_ns() {
+#ifdef _WIN32
+  static LARGE_INTEGER frequency{};
+  if (frequency.QuadPart == 0 &&
+      (!QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0)) {
+    return -1;
+  }
+
+  LARGE_INTEGER counter{};
+  if (!QueryPerformanceCounter(&counter) || counter.QuadPart < 0) {
+    return -1;
+  }
+
+  constexpr int64_t kNanosecondsPerSecond = 1000000000LL;
+  const auto seconds = counter.QuadPart / frequency.QuadPart;
+  if (seconds > std::numeric_limits<int64_t>::max() / kNanosecondsPerSecond) {
+    return -1;
+  }
+  const auto remainder = counter.QuadPart % frequency.QuadPart;
+  const auto fractional_ns = static_cast<int64_t>(
+      static_cast<long double>(remainder) * kNanosecondsPerSecond /
+      static_cast<long double>(frequency.QuadPart));
+  return seconds * kNanosecondsPerSecond + fractional_ns;
+#elif defined(CLOCK_MONOTONIC_RAW)
+  struct timespec ts {};
+  if (clock_gettime(CLOCK_MONOTONIC_RAW, &ts) != 0 || ts.tv_sec < 0 || ts.tv_nsec < 0 ||
+      ts.tv_nsec >= 1000000000L) {
+    return -1;
+  }
+
+  constexpr uint64_t kNanosecondsPerSecond = 1000000000ULL;
+  const auto seconds = static_cast<uint64_t>(ts.tv_sec);
+  const auto max_seconds = static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) /
+                           kNanosecondsPerSecond;
+  if (seconds > max_seconds) {
+    return -1;
+  }
+  return static_cast<int64_t>(seconds * kNanosecondsPerSecond + ts.tv_nsec);
+#else
+  const auto now = std::chrono::steady_clock::now();
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+#endif
 }
 
 int64_t get_current_thread_cpu_time_ns() {

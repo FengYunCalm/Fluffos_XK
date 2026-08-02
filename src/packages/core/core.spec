@@ -369,6 +369,8 @@ void trace_end();
 
 // return highest resolution clock in platform dependent unit
 int perf_counter_ns();
+// Return monotonic wall time compatible with current-thread CPU accounting.
+int performance_wall_time_ns();
 // Return current thread user+kernel CPU time in nanoseconds, or -1 if unavailable.
 int thread_cpu_time_ns();
 // Return nanosecond time

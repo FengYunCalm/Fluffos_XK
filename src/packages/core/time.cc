@@ -24,6 +24,10 @@ void f_perf_counter_ns() {
 }
 #endif
 
+#ifdef F_PERFORMANCE_WALL_TIME_NS
+void f_performance_wall_time_ns() { push_number(get_current_performance_wall_time_ns()); }
+#endif
+
 #ifdef F_THREAD_CPU_TIME_NS
 void f_thread_cpu_time_ns() { push_number(get_current_thread_cpu_time_ns()); }
 #endif

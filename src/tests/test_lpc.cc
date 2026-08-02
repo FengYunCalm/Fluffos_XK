@@ -2933,6 +2933,53 @@ TEST_F(DriverTest, TestPerfCounterUsesMonotonicSteadyClock) {
             std::string::npos);
 }
 
+TEST_F(DriverTest, TestPerformanceWallClockUsesRawMonotonicSource) {
+  const auto port_header = read_source_file_for_test("../src/base/internal/port.h");
+  const auto port_source = read_source_file_for_test("../src/base/internal/port.cc");
+  const auto time_source = read_source_file_for_test("../src/packages/core/time.cc");
+  const auto spec_source = read_source_file_for_test("../src/packages/core/core.spec");
+  const auto helper_pos = port_source.find("get_current_performance_wall_time_ns");
+  const auto efun_pos = time_source.find("void f_performance_wall_time_ns()");
+
+  ASSERT_NE(port_header.find("int64_t get_current_performance_wall_time_ns();"),
+            std::string::npos);
+  ASSERT_NE(helper_pos, std::string::npos);
+  ASSERT_NE(port_source.find("CLOCK_MONOTONIC_RAW", helper_pos), std::string::npos);
+  ASSERT_NE(port_source.find("clock_gettime(CLOCK_MONOTONIC_RAW", helper_pos),
+            std::string::npos);
+  ASSERT_NE(port_source.find("QueryPerformanceCounter", helper_pos), std::string::npos);
+  ASSERT_NE(spec_source.find("int performance_wall_time_ns();"), std::string::npos);
+  ASSERT_NE(efun_pos, std::string::npos);
+  ASSERT_NE(time_source.find("get_current_performance_wall_time_ns()", efun_pos),
+            std::string::npos);
+}
+
+TEST_F(DriverTest, TestPerformanceWallClockContainsCurrentThreadCpuInterval) {
+  const auto wall_before = get_current_performance_wall_time_ns();
+  const auto cpu_before = get_current_thread_cpu_time_ns();
+  if (wall_before < 0 || cpu_before < 0) {
+    GTEST_SKIP() << "current platform lacks compatible performance clocks";
+  }
+
+  constexpr int64_t kTargetCpuNs = 10000000;
+  constexpr int64_t kSafetyWallNs = 1000000000;
+  volatile uint64_t accumulator = 0;
+  int64_t cpu_after = cpu_before;
+  while (cpu_after - cpu_before < kTargetCpuNs &&
+         get_current_performance_wall_time_ns() - wall_before < kSafetyWallNs) {
+    for (uint64_t value = 1; value <= 10000; ++value) {
+      accumulator += value;
+    }
+    cpu_after = get_current_thread_cpu_time_ns();
+  }
+  const auto wall_after = get_current_performance_wall_time_ns();
+
+  ASSERT_GT(accumulator, 0u);
+  ASSERT_GE(cpu_after - cpu_before, kTargetCpuNs);
+  ASSERT_GE(wall_after, wall_before);
+  ASSERT_GE(wall_after - wall_before, cpu_after - cpu_before);
+}
+
 TEST_F(DriverTest, TestThreadCpuClockUsesDedicatedPerThreadSources) {
   const auto port_source = read_source_file_for_test("../src/base/internal/port.cc");
   const auto time_source = read_source_file_for_test("../src/packages/core/time.cc");
@@ -3067,6 +3114,18 @@ TEST_F(DriverTest, TestGatewayReceiveApplyExposesMainThreadCpuCounter) {
   ASSERT_NE(gateway_status.find("gateway_receive_apply_total_us"), std::string::npos);
   ASSERT_NE(gateway_status.find("gateway_receive_apply_thread_cpu_total_us"), std::string::npos);
   ASSERT_NE(gateway_status.find("gateway_receive_apply_thread_cpu_unavailable"),
+            std::string::npos);
+}
+
+TEST_F(DriverTest, TestGatewayReceiveApplyUsesPerformanceWallClock) {
+  const auto gateway_source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
+  const auto apply_pos = gateway_source.find(
+      "auto apply_started_at = get_current_performance_wall_time_ns()");
+
+  ASSERT_NE(apply_pos, std::string::npos);
+  ASSERT_NE(gateway_source.find("gateway_record_performance_wall(", apply_pos),
+            std::string::npos);
+  ASSERT_NE(gateway_source.find("std::chrono::steady_clock::now()"),
             std::string::npos);
 }
 

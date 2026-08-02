@@ -139,6 +139,18 @@ void gateway_record_latency(std::atomic<uint64_t> &total, std::atomic<uint64_t> 
   gateway_record_max(max, elapsed_ns);
 }
 
+void gateway_record_performance_wall(std::atomic<uint64_t> &total,
+                                     std::atomic<uint64_t> &max,
+                                     std::atomic<uint64_t> &samples,
+                                     int64_t started_ns) {
+  const auto finished_ns = get_current_performance_wall_time_ns();
+  if (started_ns < 0 || finished_ns < started_ns) {
+    return;
+  }
+  gateway_record_latency(total, max, samples,
+                         static_cast<uint64_t>(finished_ns - started_ns));
+}
+
 void gateway_record_thread_cpu(std::atomic<uint64_t> &total, std::atomic<uint64_t> &max,
                                std::atomic<uint64_t> &samples,
                                std::atomic<uint64_t> &unavailable, int64_t started_ns) {
@@ -396,7 +408,7 @@ bool gateway_apply_receive(object_t *user, svalue_t *data_sv) {
           g_gateway_runtime_counters.receive_tasks_dispatched.fetch_add(1, std::memory_order_relaxed);
           set_eval(max_eval_cost);
           push_svalue(payload.get());
-          auto apply_started_at = gateway_now_ns();
+          auto apply_started_at = get_current_performance_wall_time_ns();
           auto apply_cpu_started_at = get_current_thread_cpu_time_ns();
           safe_apply("gateway_receive", user, 1, ORIGIN_DRIVER);
           gateway_record_thread_cpu(
@@ -404,10 +416,10 @@ bool gateway_apply_receive(object_t *user, svalue_t *data_sv) {
               g_gateway_runtime_counters.receive_apply_thread_cpu_ns_max,
               g_gateway_runtime_counters.receive_apply_thread_cpu_samples,
               g_gateway_runtime_counters.receive_apply_thread_cpu_unavailable, apply_cpu_started_at);
-          gateway_record_latency(g_gateway_runtime_counters.receive_apply_ns_total,
-                                 g_gateway_runtime_counters.receive_apply_ns_max,
-                                 g_gateway_runtime_counters.receive_apply_samples,
-                                 gateway_now_ns() - apply_started_at);
+          gateway_record_performance_wall(
+              g_gateway_runtime_counters.receive_apply_ns_total,
+              g_gateway_runtime_counters.receive_apply_ns_max,
+              g_gateway_runtime_counters.receive_apply_samples, apply_started_at);
         }
         restore_command_giver();
       }, nullptr, VM_OWNER_MAIN_TASK_IO_ADAPTER) != 0) {
