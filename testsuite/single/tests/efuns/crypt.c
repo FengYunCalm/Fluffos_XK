@@ -19,6 +19,13 @@ void test_crypt(string key) {
   ASSERT_EQ("$6$", result[0..2]);
   ASSERT_EQ(result, crypt("deadbeef", result));
 
+  // Existing DES hashes remain verifiable only through the boolean migration
+  // helper; crypt() must still refuse two-character DES hash generation.
+  ASSERT(verify_legacy_des_crypt("test1234", "xkaEkVhxVHkMw"));
+  ASSERT(!verify_legacy_des_crypt("wrong-password", "xkaEkVhxVHkMw"));
+  ASSERT(!verify_legacy_des_crypt("test1234", "xk"));
+  ASSERT(!verify_legacy_des_crypt("test1234", "xkaEkVhxVHkM!"));
+
   // Make sure we use SHA512 as default
   result = crypt(key, "");
   ASSERT_EQ("$6$", result[0..2]);

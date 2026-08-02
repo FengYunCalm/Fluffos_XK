@@ -13,16 +13,17 @@ set(SOURCE
   "crypt.h"
   "crypt.c"
   "crypt_blowfish.c"
+  "crypt_des.c"
+  "crypt_des.h"
   "crypt_md5.c"
   "crypt_r.c"
   "crypt_sha256.c"
   "crypt_sha512.c"
 )
 
+# The boolean migration verifier uses DES without reopening generic DES crypt().
 if (ENABLE_LEGACY_DES_CRYPT)
   list(APPEND SOURCE
-    "crypt_des.c"
-    "crypt_des.h"
     "encrypt.c"
   )
 endif ()

@@ -192,6 +192,7 @@ string set_bit(string, int);
 int next_bit(string, int);
 
 string crypt(string, string | int);
+int verify_legacy_des_crypt(string, string);
 string oldcrypt(string, string | int);
 
 

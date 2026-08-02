@@ -3478,6 +3478,28 @@ void f_crypt() {
 }
 #endif
 
+#ifdef F_VERIFY_LEGACY_DES_CRYPT
+void f_verify_legacy_des_crypt() {
+  constexpr size_t kLegacyDesHashLength = 13;
+  const auto *key = (sp - 1)->u.string;
+  const auto *stored_hash = sp->u.string;
+  const auto stored_hash_length = SVALUE_STRLEN(sp);
+  bool valid_hash = stored_hash_length == kLegacyDesHashLength;
+
+  for (size_t index = 0; valid_hash && index < stored_hash_length; index++) {
+    const auto ch = stored_hash[index];
+    valid_hash = ch == '.' || ch == '/' || (ch >= '0' && ch <= '9') ||
+                 (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
+  }
+
+  char output[128] = {};
+  const auto *result = valid_hash ? __crypt_des(key, stored_hash, output) : nullptr;
+  const bool matches = result != nullptr && strcmp(result, stored_hash) == 0;
+  pop_2_elems();
+  push_number(matches ? 1 : 0);
+}
+#endif
+
 #ifdef F_OLDCRYPT
 void f_oldcrypt() {
   const int salt_len = 8;
