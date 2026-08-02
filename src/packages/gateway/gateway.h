@@ -529,6 +529,8 @@ bool gateway_fill_projected_wires_for_test(
     const std::vector<uint64_t> &reservation_ids,
     const std::vector<std::string> &wire_json,
     GatewayOutputWriter writer);
+void gateway_reset_projected_wire_full_validation_count_for_test();
+uint64_t gateway_projected_wire_full_validation_count_for_test();
 bool gateway_drop_room_output_wave_for_test(uint64_t reservation_id);
 std::string gateway_encode_preencoded_chat_batch_for_test(
     const std::vector<std::string> &stable_children_json, LPC_INT message_epoch,

@@ -1545,6 +1545,58 @@ TEST_F(DriverTest, TestGatewayPendingMessageEventSnapshotProjectsByteEquivalentF
   ASSERT_FALSE(session.output_fifo.front().ready);
 }
 
+TEST_F(DriverTest,
+       TestGatewayLocalProjectionSkipsFullValidationWhileUntrustedWireKeepsIt) {
+  static std::vector<std::string> writes;
+  writes.clear();
+  const auto writer = [](int, const char *data, size_t len) {
+    writes.emplace_back(data, len);
+    return 1;
+  };
+
+  GatewaySession local;
+  local.session_id = "local-projection-session";
+  local.master_fd = 120;
+  const auto local_id = gateway_reserve_session_output(&local);
+  ASSERT_GT(local_id, 0u);
+  const std::string stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"local-projection\",\"payload\":{}}";
+  ASSERT_TRUE(gateway_append_preencoded_message_event_wave(
+      {&local}, {local_id}, {101}, {102}, {3}, {1001}, stable, "player",
+      123456, 128));
+
+  gateway_reset_projected_wire_full_validation_count_for_test();
+  GatewayPendingMessageEventBatchFillResult result;
+  ASSERT_TRUE(gateway_fill_pending_message_event_batches_with_writer(
+      {&local}, {local_id}, {"player-one"}, {7}, writer, &result));
+  ASSERT_EQ(writes.size(), 1u);
+  EXPECT_EQ(gateway_projected_wire_full_validation_count_for_test(), 0u);
+
+  GatewaySession untrusted;
+  untrusted.session_id = "untrusted-projection-session";
+  untrusted.master_fd = 121;
+  const auto valid_id = gateway_reserve_session_output(&untrusted);
+  ASSERT_GT(valid_id, 0u);
+  const auto valid_wire = gateway_encode_output_envelope_for_test(
+      untrusted.session_id, "validated", 9);
+  ASSERT_TRUE(gateway_fill_projected_wires_for_test(
+      {&untrusted}, {valid_id}, {valid_wire}, writer));
+  EXPECT_EQ(gateway_projected_wire_full_validation_count_for_test(), 1u);
+
+  const auto invalid_id = gateway_reserve_session_output(&untrusted);
+  ASSERT_GT(invalid_id, 0u);
+  const auto wrong_session_wire = gateway_encode_output_envelope_for_test(
+      "wrong-session", "rejected", 8);
+  ASSERT_FALSE(gateway_fill_projected_wires_for_test(
+      {&untrusted}, {invalid_id}, {wrong_session_wire}, writer));
+  EXPECT_EQ(gateway_projected_wire_full_validation_count_for_test(), 2u);
+  ASSERT_EQ(untrusted.output_fifo.size(), 1u);
+  EXPECT_FALSE(untrusted.output_fifo.front().ready);
+}
+
 TEST_F(DriverTest, TestGatewayPendingMessageEventBatchPreencodesEveryWireBeforeFirstWrite) {
   GatewaySession first;
   GatewaySession invalid;

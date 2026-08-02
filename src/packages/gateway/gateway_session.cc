@@ -41,6 +41,7 @@ std::unordered_map<std::string, std::unique_ptr<GatewaySession>> g_gateway_sessi
 std::unordered_map<object_t *, GatewaySession *> g_gateway_obj_to_session;
 std::atomic<uint64_t> g_gateway_next_output_reservation_id{1};
 std::atomic<uint64_t> g_gateway_next_message_event_wave_id{1};
+std::atomic<uint64_t> g_gateway_projected_wire_full_validation_count{0};
 std::atomic<long> g_gateway_command_input_pending_sessions{0};
 std::atomic<long> g_gateway_command_task_pending_sessions{0};
 enum class GatewayFutureOutputKind : uint8_t {
@@ -432,18 +433,31 @@ class GatewayWireOutputFactory {
     }
   }
 
-  static std::optional<GatewayWireOutput> trusted_projected_wire(
+  static std::optional<GatewayWireOutput> validated_projected_wire(
       const GatewaySession *sess, std::string wire_bytes) {
     if (!sess || sess->session_id.empty() ||
         !valid_wire_bytes(wire_bytes)) {
       return std::nullopt;
     }
+    g_gateway_projected_wire_full_validation_count.fetch_add(
+        1, std::memory_order_relaxed);
     try {
       const auto payload = nlohmann::json::parse(wire_bytes);
       if (!valid_output_envelope(sess, payload)) {
         return std::nullopt;
       }
     } catch (const std::exception &) {
+      return std::nullopt;
+    }
+    return GatewayWireOutput(sess->session_id, std::move(wire_bytes));
+  }
+
+  static std::optional<GatewayWireOutput> locally_encoded_projected_wire(
+      const GatewaySession *sess, std::string_view encoded_session_id,
+      std::string wire_bytes) {
+    if (!sess || sess->session_id.empty() ||
+        encoded_session_id != sess->session_id ||
+        !valid_wire_bytes(wire_bytes)) {
       return std::nullopt;
     }
     return GatewayWireOutput(sess->session_id, std::move(wire_bytes));
@@ -2101,7 +2115,7 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
       bool output_filled = false;
       if (state == "completed") {
         if (watch.output_kind == GatewayFutureOutputKind::kValidatedWire) {
-          auto wire_output = GatewayWireOutputFactory::trusted_projected_wire(
+          auto wire_output = GatewayWireOutputFactory::validated_projected_wire(
               sess, std::move(output_future.value));
           output_filled = wire_output &&
               gateway_fill_session_wire_output_with_writer(
@@ -3279,8 +3293,8 @@ bool gateway_prevalidate_pending_message_event_projection_work(
           work->snapshot, work->columns, &wire_bytes)) {
     return false;
   }
-  auto wire_output = GatewayWireOutputFactory::trusted_projected_wire(
-      sess, std::move(wire_bytes));
+  auto wire_output = GatewayWireOutputFactory::locally_encoded_projected_wire(
+      sess, work->columns.session_id, std::move(wire_bytes));
   if (!wire_output) {
     return false;
   }
@@ -3317,6 +3331,22 @@ bool gateway_encode_pending_message_event_projection_inline(
   return projected;
 }
 
+namespace {
+std::optional<GatewayWireOutput>
+gateway_encode_pending_message_event_projection_output_inline(
+    GatewaySession *sess,
+    const GatewayPendingMessageEventProjectionSnapshot &snapshot,
+    const GatewayPendingMessageEventProjectionColumns &columns) {
+  std::string wire_bytes;
+  if (!gateway_encode_pending_message_event_projection_inline(
+          snapshot, columns, &wire_bytes)) {
+    return std::nullopt;
+  }
+  return GatewayWireOutputFactory::locally_encoded_projected_wire(
+      sess, columns.session_id, std::move(wire_bytes));
+}
+}  // namespace
+
 bool gateway_build_pending_message_event_batch_frame(
     GatewaySession *sess, uint64_t reservation_id, const std::string &scope_id,
     LPC_INT slot_epoch, std::string *frame, LPC_INT *event_count,
@@ -3346,18 +3376,15 @@ int gateway_fill_pending_message_event_batch_with_writer(
     LPC_INT slot_epoch, GatewayOutputWriter writer) {
   GatewayPendingMessageEventProjectionSnapshot snapshot;
   GatewayPendingMessageEventProjectionColumns columns;
-  std::string wire_bytes;
   std::optional<GatewayWireOutput> wire_output;
   try {
     if (!writer || !gateway_snapshot_pending_message_event_batch(
                        sess, reservation_id, scope_id, slot_epoch, &snapshot,
-                       &columns) ||
-        !gateway_encode_pending_message_event_projection_inline(
-            snapshot, columns, &wire_bytes)) {
+                       &columns)) {
       return 0;
     }
-    wire_output = GatewayWireOutputFactory::trusted_projected_wire(
-        sess, std::move(wire_bytes));
+    wire_output = gateway_encode_pending_message_event_projection_output_inline(
+        sess, snapshot, columns);
   } catch (const std::exception &) {
     return 0;
   }
@@ -3426,7 +3453,6 @@ bool gateway_fill_pending_message_event_batches_with_writer(
     result->slot_server_seqs.resize(count);
     for (size_t index = 0; index < count; ++index) {
       auto *sess = sessions[index];
-      std::string wire_bytes;
       std::optional<GatewayWireOutput> wire_output;
       if (!sess || reservation_ids[index] == 0 ||
           !unique_reservation_ids.insert(reservation_ids[index]).second ||
@@ -3434,9 +3460,7 @@ bool gateway_fill_pending_message_event_batches_with_writer(
           slot_epochs[index] < 0 ||
           !gateway_snapshot_pending_message_event_batch(
               sess, reservation_ids[index], scope_ids[index], slot_epochs[index],
-              &snapshots[index], &columns[index]) ||
-          !gateway_encode_pending_message_event_projection_inline(
-              snapshots[index], columns[index], &wire_bytes)) {
+              &snapshots[index], &columns[index])) {
         result->filled.clear();
         result->event_counts.clear();
         result->slot_server_seqs.clear();
@@ -3445,8 +3469,8 @@ bool gateway_fill_pending_message_event_batches_with_writer(
       result->event_counts[index] = static_cast<LPC_INT>(
           snapshots[index].event_wave_indices.size());
       result->slot_server_seqs[index] = columns[index].slot_server_seq;
-      wire_output = GatewayWireOutputFactory::trusted_projected_wire(
-          sess, std::move(wire_bytes));
+      wire_output = gateway_encode_pending_message_event_projection_output_inline(
+          sess, snapshots[index], columns[index]);
       if (!wire_output) {
         result->filled.clear();
         result->event_counts.clear();
@@ -3500,18 +3524,15 @@ namespace {
 std::optional<GatewayWireOutput> gateway_prepare_projection_wire(
     GatewaySession *sess,
     const std::shared_ptr<const GatewayPendingMessageEventProjectionWork> &work) {
-  std::string wire_bytes;
   if (!sess || !work) {
     return std::nullopt;
   }
   if (!work->prevalidated_wire_bytes.empty()) {
-    wire_bytes = work->prevalidated_wire_bytes;
-  } else if (!gateway_encode_pending_message_event_projection_inline(
-                 work->snapshot, work->columns, &wire_bytes)) {
-    return std::nullopt;
+    return GatewayWireOutputFactory::locally_encoded_projected_wire(
+        sess, work->columns.session_id, work->prevalidated_wire_bytes);
   }
-  return GatewayWireOutputFactory::trusted_projected_wire(
-      sess, std::move(wire_bytes));
+  return gateway_encode_pending_message_event_projection_output_inline(
+      sess, work->snapshot, work->columns);
 }
 }  // namespace
 
@@ -4382,7 +4403,7 @@ bool gateway_publish_room_output_wave(uint64_t wave_id) {
           !owner_current || item.wire_bytes.empty();
       std::optional<GatewayWireOutput> wire_output;
       if (!use_inline) {
-        wire_output = GatewayWireOutputFactory::trusted_projected_wire(
+        wire_output = GatewayWireOutputFactory::validated_projected_wire(
             sess, item.wire_bytes);
         use_inline = !wire_output.has_value();
       }
@@ -5285,7 +5306,7 @@ bool gateway_fill_projected_wires_for_test(
   std::vector<GatewayWireOutput> wire_outputs;
   wire_outputs.reserve(sessions.size());
   for (size_t index = 0; index < sessions.size(); ++index) {
-    auto wire_output = GatewayWireOutputFactory::trusted_projected_wire(
+    auto wire_output = GatewayWireOutputFactory::validated_projected_wire(
         sessions[index], wire_json[index]);
     if (!wire_output) {
       return false;
@@ -5300,6 +5321,16 @@ bool gateway_fill_projected_wires_for_test(
     gateway_flush_session_output_fifo_with_writer(sess, writer);
   }
   return true;
+}
+
+void gateway_reset_projected_wire_full_validation_count_for_test() {
+  g_gateway_projected_wire_full_validation_count.store(
+      0, std::memory_order_relaxed);
+}
+
+uint64_t gateway_projected_wire_full_validation_count_for_test() {
+  return g_gateway_projected_wire_full_validation_count.load(
+      std::memory_order_relaxed);
 }
 
 bool gateway_drop_room_output_wave_for_test(uint64_t reservation_id) {
