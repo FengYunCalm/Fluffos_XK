@@ -2667,7 +2667,8 @@ bool gateway_append_validated_message_event_wave(
     const std::vector<LPC_INT> &message_seqs, const std::string &scope_type,
     LPC_INT sent_at, size_t batch_limit,
     const GatewayMessageEventTemplate &message_template, uint64_t wave_id,
-    const std::vector<bool> *reservation_reused) {
+    const std::vector<bool> *reservation_reused, size_t text_length = 0,
+    uint64_t appended_at_ns = 0) {
   const auto count = sessions.size();
   std::unordered_set<GatewaySession *> unique_sessions;
   std::vector<GatewayOutputEntry *> entries;
@@ -2705,7 +2706,9 @@ bool gateway_append_validated_message_event_wave(
         (entry->pending_message_batch->slot_server_seq <= 0 ||
          entry->pending_message_batch->slot_sent_at <= 0 ||
          entry->pending_message_batch->projection_generation ==
-             std::numeric_limits<uint64_t>::max())) {
+             std::numeric_limits<uint64_t>::max() ||
+         text_length > std::numeric_limits<size_t>::max() -
+                           entry->pending_message_batch->text_length_total)) {
       return false;
     }
     entries.push_back(entry);
@@ -2766,6 +2769,7 @@ bool gateway_append_validated_message_event_wave(
       entry->pending_message_batch = std::move(new_batches[index]);
       entry->pending_message_batch->slot_server_seq = slot_server_seqs[index];
       entry->pending_message_batch->slot_sent_at = sent_at;
+      entry->pending_message_batch->created_at_ns = appended_at_ns;
     }
     const auto reservation_origin = !reservation_reused
         ? GatewayMessageEventReservationOrigin::kUnspecified
@@ -2774,7 +2778,12 @@ bool gateway_append_validated_message_event_wave(
             : GatewayMessageEventReservationOrigin::kCreated;
     entry->pending_message_batch->events.push_back(
         {wave, message_seqs[index], message_server_seqs[index],
-         message_epochs[index], reservation_origin});
+         message_epochs[index], text_length, appended_at_ns,
+         reservation_origin});
+    entry->pending_message_batch->text_length_total += text_length;
+    if (appended_at_ns > 0) {
+      entry->pending_message_batch->last_append_at_ns = appended_at_ns;
+    }
     entry->pending_message_batch->projection_generation =
         next_generations[index];
   }
@@ -2869,6 +2878,275 @@ bool gateway_reserve_and_append_preencoded_message_event_wave(
   return false;
 }
 
+bool gateway_reserve_and_append_compact_preencoded_message_event_wave(
+    const std::vector<GatewaySession *> &sessions, LPC_INT first_server_seq,
+    const std::vector<LPC_INT> &message_epochs,
+    const std::vector<LPC_INT> &message_seqs, const std::string &stable_json,
+    const std::string &scope_type, LPC_INT sent_at, size_t batch_limit,
+    size_t text_length, GatewaySessionCompactMessageEventWaveResult *result) {
+  std::unordered_set<GatewaySession *> unique_sessions;
+  std::vector<uint64_t> reservation_ids;
+  std::vector<bool> reused;
+  std::vector<std::pair<GatewaySession *, uint64_t>> created;
+  std::vector<LPC_INT> slot_server_seqs;
+  std::vector<LPC_INT> message_server_seqs;
+  GatewayMessageEventTemplate uncached;
+  const auto count = sessions.size();
+  const auto max_seq = std::numeric_limits<LPC_INT>::max();
+
+  if (!result) {
+    return false;
+  }
+  *result = GatewaySessionCompactMessageEventWaveResult{};
+  if (count == 0 || message_epochs.size() != count ||
+      message_seqs.size() != count || stable_json.empty() ||
+      scope_type.empty() || sent_at <= 0 || batch_limit == 0 ||
+      text_length == 0 || first_server_seq <= 0 ||
+      count > static_cast<size_t>((max_seq - first_server_seq + 1) / 2)) {
+    return false;
+  }
+  const auto *message_template =
+      gateway_resolve_message_event_template(stable_json, &uncached);
+  if (!message_template) {
+    return false;
+  }
+
+  try {
+    unique_sessions.reserve(count);
+    reservation_ids.reserve(count);
+    reused.reserve(count);
+    created.reserve(count);
+    slot_server_seqs.reserve(count);
+    message_server_seqs.reserve(count);
+    result->created_indices.reserve(count);
+    result->created_reservation_ids.reserve(count);
+    result->created_slot_server_seqs.reserve(count);
+    result->full_indices.reserve(count);
+    for (size_t index = 0; index < count; ++index) {
+      auto *sess = sessions[index];
+      if (!sess || !unique_sessions.insert(sess).second ||
+          message_epochs[index] < 0 || message_seqs[index] <= 0) {
+        return false;
+      }
+      const auto slot_server_seq =
+          first_server_seq + static_cast<LPC_INT>(index * 2);
+      slot_server_seqs.push_back(slot_server_seq);
+      message_server_seqs.push_back(slot_server_seq + 1);
+
+      auto *tail = sess->output_fifo.empty() ? nullptr : &sess->output_fifo.back();
+      auto *batch = tail && !tail->ready && tail->pending_message_batch
+          ? tail->pending_message_batch.get()
+          : nullptr;
+      if (batch && !batch->registered) {
+        return false;
+      }
+      const bool can_reuse = batch && !batch->projection_sealed &&
+                             batch->events.size() < batch_limit;
+      if (!can_reuse && sess->output_fifo.size() >= sess->output_fifo_max_depth) {
+        return false;
+      }
+      if (can_reuse) {
+        reservation_ids.push_back(tail->reservation_id);
+        reused.push_back(true);
+      } else {
+        reservation_ids.push_back(0);
+        reused.push_back(false);
+      }
+    }
+
+    for (size_t index = 0; index < count; ++index) {
+      if (reused[index]) {
+        continue;
+      }
+      const auto reservation_id = gateway_reserve_session_output(sessions[index]);
+      if (reservation_id == 0) {
+        for (auto it = created.rbegin(); it != created.rend(); ++it) {
+          gateway_release_session_output_with_writer(
+              it->first, it->second,
+              [](int, const char *, size_t) -> int { return 0; });
+        }
+        return false;
+      }
+      reservation_ids[index] = reservation_id;
+      created.emplace_back(sessions[index], reservation_id);
+    }
+  } catch (const std::bad_alloc &) {
+    for (auto it = created.rbegin(); it != created.rend(); ++it) {
+      gateway_release_session_output_with_writer(
+          it->first, it->second,
+          [](int, const char *, size_t) -> int { return 0; });
+    }
+    return false;
+  }
+
+  const auto wave_id = gateway_next_message_event_wave_id();
+  const auto appended_at_ns = gateway_session_now_ns();
+  if (wave_id == 0 || appended_at_ns == 0 ||
+      !gateway_append_validated_message_event_wave(
+          sessions, reservation_ids, slot_server_seqs, message_server_seqs,
+          message_epochs, message_seqs, scope_type, sent_at, batch_limit,
+          *message_template, wave_id, &reused, text_length, appended_at_ns)) {
+    for (auto it = created.rbegin(); it != created.rend(); ++it) {
+      gateway_release_session_output_with_writer(
+          it->first, it->second,
+          [](int, const char *, size_t) -> int { return 0; });
+    }
+    return false;
+  }
+
+  try {
+    result->wave_id = wave_id;
+    for (size_t index = 0; index < count; ++index) {
+      const auto *batch = sessions[index]->output_fifo.back().pending_message_batch.get();
+      if (reused[index]) {
+        result->reused_count++;
+      } else {
+        result->created_indices.push_back(index);
+        result->created_reservation_ids.push_back(reservation_ids[index]);
+        result->created_slot_server_seqs.push_back(slot_server_seqs[index]);
+      }
+      if (batch && batch->events.size() >= batch_limit) {
+        result->full_indices.push_back(index);
+      }
+    }
+  } catch (const std::bad_alloc &) {
+    gateway_rollback_compact_preencoded_message_event_wave_with_writer(
+        sessions, wave_id, [](int, const char *, size_t) -> int { return 0; });
+    *result = GatewaySessionCompactMessageEventWaveResult{};
+    return false;
+  }
+  return true;
+}
+
+bool gateway_commit_compact_preencoded_message_event_wave(
+    const std::vector<GatewaySession *> &sessions, uint64_t wave_id) {
+  std::vector<GatewayPendingMessageEventBatch *> created_batches;
+  std::unordered_set<GatewaySession *> unique_sessions;
+  if (sessions.empty() || wave_id == 0) {
+    return false;
+  }
+  try {
+    created_batches.reserve(sessions.size());
+    unique_sessions.reserve(sessions.size());
+    for (auto *sess : sessions) {
+      if (!sess || !unique_sessions.insert(sess).second ||
+          sess->output_fifo.empty()) {
+        return false;
+      }
+      auto &entry = sess->output_fifo.back();
+      auto *batch = !entry.ready && entry.pending_message_batch
+          ? entry.pending_message_batch.get()
+          : nullptr;
+      if (!batch || batch->events.empty() || !batch->events.back().wave ||
+          batch->events.back().wave->wave_id != wave_id) {
+        return false;
+      }
+      const auto origin = batch->events.back().reservation_origin;
+      if (origin == GatewayMessageEventReservationOrigin::kCreated) {
+        if (batch->registered) {
+          return false;
+        }
+        created_batches.push_back(batch);
+      } else if (origin != GatewayMessageEventReservationOrigin::kReused ||
+                 !batch->registered) {
+        return false;
+      }
+    }
+  } catch (const std::bad_alloc &) {
+    return false;
+  }
+  for (auto *batch : created_batches) {
+    batch->registered = true;
+  }
+  return true;
+}
+
+bool gateway_rollback_compact_preencoded_message_event_wave_with_writer(
+    const std::vector<GatewaySession *> &sessions, uint64_t wave_id,
+    GatewayOutputWriter writer) {
+  std::vector<GatewayOutputEntry *> entries;
+  std::vector<bool> reused;
+  std::unordered_set<GatewaySession *> unique_sessions;
+  if (sessions.empty() || wave_id == 0 || !writer) {
+    return false;
+  }
+  try {
+    entries.reserve(sessions.size());
+    reused.reserve(sessions.size());
+    unique_sessions.reserve(sessions.size());
+    for (auto *sess : sessions) {
+      if (!sess || !unique_sessions.insert(sess).second ||
+          sess->output_fifo.empty()) {
+        return false;
+      }
+      auto *entry = &sess->output_fifo.back();
+      auto *batch = !entry->ready && entry->pending_message_batch
+          ? entry->pending_message_batch.get()
+          : nullptr;
+      if (!batch || batch->projection_sealed || batch->events.empty() ||
+          !batch->events.back().wave ||
+          batch->events.back().wave->wave_id != wave_id) {
+        return false;
+      }
+      const auto origin = batch->events.back().reservation_origin;
+      if (origin != GatewayMessageEventReservationOrigin::kCreated &&
+          origin != GatewayMessageEventReservationOrigin::kReused) {
+        return false;
+      }
+      entries.push_back(entry);
+      reused.push_back(origin == GatewayMessageEventReservationOrigin::kReused);
+    }
+  } catch (const std::bad_alloc &) {
+    return false;
+  }
+
+  for (size_t index = 0; index < sessions.size(); ++index) {
+    auto *batch = entries[index]->pending_message_batch.get();
+    if (!reused[index]) {
+      if (!gateway_release_session_output_with_writer(
+              sessions[index], entries[index]->reservation_id, writer)) {
+        return false;
+      }
+      continue;
+    }
+    const auto removed_text_length = batch->events.back().text_length;
+    batch->events.pop_back();
+    batch->text_length_total = removed_text_length <= batch->text_length_total
+        ? batch->text_length_total - removed_text_length
+        : 0;
+    batch->last_append_at_ns = batch->events.empty()
+        ? 0
+        : batch->events.back().appended_at_ns;
+    batch->projection_generation++;
+    if (batch->events.empty()) {
+      entries[index]->pending_message_batch.reset();
+    }
+  }
+  return true;
+}
+
+bool gateway_pending_message_event_batch_status(
+    const GatewaySession *sess, uint64_t reservation_id,
+    GatewayPendingMessageEventBatchStatus *status) {
+  if (!status) {
+    return false;
+  }
+  *status = GatewayPendingMessageEventBatchStatus{};
+  const auto *entry = gateway_find_pending_output_entry(sess, reservation_id);
+  const auto *batch = entry && entry->pending_message_batch
+      ? entry->pending_message_batch.get()
+      : nullptr;
+  if (!batch || batch->events.empty()) {
+    return false;
+  }
+  status->event_count = batch->events.size();
+  status->text_length_total = batch->text_length_total;
+  status->created_at_ns = batch->created_at_ns;
+  status->last_append_at_ns = batch->last_append_at_ns;
+  status->registered = batch->registered;
+  return true;
+}
+
 bool gateway_rollback_preencoded_message_event_wave_with_writer(
     const std::vector<GatewaySession *> &sessions,
     const std::vector<uint64_t> &reservation_ids,
@@ -2916,7 +3194,16 @@ bool gateway_rollback_preencoded_message_event_wave_with_writer(
       }
       continue;
     }
+    const auto removed_text_length =
+        entries[index]->pending_message_batch->events.back().text_length;
     entries[index]->pending_message_batch->events.pop_back();
+    auto *batch = entries[index]->pending_message_batch.get();
+    batch->text_length_total = removed_text_length <= batch->text_length_total
+        ? batch->text_length_total - removed_text_length
+        : 0;
+    batch->last_append_at_ns = batch->events.empty()
+        ? 0
+        : batch->events.back().appended_at_ns;
     entries[index]->pending_message_batch->projection_generation++;
     if (entries[index]->pending_message_batch->events.empty()) {
       entries[index]->pending_message_batch.reset();
@@ -6059,6 +6346,210 @@ void f_gateway_sessions_rollback_preencoded_message_event_wave() {
   }
   pop_n_elems(4);
   push_number(result);
+}
+
+void f_gateway_sessions_reserve_and_append_compact_preencoded_message_event_wave() {
+  const auto text_length = sp->u.number;
+  const auto batch_limit = (sp - 1)->u.number;
+  const auto sent_at = (sp - 2)->u.number;
+  auto *message_epochs = (sp - 3)->u.arr;
+  auto *message_seqs = (sp - 4)->u.arr;
+  const auto *scope_type = (sp - 5)->u.string;
+  const auto scope_type_len = SVALUE_STRLEN(sp - 5);
+  const auto *stable_json = (sp - 6)->u.string;
+  const auto stable_json_len = SVALUE_STRLEN(sp - 6);
+  const auto first_server_seq = (sp - 7)->u.number;
+  auto *targets = (sp - 8)->u.arr;
+  std::vector<GatewaySession *> sessions;
+  std::vector<LPC_INT> epochs;
+  std::vector<LPC_INT> seqs;
+  GatewaySessionCompactMessageEventWaveResult result;
+  mapping_t *response;
+  array_t *created_indices;
+  array_t *created_ids;
+  array_t *created_slot_seqs;
+  array_t *full_indices;
+  bool ok = false;
+
+  const auto append_ints = [](array_t *source, std::vector<LPC_INT> *target,
+                              bool positive) {
+    if (!source || !target || source->size <= 0) {
+      return false;
+    }
+    target->reserve(static_cast<size_t>(source->size));
+    for (int index = 0; index < source->size; ++index) {
+      const auto *value = &source->item[index];
+      if (value->type != T_NUMBER ||
+          (positive ? value->u.number <= 0 : value->u.number < 0)) {
+        return false;
+      }
+      target->push_back(value->u.number);
+    }
+    return true;
+  };
+
+  if (targets && targets->size > 0 && stable_json && stable_json_len > 0 &&
+      scope_type && scope_type_len > 0 && first_server_seq > 0 && sent_at > 0 &&
+      batch_limit > 0 && text_length > 0 && vm_context_is_main_thread() &&
+      append_ints(message_epochs, &epochs, false) &&
+      append_ints(message_seqs, &seqs, true) &&
+      epochs.size() == static_cast<size_t>(targets->size) &&
+      seqs.size() == static_cast<size_t>(targets->size)) {
+    sessions.reserve(static_cast<size_t>(targets->size));
+    ok = true;
+    for (int index = 0; index < targets->size; ++index) {
+      const auto *target = &targets->item[index];
+      if (target->type != T_OBJECT || !gateway_object_valid(target->u.ob)) {
+        ok = false;
+        break;
+      }
+      auto *sess = gateway_find_session_by_object(target->u.ob);
+      if (!sess) {
+        ok = false;
+        break;
+      }
+      sessions.push_back(sess);
+    }
+    if (ok) {
+      ok = gateway_reserve_and_append_compact_preencoded_message_event_wave(
+          sessions, first_server_seq, epochs, seqs,
+          std::string(stable_json, stable_json_len),
+          std::string(scope_type, scope_type_len), sent_at,
+          static_cast<size_t>(batch_limit), static_cast<size_t>(text_length),
+          &result);
+    }
+  }
+
+  const auto created_count =
+      ok ? static_cast<int>(result.created_indices.size()) : 0;
+  const auto full_count = ok ? static_cast<int>(result.full_indices.size()) : 0;
+  created_indices = allocate_array(created_count);
+  created_ids = allocate_array(created_count);
+  created_slot_seqs = allocate_array(created_count);
+  full_indices = allocate_array(full_count);
+  for (int index = 0; index < created_count; ++index) {
+    created_indices->item[index].type = T_NUMBER;
+    created_indices->item[index].u.number =
+        static_cast<LPC_INT>(result.created_indices[index]);
+    created_ids->item[index].type = T_NUMBER;
+    created_ids->item[index].u.number =
+        static_cast<LPC_INT>(result.created_reservation_ids[index]);
+    created_slot_seqs->item[index].type = T_NUMBER;
+    created_slot_seqs->item[index].u.number =
+        result.created_slot_server_seqs[index];
+  }
+  for (int index = 0; index < full_count; ++index) {
+    full_indices->item[index].type = T_NUMBER;
+    full_indices->item[index].u.number =
+        static_cast<LPC_INT>(result.full_indices[index]);
+  }
+  response = allocate_mapping(8);
+  add_mapping_pair(response, "ok", ok ? 1 : 0);
+  add_mapping_array(response, "created_indices", created_indices);
+  add_mapping_array(response, "created_reservation_ids", created_ids);
+  add_mapping_array(response, "created_slot_server_seqs", created_slot_seqs);
+  add_mapping_array(response, "full_indices", full_indices);
+  add_mapping_pair(response, "created_count", created_count);
+  add_mapping_pair(response, "reused_count",
+                   ok ? static_cast<LPC_INT>(result.reused_count) : 0);
+  add_mapping_pair(response, "wave_id",
+                   ok ? static_cast<LPC_INT>(result.wave_id) : 0);
+  free_array(created_indices);
+  free_array(created_ids);
+  free_array(created_slot_seqs);
+  free_array(full_indices);
+  pop_n_elems(9);
+  push_refed_mapping(response);
+}
+
+void f_gateway_sessions_commit_compact_preencoded_message_event_wave() {
+  const auto wave_id = static_cast<uint64_t>(sp->u.number);
+  auto *targets = (sp - 1)->u.arr;
+  std::vector<GatewaySession *> sessions;
+  int result = 0;
+  if (targets && targets->size > 0 && wave_id > 0 &&
+      vm_context_is_main_thread()) {
+    sessions.reserve(static_cast<size_t>(targets->size));
+    result = 1;
+    for (int index = 0; index < targets->size; ++index) {
+      const auto *target = &targets->item[index];
+      if (target->type != T_OBJECT || !gateway_object_valid(target->u.ob)) {
+        result = 0;
+        break;
+      }
+      auto *sess = gateway_find_session_by_object(target->u.ob);
+      if (!sess) {
+        result = 0;
+        break;
+      }
+      sessions.push_back(sess);
+    }
+    if (result) {
+      result = gateway_commit_compact_preencoded_message_event_wave(
+                   sessions, wave_id)
+          ? 1
+          : 0;
+    }
+  }
+  pop_n_elems(2);
+  push_number(result);
+}
+
+void f_gateway_sessions_rollback_compact_preencoded_message_event_wave() {
+  const auto wave_id = static_cast<uint64_t>(sp->u.number);
+  auto *targets = (sp - 1)->u.arr;
+  std::vector<GatewaySession *> sessions;
+  int result = 0;
+  if (targets && targets->size > 0 && wave_id > 0 &&
+      vm_context_is_main_thread()) {
+    sessions.reserve(static_cast<size_t>(targets->size));
+    result = 1;
+    for (int index = 0; index < targets->size; ++index) {
+      const auto *target = &targets->item[index];
+      if (target->type != T_OBJECT || !gateway_object_valid(target->u.ob)) {
+        result = 0;
+        break;
+      }
+      auto *sess = gateway_find_session_by_object(target->u.ob);
+      if (!sess) {
+        result = 0;
+        break;
+      }
+      sessions.push_back(sess);
+    }
+    if (result) {
+      result = gateway_rollback_compact_preencoded_message_event_wave_with_writer(
+                   sessions, wave_id, gateway_send_raw_to_fd)
+          ? 1
+          : 0;
+    }
+  }
+  pop_n_elems(2);
+  push_number(result);
+}
+
+void f_gateway_session_pending_message_event_batch_status() {
+  const auto reservation_id = static_cast<uint64_t>(sp->u.number);
+  auto *ob = (sp - 1)->u.ob;
+  GatewayPendingMessageEventBatchStatus status;
+  mapping_t *response;
+  auto *sess = gateway_find_session_by_object(ob);
+  const auto ok = vm_context_is_main_thread() && sess && reservation_id > 0 &&
+                  gateway_pending_message_event_batch_status(
+                      sess, reservation_id, &status);
+  response = allocate_mapping(6);
+  add_mapping_pair(response, "ok", ok ? 1 : 0);
+  add_mapping_pair(response, "event_count",
+                   ok ? static_cast<LPC_INT>(status.event_count) : 0);
+  add_mapping_pair(response, "text_length_total",
+                   ok ? static_cast<LPC_INT>(status.text_length_total) : 0);
+  add_mapping_pair(response, "created_at_ns",
+                   ok ? static_cast<LPC_INT>(status.created_at_ns) : 0);
+  add_mapping_pair(response, "last_append_at_ns",
+                   ok ? static_cast<LPC_INT>(status.last_append_at_ns) : 0);
+  add_mapping_pair(response, "registered", ok && status.registered ? 1 : 0);
+  pop_n_elems(2);
+  push_refed_mapping(response);
 }
 
 void f_gateway_session_fill() {

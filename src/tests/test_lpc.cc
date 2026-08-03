@@ -2010,6 +2010,162 @@ TEST_F(DriverTest, TestGatewayReserveAndAppendWaveFailuresLeaveNoNewSlots) {
   ASSERT_TRUE(result.reused.empty());
 }
 
+TEST_F(DriverTest, TestGatewayCompactRoomWaveReturnsOnlySparseBookkeeping) {
+  GatewaySession first;
+  GatewaySession second;
+  first.session_id = "compact-first";
+  second.session_id = "compact-second";
+  first.master_fd = 109;
+  second.master_fd = 110;
+  const std::string stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"compact\",\"payload\":{}}";
+  GatewaySessionCompactMessageEventWaveResult first_wave;
+
+  ASSERT_TRUE(gateway_reserve_and_append_compact_preencoded_message_event_wave(
+      {&first, &second}, 101, {3, 4}, {1001, 2001}, stable, "player",
+      123456, 2, 7, &first_wave));
+  ASSERT_EQ(first_wave.created_indices, (std::vector<size_t>{0, 1}));
+  ASSERT_EQ(first_wave.created_reservation_ids.size(), 2u);
+  ASSERT_EQ(first_wave.created_slot_server_seqs,
+            (std::vector<LPC_INT>{101, 103}));
+  ASSERT_TRUE(first_wave.full_indices.empty());
+  ASSERT_EQ(first_wave.reused_count, 0u);
+  ASSERT_GT(first_wave.wave_id, 0u);
+
+  // A newly-created slot cannot be reused until LPC session/FIFO bookkeeping
+  // has committed the sparse registration result.
+  GatewaySessionCompactMessageEventWaveResult uncommitted_wave;
+  ASSERT_FALSE(gateway_reserve_and_append_compact_preencoded_message_event_wave(
+      {&first, &second}, 105, {3, 4}, {1002, 2002}, stable, "player",
+      123457, 2, 7, &uncommitted_wave));
+  ASSERT_TRUE(gateway_commit_compact_preencoded_message_event_wave(
+      {&first, &second}, first_wave.wave_id));
+
+  GatewaySessionCompactMessageEventWaveResult reused_wave;
+  ASSERT_TRUE(gateway_reserve_and_append_compact_preencoded_message_event_wave(
+      {&first, &second}, 105, {3, 4}, {1002, 2002}, stable, "player",
+      123457, 2, 11, &reused_wave));
+  ASSERT_TRUE(reused_wave.created_indices.empty());
+  ASSERT_TRUE(reused_wave.created_reservation_ids.empty());
+  ASSERT_TRUE(reused_wave.created_slot_server_seqs.empty());
+  ASSERT_EQ(reused_wave.full_indices, (std::vector<size_t>{0, 1}));
+  ASSERT_EQ(reused_wave.reused_count, 2u);
+
+  GatewayPendingMessageEventBatchStatus status;
+  ASSERT_TRUE(gateway_pending_message_event_batch_status(
+      &first, first_wave.created_reservation_ids[0], &status));
+  ASSERT_EQ(status.event_count, 2u);
+  ASSERT_EQ(status.text_length_total, 18u);
+  ASSERT_TRUE(status.registered);
+  ASSERT_GT(status.created_at_ns, 0u);
+  ASSERT_GE(status.last_append_at_ns, status.created_at_ns);
+
+  ASSERT_TRUE(gateway_rollback_compact_preencoded_message_event_wave_with_writer(
+      {&first, &second}, reused_wave.wave_id,
+      [](int, const char *, size_t) -> int { return 1; }));
+  ASSERT_TRUE(gateway_pending_message_event_batch_status(
+      &first, first_wave.created_reservation_ids[0], &status));
+  ASSERT_EQ(status.event_count, 1u);
+  ASSERT_EQ(status.text_length_total, 7u);
+  ASSERT_TRUE(status.registered);
+  ASSERT_EQ(first.output_fifo.size(), 1u);
+  ASSERT_EQ(second.output_fifo.size(), 1u);
+}
+
+TEST_F(DriverTest, TestGatewayCompactRoomWaveRollsBackUncommittedCreatedSlots) {
+  GatewaySession first;
+  GatewaySession second;
+  first.session_id = "compact-created-first";
+  second.session_id = "compact-created-second";
+  first.master_fd = 111;
+  second.master_fd = 112;
+  const std::string stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"created\",\"payload\":{}}";
+  GatewaySessionCompactMessageEventWaveResult wave;
+
+  ASSERT_TRUE(gateway_reserve_and_append_compact_preencoded_message_event_wave(
+      {&first, &second}, 201, {7, 8}, {3001, 4001}, stable, "player",
+      223456, 128, 7, &wave));
+  ASSERT_EQ(wave.created_indices, (std::vector<size_t>{0, 1}));
+  ASSERT_EQ(wave.reused_count, 0u);
+
+  GatewayPendingMessageEventBatchStatus status;
+  ASSERT_TRUE(gateway_pending_message_event_batch_status(
+      &first, wave.created_reservation_ids[0], &status));
+  ASSERT_FALSE(status.registered);
+  ASSERT_EQ(status.event_count, 1u);
+  ASSERT_TRUE(gateway_rollback_compact_preencoded_message_event_wave_with_writer(
+      {&first, &second}, wave.wave_id,
+      [](int, const char *, size_t) -> int { return 1; }));
+  ASSERT_TRUE(first.output_fifo.empty());
+  ASSERT_TRUE(second.output_fifo.empty());
+  ASSERT_FALSE(gateway_pending_message_event_batch_status(
+      &first, wave.created_reservation_ids[0], &status));
+  ASSERT_EQ(status.event_count, 0u);
+  ASSERT_FALSE(status.registered);
+}
+
+TEST_F(DriverTest, TestGatewayCompactRoomWaveMixedRollbackIsAtomic) {
+  GatewaySession reused;
+  GatewaySession created;
+  reused.session_id = "compact-mixed-reused";
+  created.session_id = "compact-mixed-created";
+  reused.master_fd = 113;
+  created.master_fd = 114;
+  const std::string stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"mixed\",\"payload\":{}}";
+  GatewaySessionCompactMessageEventWaveResult base;
+  ASSERT_TRUE(gateway_reserve_and_append_compact_preencoded_message_event_wave(
+      {&reused}, 301, {9}, {5001}, stable, "player", 323456, 2, 5,
+      &base));
+  ASSERT_TRUE(gateway_commit_compact_preencoded_message_event_wave(
+      {&reused}, base.wave_id));
+
+  GatewaySessionCompactMessageEventWaveResult mixed;
+  ASSERT_TRUE(gateway_reserve_and_append_compact_preencoded_message_event_wave(
+      {&reused, &created}, 303, {9, 10}, {5002, 6001}, stable, "player",
+      323457, 2, 6, &mixed));
+  ASSERT_EQ(mixed.created_indices, (std::vector<size_t>{1}));
+  ASSERT_EQ(mixed.created_slot_server_seqs, (std::vector<LPC_INT>{305}));
+  ASSERT_EQ(mixed.full_indices, (std::vector<size_t>{0}));
+  ASSERT_EQ(mixed.reused_count, 1u);
+
+  GatewayPendingMessageEventBatchStatus status;
+  ASSERT_FALSE(gateway_commit_compact_preencoded_message_event_wave(
+      {&reused, &created}, mixed.wave_id + 1));
+  ASSERT_FALSE(gateway_rollback_compact_preencoded_message_event_wave_with_writer(
+      {&reused, &created}, mixed.wave_id + 1,
+      [](int, const char *, size_t) -> int { return 1; }));
+  ASSERT_TRUE(gateway_pending_message_event_batch_status(
+      &reused, base.created_reservation_ids[0], &status));
+  ASSERT_EQ(status.event_count, 2u);
+  ASSERT_EQ(status.text_length_total, 11u);
+  ASSERT_EQ(created.output_fifo.size(), 1u);
+
+  ASSERT_TRUE(gateway_commit_compact_preencoded_message_event_wave(
+      {&reused, &created}, mixed.wave_id));
+  ASSERT_TRUE(gateway_rollback_compact_preencoded_message_event_wave_with_writer(
+      {&reused, &created}, mixed.wave_id,
+      [](int, const char *, size_t) -> int { return 1; }));
+  ASSERT_TRUE(gateway_pending_message_event_batch_status(
+      &reused, base.created_reservation_ids[0], &status));
+  ASSERT_EQ(status.event_count, 1u);
+  ASSERT_EQ(status.text_length_total, 5u);
+  ASSERT_TRUE(status.registered);
+  ASSERT_TRUE(created.output_fifo.empty());
+  ASSERT_FALSE(gateway_pending_message_event_batch_status(
+      &created, mixed.created_reservation_ids[0], &status));
+}
+
 TEST_F(DriverTest, TestGatewayPreencodedChatBatchBuilderKeepsStableAndDynamicBoundaries) {
   const std::vector<std::string> stable_children{
       "{\"content\":\"first\",\"direction\":\"incoming\"}",
