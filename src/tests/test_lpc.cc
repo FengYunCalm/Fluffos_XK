@@ -1449,6 +1449,7 @@ TEST_F(DriverTest, TestGatewayPendingMessageEventBatchFillsRecipientSliceNativel
       {7, 8}, writer, &result));
   ASSERT_EQ(result.filled, (std::vector<bool>{true, true}));
   ASSERT_EQ(result.event_counts, (std::vector<LPC_INT>{1, 1}));
+  ASSERT_EQ(result.text_length_totals, (std::vector<LPC_INT>{0, 0}));
   ASSERT_EQ(result.slot_server_seqs, (std::vector<LPC_INT>{101, 201}));
   ASSERT_EQ(writes.size(), 2u);
   const auto first_wire = nlohmann::json::parse(writes[0]);
@@ -2073,6 +2074,43 @@ TEST_F(DriverTest, TestGatewayCompactRoomWaveReturnsOnlySparseBookkeeping) {
   ASSERT_TRUE(status.registered);
   ASSERT_EQ(first.output_fifo.size(), 1u);
   ASSERT_EQ(second.output_fifo.size(), 1u);
+}
+
+TEST_F(DriverTest,
+       TestGatewayPendingMessageEventBatchFillReturnsAuthoritativeTotals) {
+  GatewaySession session;
+  session.session_id = "native-fill-totals";
+  session.master_fd = 115;
+  const std::string stable =
+      "{\"schema_version\":1,\"channel\":\"main\",\"intent\":\"append\","
+      "\"priority\":\"low\",\"reliability\":\"important\","
+      "\"display_mode\":\"instant\",\"ttl_ms\":30000,"
+      "\"collapse_key\":\"\",\"text\":\"totals\",\"payload\":{}}";
+  GatewaySessionCompactMessageEventWaveResult first_wave;
+  ASSERT_TRUE(gateway_reserve_and_append_compact_preencoded_message_event_wave(
+      {&session}, 101, {3}, {1001}, stable, "player", 123456, 128, 7,
+      &first_wave));
+  ASSERT_TRUE(gateway_commit_compact_preencoded_message_event_wave(
+      {&session}, first_wave.wave_id));
+
+  GatewaySessionCompactMessageEventWaveResult second_wave;
+  ASSERT_TRUE(gateway_reserve_and_append_compact_preencoded_message_event_wave(
+      {&session}, 103, {3}, {1002}, stable, "player", 123457, 128, 11,
+      &second_wave));
+  ASSERT_TRUE(second_wave.created_indices.empty());
+  ASSERT_EQ(second_wave.reused_count, 1u);
+  ASSERT_TRUE(gateway_commit_compact_preencoded_message_event_wave(
+      {&session}, second_wave.wave_id));
+
+  GatewayPendingMessageEventBatchFillResult result;
+  ASSERT_TRUE(gateway_fill_pending_message_event_batches_with_writer(
+      {&session}, {first_wave.created_reservation_ids[0]}, {"player-one"},
+      {9}, [](int, const char *, size_t) -> int { return 1; }, &result));
+  ASSERT_EQ(result.filled, (std::vector<bool>{true}));
+  ASSERT_EQ(result.event_counts, (std::vector<LPC_INT>{2}));
+  ASSERT_EQ(result.text_length_totals, (std::vector<LPC_INT>{18}));
+  ASSERT_EQ(result.slot_server_seqs, (std::vector<LPC_INT>{101}));
+  ASSERT_TRUE(session.output_fifo.empty());
 }
 
 TEST_F(DriverTest, TestGatewayCompactRoomWaveRollsBackUncommittedCreatedSlots) {
@@ -15417,6 +15455,7 @@ TEST_F(DriverTest, TestGatewayOwnerRoomOutputProjectionUsesSameWireAndFifoSlot) 
   ASSERT_EQ(submitted.submitted, (std::vector<bool>{true}));
   ASSERT_EQ(submitted.filled_inline, (std::vector<bool>{false}));
   ASSERT_EQ(submitted.event_counts, (std::vector<LPC_INT>{1}));
+  ASSERT_EQ(submitted.text_length_totals, (std::vector<LPC_INT>{0}));
   ASSERT_EQ(submitted.slot_server_seqs, (std::vector<LPC_INT>{1201}));
   ASSERT_EQ(submitted.future_ids.size(), 1u);
   ASSERT_GT(submitted.future_ids[0], 0u);
@@ -16856,6 +16895,7 @@ TEST_F(DriverTest, TestGatewayOwnerRoomOutputFallsBackInlineByteEquivalent) {
   ASSERT_EQ(submitted.filled_inline, (std::vector<bool>{true}));
   ASSERT_EQ(submitted.future_ids, (std::vector<uint64_t>{0}));
   ASSERT_EQ(submitted.event_counts, (std::vector<LPC_INT>{1}));
+  ASSERT_EQ(submitted.text_length_totals, (std::vector<LPC_INT>{0}));
   ASSERT_EQ(submitted.slot_server_seqs, (std::vector<LPC_INT>{1201}));
   ASSERT_EQ(gateway_session_future_watch_count(), 0);
   ASSERT_EQ(session->output_fifo.size(), 1u);

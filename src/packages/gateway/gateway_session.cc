@@ -3272,6 +3272,12 @@ bool gateway_snapshot_pending_message_event_batch(
     next_columns.slot_server_seq = batch.slot_server_seq;
     next_columns.slot_epoch = slot_epoch;
     next_columns.slot_sent_at = batch.slot_sent_at;
+    if (batch.text_length_total >
+        static_cast<size_t>(std::numeric_limits<LPC_INT>::max())) {
+      return false;
+    }
+    next_snapshot.text_length_total =
+        static_cast<LPC_INT>(batch.text_length_total);
     next_snapshot.generation = batch.projection_generation;
   } catch (const std::exception &) {
     return false;
@@ -3723,6 +3729,7 @@ bool gateway_fill_pending_message_event_batches_with_writer(
   }
   result->filled.clear();
   result->event_counts.clear();
+  result->text_length_totals.clear();
   result->slot_server_seqs.clear();
   if (count == 0 || reservation_ids.size() != count ||
       scope_ids.size() != count || slot_epochs.size() != count || !writer) {
@@ -3737,6 +3744,7 @@ bool gateway_fill_pending_message_event_batches_with_writer(
     generations.reserve(count);
     result->filled.assign(count, false);
     result->event_counts.resize(count);
+    result->text_length_totals.resize(count);
     result->slot_server_seqs.resize(count);
     for (size_t index = 0; index < count; ++index) {
       auto *sess = sessions[index];
@@ -3750,17 +3758,20 @@ bool gateway_fill_pending_message_event_batches_with_writer(
               &snapshots[index], &columns[index])) {
         result->filled.clear();
         result->event_counts.clear();
+        result->text_length_totals.clear();
         result->slot_server_seqs.clear();
         return false;
       }
       result->event_counts[index] = static_cast<LPC_INT>(
           snapshots[index].event_wave_indices.size());
+      result->text_length_totals[index] = snapshots[index].text_length_total;
       result->slot_server_seqs[index] = columns[index].slot_server_seq;
       wire_output = gateway_encode_pending_message_event_projection_output_inline(
           sess, snapshots[index], columns[index]);
       if (!wire_output) {
         result->filled.clear();
         result->event_counts.clear();
+        result->text_length_totals.clear();
         result->slot_server_seqs.clear();
         return false;
       }
@@ -3770,6 +3781,7 @@ bool gateway_fill_pending_message_event_batches_with_writer(
   } catch (const std::exception &) {
     result->filled.clear();
     result->event_counts.clear();
+    result->text_length_totals.clear();
     result->slot_server_seqs.clear();
     return false;
   }
@@ -3781,6 +3793,7 @@ bool gateway_fill_pending_message_event_batches_with_writer(
                                                  reservation_ids[index])) {
       result->filled.clear();
       result->event_counts.clear();
+      result->text_length_totals.clear();
       result->slot_server_seqs.clear();
       return false;
     }
@@ -3789,6 +3802,7 @@ bool gateway_fill_pending_message_event_batches_with_writer(
           sessions, reservation_ids, generations)) {
     result->filled.clear();
     result->event_counts.clear();
+    result->text_length_totals.clear();
     result->slot_server_seqs.clear();
     return false;
   }
@@ -3797,6 +3811,7 @@ bool gateway_fill_pending_message_event_batches_with_writer(
                                           &wire_outputs)) {
     result->filled.clear();
     result->event_counts.clear();
+    result->text_length_totals.clear();
     result->slot_server_seqs.clear();
     return false;
   }
@@ -3880,6 +3895,7 @@ bool gateway_submit_pending_message_event_batches_for_objects(
     result->submitted.assign(count, false);
     result->filled_inline.assign(count, false);
     result->event_counts.resize(count);
+    result->text_length_totals.resize(count);
     result->slot_server_seqs.resize(count);
     result->future_ids.assign(count, 0);
   } catch (const std::exception &) {
@@ -3890,6 +3906,8 @@ bool gateway_submit_pending_message_event_batches_for_objects(
   for (size_t index = 0; index < count; ++index) {
     result->event_counts[index] = static_cast<LPC_INT>(
         works[index]->snapshot.event_wave_indices.size());
+    result->text_length_totals[index] =
+        works[index]->snapshot.text_length_total;
     result->slot_server_seqs[index] =
         works[index]->columns.slot_server_seq;
   }
@@ -6698,6 +6716,7 @@ void f_gateway_sessions_fill_pending_message_event_batches() {
   mapping_t *response;
   array_t *filled;
   array_t *event_counts;
+  array_t *text_length_totals;
   array_t *slot_server_seqs;
   bool ok = false;
 
@@ -6741,22 +6760,28 @@ void f_gateway_sessions_fill_pending_message_event_batches() {
   const auto result_count = ok ? static_cast<int>(result.filled.size()) : 0;
   filled = allocate_array(result_count);
   event_counts = allocate_array(result_count);
+  text_length_totals = allocate_array(result_count);
   slot_server_seqs = allocate_array(result_count);
   for (int index = 0; index < result_count; ++index) {
     filled->item[index].type = T_NUMBER;
     filled->item[index].u.number = result.filled[index] ? 1 : 0;
     event_counts->item[index].type = T_NUMBER;
     event_counts->item[index].u.number = result.event_counts[index];
+    text_length_totals->item[index].type = T_NUMBER;
+    text_length_totals->item[index].u.number =
+        result.text_length_totals[index];
     slot_server_seqs->item[index].type = T_NUMBER;
     slot_server_seqs->item[index].u.number = result.slot_server_seqs[index];
   }
-  response = allocate_mapping(4);
+  response = allocate_mapping(5);
   add_mapping_pair(response, "ok", ok ? 1 : 0);
   add_mapping_array(response, "filled", filled);
   add_mapping_array(response, "event_counts", event_counts);
+  add_mapping_array(response, "text_length_totals", text_length_totals);
   add_mapping_array(response, "slot_server_seqs", slot_server_seqs);
   free_array(filled);
   free_array(event_counts);
+  free_array(text_length_totals);
   free_array(slot_server_seqs);
   pop_n_elems(4);
   push_refed_mapping(response);
@@ -6815,6 +6840,7 @@ void f_gateway_sessions_submit_pending_message_event_batches() {
   auto *submitted = allocate_array(result_count);
   auto *filled_inline = allocate_array(result_count);
   auto *event_counts = allocate_array(result_count);
+  auto *text_length_totals = allocate_array(result_count);
   auto *slot_server_seqs = allocate_array(result_count);
   auto *future_ids = allocate_array(result_count);
   for (int index = 0; index < result_count; ++index) {
@@ -6825,6 +6851,9 @@ void f_gateway_sessions_submit_pending_message_event_batches() {
         result.filled_inline[index] ? 1 : 0;
     event_counts->item[index].type = T_NUMBER;
     event_counts->item[index].u.number = result.event_counts[index];
+    text_length_totals->item[index].type = T_NUMBER;
+    text_length_totals->item[index].u.number =
+        result.text_length_totals[index];
     slot_server_seqs->item[index].type = T_NUMBER;
     slot_server_seqs->item[index].u.number =
         result.slot_server_seqs[index];
@@ -6832,16 +6861,18 @@ void f_gateway_sessions_submit_pending_message_event_batches() {
     future_ids->item[index].u.number =
         static_cast<LPC_INT>(result.future_ids[index]);
   }
-  auto *response = allocate_mapping(6);
+  auto *response = allocate_mapping(7);
   add_mapping_pair(response, "ok", ok ? 1 : 0);
   add_mapping_array(response, "submitted", submitted);
   add_mapping_array(response, "filled_inline", filled_inline);
   add_mapping_array(response, "event_counts", event_counts);
+  add_mapping_array(response, "text_length_totals", text_length_totals);
   add_mapping_array(response, "slot_server_seqs", slot_server_seqs);
   add_mapping_array(response, "future_ids", future_ids);
   free_array(submitted);
   free_array(filled_inline);
   free_array(event_counts);
+  free_array(text_length_totals);
   free_array(slot_server_seqs);
   free_array(future_ids);
   pop_n_elems(5);

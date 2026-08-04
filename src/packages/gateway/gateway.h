@@ -388,6 +388,7 @@ struct GatewayPendingMessageEventBatchStatus {
 struct GatewayPendingMessageEventBatchFillResult {
   std::vector<bool> filled;
   std::vector<LPC_INT> event_counts;
+  std::vector<LPC_INT> text_length_totals;
   std::vector<LPC_INT> slot_server_seqs;
 };
 
@@ -397,6 +398,7 @@ struct GatewayPendingMessageEventProjectionSnapshot {
   std::vector<std::shared_ptr<const GatewayPreencodedMessageEventWave>>
       wave_table;
   std::vector<size_t> event_wave_indices;
+  LPC_INT text_length_total{0};
   uint64_t generation{0};
 };
 
@@ -415,6 +417,7 @@ struct GatewayPendingMessageEventBatchOwnerSubmitResult {
   std::vector<bool> submitted;
   std::vector<bool> filled_inline;
   std::vector<LPC_INT> event_counts;
+  std::vector<LPC_INT> text_length_totals;
   std::vector<LPC_INT> slot_server_seqs;
   std::vector<uint64_t> future_ids;
 };
