@@ -24,9 +24,27 @@ private mapping* trace_to_last_assert() {
   return trace;
 }
 
+private string format_assert_trace(mapping *trace) {
+  string *frames = ({});
+  int frame_count = sizeof(trace);
+
+  // Assertion diagnostics must stay useful without serializing arguments or
+  // locals, which may be both sensitive and large enough to mask the failure.
+  if (frame_count > 32) {
+    frame_count = 32;
+  }
+  for (int i = 0; i < frame_count; i++) {
+    frames += ({ sprintf("Line: %O File: %O Function: %O Object: %O Program: %O",
+                         trace[i]["line"], trace[i]["file"], trace[i]["function"],
+                         trace[i]["object"] || "No object",
+                         trace[i]["program"] || "No program") });
+  }
+  return implode(frames, "\n");
+}
+
 public string get_last_error() {
   if (last_error == "") {
-    return sprintf("%O", trace_to_last_assert());
+    return format_assert_trace(trace_to_last_assert());
   }
   return last_error;
 }

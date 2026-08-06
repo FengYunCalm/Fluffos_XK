@@ -1197,7 +1197,7 @@ void assert_owner_executor_contract(mapping status) {
     ASSERT(found_player_domain);
     ASSERT(found_economy_domain);
     ASSERT(arrayp(dispatch_contracts));
-    ASSERT_EQ(19, sizeof(dispatch_contracts));
+    ASSERT_EQ(20, sizeof(dispatch_contracts));
     for (i = 0; i < sizeof(dispatch_contracts); i++) {
         mapping entry = dispatch_contracts[i];
 
@@ -1249,6 +1249,8 @@ void assert_owner_executor_contract(mapping status) {
     assert_dispatch_entry_ex(dispatch_contract, "ed_callback", "owner_executor_callback",
                              "executor_callback", "main_required_callback", 0, 0, 0,
                              "owner_main_queue_callback_adapter", 1, 0, 1);
+    assert_dispatch_entry(dispatch_contract, "room_output_projection", "room_output_projection",
+                          "executor_callback", "executor_safe", 1, 1, 0);
     assert_dispatch_entry(dispatch_contract, "compute_result", "compute_result",
                           "compute_result", "executor_safe", 1, 1, 0);
     assert_dispatch_entry(dispatch_contract, "lpc", "lpc", "reject_lpc",
