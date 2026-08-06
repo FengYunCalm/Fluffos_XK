@@ -1005,6 +1005,11 @@ void gateway_handle_sys(int fd, const nlohmann::json &msg) {
   if (msg.contains("cid") && msg["cid"].is_string()) {
     auto session_id = msg["cid"].get<std::string>();
     auto *sess = gateway_find_session(session_id.c_str());
+    if (!sess || sess->master_fd != fd) {
+      g_gateway_runtime_counters.stale_master_frames_rejected.fetch_add(
+          1, std::memory_order_relaxed);
+      return;
+    }
     auto *user = sess ? sess->user_ob : nullptr;
     if (gateway_object_valid_local(user)) {
       svalue_t data_sv = {};

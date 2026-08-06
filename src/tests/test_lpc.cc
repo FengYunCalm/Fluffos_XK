@@ -17856,6 +17856,17 @@ TEST_F(DriverTest, TestGatewayMasterReconnectRebindsExistingSessionWithoutLosing
 
   ASSERT_TRUE(gateway_dispatch_message_for_test(
       old_master_fd,
+      R"({"type":"sys","action":"session_notice","cid":"gw-test-master-reconnect","data":{"cmd":"stale-sys"}})"));
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 0);
+  payload = call_lpc_method(ob, "query_last_gateway_payload");
+  ASSERT_NE(payload, nullptr);
+  command_value = find_string_in_mapping(payload->u.map, "cmd");
+  ASSERT_NE(command_value, nullptr);
+  ASSERT_EQ(command_value->type, T_STRING);
+  ASSERT_STREQ(command_value->u.string, "current");
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      old_master_fd,
       R"({"type":"discon","cid":"gw-test-master-reconnect"})"));
   ASSERT_EQ(gateway_find_session(session_id), session);
   ASSERT_NE(ob->interactive, nullptr);
