@@ -879,6 +879,23 @@ bool gateway_status_to_json(nlohmann::json *out) {
   return true;
 }
 
+bool gateway_extract_valid_session_id(const nlohmann::json &msg,
+                                      std::string *session_id) {
+  if (!session_id || !msg.contains("cid") || !msg["cid"].is_string()) {
+    g_gateway_runtime_counters.session_id_frames_rejected.fetch_add(
+        1, std::memory_order_relaxed);
+    return false;
+  }
+  const auto &candidate = msg["cid"].get_ref<const std::string &>();
+  if (!gateway_session_id_is_valid(candidate.data(), candidate.size())) {
+    g_gateway_runtime_counters.session_id_frames_rejected.fetch_add(
+        1, std::memory_order_relaxed);
+    return false;
+  }
+  *session_id = candidate;
+  return true;
+}
+
 void gateway_remove_master(int fd);
 
 void gateway_handle_heartbeat(int fd) {
@@ -941,15 +958,12 @@ void gateway_handle_login(int fd, const nlohmann::json &msg) {
   svalue_t data_sv = {};
   bool has_data = false;
 
-  if (!msg.contains("cid") || !msg["cid"].is_string()) {
+  if (!gateway_extract_valid_session_id(msg, &session_id)) {
     return;
   }
   if (g_gateway_debug) {
-    debug_message("[gateway] login fd=%d cid=%s\n", fd, msg["cid"].get_ref<const std::string &>().c_str());
-  }
-  session_id = msg["cid"].get<std::string>();
-  if (session_id.empty()) {
-    return;
+    debug_message("[gateway] login fd=%d cid=%s\n", fd,
+                  session_id.c_str());
   }
   if (msg.contains("data") && msg["data"].is_object()) {
     const auto &data = msg["data"];
@@ -1012,20 +1026,16 @@ void gateway_handle_data(int fd, const nlohmann::json &msg) {
   svalue_t data_sv = {};
   uint64_t ingress_sequence = 0;
 
-  if (!msg.contains("cid") || !msg["cid"].is_string() || !msg.contains("data")) {
+  if (!msg.contains("data") ||
+      !gateway_extract_valid_session_id(msg, &session_id)) {
     g_gateway_runtime_counters.data_frames_rejected.fetch_add(1, std::memory_order_relaxed);
     gateway_queue_ingress_ack(fd);
     return;
   }
   g_gateway_runtime_counters.data_frames_received.fetch_add(1, std::memory_order_relaxed);
   if (g_gateway_debug) {
-    debug_message("[gateway] data fd=%d cid=%s\n", fd, msg["cid"].get_ref<const std::string &>().c_str());
-  }
-  session_id = msg["cid"].get<std::string>();
-  if (session_id.empty()) {
-    g_gateway_runtime_counters.data_frames_rejected.fetch_add(1, std::memory_order_relaxed);
-    gateway_queue_ingress_ack(fd);
-    return;
+    debug_message("[gateway] data fd=%d cid=%s\n", fd,
+                  session_id.c_str());
   }
   const auto ingress_decision =
       gateway_classify_ingress_sequence(fd, msg, &ingress_sequence);
@@ -1087,16 +1097,18 @@ void gateway_handle_data(int fd, const nlohmann::json &msg) {
 }
 
 void gateway_handle_discon(int fd, const nlohmann::json &msg) {
+  std::string session_id;
   std::string reason_code = "client_disconnected";
   std::string reason_text = "client disconnect";
 
-  if (!msg.contains("cid") || !msg["cid"].is_string()) {
+  if (!gateway_extract_valid_session_id(msg, &session_id)) {
     return;
   }
   if (g_gateway_debug) {
-    debug_message("[gateway] discon fd=%d cid=%s\n", fd, msg["cid"].get_ref<const std::string &>().c_str());
+    debug_message("[gateway] discon fd=%d cid=%s\n", fd,
+                  session_id.c_str());
   }
-  auto *sess = gateway_find_session(msg["cid"].get_ref<const std::string &>().c_str());
+  auto *sess = gateway_find_session(session_id.c_str());
   if (!sess || sess->master_fd != fd) {
     g_gateway_runtime_counters.stale_master_frames_rejected.fetch_add(1, std::memory_order_relaxed);
     return;
@@ -1112,8 +1124,8 @@ void gateway_handle_discon(int fd, const nlohmann::json &msg) {
              !msg["reason"].get_ref<const std::string &>().empty()) {
     reason_text = msg["reason"].get<std::string>();
   }
-  gateway_destroy_session_internal(msg["cid"].get_ref<const std::string &>().c_str(),
-                                   reason_code.c_str(), reason_text.c_str());
+  gateway_destroy_session_internal(session_id.c_str(), reason_code.c_str(),
+                                   reason_text.c_str());
 }
 
 void gateway_schedule_status_response(int fd, const nlohmann::json &msg) {
@@ -1174,8 +1186,11 @@ void gateway_handle_sys(int fd, const nlohmann::json &msg) {
     return;
   }
 
-  if (msg.contains("cid") && msg["cid"].is_string()) {
-    auto session_id = msg["cid"].get<std::string>();
+  if (msg.contains("cid")) {
+    std::string session_id;
+    if (!gateway_extract_valid_session_id(msg, &session_id)) {
+      return;
+    }
     auto *sess = gateway_find_session(session_id.c_str());
     if (!sess || sess->master_fd != fd) {
       g_gateway_runtime_counters.stale_master_frames_rejected.fetch_add(
@@ -2368,6 +2383,12 @@ mapping_t *gateway_status_internal() {
                    static_cast<long>(g_gateway_runtime_counters.data_frames_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_json_frames_rejected",
                    static_cast<long>(g_gateway_runtime_counters.json_frames_rejected.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_session_id_max_bytes",
+                   static_cast<long>(kGatewayMaxSessionIdBytes));
+  add_mapping_pair(
+      map, "gateway_session_id_frames_rejected",
+      static_cast<long>(g_gateway_runtime_counters.session_id_frames_rejected.load(
+          std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_ingress_sequence_last_accepted",
                    static_cast<long>(g_gateway_ingress_sequence.last_accepted));
   add_mapping_pair(map, "gateway_ingress_sequence_duplicates",

@@ -23,6 +23,8 @@ enum GatewayReadPauseReason : uint8_t {
   GATEWAY_READ_PAUSE_MAIN_QUEUE = 1u << 1,
 };
 
+constexpr size_t kGatewayMaxSessionIdBytes = 128;
+
 extern int g_gateway_debug;
 extern size_t g_gateway_max_packet_size;
 extern int g_gateway_max_masters;
@@ -36,6 +38,7 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> data_frames_applied{0};
   std::atomic<uint64_t> data_frames_rejected{0};
   std::atomic<uint64_t> json_frames_rejected{0};
+  std::atomic<uint64_t> session_id_frames_rejected{0};
   std::atomic<uint64_t> ingress_sequence_duplicates{0};
   std::atomic<uint64_t> ingress_sequence_gaps{0};
   std::atomic<uint64_t> ingress_sequence_stream_mismatches{0};
@@ -613,6 +616,7 @@ void gateway_clear_message_event_template_cache_for_test();
 
 GatewaySession *gateway_find_session(const char *session_id);
 GatewaySession *gateway_find_session_by_object(object_t *ob);
+bool gateway_session_id_is_valid(const char *data, size_t len);
 int gateway_bind_session_object(const char *session_id, object_t *ob, const char *ip,
                                 int port, int master_fd);
 object_t *gateway_rebind_session_internal(const char *session_id, const char *ip,

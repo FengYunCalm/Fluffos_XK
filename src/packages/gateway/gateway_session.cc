@@ -36,7 +36,31 @@
 
 uint64_t gateway_enqueue_pending_command_internal(object_t *user);
 
+bool gateway_session_id_is_valid(const char *data, size_t len) {
+  if (!data || len == 0 || len > kGatewayMaxSessionIdBytes) {
+    return false;
+  }
+  for (size_t index = 0; index < len; ++index) {
+    const auto byte = static_cast<unsigned char>(data[index]);
+    if (byte < 0x21 || byte > 0x7e) {
+      return false;
+    }
+  }
+  return true;
+}
+
 namespace {
+bool gateway_session_id_c_string_is_valid(const char *session_id) {
+  if (!session_id) {
+    return false;
+  }
+  size_t len = 0;
+  while (len <= kGatewayMaxSessionIdBytes && session_id[len] != '\0') {
+    ++len;
+  }
+  return gateway_session_id_is_valid(session_id, len);
+}
+
 std::unordered_map<std::string, std::unique_ptr<GatewaySession>> g_gateway_sessions;
 std::unordered_map<object_t *, GatewaySession *> g_gateway_obj_to_session;
 std::atomic<uint64_t> g_gateway_next_output_reservation_id{1};
@@ -1780,7 +1804,7 @@ long gateway_room_output_projection_retry_count() {
 }
 
 GatewaySession *gateway_find_session(const char *session_id) {
-  if (!session_id || session_id[0] == '\0') {
+  if (!gateway_session_id_c_string_is_valid(session_id)) {
     return nullptr;
   }
   auto it = g_gateway_sessions.find(session_id);
@@ -5464,7 +5488,8 @@ int gateway_bind_session_object(const char *session_id, object_t *ob, const char
                                 int master_fd) {
   GatewaySession *sess;
 
-  if (!gateway_object_valid(ob) || !session_id || session_id[0] == '\0') {
+  if (!gateway_object_valid(ob) ||
+      !gateway_session_id_c_string_is_valid(session_id)) {
     return 0;
   }
 
@@ -5853,7 +5878,8 @@ object_t *gateway_create_session_internal(const char *session_id, svalue_t *data
   interactive_t *user;
   int has_gateway_logon;
 
-  if (!session_id || session_id[0] == '\0' || gateway_find_session(session_id) || !g_event_base ||
+  if (!gateway_session_id_c_string_is_valid(session_id) ||
+      gateway_find_session(session_id) || !g_event_base ||
       (g_gateway_max_sessions > 0 && gateway_get_session_count() >= g_gateway_max_sessions)) {
     return nullptr;
   }
@@ -5960,6 +5986,9 @@ object_t *gateway_create_session_internal(const char *session_id, svalue_t *data
 
 int gateway_destroy_session_internal(const char *session_id, const char *reason_code,
                                      const char *reason_text) {
+  if (!gateway_session_id_c_string_is_valid(session_id)) {
+    return 0;
+  }
   const std::string session_key = session_id ? session_id : "";
   auto *sess = gateway_find_session(session_key.c_str());
   auto *ob = gateway_resolve_session_object(sess);

@@ -18424,6 +18424,129 @@ TEST_F(DriverTest, TestGatewayInboundJsonShapeFailureDoesNotLeakPartialArrays) {
   free_object(&ob, "TestGatewayInboundJsonShapeFailureDoesNotLeakPartialArrays");
 }
 
+TEST_F(DriverTest, TestGatewaySessionIdRejectsOverlongValue) {
+  const std::string at_limit(kGatewayMaxSessionIdBytes, 'a');
+  auto *accepted = create_gateway_session_for_test(
+      at_limit.c_str(), "/clone/gateway_login_example");
+  ASSERT_NE(accepted, nullptr);
+  add_ref(accepted, "TestGatewaySessionIdRejectsOverlongValueAccepted");
+  ASSERT_EQ(gateway_destroy_session_internal(at_limit.c_str(), "test_done", "done"),
+            1);
+  destruct_object(accepted);
+  free_object(&accepted, "TestGatewaySessionIdRejectsOverlongValueAccepted");
+
+  const std::string overlong(kGatewayMaxSessionIdBytes + 1, 'b');
+  auto *rejected = create_gateway_session_for_test(
+      overlong.c_str(), "/clone/gateway_login_example");
+  const bool was_created = rejected != nullptr;
+  if (rejected) {
+    add_ref(rejected, "TestGatewaySessionIdRejectsOverlongValueRejected");
+    EXPECT_EQ(
+        gateway_destroy_session_internal(overlong.c_str(), "test_done", "done"),
+        1);
+    destruct_object(rejected);
+    free_object(&rejected, "TestGatewaySessionIdRejectsOverlongValueRejected");
+  }
+  EXPECT_FALSE(was_created);
+}
+
+TEST_F(DriverTest, TestGatewaySessionIdRejectsControlCharacters) {
+  const std::string control_id = "gw-test-control\nforged-log-line";
+  auto *rejected = create_gateway_session_for_test(
+      control_id.c_str(), "/clone/gateway_login_example");
+  const bool was_created = rejected != nullptr;
+  if (rejected) {
+    add_ref(rejected, "TestGatewaySessionIdRejectsControlCharacters");
+    EXPECT_EQ(gateway_destroy_session_internal(
+                  control_id.c_str(), "test_done", "done"),
+              1);
+    destruct_object(rejected);
+    free_object(&rejected, "TestGatewaySessionIdRejectsControlCharacters");
+  }
+  EXPECT_FALSE(was_created);
+}
+
+TEST_F(DriverTest, TestGatewayWireCidRejectsEmbeddedNullAlias) {
+  const char *session_id = "gw-test-cid-alias";
+  auto *ob = create_gateway_session_for_test(
+      session_id, "/clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayWireCidRejectsEmbeddedNullAlias");
+  gateway_reset_ingress_sequence_for_test();
+  const auto rejected_before =
+      g_gateway_runtime_counters.session_id_frames_rejected.load(
+          std::memory_order_relaxed);
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      -1,
+      R"({"type":"data","cid":"gw-test-cid-alias","data":{"cmd":"baseline"}})"));
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+
+  std::string aliased_id(session_id);
+  aliased_id.push_back('\0');
+  aliased_id.append("forged-suffix");
+  const auto message = nlohmann::json({
+      {"type", "data"},
+      {"cid", aliased_id},
+      {"data", nlohmann::json({{"cmd", "aliased"}})},
+  }).dump();
+  ASSERT_TRUE(gateway_dispatch_message_for_test(-1, message.c_str()));
+  EXPECT_EQ(vm_owner_drain_main_tasks(8), 0);
+
+  const auto sys_message = nlohmann::json({
+      {"type", "sys"},
+      {"action", "custom"},
+      {"cid", aliased_id},
+      {"data", nlohmann::json({{"cmd", "sys-aliased"}})},
+  }).dump();
+  ASSERT_TRUE(gateway_dispatch_message_for_test(-1, sys_message.c_str()));
+  EXPECT_EQ(vm_owner_drain_main_tasks(8), 0);
+
+  const auto discon_message = nlohmann::json({
+      {"type", "discon"},
+      {"cid", aliased_id},
+  }).dump();
+  ASSERT_TRUE(gateway_dispatch_message_for_test(-1, discon_message.c_str()));
+  EXPECT_NE(gateway_find_session(session_id), nullptr);
+
+  const std::string overlong_id(kGatewayMaxSessionIdBytes + 1, 'z');
+  const auto login_message = nlohmann::json({
+      {"type", "login"},
+      {"cid", overlong_id},
+      {"data", nlohmann::json({{"ip", "127.0.0.1"}, {"port", 6040}})},
+  }).dump();
+  ASSERT_TRUE(gateway_dispatch_message_for_test(-1, login_message.c_str()));
+  EXPECT_EQ(vm_owner_drain_main_tasks(8), 0);
+  EXPECT_EQ(gateway_find_session(overlong_id.c_str()), nullptr);
+
+  auto *payload = call_lpc_method(ob, "query_last_gateway_payload");
+  ASSERT_NE(payload, nullptr);
+  auto *command = find_string_in_mapping(payload->u.map, "cmd");
+  ASSERT_NE(command, nullptr);
+  EXPECT_STREQ(command->u.string, "baseline");
+  EXPECT_EQ(g_gateway_runtime_counters.session_id_frames_rejected.load(
+                std::memory_order_relaxed),
+            rejected_before + 4);
+
+  auto *status = gateway_status_internal();
+  ASSERT_NE(status, nullptr);
+  auto *max_bytes =
+      find_string_in_mapping(status, "gateway_session_id_max_bytes");
+  auto *rejected =
+      find_string_in_mapping(status, "gateway_session_id_frames_rejected");
+  ASSERT_NE(max_bytes, nullptr);
+  ASSERT_NE(rejected, nullptr);
+  EXPECT_EQ(max_bytes->u.number,
+            static_cast<LPC_INT>(kGatewayMaxSessionIdBytes));
+  EXPECT_EQ(rejected->u.number, static_cast<LPC_INT>(rejected_before + 4));
+  free_mapping(status);
+
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayWireCidRejectsEmbeddedNullAlias");
+  gateway_reset_ingress_sequence_for_test();
+}
+
 TEST_F(DriverTest, TestGatewayReliableIngressExecutesContinuousSequenceExactlyOnce) {
   const char *session_id = "gw-test-reliable-ingress";
   auto *ob = create_gateway_session_for_test(session_id, "/clone/gateway_login_example");
