@@ -40,6 +40,7 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> ingress_sequence_gaps{0};
   std::atomic<uint64_t> ingress_sequence_stream_mismatches{0};
   std::atomic<uint64_t> ingress_sequence_stream_resets{0};
+  std::atomic<uint64_t> ingress_sequence_owner_mismatches{0};
   std::atomic<uint64_t> ingress_ack_frames_sent{0};
   std::atomic<uint64_t> ingress_ack_frames_failed{0};
   std::atomic<uint64_t> stale_master_frames_rejected{0};

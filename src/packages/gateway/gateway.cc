@@ -83,6 +83,7 @@ constexpr auto kGatewayDeferredMainDrainBacklogWallBudget = std::chrono::millise
 constexpr long kGatewayDeferredMainDrainBacklogThreshold = 64;
 constexpr auto kGatewayDeferredMainDrainContinuationDelay = std::chrono::milliseconds(1);
 constexpr int kGatewayDeferredMainDrainWaitTimerQueueOnly = 1;
+constexpr int kGatewayIngressUnownedFd = std::numeric_limits<int>::min();
 
 evconnlistener *g_gateway_listener = nullptr;
 event *g_gateway_heartbeat_timer = nullptr;
@@ -95,8 +96,11 @@ bool g_gateway_main_drain_scheduled = false;
 TickEvent *g_gateway_main_drain_event = nullptr;
 
 struct GatewayIngressSequenceState {
+  // A reconnect releases only owner_fd: the stable stream identity and
+  // cumulative sequence must survive so the replacement master can replay.
   std::string stream_id;
   uint64_t last_accepted{0};
+  int owner_fd{kGatewayIngressUnownedFd};
 };
 
 GatewayIngressSequenceState g_gateway_ingress_sequence;
@@ -721,19 +725,35 @@ void gateway_send_json_to_fd(int fd, const nlohmann::json &payload) {
   gateway_send_raw_to_fd(fd, encoded.c_str(), encoded.size());
 }
 
-void gateway_begin_ingress_stream(const std::string &stream_id) {
-  if (stream_id.empty() || stream_id.size() > 128 ||
-      stream_id == g_gateway_ingress_sequence.stream_id) {
-    return;
+bool gateway_begin_ingress_stream(int fd, const std::string &stream_id) {
+  if (stream_id.empty() || stream_id.size() > 128) {
+    return false;
+  }
+  if (g_gateway_ingress_sequence.owner_fd != kGatewayIngressUnownedFd &&
+      g_gateway_ingress_sequence.owner_fd != fd) {
+    g_gateway_runtime_counters.ingress_sequence_owner_mismatches.fetch_add(
+        1, std::memory_order_relaxed);
+    return false;
+  }
+
+  g_gateway_ingress_sequence.owner_fd = fd;
+  if (stream_id == g_gateway_ingress_sequence.stream_id) {
+    return true;
+  }
+  auto master_it = g_gateway_masters.find(fd);
+  if (master_it != g_gateway_masters.end() && master_it->second) {
+    master_it->second->ingress_ack_pending = false;
+    master_it->second->ingress_ack_sequence = 0;
   }
   g_gateway_ingress_sequence.stream_id = stream_id;
   g_gateway_ingress_sequence.last_accepted = 0;
   g_gateway_runtime_counters.ingress_sequence_stream_resets.fetch_add(
       1, std::memory_order_relaxed);
+  return true;
 }
 
 GatewayIngressSequenceDecision gateway_classify_ingress_sequence(
-    const nlohmann::json &msg, uint64_t *sequence) {
+    int fd, const nlohmann::json &msg, uint64_t *sequence) {
   const auto has_id = msg.contains("ingress_id");
   const auto has_sequence = msg.contains("ingress_seq");
   if (!has_id && !has_sequence && g_gateway_ingress_sequence.stream_id.empty()) {
@@ -741,6 +761,11 @@ GatewayIngressSequenceDecision gateway_classify_ingress_sequence(
   }
   if (!has_id || !has_sequence || !msg["ingress_id"].is_string() ||
       !msg["ingress_seq"].is_number_unsigned()) {
+    return GatewayIngressSequenceDecision::kReject;
+  }
+  if (g_gateway_ingress_sequence.owner_fd != fd) {
+    g_gateway_runtime_counters.ingress_sequence_owner_mismatches.fetch_add(
+        1, std::memory_order_relaxed);
     return GatewayIngressSequenceDecision::kReject;
   }
   const auto &stream_id = msg["ingress_id"].get_ref<const std::string &>();
@@ -772,7 +797,8 @@ GatewayIngressSequenceDecision gateway_classify_ingress_sequence(
 void gateway_queue_ingress_ack(int fd) {
   auto it = g_gateway_masters.find(fd);
   if (it == g_gateway_masters.end() || !it->second ||
-      g_gateway_ingress_sequence.stream_id.empty()) {
+      g_gateway_ingress_sequence.stream_id.empty() ||
+      g_gateway_ingress_sequence.owner_fd != fd) {
     return;
   }
   it->second->ingress_ack_pending = true;
@@ -781,7 +807,8 @@ void gateway_queue_ingress_ack(int fd) {
 
 bool gateway_encode_ingress_ack(const GatewayMaster *master, std::string *encoded) {
   if (!master || !encoded || !master->ingress_ack_pending ||
-      g_gateway_ingress_sequence.stream_id.empty()) {
+      g_gateway_ingress_sequence.stream_id.empty() ||
+      g_gateway_ingress_sequence.owner_fd != master->fd) {
     return false;
   }
   nlohmann::json ack = {
@@ -886,6 +913,9 @@ void gateway_remove_master(int fd) {
                std::memory_order_acquire)) {
     }
   }
+  if (g_gateway_ingress_sequence.owner_fd == fd) {
+    g_gateway_ingress_sequence.owner_fd = kGatewayIngressUnownedFd;
+  }
   gateway_cleanup_master_sessions(fd);
   g_gateway_masters.erase(it);
 }
@@ -898,7 +928,7 @@ void gateway_handle_hello(int fd, const nlohmann::json &msg) {
     const auto &data = msg["data"];
     if (data.contains("ingress_id") && data["ingress_id"].is_string()) {
       gateway_begin_ingress_stream(
-          data["ingress_id"].get_ref<const std::string &>());
+          fd, data["ingress_id"].get_ref<const std::string &>());
     }
   }
   gateway_handle_heartbeat(fd);
@@ -998,7 +1028,7 @@ void gateway_handle_data(int fd, const nlohmann::json &msg) {
     return;
   }
   const auto ingress_decision =
-      gateway_classify_ingress_sequence(msg, &ingress_sequence);
+      gateway_classify_ingress_sequence(fd, msg, &ingress_sequence);
   if (ingress_decision == GatewayIngressSequenceDecision::kDuplicate) {
     gateway_queue_ingress_ack(fd);
     return;
@@ -1981,6 +2011,8 @@ void gateway_reset_ingress_sequence_for_test() {
       0, std::memory_order_relaxed);
   g_gateway_runtime_counters.ingress_sequence_stream_resets.store(
       0, std::memory_order_relaxed);
+  g_gateway_runtime_counters.ingress_sequence_owner_mismatches.store(
+      0, std::memory_order_relaxed);
   g_gateway_runtime_counters.ingress_ack_frames_sent.store(
       0, std::memory_order_relaxed);
   g_gateway_runtime_counters.ingress_ack_frames_failed.store(
@@ -2346,6 +2378,18 @@ mapping_t *gateway_status_internal() {
                    static_cast<long>(g_gateway_runtime_counters.ingress_sequence_stream_mismatches.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_ingress_sequence_stream_resets",
                    static_cast<long>(g_gateway_runtime_counters.ingress_sequence_stream_resets.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_ingress_sequence_owner_fd",
+      g_gateway_ingress_sequence.owner_fd == kGatewayIngressUnownedFd
+          ? -1
+          : static_cast<long>(g_gateway_ingress_sequence.owner_fd));
+  add_mapping_pair(
+      map, "gateway_ingress_sequence_owner_active",
+      g_gateway_ingress_sequence.owner_fd == kGatewayIngressUnownedFd ? 0 : 1);
+  add_mapping_pair(
+      map, "gateway_ingress_sequence_owner_mismatches",
+      static_cast<long>(g_gateway_runtime_counters.ingress_sequence_owner_mismatches.load(
+          std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_ingress_ack_frames_sent",
                    static_cast<long>(g_gateway_runtime_counters.ingress_ack_frames_sent.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_ingress_ack_frames_failed",

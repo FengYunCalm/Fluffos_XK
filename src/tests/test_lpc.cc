@@ -18528,6 +18528,171 @@ TEST_F(DriverTest, TestGatewayReliableIngressResetsOnlyForNewStreamIdentity) {
   free_object(&ob, "TestGatewayReliableIngressResetsOnlyForNewStreamIdentity");
 }
 
+TEST_F(DriverTest, TestGatewayReliableIngressActiveOwnerRejectsCompetingStream) {
+  constexpr int owner_fd = 993;
+  constexpr int contender_fd = 994;
+  const char *session_id = "gw-test-reliable-owner";
+  bufferevent *owner_pair[2] = {nullptr, nullptr};
+  bufferevent *contender_pair[2] = {nullptr, nullptr};
+
+  gateway_reset_ingress_sequence_for_test();
+  ASSERT_EQ(bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, owner_pair), 0);
+  ASSERT_EQ(
+      bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, contender_pair),
+      0);
+  ASSERT_NE(gateway_register_master_for_test(owner_fd, owner_pair[0]), nullptr);
+  auto *contender =
+      gateway_register_master_for_test(contender_fd, contender_pair[0]);
+  ASSERT_NE(contender, nullptr);
+  auto *ob = create_gateway_session_for_test(
+      session_id, "/clone/gateway_login_example", owner_fd);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob,
+          "TestGatewayReliableIngressActiveOwnerRejectsCompetingStream");
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      owner_fd,
+      R"({"type":"hello","data":{"ingress_id":"owner-stream","version":2}})"));
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      owner_fd,
+      R"({"type":"data","cid":"gw-test-reliable-owner","ingress_id":"owner-stream","ingress_seq":1,"data":{"cmd":"first"}})"));
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      contender_fd,
+      R"({"type":"hello","data":{"ingress_id":"contender-stream","version":2}})"));
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      contender_fd,
+      R"({"type":"data","cid":"gw-test-reliable-owner","ingress_id":"contender-stream","ingress_seq":1,"data":{"cmd":"contender"}})"));
+  EXPECT_FALSE(contender->ingress_ack_pending);
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 0);
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      owner_fd,
+      R"({"type":"data","cid":"gw-test-reliable-owner","ingress_id":"owner-stream","ingress_seq":2,"data":{"cmd":"second"}})"));
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+  auto *payload = call_lpc_method(ob, "query_last_gateway_payload");
+  ASSERT_NE(payload, nullptr);
+  auto *command = find_string_in_mapping(payload->u.map, "cmd");
+  ASSERT_NE(command, nullptr);
+  ASSERT_STREQ(command->u.string, "second");
+
+  auto *status = gateway_status_internal();
+  ASSERT_NE(status, nullptr);
+  auto mapping_number = [](mapping_t *map, const char *key) -> long {
+    auto *value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  EXPECT_EQ(mapping_number(status, "gateway_ingress_sequence_last_accepted"), 2);
+  EXPECT_EQ(mapping_number(status, "gateway_ingress_sequence_stream_resets"), 1);
+  EXPECT_EQ(mapping_number(status, "gateway_ingress_sequence_owner_fd"), owner_fd);
+  EXPECT_EQ(mapping_number(status, "gateway_ingress_sequence_owner_active"), 1);
+  EXPECT_EQ(mapping_number(status, "gateway_ingress_sequence_owner_mismatches"), 2);
+  free_mapping(status);
+
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
+  gateway_remove_master_for_test(contender_fd);
+  contender_pair[0] = nullptr;
+  gateway_remove_master_for_test(owner_fd);
+  owner_pair[0] = nullptr;
+  bufferevent_free(contender_pair[1]);
+  contender_pair[1] = nullptr;
+  bufferevent_free(owner_pair[1]);
+  owner_pair[1] = nullptr;
+  destruct_object(ob);
+  free_object(
+      &ob, "TestGatewayReliableIngressActiveOwnerRejectsCompetingStream");
+  gateway_reset_ingress_sequence_for_test();
+}
+
+TEST_F(DriverTest, TestGatewayReliableIngressReconnectPreservesAcceptedSequence) {
+  constexpr int owner_fd = 995;
+  constexpr int replacement_fd = 996;
+  const char *session_id = "gw-test-reliable-reconnect";
+  bufferevent *owner_pair[2] = {nullptr, nullptr};
+  bufferevent *replacement_pair[2] = {nullptr, nullptr};
+
+  gateway_reset_ingress_sequence_for_test();
+  ASSERT_EQ(bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, owner_pair), 0);
+  ASSERT_EQ(
+      bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, replacement_pair),
+      0);
+  ASSERT_NE(gateway_register_master_for_test(owner_fd, owner_pair[0]), nullptr);
+  auto *ob = create_gateway_session_for_test(
+      session_id, "/clone/gateway_login_example", owner_fd);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob,
+          "TestGatewayReliableIngressReconnectPreservesAcceptedSequence");
+
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      owner_fd,
+      R"({"type":"hello","data":{"ingress_id":"reconnect-stream","version":2}})"));
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      owner_fd,
+      R"({"type":"data","cid":"gw-test-reliable-reconnect","ingress_id":"reconnect-stream","ingress_seq":1,"data":{"cmd":"first"}})"));
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "reconnect", "reconnect"),
+            1);
+  destruct_object(ob);
+  free_object(
+      &ob, "TestGatewayReliableIngressReconnectPreservesAcceptedSequenceOld");
+  gateway_remove_master_for_test(owner_fd);
+  owner_pair[0] = nullptr;
+  ASSERT_NE(
+      gateway_register_master_for_test(replacement_fd, replacement_pair[0]),
+      nullptr);
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      replacement_fd,
+      R"({"type":"hello","data":{"ingress_id":"reconnect-stream","version":2}})"));
+
+  ob = create_gateway_session_for_test(
+      session_id, "/clone/gateway_login_example", replacement_fd);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob,
+          "TestGatewayReliableIngressReconnectPreservesAcceptedSequenceNew");
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      replacement_fd,
+      R"({"type":"data","cid":"gw-test-reliable-reconnect","ingress_id":"reconnect-stream","ingress_seq":1,"data":{"cmd":"duplicate"}})"));
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 0);
+  ASSERT_TRUE(gateway_dispatch_message_for_test(
+      replacement_fd,
+      R"({"type":"data","cid":"gw-test-reliable-reconnect","ingress_id":"reconnect-stream","ingress_seq":2,"data":{"cmd":"second"}})"));
+  ASSERT_EQ(vm_owner_drain_main_tasks(8), 1);
+
+  auto *payload = call_lpc_method(ob, "query_last_gateway_payload");
+  ASSERT_NE(payload, nullptr);
+  auto *command = find_string_in_mapping(payload->u.map, "cmd");
+  ASSERT_NE(command, nullptr);
+  ASSERT_STREQ(command->u.string, "second");
+
+  auto *status = gateway_status_internal();
+  ASSERT_NE(status, nullptr);
+  auto *last_accepted =
+      find_string_in_mapping(status, "gateway_ingress_sequence_last_accepted");
+  auto *owner =
+      find_string_in_mapping(status, "gateway_ingress_sequence_owner_fd");
+  ASSERT_NE(last_accepted, nullptr);
+  ASSERT_NE(owner, nullptr);
+  EXPECT_EQ(last_accepted->u.number, 2);
+  EXPECT_EQ(owner->u.number, replacement_fd);
+  free_mapping(status);
+
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
+  gateway_remove_master_for_test(replacement_fd);
+  replacement_pair[0] = nullptr;
+  bufferevent_free(replacement_pair[1]);
+  replacement_pair[1] = nullptr;
+  bufferevent_free(owner_pair[1]);
+  owner_pair[1] = nullptr;
+  destruct_object(ob);
+  free_object(
+      &ob, "TestGatewayReliableIngressReconnectPreservesAcceptedSequence");
+  gateway_reset_ingress_sequence_for_test();
+}
+
 TEST_F(DriverTest, TestGatewayReliableIngressNacksExpectedSequenceUntilSessionExists) {
   const int master_fd = 992;
   const char *session_id = "gw-test-reliable-late-session";
