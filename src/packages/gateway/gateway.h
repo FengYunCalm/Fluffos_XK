@@ -68,6 +68,9 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> read_dispatch_buffer_compacted_bytes{0};
   std::atomic<uint64_t> read_dispatch_front_shift_bytes_avoided{0};
   std::atomic<uint64_t> read_dispatch_buffer_peak_bytes{0};
+  std::atomic<uint64_t> read_dispatch_frame_length_rejected{0};
+  std::atomic<uint64_t> read_dispatch_buffer_limit_rejected{0};
+  std::atomic<uint64_t> read_dispatch_native_bytes_deferred{0};
   std::atomic<uint64_t> command_callbacks{0};
   std::atomic<uint64_t> command_tasks_enqueued{0};
   std::atomic<uint64_t> command_tasks_rejected{0};
@@ -554,6 +557,11 @@ int gateway_dispatch_buffered_frames_for_test(GatewayMaster *master, int budget)
 void gateway_set_read_dispatch_pending_for_test(GatewayMaster *master, bool pending);
 void gateway_service_admitted_receive_tasks_for_test();
 bool gateway_master_has_buffered_input_for_test(const GatewayMaster *master);
+size_t gateway_read_buffer_limit_for_test();
+bool gateway_append_read_bytes_for_test(GatewayMaster *master, const char *data,
+                                        size_t len);
+size_t gateway_packet_size_hard_limit_for_test();
+bool gateway_set_max_packet_size_for_test(size_t value);
 GatewayMaster *gateway_register_master_for_test(int fd, bufferevent *bev);
 void gateway_remove_master_for_test(int fd);
 void gateway_reset_ingress_sequence_for_test();

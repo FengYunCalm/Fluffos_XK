@@ -532,6 +532,18 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_data_frames_applied"), 0);
   ASSERT_GE(mapping_number(status, "gateway_data_frames_rejected"), 0);
   ASSERT_GE(mapping_number(status, "gateway_json_frames_rejected"), 0);
+  ASSERT_GE(mapping_number(status,
+                           "gateway_read_dispatch_frame_length_rejected"),
+            0);
+  ASSERT_GE(mapping_number(status,
+                           "gateway_read_dispatch_buffer_limit_rejected"),
+            0);
+  ASSERT_GE(mapping_number(status,
+                           "gateway_read_dispatch_native_bytes_deferred"),
+            0);
+  ASSERT_GE(mapping_number(status, "gateway_read_buffer_limit_bytes"), 1028);
+  ASSERT_EQ(mapping_number(status, "gateway_packet_size_hard_limit_bytes"),
+            16 * 1024 * 1024);
   ASSERT_GE(mapping_number(status, "gateway_stale_master_frames_rejected"), 0);
   ASSERT_GE(mapping_number(status, "gateway_sessions_detached_total"), 0);
   ASSERT_GE(mapping_number(status, "gateway_session_rebind_attempts"), 0);
@@ -3037,6 +3049,102 @@ TEST_F(DriverTest, TestGatewayBufferedReadParserPreservesPartialFramesAndCharges
   invalid_length.fd = -1;
   invalid_length.read_buffer.assign(sizeof(uint32_t), '\0');
   ASSERT_EQ(gateway_dispatch_buffered_frames_for_test(&invalid_length, 2), -1);
+}
+
+TEST_F(DriverTest, TestGatewayBufferedReadParserRejectsConfiguredOversizeFrame) {
+  struct PacketSizeGuard {
+    size_t original{g_gateway_max_packet_size};
+    ~PacketSizeGuard() { g_gateway_max_packet_size = original; }
+  } packet_size_guard;
+
+  g_gateway_max_packet_size = 1024;
+  GatewayMaster master;
+  master.fd = -1;
+  const auto rejected_before =
+      g_gateway_runtime_counters.read_dispatch_frame_length_rejected.load(
+          std::memory_order_relaxed);
+  const uint32_t network_length = htonl(1025);
+  master.read_buffer.assign(
+      reinterpret_cast<const char *>(&network_length), sizeof(network_length));
+
+  ASSERT_EQ(gateway_dispatch_buffered_frames_for_test(&master, 2), -1);
+  ASSERT_EQ(
+      g_gateway_runtime_counters.read_dispatch_frame_length_rejected.load(
+          std::memory_order_relaxed),
+      rejected_before + 1);
+}
+
+TEST_F(DriverTest, TestGatewayReadBufferRejectsAggregateOverflowBeforeCopy) {
+  struct PacketSizeGuard {
+    size_t original{g_gateway_max_packet_size};
+    ~PacketSizeGuard() { g_gateway_max_packet_size = original; }
+  } packet_size_guard;
+
+  g_gateway_max_packet_size = 1024;
+  const auto limit = gateway_read_buffer_limit_for_test();
+  ASSERT_EQ(limit, 1024u + sizeof(uint32_t));
+  GatewayMaster master;
+  const std::string bounded(limit, 'x');
+  const auto rejected_before =
+      g_gateway_runtime_counters.read_dispatch_buffer_limit_rejected.load(
+          std::memory_order_relaxed);
+
+  ASSERT_TRUE(gateway_append_read_bytes_for_test(
+      &master, bounded.data(), bounded.size()));
+  ASSERT_EQ(master.read_buffer.size(), limit);
+  ASSERT_FALSE(gateway_append_read_bytes_for_test(&master, "x", 1));
+  ASSERT_EQ(master.read_buffer.size(), limit);
+  ASSERT_EQ(
+      g_gateway_runtime_counters.read_dispatch_buffer_limit_rejected.load(
+          std::memory_order_relaxed),
+      rejected_before + 1);
+}
+
+TEST_F(DriverTest, TestGatewayMasterReadWatermarkMatchesBoundedAggregateBuffer) {
+  struct PacketSizeGuard {
+    size_t original{g_gateway_max_packet_size};
+    ~PacketSizeGuard() { g_gateway_max_packet_size = original; }
+  } packet_size_guard;
+
+  g_gateway_max_packet_size = 2048;
+  constexpr int master_fd = 1707;
+  bufferevent *pair[2] = {nullptr, nullptr};
+  ASSERT_EQ(bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, pair), 0);
+  ASSERT_NE(pair[0], nullptr);
+  ASSERT_NE(pair[1], nullptr);
+  ASSERT_NE(gateway_register_master_for_test(master_fd, pair[0]), nullptr);
+  size_t lowmark = 0;
+  size_t highmark = 0;
+
+  ASSERT_EQ(bufferevent_getwatermark(pair[0], EV_READ, &lowmark, &highmark),
+            0);
+  ASSERT_EQ(lowmark, 0u);
+  ASSERT_EQ(highmark, gateway_read_buffer_limit_for_test());
+
+  gateway_remove_master_for_test(master_fd);
+  pair[0] = nullptr;
+  bufferevent_free(pair[1]);
+}
+
+TEST_F(DriverTest, TestGatewayPacketSizeRuntimeOverrideHonorsWireHardLimit) {
+  struct PacketSizeGuard {
+    size_t original{g_gateway_max_packet_size};
+    ~PacketSizeGuard() {
+      if (!gateway_set_max_packet_size_for_test(original)) {
+        g_gateway_max_packet_size = original;
+      }
+    }
+  } packet_size_guard;
+
+  const auto hard_limit = gateway_packet_size_hard_limit_for_test();
+  ASSERT_EQ(hard_limit, 16u * 1024u * 1024u);
+  const auto original = g_gateway_max_packet_size;
+
+  ASSERT_FALSE(gateway_set_max_packet_size_for_test(hard_limit + 1));
+  ASSERT_EQ(g_gateway_max_packet_size, original);
+  ASSERT_TRUE(gateway_set_max_packet_size_for_test(4096));
+  ASSERT_EQ(g_gateway_max_packet_size, 4096u);
+  ASSERT_EQ(gateway_read_buffer_limit_for_test(), 4096u + sizeof(uint32_t));
 }
 
 TEST_F(DriverTest, TestGatewayMasterListenerEnablesTcpNoDelayAndGatewayPriority) {
