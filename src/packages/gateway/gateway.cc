@@ -49,6 +49,8 @@ constexpr int kGatewayDefaultHeartbeatTimeout = 45;
 constexpr int kGatewayDefaultReconnectGrace = 60;
 constexpr size_t kGatewayMinPacketSize = 1024;
 constexpr size_t kGatewayAbsoluteMaxPacketSize = 16 * 1024 * 1024;
+constexpr size_t kGatewayWriteFlushBudget = 128;
+constexpr auto kGatewayWriteFlushContinuationDelay = std::chrono::milliseconds(1);
 constexpr int kGatewayMaxJsonDepth = 20;
 constexpr int kGatewayMaxWireJsonDepth = kGatewayMaxJsonDepth + 4;
 // One admitted gameplay frame can execute a tens-of-milliseconds LPC command
@@ -116,6 +118,8 @@ void gateway_schedule_buffered_read(int fd);
 int gateway_main_queue_admission_budget(int budget);
 void gateway_pause_all_reads_for_main_queue_pressure();
 void gateway_resume_main_queue_reads_if_below_low_watermark();
+void gateway_writecb(bufferevent *bev, void *ctx);
+void gateway_schedule_write_flush(int fd);
 
 void gateway_stop_heartbeat_timer();
 int gateway_start_heartbeat_timer();
@@ -1305,6 +1309,13 @@ void gateway_apply_read_watermark(bufferevent *bev) {
   }
 }
 
+void gateway_apply_write_watermark(bufferevent *bev) {
+  if (bev) {
+    const auto limit = gateway_write_buffer_limit();
+    bufferevent_setwatermark(bev, EV_WRITE, limit / 2, limit);
+  }
+}
+
 bool gateway_set_max_packet_size(size_t value) {
   if (value < kGatewayMinPacketSize || value > kGatewayAbsoluteMaxPacketSize) {
     return false;
@@ -1313,6 +1324,7 @@ bool gateway_set_max_packet_size(size_t value) {
   for (const auto &entry : g_gateway_masters) {
     if (entry.second) {
       gateway_apply_read_watermark(entry.second->bev);
+      gateway_apply_write_watermark(entry.second->bev);
     }
   }
   return true;
@@ -1760,6 +1772,59 @@ void gateway_readcb(bufferevent *bev, void *ctx) {
   }
 }
 
+void gateway_schedule_write_flush(int fd) {
+  auto it = g_gateway_masters.find(fd);
+  if (it == g_gateway_masters.end() || !it->second || !g_event_base ||
+      it->second->write_flush_scheduled ||
+      !gateway_master_output_pending(fd)) {
+    return;
+  }
+  auto *master = it->second.get();
+  auto *output = master->bev ? bufferevent_get_output(master->bev) : nullptr;
+  if (!output || evbuffer_get_length(output) >= gateway_write_buffer_limit()) {
+    return;
+  }
+  master->write_flush_scheduled = true;
+  master->write_flush_event = add_walltime_event(
+      kGatewayWriteFlushContinuationDelay, [fd] {
+        auto current = g_gateway_masters.find(fd);
+        if (current == g_gateway_masters.end() || !current->second) {
+          return;
+        }
+        auto *scheduled_master = current->second.get();
+        scheduled_master->write_flush_event = nullptr;
+        scheduled_master->write_flush_scheduled = false;
+        const auto flushed =
+            gateway_flush_master_output_fifos(fd, kGatewayWriteFlushBudget);
+        auto *scheduled_output = scheduled_master->bev
+                                     ? bufferevent_get_output(scheduled_master->bev)
+                                     : nullptr;
+        if (flushed > 0 && gateway_master_output_pending(fd) &&
+            scheduled_output &&
+            evbuffer_get_length(scheduled_output) < gateway_write_buffer_limit()) {
+          gateway_schedule_write_flush(fd);
+        }
+      },
+      BackendEventPriority::kGateway);
+  if (!master->write_flush_event) {
+    master->write_flush_scheduled = false;
+  }
+}
+
+void gateway_writecb(bufferevent * /*bev*/, void *ctx) {
+  auto *master = reinterpret_cast<GatewayMaster *>(ctx);
+  if (!master || master->closing) {
+    return;
+  }
+  const auto flushed =
+      gateway_flush_master_output_fifos(master->fd, kGatewayWriteFlushBudget);
+  auto *output = master->bev ? bufferevent_get_output(master->bev) : nullptr;
+  if (flushed > 0 && gateway_master_output_pending(master->fd) && output &&
+      evbuffer_get_length(output) < gateway_write_buffer_limit()) {
+    gateway_schedule_write_flush(master->fd);
+  }
+}
+
 void gateway_listener_cb(evconnlistener *listener, evutil_socket_t fd,
                          sockaddr *sa, int socklen, void * /*ctx*/) {
   char ipbuf[INET6_ADDRSTRLEN] = {0};
@@ -1781,6 +1846,7 @@ void gateway_listener_cb(evconnlistener *listener, evutil_socket_t fd,
     return;
   }
   gateway_apply_read_watermark(bev);
+  gateway_apply_write_watermark(bev);
 
   if (sa && sa->sa_family == AF_INET) {
     evutil_inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in *>(sa)->sin_addr, ipbuf,
@@ -1797,7 +1863,8 @@ void gateway_listener_cb(evconnlistener *listener, evutil_socket_t fd,
   master->connected_at = get_current_time();
   master->last_active = master->connected_at;
 
-  bufferevent_setcb(bev, gateway_readcb, nullptr, gateway_eventcb, master.get());
+  bufferevent_setcb(bev, gateway_readcb, gateway_writecb, gateway_eventcb,
+                    master.get());
   bufferevent_enable(bev, EV_READ | EV_WRITE);
   g_gateway_masters[master->fd] = std::move(master);
 }
@@ -1806,6 +1873,19 @@ void gateway_listener_error_cb(evconnlistener * /*listener*/, void * /*ctx*/) {
   debug_message("Gateway listener error.\n");
 }
 }  // namespace
+
+size_t gateway_write_buffer_limit() {
+  constexpr size_t kMinBytes = 64 * 1024;
+  constexpr size_t kMaxBytes = 32 * 1024 * 1024;
+  constexpr size_t kPacketAllowance = 4;
+  const auto packet_with_header = gateway_read_buffer_limit();
+  const auto allowance =
+      packet_with_header >
+              std::numeric_limits<size_t>::max() / kPacketAllowance
+          ? kMaxBytes
+          : packet_with_header * kPacketAllowance;
+  return std::min(kMaxBytes, std::max(kMinBytes, allowance));
+}
 
 int gateway_svalue_to_json_string(const svalue_t *sv, std::string *out) {
   return gateway_svalue_to_json_string_impl(sv, out);
@@ -1865,6 +1945,10 @@ bool gateway_set_max_packet_size_for_test(size_t value) {
   return gateway_set_max_packet_size(value);
 }
 
+size_t gateway_write_buffer_limit_for_test() {
+  return gateway_write_buffer_limit();
+}
+
 GatewayMaster *gateway_register_master_for_test(int fd, bufferevent *bev) {
   if (fd < 0 || !bev || g_gateway_masters.count(fd)) {
     return nullptr;
@@ -1873,9 +1957,16 @@ GatewayMaster *gateway_register_master_for_test(int fd, bufferevent *bev) {
   master->fd = fd;
   master->bev = bev;
   gateway_apply_read_watermark(bev);
+  gateway_apply_write_watermark(bev);
+  bufferevent_setcb(bev, gateway_readcb, gateway_writecb, gateway_eventcb,
+                    master.get());
   auto *result = master.get();
   g_gateway_masters[fd] = std::move(master);
   return result;
+}
+
+void gateway_invoke_master_write_callback_for_test(GatewayMaster *master) {
+  gateway_writecb(master ? master->bev : nullptr, master);
 }
 
 void gateway_remove_master_for_test(int fd) { gateway_remove_master(fd); }
@@ -1901,6 +1992,10 @@ GatewayMaster::~GatewayMaster() {
   if (read_dispatch_event) {
     read_dispatch_event->cancel();
     read_dispatch_event = nullptr;
+  }
+  if (write_flush_event) {
+    write_flush_event->cancel();
+    write_flush_event = nullptr;
   }
   if (bev) {
     bufferevent_free(bev);
@@ -2001,6 +2096,11 @@ int gateway_append_framed_output(evbuffer *output, const char *data, size_t len)
       len > static_cast<size_t>(std::numeric_limits<uint32_t>::max())) {
     return 0;
   }
+  const auto queued = evbuffer_get_length(output);
+  const auto output_limit = gateway_write_buffer_limit();
+  if (queued > output_limit || framed_len > output_limit - queued) {
+    return 0;
+  }
   net_len = htonl(static_cast<uint32_t>(len));
   if (framed_len < len ||
       evbuffer_reserve_space(output, static_cast<ev_ssize_t>(framed_len),
@@ -2025,14 +2125,34 @@ int gateway_append_framed_output_for_test(evbuffer *output, const char *data,
 
 int gateway_send_raw_to_fd(int fd, const char *data, size_t len) {
   auto it = g_gateway_masters.find(fd);
-  auto *output = static_cast<evbuffer *>(nullptr);
-
   if (!data || len == 0 || len > g_gateway_max_packet_size ||
+      len > kGatewayAbsoluteMaxPacketSize ||
+      len > static_cast<size_t>(std::numeric_limits<uint32_t>::max()) ||
       it == g_gateway_masters.end() || !it->second || !it->second->bev ||
-      it->second->closing || !(output = bufferevent_get_output(it->second->bev)) ||
-      !gateway_append_framed_output(output, data, len)) {
+      it->second->closing) {
     g_gateway_runtime_counters.raw_writes_failed.fetch_add(1,
                                                             std::memory_order_relaxed);
+    return 0;
+  }
+  auto *output = bufferevent_get_output(it->second->bev);
+  if (!output) {
+    g_gateway_runtime_counters.raw_writes_failed.fetch_add(
+        1, std::memory_order_relaxed);
+    return 0;
+  }
+  const auto output_limit = gateway_write_buffer_limit();
+  const auto queued = evbuffer_get_length(output);
+  const auto framed_len = sizeof(uint32_t) + len;
+  if (queued > output_limit || framed_len > output_limit - queued) {
+    g_gateway_runtime_counters.raw_write_backpressure_rejected.fetch_add(
+        1, std::memory_order_relaxed);
+    g_gateway_runtime_counters.raw_writes_failed.fetch_add(
+        1, std::memory_order_relaxed);
+    return 0;
+  }
+  if (!gateway_append_framed_output(output, data, len)) {
+    g_gateway_runtime_counters.raw_writes_failed.fetch_add(
+        1, std::memory_order_relaxed);
     return 0;
   }
 
@@ -2106,7 +2226,7 @@ mapping_t *gateway_status_internal() {
   const auto backend_status = backend_runtime_status();
 
   uptime = g_gateway_started_at ? static_cast<int>(get_current_time() - g_gateway_started_at) : 0;
-  map = allocate_mapping(204);
+  map = allocate_mapping(208);
   add_mapping_pair(map, "listening", g_gateway_listener ? 1 : 0);
   add_mapping_pair(map, "gateway_event_priority_levels",
                    kBackendEventPriorityLevels);
@@ -2197,6 +2317,14 @@ mapping_t *gateway_status_internal() {
   add_mapping_pair(map, "session_fifo_depth", gateway_session_fifo_depth_total());
   add_mapping_pair(map, "session_fifo_pending_reservations",
                    gateway_session_fifo_pending_reservations_total());
+  add_mapping_pair(
+      map, "session_fifo_wire_bytes",
+      static_cast<long>(gateway_session_fifo_wire_bytes_total()));
+  add_mapping_pair(map, "session_fifo_wire_limit_bytes",
+                   static_cast<long>(gateway_write_buffer_limit()));
+  add_mapping_pair(
+      map, "session_fifo_wire_bytes_rejected",
+      static_cast<long>(gateway_session_fifo_wire_bytes_rejected_total()));
   add_mapping_pair(map, "session_fifo_enqueued", static_cast<long>(gateway_session_fifo_enqueued_total()));
   add_mapping_pair(map, "session_fifo_flushed", static_cast<long>(gateway_session_fifo_flushed_total()));
   add_mapping_pair(map, "session_fifo_rejected", static_cast<long>(gateway_session_fifo_rejected_total()));
@@ -2314,6 +2442,11 @@ mapping_t *gateway_status_internal() {
   add_mapping_pair(
       map, "gateway_output_fifo_rejected",
       static_cast<long>(g_gateway_runtime_counters.output_fifo_rejected.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_output_fifo_wire_bytes_rejected",
+      static_cast<long>(
+          g_gateway_runtime_counters.output_fifo_wire_bytes_rejected.load(
+              std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_reserved",
       static_cast<long>(g_gateway_runtime_counters.output_fifo_reserved.load(std::memory_order_relaxed)));
@@ -2472,6 +2605,12 @@ mapping_t *gateway_status_internal() {
                    static_cast<long>(g_gateway_runtime_counters.raw_writes_sent.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_raw_writes_failed",
                    static_cast<long>(g_gateway_runtime_counters.raw_writes_failed.load(std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_raw_write_backpressure_rejected",
+      static_cast<long>(g_gateway_runtime_counters.raw_write_backpressure_rejected.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_write_buffer_limit_bytes",
+                   static_cast<long>(gateway_write_buffer_limit()));
   add_mapping_pair(
       map, "gateway_master_tcp_nodelay_enabled",
       static_cast<long>(g_gateway_runtime_counters.master_tcp_nodelay_enabled.load(std::memory_order_relaxed)));

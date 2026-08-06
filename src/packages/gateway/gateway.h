@@ -84,6 +84,7 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> output_fifo_enqueued{0};
   std::atomic<uint64_t> output_fifo_flushed{0};
   std::atomic<uint64_t> output_fifo_rejected{0};
+  std::atomic<uint64_t> output_fifo_wire_bytes_rejected{0};
   std::atomic<uint64_t> output_fifo_reserved{0};
   std::atomic<uint64_t> output_fifo_filled{0};
   std::atomic<uint64_t> output_fifo_released{0};
@@ -144,6 +145,7 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> generic_future_watch_callback_failures{0};
   std::atomic<uint64_t> raw_writes_sent{0};
   std::atomic<uint64_t> raw_writes_failed{0};
+  std::atomic<uint64_t> raw_write_backpressure_rejected{0};
   std::atomic<uint64_t> master_tcp_nodelay_enabled{0};
   std::atomic<uint64_t> master_tcp_nodelay_failed{0};
   std::atomic<uint64_t> main_drain_runs{0};
@@ -277,6 +279,8 @@ struct GatewayMaster {
   bool read_dispatch_pending{false};
   bool read_dispatch_input_paused{false};
   uint8_t read_dispatch_pause_reasons{0};
+  bool write_flush_scheduled{false};
+  TickEvent *write_flush_event{nullptr};
   bool ingress_ack_pending{false};
   uint64_t ingress_ack_sequence{0};
 
@@ -363,6 +367,11 @@ struct GatewaySession {
   uint64_t output_fifo_enqueued{0};
   uint64_t output_fifo_flushed{0};
   uint64_t output_fifo_rejected{0};
+  size_t output_fifo_wire_bytes{0};
+  uint64_t output_fifo_wire_bytes_rejected{0};
+  // Zero follows the current gateway write-buffer policy. Tests and bounded
+  // embeddings may set a smaller explicit limit.
+  size_t output_fifo_max_wire_bytes{0};
   size_t output_fifo_max_depth{4096};
 };
 
@@ -444,8 +453,13 @@ long gateway_main_queue_pending_count();
 uint64_t gateway_session_fifo_enqueued_total();
 uint64_t gateway_session_fifo_flushed_total();
 uint64_t gateway_session_fifo_rejected_total();
+uint64_t gateway_session_fifo_wire_bytes_total();
+uint64_t gateway_session_fifo_wire_bytes_rejected_total();
+size_t gateway_write_buffer_limit();
 int gateway_flush_session_output_fifo_with_writer(GatewaySession *sess, GatewayOutputWriter writer);
 int gateway_flush_session_output_fifo(GatewaySession *sess);
+int gateway_flush_master_output_fifos(int master_fd, size_t budget);
+bool gateway_master_output_pending(int master_fd);
 int gateway_enqueue_session_protocol_output(GatewaySession *sess, const char *data,
                                             size_t len);
 uint64_t gateway_reserve_session_output(GatewaySession *sess);
@@ -562,7 +576,9 @@ bool gateway_append_read_bytes_for_test(GatewayMaster *master, const char *data,
                                         size_t len);
 size_t gateway_packet_size_hard_limit_for_test();
 bool gateway_set_max_packet_size_for_test(size_t value);
+size_t gateway_write_buffer_limit_for_test();
 GatewayMaster *gateway_register_master_for_test(int fd, bufferevent *bev);
+void gateway_invoke_master_write_callback_for_test(GatewayMaster *master);
 void gateway_remove_master_for_test(int fd);
 void gateway_reset_ingress_sequence_for_test();
 int gateway_append_framed_output_for_test(evbuffer *output, const char *data,

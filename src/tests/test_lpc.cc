@@ -525,6 +525,10 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_EQ(mapping_number(status, "session_fifo_contract_ready"), 1);
   ASSERT_GE(mapping_number(status, "session_fifo_depth"), 0);
   ASSERT_GE(mapping_number(status, "session_fifo_pending_reservations"), 0);
+  ASSERT_GE(mapping_number(status, "session_fifo_wire_bytes"), 0);
+  ASSERT_GE(mapping_number(status, "session_fifo_wire_limit_bytes"),
+            64 * 1024);
+  ASSERT_GE(mapping_number(status, "session_fifo_wire_bytes_rejected"), 0);
   ASSERT_GE(mapping_number(status, "session_fifo_enqueued"), 0);
   ASSERT_GE(mapping_number(status, "session_fifo_flushed"), 0);
   ASSERT_GE(mapping_number(status, "session_fifo_rejected"), 0);
@@ -542,6 +546,11 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
                            "gateway_read_dispatch_native_bytes_deferred"),
             0);
   ASSERT_GE(mapping_number(status, "gateway_read_buffer_limit_bytes"), 1028);
+  ASSERT_GE(mapping_number(status,
+                           "gateway_raw_write_backpressure_rejected"),
+            0);
+  ASSERT_GE(mapping_number(status, "gateway_write_buffer_limit_bytes"),
+            64 * 1024);
   ASSERT_EQ(mapping_number(status, "gateway_packet_size_hard_limit_bytes"),
             16 * 1024 * 1024);
   ASSERT_GE(mapping_number(status, "gateway_stale_master_frames_rejected"), 0);
@@ -580,6 +589,9 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_enqueued"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_flushed"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_rejected"), 0);
+  ASSERT_GE(mapping_number(status,
+                           "gateway_output_fifo_wire_bytes_rejected"),
+            0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_reserved"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_filled"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_released"), 0);
@@ -868,6 +880,7 @@ TEST_F(DriverTest, TestGatewayOutputReservationTimeoutReleaseUnblocksFollowingOu
   ASSERT_EQ(wire["cid"], "release-session");
   ASSERT_EQ(wire["data"], "after-release");
   ASSERT_TRUE(session.output_fifo.empty());
+  ASSERT_EQ(session.output_fifo_wire_bytes, 0u);
 }
 
 TEST_F(DriverTest, TestGatewayOrdinaryOutputQueuesExactWireEnvelope) {
@@ -883,9 +896,58 @@ TEST_F(DriverTest, TestGatewayOrdinaryOutputQueuesExactWireEnvelope) {
   ASSERT_TRUE(session.output_fifo.front().ready);
   const auto wire = nlohmann::json::parse(
       session.output_fifo.front().wire_bytes);
+  ASSERT_EQ(session.output_fifo_wire_bytes,
+            session.output_fifo.front().wire_bytes.size());
   ASSERT_EQ(wire["type"], "output");
   ASSERT_EQ(wire["cid"], "ordinary-session");
   ASSERT_EQ(wire["data"].get<std::string>(), frame);
+}
+
+TEST_F(DriverTest, TestGatewayMasterOutputBufferRejectsSlowPeerBeforeUnboundedGrowth) {
+  struct PacketSizeGuard {
+    size_t original{g_gateway_max_packet_size};
+    ~PacketSizeGuard() { g_gateway_max_packet_size = original; }
+  } packet_size_guard;
+
+  g_gateway_max_packet_size = 1024;
+  constexpr int master_fd = 1708;
+  bufferevent *pair[2] = {nullptr, nullptr};
+  ASSERT_EQ(bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, pair), 0);
+  ASSERT_NE(pair[0], nullptr);
+  ASSERT_NE(pair[1], nullptr);
+  ASSERT_NE(gateway_register_master_for_test(master_fd, pair[0]), nullptr);
+
+  const auto output_limit = gateway_write_buffer_limit_for_test();
+  const auto rejected_before =
+      g_gateway_runtime_counters.raw_write_backpressure_rejected.load(
+          std::memory_order_relaxed);
+  const std::string payload(128, 'x');
+  size_t accepted = 0;
+  while (gateway_send_raw_to_fd(master_fd, payload.data(), payload.size())) {
+    accepted++;
+    ASSERT_LE(evbuffer_get_length(bufferevent_get_output(pair[0])),
+              output_limit);
+  }
+
+  ASSERT_GT(accepted, 0u);
+  ASSERT_LT(evbuffer_get_length(bufferevent_get_output(pair[0])),
+            output_limit + payload.size() + sizeof(uint32_t));
+  ASSERT_EQ(
+      g_gateway_runtime_counters.raw_write_backpressure_rejected.load(
+          std::memory_order_relaxed),
+      rejected_before + 1);
+  ASSERT_EQ(gateway_send_raw_to_fd(master_fd, nullptr, payload.size()), 0);
+  ASSERT_EQ(gateway_send_raw_to_fd(master_fd, payload.data(),
+                                   g_gateway_max_packet_size + 1),
+            0);
+  ASSERT_EQ(
+      g_gateway_runtime_counters.raw_write_backpressure_rejected.load(
+          std::memory_order_relaxed),
+      rejected_before + 1);
+
+  gateway_remove_master_for_test(master_fd);
+  pair[0] = nullptr;
+  bufferevent_free(pair[1]);
 }
 
 TEST_F(DriverTest, TestGatewayWireFactoryRejectsOversizeBeforeFifoMutation) {
@@ -927,6 +989,54 @@ TEST_F(DriverTest, TestGatewayWireFactoryRejectsOversizeBeforeFifoMutation) {
 }
 
 TEST_F(DriverTest,
+       TestGatewaySessionFifoWireByteLimitRejectsWithoutQueueMutation) {
+  const auto rejected_before =
+      g_gateway_runtime_counters.output_fifo_wire_bytes_rejected.load(
+          std::memory_order_relaxed);
+
+  GatewaySession ordinary;
+  ordinary.session_id = "wire-byte-limit-ordinary";
+  ordinary.master_fd = -1;
+  const auto ordinary_wire = gateway_encode_output_envelope_for_test(
+      ordinary.session_id, "first", 5);
+  ordinary.output_fifo_max_wire_bytes = ordinary_wire.size();
+  ASSERT_EQ(gateway_enqueue_session_protocol_output(&ordinary, "first", 5), 1);
+  ASSERT_EQ(ordinary.output_fifo_wire_bytes, ordinary_wire.size());
+  ASSERT_EQ(gateway_enqueue_session_protocol_output(&ordinary, "second", 6),
+            0);
+  ASSERT_EQ(ordinary.output_fifo.size(), 1u);
+  ASSERT_EQ(ordinary.output_fifo_wire_bytes, ordinary_wire.size());
+  ASSERT_EQ(ordinary.output_fifo_wire_bytes_rejected, 1u);
+
+  GatewaySession reserved;
+  reserved.session_id = "wire-byte-limit-reserved";
+  reserved.master_fd = -1;
+  const auto retained_wire = gateway_encode_output_envelope_for_test(
+      reserved.session_id, "retained", 8);
+  reserved.output_fifo_max_wire_bytes = retained_wire.size();
+  ASSERT_EQ(gateway_enqueue_session_protocol_output(
+                &reserved, "retained", 8),
+            1);
+  const auto reservation_id = gateway_reserve_session_output(&reserved);
+  ASSERT_GT(reservation_id, 0u);
+  reserved.master_fd = 77;
+  ASSERT_EQ(gateway_fill_session_protocol_output_with_writer(
+                &reserved, reservation_id, "blocked", 7,
+                [](int, const char *, size_t) -> int { return 1; }),
+            0);
+  ASSERT_EQ(reserved.output_fifo.size(), 2u);
+  ASSERT_TRUE(reserved.output_fifo.front().ready);
+  ASSERT_FALSE(reserved.output_fifo.back().ready);
+  ASSERT_TRUE(reserved.output_fifo.back().wire_bytes.empty());
+  ASSERT_EQ(reserved.output_fifo_wire_bytes, retained_wire.size());
+  ASSERT_EQ(reserved.output_fifo_wire_bytes_rejected, 1u);
+  ASSERT_EQ(
+      g_gateway_runtime_counters.output_fifo_wire_bytes_rejected.load(
+          std::memory_order_relaxed),
+      rejected_before + 2);
+}
+
+TEST_F(DriverTest,
        TestGatewayFlushDropsReadyWireMadeOversizeByLimitReduction) {
   struct PacketSizeGuard {
     size_t original{g_gateway_max_packet_size};
@@ -962,6 +1072,9 @@ TEST_F(DriverTest,
   ASSERT_EQ(session.output_fifo.front().reservation_id, 0u);
   ASSERT_GT(session.output_fifo.front().wire_bytes.size(), 1024u);
   ASSERT_LT(session.output_fifo.back().wire_bytes.size(), 1024u);
+  ASSERT_EQ(session.output_fifo_wire_bytes,
+            session.output_fifo.front().wire_bytes.size() +
+                session.output_fifo.back().wire_bytes.size());
   const auto oversize_dropped_before =
       g_gateway_runtime_counters.output_fifo_oversize_dropped.load(
           std::memory_order_relaxed);
@@ -976,6 +1089,7 @@ TEST_F(DriverTest,
   session.master_fd = 77;
   ASSERT_EQ(gateway_flush_session_output_fifo_with_writer(&session, writer), 1);
   ASSERT_TRUE(session.output_fifo.empty());
+  ASSERT_EQ(session.output_fifo_wire_bytes, 0u);
   ASSERT_EQ(attempted_lengths.size(), 1u);
   ASSERT_EQ(writes.size(), 1u);
   const auto successor = nlohmann::json::parse(writes.front());
@@ -1032,6 +1146,9 @@ TEST_F(DriverTest,
   ASSERT_EQ(session.output_fifo.front().reservation_id, reservation_id);
   ASSERT_GT(session.output_fifo.front().wire_bytes.size(), 1024u);
   ASSERT_LT(session.output_fifo.back().wire_bytes.size(), 1024u);
+  ASSERT_EQ(session.output_fifo_wire_bytes,
+            session.output_fifo.front().wire_bytes.size() +
+                session.output_fifo.back().wire_bytes.size());
   const auto oversize_dropped_before =
       g_gateway_runtime_counters.output_fifo_oversize_dropped.load(
           std::memory_order_relaxed);
@@ -1046,6 +1163,7 @@ TEST_F(DriverTest,
   session.master_fd = 78;
   ASSERT_EQ(gateway_flush_session_output_fifo_with_writer(&session, writer), 1);
   ASSERT_TRUE(session.output_fifo.empty());
+  ASSERT_EQ(session.output_fifo_wire_bytes, 0u);
   ASSERT_EQ(attempted_lengths.size(), 1u);
   ASSERT_EQ(writes.size(), 1u);
   const auto successor = nlohmann::json::parse(writes.front());
@@ -1188,6 +1306,52 @@ TEST_F(DriverTest, TestGatewayProjectedWireBatchRejectsOversizeAtomically) {
   ASSERT_TRUE(second.output_fifo.front().wire_bytes.empty());
 }
 
+TEST_F(DriverTest,
+       TestGatewayProjectedWireBatchRejectsWireByteLimitAtomically) {
+  static std::vector<std::string> writes;
+  writes.clear();
+  auto writer = [](int, const char *data, size_t len) -> int {
+    writes.emplace_back(data, len);
+    return 1;
+  };
+
+  GatewaySession first;
+  GatewaySession second;
+  first.session_id = "projected-byte-first";
+  second.session_id = "projected-byte-second";
+  first.master_fd = -1;
+  second.master_fd = 82;
+  const auto retained_wire = gateway_encode_output_envelope_for_test(
+      first.session_id, "retained", 8);
+  first.output_fifo_max_wire_bytes = retained_wire.size();
+  ASSERT_EQ(gateway_enqueue_session_protocol_output(
+                &first, "retained", 8),
+            1);
+  const auto first_id = gateway_reserve_session_output(&first);
+  const auto second_id = gateway_reserve_session_output(&second);
+  ASSERT_GT(first_id, 0u);
+  ASSERT_GT(second_id, 0u);
+  first.master_fd = 81;
+  const auto first_wire = gateway_encode_output_envelope_for_test(
+      first.session_id, "first", 5);
+  const auto second_wire = gateway_encode_output_envelope_for_test(
+      second.session_id, "second", 6);
+
+  ASSERT_FALSE(gateway_fill_projected_wires_for_test(
+      {&first, &second}, {first_id, second_id}, {first_wire, second_wire},
+      writer));
+  ASSERT_TRUE(writes.empty());
+  ASSERT_EQ(first.output_fifo.size(), 2u);
+  ASSERT_TRUE(first.output_fifo.front().ready);
+  ASSERT_FALSE(first.output_fifo.back().ready);
+  ASSERT_EQ(first.output_fifo_wire_bytes, retained_wire.size());
+  ASSERT_EQ(first.output_fifo_wire_bytes_rejected, 1u);
+  ASSERT_EQ(second.output_fifo.size(), 1u);
+  ASSERT_FALSE(second.output_fifo.front().ready);
+  ASSERT_EQ(second.output_fifo_wire_bytes, 0u);
+  ASSERT_EQ(second.output_fifo_wire_bytes_rejected, 0u);
+}
+
 TEST_F(DriverTest, TestGatewaySessionSendKeepsHistoricalMixedPayloadSemantics) {
   const auto assert_payload = [](const std::string &payload_json,
                                  const nlohmann::json &expected) {
@@ -1237,6 +1401,8 @@ TEST_F(DriverTest, TestGatewayWriterFailureRetainsOneReadyFrameForExactRetry) {
   ASSERT_EQ(session.output_fifo.size(), 1u);
   ASSERT_TRUE(session.output_fifo.front().ready);
   ASSERT_EQ(session.output_fifo.front().reservation_id, reservation_id);
+  ASSERT_EQ(session.output_fifo_wire_bytes,
+            session.output_fifo.front().wire_bytes.size());
   ASSERT_EQ(g_gateway_runtime_counters.output_fifo_writer_failures.load(
                 std::memory_order_relaxed),
             failures_before + 1);
@@ -1248,6 +1414,7 @@ TEST_F(DriverTest, TestGatewayWriterFailureRetainsOneReadyFrameForExactRetry) {
                 &session, succeeding_writer),
             0);
   ASSERT_TRUE(session.output_fifo.empty());
+  ASSERT_EQ(session.output_fifo_wire_bytes, 0u);
   ASSERT_EQ(writes.size(), 1u);
   const auto wire = nlohmann::json::parse(writes.front());
   ASSERT_EQ(wire["type"], "output");
@@ -14032,6 +14199,118 @@ object_t *create_gateway_session_for_test(const char *session_id, const char *lo
   safe_apply("reset_test_login_ob", master_ob, 0, ORIGIN_DRIVER);
   free_svalue(&data, "create_gateway_session_for_test");
   return ob;
+}
+
+TEST_F(DriverTest, TestGatewayMasterWriteCallbackRetriesBackpressuredSessionFifo) {
+  struct PacketSizeGuard {
+    size_t original{g_gateway_max_packet_size};
+    ~PacketSizeGuard() { g_gateway_max_packet_size = original; }
+  } packet_size_guard;
+
+  g_gateway_max_packet_size = 1024;
+  constexpr int master_fd = 1709;
+  const char *session_id = "gw-test-write-backpressure-retry";
+  bufferevent *pair[2] = {nullptr, nullptr};
+  ASSERT_EQ(bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, pair), 0);
+  ASSERT_NE(pair[0], nullptr);
+  ASSERT_NE(pair[1], nullptr);
+  ASSERT_NE(gateway_register_master_for_test(master_fd, pair[0]), nullptr);
+  auto *ob = create_gateway_session_for_test(
+      session_id, "/clone/gateway_login_example", master_fd);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob,
+          "TestGatewayMasterWriteCallbackRetriesBackpressuredSessionFifo");
+  auto *sess = gateway_find_session(session_id);
+  ASSERT_NE(sess, nullptr);
+  const std::string payload(512, 'x');
+
+  for (int attempt = 0; attempt < 1024 && sess->output_fifo.empty(); ++attempt) {
+    ASSERT_EQ(gateway_enqueue_session_protocol_output(
+                  sess, payload.data(), payload.size()),
+              1);
+  }
+  ASSERT_FALSE(sess->output_fifo.empty());
+  ASSERT_TRUE(sess->output_fifo.front().ready);
+  ASSERT_LE(evbuffer_get_length(bufferevent_get_output(pair[0])),
+            gateway_write_buffer_limit_for_test());
+
+  ASSERT_EQ(bufferevent_enable(pair[0], EV_WRITE), 0);
+  ASSERT_EQ(bufferevent_enable(pair[1], EV_READ), 0);
+  auto *peer_input = bufferevent_get_input(pair[1]);
+  ASSERT_NE(peer_input, nullptr);
+  for (int attempt = 0; attempt < 256 && !sess->output_fifo.empty(); ++attempt) {
+    event_base_loop(g_event_base, EVLOOP_ONCE | EVLOOP_NONBLOCK);
+    const auto received = evbuffer_get_length(peer_input);
+    if (received > 0) {
+      ASSERT_EQ(evbuffer_drain(peer_input, received), 0);
+    }
+  }
+  ASSERT_TRUE(sess->output_fifo.empty());
+
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(
+      &ob, "TestGatewayMasterWriteCallbackRetriesBackpressuredSessionFifo");
+  gateway_remove_master_for_test(master_fd);
+  pair[0] = nullptr;
+  bufferevent_free(pair[1]);
+}
+
+TEST_F(DriverTest,
+       TestGatewayMasterWriteCallbackDoesNotRescheduleWithoutProgress) {
+  struct PacketSizeGuard {
+    size_t original{g_gateway_max_packet_size};
+    ~PacketSizeGuard() { g_gateway_max_packet_size = original; }
+  } packet_size_guard;
+
+  g_gateway_max_packet_size = 1024;
+  constexpr int master_fd = 1710;
+  const char *session_id = "gw-test-write-no-progress";
+  bufferevent *pair[2] = {nullptr, nullptr};
+  ASSERT_EQ(bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, pair), 0);
+  ASSERT_NE(pair[0], nullptr);
+  ASSERT_NE(pair[1], nullptr);
+  auto *master = gateway_register_master_for_test(master_fd, pair[0]);
+  ASSERT_NE(master, nullptr);
+  auto *output = bufferevent_get_output(pair[0]);
+  ASSERT_NE(output, nullptr);
+  const auto output_limit = gateway_write_buffer_limit_for_test();
+  ASSERT_GT(output_limit, 32u);
+  const std::string filler(output_limit - 32, 'f');
+  ASSERT_EQ(evbuffer_add(output, filler.data(), filler.size()), 0);
+
+  auto *ob = create_gateway_session_for_test(
+      session_id, "/clone/gateway_login_example", master_fd);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob,
+          "TestGatewayMasterWriteCallbackDoesNotRescheduleWithoutProgress");
+  auto *sess = gateway_find_session(session_id);
+  ASSERT_NE(sess, nullptr);
+  const std::string payload(512, 'x');
+  ASSERT_EQ(gateway_enqueue_session_protocol_output(
+                sess, payload.data(), payload.size()),
+            1);
+  ASSERT_EQ(sess->output_fifo.size(), 1u);
+  ASSERT_TRUE(sess->output_fifo.front().ready);
+  ASSERT_FALSE(master->write_flush_scheduled);
+  const auto scheduled_before = walltime_event_queue_size_for_test();
+
+  gateway_invoke_master_write_callback_for_test(master);
+
+  ASSERT_EQ(sess->output_fifo.size(), 1u);
+  ASSERT_FALSE(master->write_flush_scheduled);
+  ASSERT_EQ(walltime_event_queue_size_for_test(), scheduled_before);
+
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(
+      &ob,
+      "TestGatewayMasterWriteCallbackDoesNotRescheduleWithoutProgress");
+  gateway_remove_master_for_test(master_fd);
+  pair[0] = nullptr;
+  bufferevent_free(pair[1]);
 }
 
 TEST_F(DriverTest, TestGatewayProbeSuppressionIsSessionScopedAndOneShot) {

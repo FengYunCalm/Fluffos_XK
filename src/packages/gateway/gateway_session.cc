@@ -380,6 +380,7 @@ class GatewayWireOutput {
   GatewayWireOutput &operator=(const GatewayWireOutput &) = delete;
 
   bool empty() const { return wire_bytes_.empty(); }
+  size_t size() const { return wire_bytes_.size(); }
   bool bound_to(const GatewaySession *sess) const {
     return sess && !session_id_.empty() && session_id_ == sess->session_id;
   }
@@ -394,6 +395,45 @@ class GatewayWireOutput {
 
   friend class GatewayWireOutputFactory;
 };
+
+size_t gateway_session_output_fifo_wire_limit(const GatewaySession *sess) {
+  return sess && sess->output_fifo_max_wire_bytes > 0
+      ? sess->output_fifo_max_wire_bytes
+      : gateway_write_buffer_limit();
+}
+
+bool gateway_session_output_fifo_can_add_wire_bytes(
+    const GatewaySession *sess, size_t wire_bytes) {
+  if (!sess) {
+    return false;
+  }
+  const auto limit = gateway_session_output_fifo_wire_limit(sess);
+  return sess->output_fifo_wire_bytes <= limit &&
+      wire_bytes <= limit - sess->output_fifo_wire_bytes;
+}
+
+void gateway_record_session_output_fifo_wire_rejection(GatewaySession *sess) {
+  if (!sess) {
+    return;
+  }
+  sess->output_fifo_rejected++;
+  sess->output_fifo_wire_bytes_rejected++;
+  g_gateway_runtime_counters.output_fifo_rejected.fetch_add(
+      1, std::memory_order_relaxed);
+  g_gateway_runtime_counters.output_fifo_wire_bytes_rejected.fetch_add(
+      1, std::memory_order_relaxed);
+}
+
+void gateway_remove_session_output_fifo_wire_bytes(GatewaySession *sess,
+                                                   size_t wire_bytes) {
+  if (!sess) {
+    return;
+  }
+  sess->output_fifo_wire_bytes =
+      wire_bytes >= sess->output_fifo_wire_bytes
+          ? 0
+          : sess->output_fifo_wire_bytes - wire_bytes;
+}
 
 class GatewayWireOutputFactory {
  public:
@@ -1021,7 +1061,11 @@ bool gateway_session_has_pending_reservation(GatewaySession *sess, uint64_t rese
 }
 
 void gateway_discard_session_output_fifo(GatewaySession *sess) {
-  if (!sess || sess->output_fifo.empty()) {
+  if (!sess) {
+    return;
+  }
+  if (sess->output_fifo.empty()) {
+    sess->output_fifo_wire_bytes = 0;
     return;
   }
   uint64_t ready = 0;
@@ -1038,6 +1082,7 @@ void gateway_discard_session_output_fifo(GatewaySession *sess) {
   g_gateway_runtime_counters.output_fifo_destroyed_pending.fetch_add(
       pending, std::memory_order_relaxed);
   sess->output_fifo.clear();
+  sess->output_fifo_wire_bytes = 0;
 }
 
 std::string gateway_future_mapping_state(mapping_t *future) {
@@ -2408,6 +2453,22 @@ uint64_t gateway_session_fifo_rejected_total() {
   return total;
 }
 
+uint64_t gateway_session_fifo_wire_bytes_total() {
+  uint64_t total = 0;
+  for (const auto &entry : g_gateway_sessions) {
+    total += entry.second->output_fifo_wire_bytes;
+  }
+  return total;
+}
+
+uint64_t gateway_session_fifo_wire_bytes_rejected_total() {
+  uint64_t total = 0;
+  for (const auto &entry : g_gateway_sessions) {
+    total += entry.second->output_fifo_wire_bytes_rejected;
+  }
+  return total;
+}
+
 int gateway_flush_session_output_fifo_with_writer(GatewaySession *sess, GatewayOutputWriter writer) {
   int flushed = 0;
   if (!sess || sess->master_fd < 0 || !writer) {
@@ -2418,7 +2479,9 @@ int gateway_flush_session_output_fifo_with_writer(GatewaySession *sess, GatewayO
     if (!entry.ready) {
       break;
     }
+    const auto wire_bytes = entry.wire_bytes.size();
     if (entry.wire_bytes.size() > g_gateway_max_packet_size) {
+      gateway_remove_session_output_fifo_wire_bytes(sess, wire_bytes);
       sess->output_fifo.pop_front();
       g_gateway_runtime_counters.output_fifo_oversize_dropped.fetch_add(
           1, std::memory_order_relaxed);
@@ -2429,6 +2492,7 @@ int gateway_flush_session_output_fifo_with_writer(GatewaySession *sess, GatewayO
           1, std::memory_order_relaxed);
       break;
     }
+    gateway_remove_session_output_fifo_wire_bytes(sess, wire_bytes);
     sess->output_fifo.pop_front();
     sess->output_fifo_flushed++;
     g_gateway_runtime_counters.output_fifo_flushed.fetch_add(1, std::memory_order_relaxed);
@@ -2439,6 +2503,43 @@ int gateway_flush_session_output_fifo_with_writer(GatewaySession *sess, GatewayO
 
 int gateway_flush_session_output_fifo(GatewaySession *sess) {
   return gateway_flush_session_output_fifo_with_writer(sess, gateway_send_raw_to_fd);
+}
+
+int gateway_flush_master_output_fifos(int master_fd, size_t budget) {
+  if (master_fd < 0 || budget == 0) {
+    return 0;
+  }
+  std::vector<GatewaySession *> sessions;
+  sessions.reserve(std::min(budget, g_gateway_sessions.size()));
+  for (const auto &entry : g_gateway_sessions) {
+    if (entry.second && entry.second->master_fd == master_fd &&
+        !entry.second->output_fifo.empty() &&
+        entry.second->output_fifo.front().ready) {
+      sessions.push_back(entry.second.get());
+      if (sessions.size() >= budget) {
+        break;
+      }
+    }
+  }
+  int flushed = 0;
+  for (auto *sess : sessions) {
+    flushed += gateway_flush_session_output_fifo(sess);
+  }
+  return flushed;
+}
+
+bool gateway_master_output_pending(int master_fd) {
+  if (master_fd < 0) {
+    return false;
+  }
+  for (const auto &entry : g_gateway_sessions) {
+    if (entry.second && entry.second->master_fd == master_fd &&
+        !entry.second->output_fifo.empty() &&
+        entry.second->output_fifo.front().ready) {
+      return true;
+    }
+  }
+  return false;
 }
 
 namespace {
@@ -2452,9 +2553,15 @@ int gateway_enqueue_session_wire_output(GatewaySession *sess,
     g_gateway_runtime_counters.output_fifo_rejected.fetch_add(1, std::memory_order_relaxed);
     return 0;
   }
+  const auto wire_bytes = wire_output.size();
+  if (!gateway_session_output_fifo_can_add_wire_bytes(sess, wire_bytes)) {
+    gateway_record_session_output_fifo_wire_rejection(sess);
+    return 0;
+  }
   GatewayOutputEntry entry;
   entry.wire_bytes = std::move(wire_output).release();
   sess->output_fifo.push_back(std::move(entry));
+  sess->output_fifo_wire_bytes += wire_bytes;
   sess->output_fifo_enqueued++;
   g_gateway_runtime_counters.output_fifo_enqueued.fetch_add(1, std::memory_order_relaxed);
   sess->last_active = get_current_time();
@@ -4132,13 +4239,19 @@ bool gateway_stage_session_wire_output(GatewaySession *sess,
       !wire_output.bound_to(sess)) {
     return false;
   }
+  const auto wire_bytes = wire_output.size();
   for (auto it = sess->output_fifo.begin(); it != sess->output_fifo.end(); ++it) {
     auto &entry = *it;
     if (entry.reservation_id != reservation_id || entry.ready) {
       continue;
     }
+    if (!gateway_session_output_fifo_can_add_wire_bytes(sess, wire_bytes)) {
+      gateway_record_session_output_fifo_wire_rejection(sess);
+      return false;
+    }
     entry.wire_bytes = std::move(wire_output).release();
     entry.ready = true;
+    sess->output_fifo_wire_bytes += wire_bytes;
     g_gateway_runtime_counters.output_fifo_filled.fetch_add(1, std::memory_order_relaxed);
     if (it != sess->output_fifo.begin() && !sess->output_fifo.front().ready) {
       auto preceding_count = static_cast<uint64_t>(std::distance(sess->output_fifo.begin(), it));
@@ -4167,10 +4280,12 @@ bool gateway_stage_session_wire_outputs(
     GatewaySession *session{nullptr};
     GatewayOutputEntry *entry{nullptr};
     uint64_t preceding_count{0};
+    size_t wire_bytes{0};
   };
   const auto count = sessions.size();
   std::vector<PendingStage> stages;
   std::unordered_set<uint64_t> unique_reservations;
+  std::unordered_map<GatewaySession *, size_t> staged_wire_bytes;
   if (!wire_outputs || count == 0 || reservation_ids.size() != count ||
       wire_outputs->size() != count) {
     return false;
@@ -4178,6 +4293,7 @@ bool gateway_stage_session_wire_outputs(
   try {
     stages.reserve(count);
     unique_reservations.reserve(count);
+    staged_wire_bytes.reserve(count);
     for (size_t index = 0; index < count; ++index) {
       auto *sess = sessions[index];
       const auto reservation_id = reservation_ids[index];
@@ -4190,6 +4306,13 @@ bool gateway_stage_session_wire_outputs(
       if (!entry) {
         return false;
       }
+      const auto wire_bytes = (*wire_outputs)[index].size();
+      auto &session_staged_wire_bytes = staged_wire_bytes[sess];
+      if (wire_bytes > std::numeric_limits<size_t>::max() -
+                           session_staged_wire_bytes) {
+        return false;
+      }
+      session_staged_wire_bytes += wire_bytes;
       uint64_t preceding_count = 0;
       for (auto it = sess->output_fifo.begin(); it != sess->output_fifo.end();
            ++it) {
@@ -4198,9 +4321,21 @@ bool gateway_stage_session_wire_outputs(
         }
         ++preceding_count;
       }
-      stages.push_back({sess, entry, preceding_count});
+      stages.push_back({sess, entry, preceding_count, wire_bytes});
     }
   } catch (const std::exception &) {
+    return false;
+  }
+
+  bool wire_capacity_rejected = false;
+  for (const auto &[sess, wire_bytes] : staged_wire_bytes) {
+    if (gateway_session_output_fifo_can_add_wire_bytes(sess, wire_bytes)) {
+      continue;
+    }
+    gateway_record_session_output_fifo_wire_rejection(sess);
+    wire_capacity_rejected = true;
+  }
+  if (wire_capacity_rejected) {
     return false;
   }
 
@@ -4210,6 +4345,7 @@ bool gateway_stage_session_wire_outputs(
     auto &stage = stages[index];
     stage.entry->wire_bytes = std::move((*wire_outputs)[index]).release();
     stage.entry->ready = true;
+    stage.session->output_fifo_wire_bytes += stage.wire_bytes;
     g_gateway_runtime_counters.output_fifo_filled.fetch_add(
         1, std::memory_order_relaxed);
     if (stage.preceding_count > 0 &&
@@ -4378,6 +4514,8 @@ bool gateway_force_remove_session_output(GatewaySession *sess,
       continue;
     }
     if (it->ready) {
+      gateway_remove_session_output_fifo_wire_bytes(sess,
+                                                    it->wire_bytes.size());
       g_gateway_runtime_counters.output_fifo_destroyed_ready.fetch_add(
           1, std::memory_order_relaxed);
     } else {
@@ -6978,7 +7116,7 @@ void f_gateway_session_info() {
     return;
   }
 
-  map = allocate_mapping(16);
+  map = allocate_mapping(20);
   add_mapping_string(map, "session_id", sess->session_id.c_str());
   add_mapping_string(map, "ip", sess->real_ip.c_str());
   add_mapping_pair(map, "port", sess->real_port);
@@ -6998,6 +7136,14 @@ void f_gateway_session_info() {
     }
   }
   add_mapping_pair(map, "session_fifo_pending_reservations", pending_reservations);
+  add_mapping_pair(map, "session_fifo_wire_bytes",
+                   static_cast<long>(sess->output_fifo_wire_bytes));
+  add_mapping_pair(
+      map, "session_fifo_wire_limit_bytes",
+      static_cast<long>(gateway_session_output_fifo_wire_limit(sess)));
+  add_mapping_pair(
+      map, "session_fifo_wire_bytes_rejected",
+      static_cast<long>(sess->output_fifo_wire_bytes_rejected));
   add_mapping_pair(map, "session_fifo_max_depth", static_cast<long>(sess->output_fifo_max_depth));
   add_mapping_pair(map, "session_fifo_enqueued", static_cast<long>(sess->output_fifo_enqueued));
   add_mapping_pair(map, "session_fifo_flushed", static_cast<long>(sess->output_fifo_flushed));
