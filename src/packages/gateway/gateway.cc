@@ -27,6 +27,7 @@
 #include <chrono>
 #include <cstring>
 #include <ctime>
+#include <limits>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -47,6 +48,7 @@ constexpr int kGatewayDefaultHeartbeatInterval = 15;
 constexpr int kGatewayDefaultHeartbeatTimeout = 45;
 constexpr int kGatewayDefaultReconnectGrace = 60;
 constexpr int kGatewayMaxJsonDepth = 20;
+constexpr int kGatewayMaxWireJsonDepth = kGatewayMaxJsonDepth + 4;
 // One admitted gameplay frame can execute a tens-of-milliseconds LPC command
 // and reserve output for hundreds of sessions. Yield after every complete
 // frame so buffered ingress cannot multiply one command tail into a multi-
@@ -119,6 +121,122 @@ int gateway_start_heartbeat_timer();
 bool gateway_object_valid_local(object_t *ob) {
   return ob && !(ob->flags & O_DESTRUCTED) && ob->obname && ob->obname[0] != '\0';
 }
+
+bool gateway_json_text_within_depth_limit(const char *data, size_t len) {
+  size_t depth = 0;
+  bool in_string = false;
+  bool escaped = false;
+
+  if (!data) {
+    return false;
+  }
+  for (size_t i = 0; i < len; ++i) {
+    const auto byte = static_cast<unsigned char>(data[i]);
+    if (in_string) {
+      if (escaped) {
+        escaped = false;
+      } else if (byte == '\\') {
+        escaped = true;
+      } else if (byte == '"') {
+        in_string = false;
+      }
+      continue;
+    }
+    if (byte == '"') {
+      in_string = true;
+      continue;
+    }
+    if (byte == '{' || byte == '[') {
+      depth++;
+      if (depth > static_cast<size_t>(kGatewayMaxWireJsonDepth)) {
+        return false;
+      }
+    } else if ((byte == '}' || byte == ']') && depth > 0) {
+      depth--;
+    }
+  }
+  return true;
+}
+
+bool gateway_parse_inbound_json(const char *data, size_t len, nlohmann::json *out) {
+  if (!out || !gateway_json_text_within_depth_limit(data, len)) {
+    g_gateway_runtime_counters.json_frames_rejected.fetch_add(
+        1, std::memory_order_relaxed);
+    return false;
+  }
+  try {
+    *out = nlohmann::json::parse(data, data + len);
+    return true;
+  } catch (const nlohmann::json::exception &) {
+    g_gateway_runtime_counters.json_frames_rejected.fetch_add(
+        1, std::memory_order_relaxed);
+    return false;
+  }
+}
+
+bool gateway_json_string_is_lpc_safe(const std::string &value) {
+  const auto max_string_length = CONFIG_INT(__MAX_STRING_LENGTH__);
+  return max_string_length > 0 &&
+         value.size() <= static_cast<size_t>(max_string_length) &&
+         value.find('\0') == std::string::npos;
+}
+
+bool gateway_json_value_is_lpc_safe(const nlohmann::json &value, int depth) {
+  if (depth > kGatewayMaxJsonDepth) {
+    return false;
+  }
+  if (value.is_object()) {
+    const auto max_array_size = CONFIG_INT(__MAX_ARRAY_SIZE__);
+    const auto max_mapping_size = CONFIG_INT(__MAX_MAPPING_SIZE__);
+    if (max_array_size < 0 || max_mapping_size < 0 ||
+        value.size() > static_cast<size_t>(max_array_size) ||
+        value.size() > static_cast<size_t>(max_mapping_size) ||
+        value.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+      return false;
+    }
+    for (const auto &entry : value.items()) {
+      if (!gateway_json_string_is_lpc_safe(entry.key()) ||
+          !gateway_json_value_is_lpc_safe(entry.value(), depth + 1)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (value.is_array()) {
+    const auto max_array_size = CONFIG_INT(__MAX_ARRAY_SIZE__);
+    if (max_array_size < 0 ||
+        value.size() > static_cast<size_t>(max_array_size) ||
+        value.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+      return false;
+    }
+    for (const auto &item : value) {
+      if (!gateway_json_value_is_lpc_safe(item, depth + 1)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (value.is_string()) {
+    return gateway_json_string_is_lpc_safe(
+        value.get_ref<const std::string &>());
+  }
+  if (value.is_number_unsigned()) {
+    return value.get<std::uint64_t>() <=
+           static_cast<std::uint64_t>(std::numeric_limits<LPC_INT>::max());
+  }
+  return value.is_null() || value.is_boolean() || value.is_number_integer() ||
+         value.is_number_float();
+}
+
+struct GatewayArrayDeleter {
+  void operator()(array_t *value) const {
+    if (value) {
+      free_array(value);
+    }
+  }
+};
+
+using GatewayArrayPtr = std::unique_ptr<array_t, GatewayArrayDeleter>;
 
 uint64_t gateway_now_ns() {
   return static_cast<uint64_t>(
@@ -454,33 +572,33 @@ svalue_t json_to_gateway_svalue(const nlohmann::json &value) {
 
   if (value.is_object()) {
     auto count = static_cast<int>(value.size());
-    array_t *keys = allocate_array(count);
-    array_t *values = allocate_array(count);
+    GatewayArrayPtr keys(allocate_array(count));
+    GatewayArrayPtr values(allocate_array(count));
     int i = 0;
     for (const auto &entry : value.items()) {
-      keys->item[i].type = T_STRING;
-      keys->item[i].subtype = STRING_MALLOC;
-      keys->item[i].u.string = string_copy(entry.key().c_str(), "gateway_json_key");
+      keys.get()->item[i].type = T_STRING;
+      keys.get()->item[i].subtype = STRING_MALLOC;
+      keys.get()->item[i].u.string =
+          string_copy(entry.key().c_str(), "gateway_json_key");
       auto item = json_to_gateway_svalue(entry.value());
-      assign_svalue_no_free(&values->item[i], &item);
+      assign_svalue_no_free(&values.get()->item[i], &item);
       free_svalue(&item, "gateway_json_value");
       i++;
     }
     sv.type = T_MAPPING;
-    sv.u.map = mkmapping(keys, values);
-    free_array(keys);
-    free_array(values);
+    sv.u.map = mkmapping(keys.get(), values.get());
     return sv;
   }
   if (value.is_array()) {
     auto count = static_cast<int>(value.size());
+    GatewayArrayPtr values(allocate_array(count));
     sv.type = T_ARRAY;
-    sv.u.arr = allocate_array(count);
     for (int i = 0; i < count; i++) {
       auto item = json_to_gateway_svalue(value[i]);
-      assign_svalue_no_free(&sv.u.arr->item[i], &item);
+      assign_svalue_no_free(&values.get()->item[i], &item);
       free_svalue(&item, "gateway_json_array_item");
     }
+    sv.u.arr = values.release();
     return sv;
   }
   if (value.is_string()) {
@@ -494,14 +612,14 @@ svalue_t json_to_gateway_svalue(const nlohmann::json &value) {
     sv.u.number = value.get<bool>() ? 1 : 0;
     return sv;
   }
-  if (value.is_number_integer()) {
-    sv.type = T_NUMBER;
-    sv.u.number = value.get<LPC_INT>();
-    return sv;
-  }
   if (value.is_number_unsigned()) {
     sv.type = T_NUMBER;
     sv.u.number = static_cast<LPC_INT>(value.get<std::uint64_t>());
+    return sv;
+  }
+  if (value.is_number_integer()) {
+    sv.type = T_NUMBER;
+    sv.u.number = value.get<LPC_INT>();
     return sv;
   }
   if (value.is_number_float()) {
@@ -513,6 +631,16 @@ svalue_t json_to_gateway_svalue(const nlohmann::json &value) {
   sv.type = T_NUMBER;
   sv.u.number = 0;
   return sv;
+}
+
+bool gateway_json_to_svalue(const nlohmann::json &value, svalue_t *out) {
+  if (!out || !gateway_json_value_is_lpc_safe(value, 0)) {
+    g_gateway_runtime_counters.json_frames_rejected.fetch_add(
+        1, std::memory_order_relaxed);
+    return false;
+  }
+  *out = json_to_gateway_svalue(value);
+  return true;
 }
 
 bool gateway_svalue_to_json_impl(const svalue_t *sv, nlohmann::json *out, int depth) {
@@ -795,7 +923,9 @@ void gateway_handle_login(int fd, const nlohmann::json &msg) {
     if (data.contains("port") && data["port"].is_number_integer()) {
       port = data["port"].get<int>();
     }
-    data_sv = json_to_gateway_svalue(data);
+    if (!gateway_json_to_svalue(data, &data_sv)) {
+      return;
+    }
     has_data = true;
   }
 
@@ -886,17 +1016,23 @@ void gateway_handle_data(int fd, const nlohmann::json &msg) {
     gateway_queue_ingress_ack(fd);
     return;
   }
-  sess->last_active = get_current_time();
-  if (user->interactive) {
-    user->interactive->last_time = sess->last_active;
-  }
   {
     auto decode_started_at = gateway_now_ns();
-    data_sv = json_to_gateway_svalue(msg["data"]);
+    const auto decoded = gateway_json_to_svalue(msg["data"], &data_sv);
     gateway_record_latency(g_gateway_runtime_counters.receive_decode_ns_total,
                            g_gateway_runtime_counters.receive_decode_ns_max,
                            g_gateway_runtime_counters.receive_decode_samples,
                            gateway_now_ns() - decode_started_at);
+    if (!decoded) {
+      g_gateway_runtime_counters.data_frames_rejected.fetch_add(
+          1, std::memory_order_relaxed);
+      gateway_queue_ingress_ack(fd);
+      return;
+    }
+  }
+  sess->last_active = get_current_time();
+  if (user->interactive) {
+    user->interactive->last_time = sess->last_active;
   }
   const auto accepted = gateway_apply_receive(user, &data_sv);
   if (accepted) {
@@ -1013,15 +1149,17 @@ void gateway_handle_sys(int fd, const nlohmann::json &msg) {
     auto *user = sess ? sess->user_ob : nullptr;
     if (gateway_object_valid_local(user)) {
       svalue_t data_sv = {};
-      sess->last_active = get_current_time();
-      if (user->interactive) {
-        user->interactive->last_time = sess->last_active;
-      }
       if (msg.contains("data")) {
-        data_sv = json_to_gateway_svalue(msg["data"]);
+        if (!gateway_json_to_svalue(msg["data"], &data_sv)) {
+          return;
+        }
       } else {
         data_sv.type = T_NUMBER;
         data_sv.u.number = 0;
+      }
+      sess->last_active = get_current_time();
+      if (user->interactive) {
+        user->interactive->last_time = sess->last_active;
       }
       gateway_apply_receive(user, &data_sv);
       free_svalue(&data_sv, "gateway_sys_data");
@@ -1030,7 +1168,10 @@ void gateway_handle_sys(int fd, const nlohmann::json &msg) {
   }
 
   if (auto *gateway_d = find_object("/adm/daemons/gateway_d")) {
-    svalue_t msg_sv = json_to_gateway_svalue(msg);
+    svalue_t msg_sv = {};
+    if (!gateway_json_to_svalue(msg, &msg_sv)) {
+      return;
+    }
     save_command_giver(gateway_d);
     VMOwnerScope owner_scope(vm_context(), vm_owner_id(gateway_d), vm_owner_epoch(gateway_d));
     vm_owner_record_task_trace(vm_owner_id(gateway_d), "gateway", "receive_system_message",
@@ -1246,7 +1387,10 @@ int gateway_dispatch_buffered_frames(GatewayMaster *master, int budget) {
         std::memory_order_relaxed);
     dispatched++;
     try {
-      auto msg = nlohmann::json::parse(payload);
+      nlohmann::json msg;
+      if (!gateway_parse_inbound_json(payload.data(), payload.size(), &msg)) {
+        continue;
+      }
       gateway_dispatch_message(master->fd, msg);
       master->messages_received++;
     } catch (...) {
@@ -1587,7 +1731,11 @@ bool gateway_dispatch_message_for_test(int fd, const char *payload) {
     return false;
   }
   try {
-    gateway_dispatch_message(fd, nlohmann::json::parse(payload));
+    nlohmann::json msg;
+    if (!gateway_parse_inbound_json(payload, strlen(payload), &msg)) {
+      return false;
+    }
+    gateway_dispatch_message(fd, msg);
     return true;
   } catch (...) {
     return false;
@@ -1948,6 +2096,8 @@ mapping_t *gateway_status_internal() {
                    static_cast<long>(g_gateway_runtime_counters.data_frames_applied.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_data_frames_rejected",
                    static_cast<long>(g_gateway_runtime_counters.data_frames_rejected.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "gateway_json_frames_rejected",
+                   static_cast<long>(g_gateway_runtime_counters.json_frames_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_ingress_sequence_last_accepted",
                    static_cast<long>(g_gateway_ingress_sequence.last_accepted));
   add_mapping_pair(map, "gateway_ingress_sequence_duplicates",

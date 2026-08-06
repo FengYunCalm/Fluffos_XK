@@ -17,6 +17,7 @@
 #include <unordered_set>
 #include <vector>
 #include "base/package_api.h"
+#include "base/internal/stats.h"
 #include "base/internal/strutils.h"
 
 #include "backend.h"
@@ -530,6 +531,7 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_data_frames_received"), 0);
   ASSERT_GE(mapping_number(status, "gateway_data_frames_applied"), 0);
   ASSERT_GE(mapping_number(status, "gateway_data_frames_rejected"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_json_frames_rejected"), 0);
   ASSERT_GE(mapping_number(status, "gateway_stale_master_frames_rejected"), 0);
   ASSERT_GE(mapping_number(status, "gateway_sessions_detached_total"), 0);
   ASSERT_GE(mapping_number(status, "gateway_session_rebind_attempts"), 0);
@@ -17879,6 +17881,160 @@ TEST_F(DriverTest, TestGatewayMasterReconnectRebindsExistingSessionWithoutLosing
   ASSERT_EQ(ob->interactive, nullptr);
   destruct_object(ob);
   free_object(&ob, "TestGatewayMasterReconnectRebindsExistingSessionWithoutLosingState");
+}
+
+TEST_F(DriverTest, TestGatewayInboundJsonRejectsExcessiveSvalueDepth) {
+  constexpr int master_fd = 1703;
+  const char *session_id = "gw-test-json-depth";
+  auto *ob = create_gateway_session_for_test(
+      session_id, "/clone/gateway_login_example", master_fd);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayInboundJsonRejectsExcessiveSvalueDepth");
+
+  nlohmann::json data = "leaf";
+  for (int depth = 0; depth < 21; ++depth) {
+    data = nlohmann::json::array({std::move(data)});
+  }
+  const auto rejected_before =
+      g_gateway_runtime_counters.json_frames_rejected.load(
+          std::memory_order_relaxed);
+  const auto message = nlohmann::json({
+      {"type", "data"},
+      {"cid", session_id},
+      {"data", std::move(data)},
+  }).dump();
+
+  EXPECT_TRUE(gateway_dispatch_message_for_test(master_fd, message.c_str()));
+  EXPECT_EQ(vm_owner_drain_main_tasks(8), 0);
+  EXPECT_EQ(g_gateway_runtime_counters.json_frames_rejected.load(
+                std::memory_order_relaxed),
+            rejected_before + 1);
+
+  nlohmann::json wire_depth_data = "leaf";
+  for (int depth = 0; depth < 30; ++depth) {
+    wire_depth_data = nlohmann::json::array({std::move(wire_depth_data)});
+  }
+  const auto wire_depth_message = nlohmann::json({
+      {"type", "data"},
+      {"cid", session_id},
+      {"data", std::move(wire_depth_data)},
+  }).dump();
+  EXPECT_FALSE(gateway_dispatch_message_for_test(
+      master_fd, wire_depth_message.c_str()));
+  EXPECT_EQ(vm_owner_drain_main_tasks(8), 0);
+  EXPECT_EQ(g_gateway_runtime_counters.json_frames_rejected.load(
+                std::memory_order_relaxed),
+            rejected_before + 2);
+
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayInboundJsonRejectsExcessiveSvalueDepth");
+}
+
+TEST_F(DriverTest, TestGatewayInboundJsonRejectsUnsignedIntegerOutsideLpcRange) {
+  constexpr int master_fd = 1704;
+  const char *session_id = "gw-test-json-unsigned";
+  auto *ob = create_gateway_session_for_test(
+      session_id, "/clone/gateway_login_example", master_fd);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayInboundJsonRejectsUnsignedIntegerOutsideLpcRange");
+
+  const auto rejected_before =
+      g_gateway_runtime_counters.json_frames_rejected.load(
+          std::memory_order_relaxed);
+  const auto message = nlohmann::json({
+      {"type", "data"},
+      {"cid", session_id},
+      {"data", nlohmann::json({
+                   {"value", std::numeric_limits<uint64_t>::max()},
+               })},
+  }).dump();
+
+  EXPECT_TRUE(gateway_dispatch_message_for_test(master_fd, message.c_str()));
+  EXPECT_EQ(vm_owner_drain_main_tasks(8), 0);
+  EXPECT_EQ(g_gateway_runtime_counters.json_frames_rejected.load(
+                std::memory_order_relaxed),
+            rejected_before + 1);
+
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
+  destruct_object(ob);
+  free_object(&ob,
+              "TestGatewayInboundJsonRejectsUnsignedIntegerOutsideLpcRange");
+}
+
+TEST_F(DriverTest, TestGatewayInboundJsonRejectsStringsLpcCannotRepresent) {
+  constexpr int master_fd = 1705;
+  const char *session_id = "gw-test-json-string";
+  auto *ob = create_gateway_session_for_test(
+      session_id, "/clone/gateway_login_example", master_fd);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayInboundJsonRejectsStringsLpcCannotRepresent");
+
+  const auto max_string_length = CONFIG_INT(__MAX_STRING_LENGTH__);
+  ASSERT_GT(max_string_length, 0);
+  const std::vector<std::string> invalid_strings = {
+      std::string("prefix\0suffix", sizeof("prefix\0suffix") - 1),
+      std::string(static_cast<size_t>(max_string_length) + 1, 'x'),
+  };
+  const auto rejected_before =
+      g_gateway_runtime_counters.json_frames_rejected.load(
+          std::memory_order_relaxed);
+
+  for (const auto &value : invalid_strings) {
+    const auto message = nlohmann::json({
+        {"type", "data"},
+        {"cid", session_id},
+        {"data", nlohmann::json({{"value", value}})},
+    }).dump();
+    EXPECT_TRUE(gateway_dispatch_message_for_test(master_fd, message.c_str()));
+    EXPECT_EQ(vm_owner_drain_main_tasks(8), 0);
+  }
+  EXPECT_EQ(g_gateway_runtime_counters.json_frames_rejected.load(
+                std::memory_order_relaxed),
+            rejected_before + invalid_strings.size());
+
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayInboundJsonRejectsStringsLpcCannotRepresent");
+}
+
+TEST_F(DriverTest, TestGatewayInboundJsonShapeFailureDoesNotLeakPartialArrays) {
+  constexpr int master_fd = 1706;
+  const char *session_id = "gw-test-json-shape";
+  auto *ob = create_gateway_session_for_test(
+      session_id, "/clone/gateway_login_example", master_fd);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayInboundJsonShapeFailureDoesNotLeakPartialArrays");
+
+  const auto max_array_size = CONFIG_INT(__MAX_ARRAY_SIZE__);
+  ASSERT_GT(max_array_size, 0);
+  nlohmann::json oversized = nlohmann::json::array();
+  for (int index = 0; index <= max_array_size; ++index) {
+    oversized.push_back(0);
+  }
+  const auto message = nlohmann::json({
+      {"type", "data"},
+      {"cid", session_id},
+      {"data", nlohmann::json::array({
+                   nlohmann::json({{"safe", 1}}),
+                   std::move(oversized),
+               })},
+  }).dump();
+  const auto arrays_before = num_arrays;
+  const auto rejected_before =
+      g_gateway_runtime_counters.json_frames_rejected.load(
+          std::memory_order_relaxed);
+
+  (void)gateway_dispatch_message_for_test(master_fd, message.c_str());
+  EXPECT_EQ(vm_owner_drain_main_tasks(8), 0);
+  EXPECT_EQ(num_arrays, arrays_before);
+  EXPECT_EQ(g_gateway_runtime_counters.json_frames_rejected.load(
+                std::memory_order_relaxed),
+            rejected_before + 1);
+
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayInboundJsonShapeFailureDoesNotLeakPartialArrays");
 }
 
 TEST_F(DriverTest, TestGatewayReliableIngressExecutesContinuousSequenceExactlyOnce) {

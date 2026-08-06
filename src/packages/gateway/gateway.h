@@ -35,6 +35,7 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> data_frames_received{0};
   std::atomic<uint64_t> data_frames_applied{0};
   std::atomic<uint64_t> data_frames_rejected{0};
+  std::atomic<uint64_t> json_frames_rejected{0};
   std::atomic<uint64_t> ingress_sequence_duplicates{0};
   std::atomic<uint64_t> ingress_sequence_gaps{0};
   std::atomic<uint64_t> ingress_sequence_stream_mismatches{0};
