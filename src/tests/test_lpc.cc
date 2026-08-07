@@ -70,10 +70,8 @@ void destruct_object_for_test(object_t* object);
 }
 extern bool vm_dns_test_support_dispatch_callback(object_t* owner, const char* method, LPC_INT key);
 extern bool vm_socket_test_support_dispatch_callback(object_t* owner, const char* method, LPC_INT fd);
-#ifndef _WIN32
 extern int external_start(int which, svalue_t* args, svalue_t* arg1, svalue_t* arg2,
                           svalue_t* arg3);
-#endif
 extern bool decode_mud_port_payload_length_for_test(const char* header, size_t header_size,
                                                     size_t* payload_length);
 extern int replace_interactive(object_t *ob, object_t *obfrom);
@@ -3528,9 +3526,14 @@ TEST_F(DriverTest, TestSocketAcceptMarksAcceptedDescriptorCloseOnExec) {
   ASSERT_NE(descriptor_flags, -1);
   ASSERT_NE(descriptor_flags & FD_CLOEXEC, 0);
 }
+#endif
 
 TEST_F(DriverTest, TestExternalSpawnFailureDoesNotPublishSocket) {
+#ifdef _WIN32
+  char invalid_command[] = "Z:\\this\\path\\does\\not\\exist\\fluffos-external-test.exe";
+#else
   char invalid_command[] = "/this/path/does/not/exist/fluffos-external-test";
+#endif
   struct FixtureGuard {
     char* saved_command;
     object_t* saved_current_object;
@@ -3571,7 +3574,48 @@ TEST_F(DriverTest, TestExternalSpawnFailureDoesNotPublishSocket) {
   ASSERT_LT(result, 0);
   ASSERT_EQ(active_after, active_before);
 }
-#endif
+
+TEST_F(DriverTest, TestExternalEmptyCommandDoesNotPublishSocket) {
+  struct FixtureGuard {
+    char* saved_command;
+    object_t* saved_current_object;
+    ~FixtureGuard() {
+      external_cmd[0] = saved_command;
+      current_object = saved_current_object;
+    }
+  } guard{external_cmd[0], current_object};
+  current_object = master_ob;
+  external_cmd[0] = nullptr;
+
+  std::vector<bool> closed_before(lpc_socks_num(), false);
+  size_t active_before = 0;
+  for (int i = 0; i < lpc_socks_num(); ++i) {
+    closed_before[i] = lpc_socks_get(i)->state == STATE_CLOSED;
+    if (!closed_before[i]) {
+      ++active_before;
+    }
+  }
+
+  svalue_t args = const0u;
+  args.type = T_STRING;
+  args.subtype = STRING_SHARED;
+  args.u.string = const_cast<char*>("");
+  const auto result = external_start(0, &args, nullptr, nullptr, nullptr);
+
+  size_t active_after = 0;
+  for (int i = 0; i < lpc_socks_num(); ++i) {
+    auto* socket = lpc_socks_get(i);
+    if (socket->state != STATE_CLOSED) {
+      ++active_after;
+      if (i >= static_cast<int>(closed_before.size()) || closed_before[i]) {
+        ASSERT_EQ(socket_close(i, 0), EESUCCESS);
+      }
+    }
+  }
+
+  ASSERT_LT(result, 0);
+  ASSERT_EQ(active_after, active_before);
+}
 
 TEST_F(DriverTest, TestReadJsonRejectsUnsignedIntegerOutsideLpcRange) {
   const char* relative_path = "log/read-json-integer-boundary.json";

@@ -3,8 +3,11 @@
 #include <cerrno>
 #include <cstring>
 #include <cstdlib>  // for exit
-#include <thread>
+#include <iterator>
 #include <string>
+#include <thread>
+#include <utility>
+#include <vector>
 #include <fmt/format.h>
 
 #include <event2/event.h>
@@ -14,7 +17,6 @@
 
 #ifndef _WIN32
 #include <sstream>
-#include <vector>
 #include <spawn.h>
 #include <sys/wait.h>
 
@@ -28,6 +30,12 @@ void split(const std::string &s, char delim, Out result) {
 }
 
 int external_start(int which, svalue_t *args, svalue_t *arg1, svalue_t *arg2, svalue_t *arg3) {
+  if (which < 0 || which >= g_num_external_cmds || external_cmd[which] == nullptr ||
+      external_cmd[which][0] == '\0') {
+    debug(external_start, "external_start: command is empty\n");
+    return EESOCKET;
+  }
+
   std::vector<std::string> newargs_data = {std::string(external_cmd[which])};
   if (args->type == T_ARRAY) {
     for (int i = 0; i < args->u.arr->size; i++) {
@@ -224,23 +232,29 @@ std::string quote_argument(const std::string &arg) {
 
 #ifdef _WIN32
 #include <windows.h>
-#include <fcntl.h>
 extern int socketpair_win32(SOCKET socks[2], int make_overlapped);  // in socketpair.cc
 
 int external_start(int which, svalue_t *args, svalue_t *arg1, svalue_t *arg2, svalue_t *arg3) {
-  int fd;
-  pid_t ret;
+  if (which < 0 || which >= g_num_external_cmds || external_cmd[which] == nullptr) {
+    debug(external_start, "external_start: command is empty\n");
+    return EESOCKET;
+  }
 
   std::string cmd = external_cmd[which];
   // guard against long path with spaces.
-  cmd = trim(cmd, " ");
+  cmd = trim(std::move(cmd));
+  if (cmd.empty()) {
+    debug(external_start, "external_start: command is empty\n");
+    return EESOCKET;
+  }
   if (cmd[0] != '"') {
     cmd = fmt::format("\"{}\"", cmd);
   }
   std::string cmdline = cmd + " ";
 
   if (args->type == T_ARRAY) {
-    std::vector<std::string> argv(args->u.arr->size);
+    std::vector<std::string> argv;
+    argv.reserve(args->u.arr->size);
     for (int i = 0; i < args->u.arr->size; i++) {
       auto item = args->u.arr->item[i];
       if (item.type != T_STRING) {
@@ -253,19 +267,123 @@ int external_start(int which, svalue_t *args, svalue_t *arg1, svalue_t *arg2, sv
     cmdline += std::string(args->u.string);
   }
 
-  fd = find_new_socket();
+  SOCKET sv[2] = {INVALID_SOCKET, INVALID_SOCKET};
+  if (socketpair_win32(sv, 0) == SOCKET_ERROR) {
+    debug(external_start, "external_start: socketpair_win32() failed: %lu\n",
+          static_cast<unsigned long>(WSAGetLastError()));
+    return EESOCKET;
+  }
+  DEFER {
+    if (sv[0] != INVALID_SOCKET) {
+      closesocket(sv[0]);
+    }
+    if (sv[1] != INVALID_SOCKET) {
+      closesocket(sv[1]);
+    }
+  };
+
+  if (evutil_make_socket_nonblocking(sv[1]) == -1) {
+    debug(external_start, "external_start: failed to make parent socket nonblocking\n");
+    return EESOCKET;
+  }
+  if (!SetHandleInformation(reinterpret_cast<HANDLE>(sv[0]), HANDLE_FLAG_INHERIT,
+                            HANDLE_FLAG_INHERIT)) {
+    const DWORD error_code = GetLastError();
+    debug(external_start, "external_start: failed to make child socket inheritable: %lu\n",
+          static_cast<unsigned long>(error_code));
+    return EESOCKET;
+  }
+  if (!SetHandleInformation(reinterpret_cast<HANDLE>(sv[1]), HANDLE_FLAG_INHERIT, 0)) {
+    const DWORD error_code = GetLastError();
+    debug(external_start, "external_start: failed to make parent socket private: %lu\n",
+          static_cast<unsigned long>(error_code));
+    return EESOCKET;
+  }
+
+  SIZE_T attribute_list_size = 0;
+  const BOOL attribute_size_result =
+      InitializeProcThreadAttributeList(nullptr, 1, 0, &attribute_list_size);
+  const DWORD attribute_size_error = GetLastError();
+  if (attribute_size_result != FALSE || attribute_size_error != ERROR_INSUFFICIENT_BUFFER ||
+      attribute_list_size == 0) {
+    debug(external_start, "external_start: failed to size process attribute list: %lu\n",
+          static_cast<unsigned long>(attribute_size_error));
+    return EESOCKET;
+  }
+  std::vector<unsigned char> attribute_storage(attribute_list_size);
+  auto *attribute_list = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attribute_storage.data());
+  if (!InitializeProcThreadAttributeList(attribute_list, 1, 0, &attribute_list_size)) {
+    const DWORD error_code = GetLastError();
+    debug(external_start, "external_start: failed to initialize process attribute list: %lu\n",
+          static_cast<unsigned long>(error_code));
+    return EESOCKET;
+  }
+  DEFER { DeleteProcThreadAttributeList(attribute_list); };
+
+  HANDLE inherited_handles[] = {reinterpret_cast<HANDLE>(sv[0])};
+  if (!UpdateProcThreadAttribute(attribute_list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                 inherited_handles, sizeof(inherited_handles), nullptr, nullptr)) {
+    const DWORD error_code = GetLastError();
+    debug(external_start, "external_start: failed to restrict inherited handles: %lu\n",
+          static_cast<unsigned long>(error_code));
+    return EESOCKET;
+  }
+
+  STARTUPINFOEXA startup_info{};
+  startup_info.StartupInfo.cb = sizeof(startup_info);
+  startup_info.StartupInfo.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+  startup_info.StartupInfo.wShowWindow = SW_HIDE;
+  startup_info.StartupInfo.hStdInput = reinterpret_cast<HANDLE>(sv[0]);
+  startup_info.StartupInfo.hStdError = reinterpret_cast<HANDLE>(sv[0]);
+  startup_info.StartupInfo.hStdOutput = reinterpret_cast<HANDLE>(sv[0]);
+  startup_info.lpAttributeList = attribute_list;
+  PROCESS_INFORMATION process_info{};
+
+  // Start the child process with only the stdio socket in its handle table.
+  if (!CreateProcessA(nullptr, cmdline.data(), nullptr, nullptr, TRUE,
+                      EXTENDED_STARTUPINFO_PRESENT, nullptr, nullptr,
+                      reinterpret_cast<LPSTARTUPINFOA>(&startup_info), &process_info)) {
+    const DWORD error_code = GetLastError();
+    debug(external_start, "external_start: CreateProcess() failed: %lu\n",
+          static_cast<unsigned long>(error_code));
+    return EESOCKET;
+  }
+
+  auto terminate_child = [&]() {
+    if (process_info.hProcess != nullptr) {
+      if (TerminateProcess(process_info.hProcess, 1)) {
+        constexpr DWORD kProcessCleanupTimeoutMs = 5000;
+        WaitForSingleObject(process_info.hProcess, kProcessCleanupTimeoutMs);
+      } else {
+        const DWORD error_code = GetLastError();
+        debug(external_start, "external_start: failed to terminate child process: %lu\n",
+              static_cast<unsigned long>(error_code));
+      }
+      CloseHandle(process_info.hProcess);
+      process_info.hProcess = nullptr;
+    }
+  };
+  bool child_cleanup_needed = true;
+  DEFER {
+    if (child_cleanup_needed) {
+      terminate_child();
+    }
+  };
+
+  if (process_info.hThread != nullptr) {
+    CloseHandle(process_info.hThread);
+    process_info.hThread = nullptr;
+  }
+  closesocket(sv[0]);
+  sv[0] = INVALID_SOCKET;
+
+  const int fd = find_new_socket();
   if (fd < 0) {
     return fd;
   }
-
   auto *sock = lpc_socks_get(fd);
-
-  SOCKET sv[2];
-  socketpair_win32(sv, 0);
-
-  new_lpc_socket_event_listener(fd, sock, sv[1]);
-
   sock->fd = sv[1];
+  sv[1] = INVALID_SOCKET;
   sock->flags = S_EXTERNAL;
   set_read_callback(fd, arg1);
   set_write_callback(fd, arg2);
@@ -275,59 +393,44 @@ int external_start(int which, svalue_t *args, svalue_t *arg1, svalue_t *arg2, sv
   sock->state = STATE_DATA_XFER;
   memset(reinterpret_cast<char *>(&sock->l_addr), 0, sizeof(sock->l_addr));
   memset(reinterpret_cast<char *>(&sock->r_addr), 0, sizeof(sock->r_addr));
-  sock->owner_ob = current_object;
-  sock->release_ob = NULL;
-  sock->r_buf = NULL;
+  sock->release_ob = nullptr;
+  sock->r_buf = nullptr;
   sock->r_off = 0;
   sock->r_len = 0;
-  sock->w_buf = NULL;
+  sock->w_buf = nullptr;
   sock->w_off = 0;
   sock->w_len = 0;
 
-  current_object->flags |= O_EFUN_SOCKET;
-
-  event_add(sock->ev_write, NULL);
-  event_add(sock->ev_read, NULL);
-
-  STARTUPINFOA si = {sizeof(si)};
-  si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
-  si.wShowWindow = SW_HIDE;
-  si.hStdInput = reinterpret_cast<HANDLE>(sv[0]);
-  si.hStdError = reinterpret_cast<HANDLE>(sv[0]);
-  si.hStdOutput = reinterpret_cast<HANDLE>(sv[0]);
-  PROCESS_INFORMATION processInfo{};
-
-  // Start the child process.
-  if (!CreateProcessA(NULL,            // No module name (use command line)
-                      cmdline.data(),  // Command line
-                      NULL,            // Process handle not inheritable
-                      NULL,            // Thread handle not inheritable
-                      TRUE,            // Set handle inheritance to TRUE
-                      0,               // No creation flags
-                      NULL,            // Use parent's environment block
-                      NULL,            // Use parent's starting directory
-                      &si,             // Pointer to STARTUPINFO structure
-                      &processInfo)    // Pointer to PROCESS_INFORMATION structure
-  ) {
-    error("CreateProcess() in external_start() failed: %s\n", strerror(errno));
+  new_lpc_socket_event_listener(fd, sock, sock->fd);
+  if (sock->ev_read == nullptr || sock->ev_write == nullptr ||
+      event_add(sock->ev_write, nullptr) != 0 || event_add(sock->ev_read, nullptr) != 0) {
+    debug(external_start, "external_start: failed to register socket events\n");
+    socket_close(fd, 0);
     return EESOCKET;
   }
-  debug(external_start, "external_start: Launching external command '%s', pid: %lu.\n", cmdline.c_str(),
-                static_cast<unsigned long>(processInfo.dwProcessId));
+  current_object->flags |= O_EFUN_SOCKET;
 
-  std::thread([=]() {
-    WaitForSingleObject(processInfo.hProcess, INFINITE);
-    DWORD exitCode = -1;
-    // Get the exit code.
-    GetExitCodeProcess(processInfo.hProcess, &exitCode);
-    debug(external_start, "external_start: pid: %lu exited with %lu.\n",
-          static_cast<unsigned long>(processInfo.dwProcessId),
-          static_cast<unsigned long>(exitCode));
-    CloseHandle(processInfo.hProcess);
-    CloseHandle(processInfo.hThread);
-    evutil_closesocket(sv[0]);
-  }).detach();
+  const auto process_handle = process_info.hProcess;
+  const auto process_id = process_info.dwProcessId;
+  try {
+    std::thread([process_handle, process_id]() {
+      WaitForSingleObject(process_handle, INFINITE);
+      DWORD exit_code = static_cast<DWORD>(-1);
+      GetExitCodeProcess(process_handle, &exit_code);
+      debug(external_start, "external_start: pid: %lu exited with %lu.\n",
+            static_cast<unsigned long>(process_id), static_cast<unsigned long>(exit_code));
+      CloseHandle(process_handle);
+    }).detach();
+  } catch (...) {
+    debug(external_start, "external_start: failed to create process monitor thread\n");
+    socket_close(fd, 0);
+    return EESOCKET;
+  }
+  process_info.hProcess = nullptr;
+  child_cleanup_needed = false;
 
+  debug(external_start, "external_start: Launching external command '%s', pid: %lu.\n",
+        cmdline.c_str(), static_cast<unsigned long>(process_id));
   return fd;
 }
 #endif
