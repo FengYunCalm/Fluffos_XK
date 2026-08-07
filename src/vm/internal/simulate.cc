@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <chrono>
 #include <fcntl.h>     // for O_RDONLY
+#include <limits>
 #include <stdlib.h>    // for exit
 #include <sys/stat.h>  // for load_object struct stat
 #include <stdarg.h>    // for va_start
@@ -64,10 +65,9 @@ void db_cleanup(void);  // FIXME
 #include "vm/internal/trace.h"  // for dump_trace && get_svalue_trace
 #include "vm/owner.h"
 #include "vm/worker.h"
-/*
- * This one is called from HUP.
- */
-int MudOS_is_being_shut_down;
+/* Written by the async signal handler and consumed by the main event loop. */
+volatile std::sig_atomic_t MudOS_is_being_shut_down;
+volatile std::sig_atomic_t MudOS_shutdown_exit_code = -1;
 
 namespace {
 enum class ObjectLifecycleStage : size_t {
@@ -161,7 +161,10 @@ const char *vm_object_lifecycle_perf_stage_name(size_t index) {
   return index < names.size() ? names[index] : "";
 }
 
-void startshutdownMudOS(int sig) { MudOS_is_being_shut_down = 1; }
+void startshutdownMudOS(int sig) {
+  MudOS_shutdown_exit_code = sig == SIGTERM ? 0 : -1;
+  MudOS_is_being_shut_down = 1;
+}
 
 /*
  * This one is called from the command "shutdown".
@@ -170,6 +173,10 @@ void startshutdownMudOS(int sig) { MudOS_is_being_shut_down = 1; }
  */
 void shutdownMudOS(int exit_code) {
   shout_string("FluffOS driver shouts: shutting down immediately.\n");
+
+  push_number(exit_code);
+  set_eval(0x7fffffff);
+  safe_apply_master_ob(APPLY_PREPARE_SHUTDOWN, 1);
 
 #ifdef PACKAGE_MUDLIB_STATS
   save_stat_files();
@@ -500,19 +507,49 @@ static object_t *load_virtual_object(const char *name, int clone) {
 }
 
 int filename_to_obname(const char *src, char *dest, int size) {
-  char last_c = 0;
-  char *p = dest;
-  char *end = dest + size - 1;
-
-  while (*src == '/') {
-    src++;
+  if (src == nullptr || dest == nullptr || size <= 0) {
+    return 0;
   }
 
-  while (*src && p < end) {
-    if (last_c == '/' && *src == '/') {
-      src++;
+  const auto capacity = static_cast<size_t>(size);
+  size_t normalized_length = 0;
+  size_t suffix_length = 0;
+  const char *cursor = src;
+  char last_c = 0;
+
+  while (*cursor == '/') {
+    cursor++;
+  }
+
+  /* Preflight the normalized length so a failed conversion never exposes a
+   * partially copied object name to callers. */
+  while (*cursor) {
+    const char current = *cursor++;
+    if (last_c == '/' && current == '/') {
+      continue;
+    }
+    last_c = current;
+    if (normalized_length == std::numeric_limits<size_t>::max()) {
+      return 0;
+    }
+    normalized_length++;
+
+    if (current == '.') {
+      if ((suffix_length & 1u) == 0) {
+        if (suffix_length == std::numeric_limits<size_t>::max()) {
+          return 0;
+        }
+        suffix_length++;
+      } else {
+        suffix_length = 1;
+      }
+    } else if (current == 'c' && (suffix_length & 1u) != 0) {
+      if (suffix_length == std::numeric_limits<size_t>::max()) {
+        return 0;
+      }
+      suffix_length++;
     } else {
-      last_c = (*p++ = *src++);
+      suffix_length = 0;
     }
   }
 
@@ -529,11 +566,35 @@ int filename_to_obname(const char *src, char *dest, int size) {
    *
    * The first solution is the one currently in use.
    */
-  while (p - dest > 2 && p[-1] == 'c' && p[-2] == '.') {
-    p -= 2;
+  if ((suffix_length & 1u) != 0 || suffix_length < 2) {
+    suffix_length = 0;
+  } else if (normalized_length > 0) {
+    const size_t max_stripped_length = ((normalized_length - 1) / 2) * 2;
+    if (suffix_length > max_stripped_length) {
+      suffix_length = max_stripped_length;
+    }
   }
 
-  *p = 0;
+  const size_t output_length = normalized_length - suffix_length;
+  if (output_length >= capacity) {
+    return 0;
+  }
+
+  cursor = src;
+  while (*cursor == '/') {
+    cursor++;
+  }
+  last_c = 0;
+  size_t copied = 0;
+  while (*cursor && copied < output_length) {
+    const char current = *cursor++;
+    if (last_c == '/' && current == '/') {
+      continue;
+    }
+    last_c = current;
+    dest[copied++] = current;
+  }
+  dest[copied] = 0;
   return 1;
 }
 
@@ -586,10 +647,10 @@ object_t *load_object(const char *lname, int callcreate) {
     error("Cannot load a clone.\n");
   }
   if (!filename_to_obname(lname, name, sizeof name)) {
-    error("Filenames with consecutive /'s in them aren't allowed (%s).\n", lname);
+    error("Object file name is too long or invalid ('%s').\n", lname);
   }
   if (!filename_to_obname(pname, actualname, sizeof actualname)) {
-    error("Filenames with consecutive /'s in them aren't allowed (%s).\n", pname);
+    error("Resolved object file name is too long or invalid ('%s').\n", pname);
   }
 
   /*
@@ -668,7 +729,7 @@ object_t *load_object(const char *lname, int callcreate) {
     char inhbuf[MAX_OBJECT_NAME_SIZE];
 
     if (!filename_to_obname(inherit_file, inhbuf, sizeof inhbuf)) {
-      strcpy(inhbuf, inherit_file);
+      error("Inherited object file name is too long or invalid.\n");
     }
     FREE(inherit_file);
     inherit_file = nullptr;

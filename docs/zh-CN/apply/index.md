@@ -33,6 +33,7 @@ title: APPLY
 * [log_error](master/log_error.html)
 * [make_path_absolute](master/make_path_absolute.html)
 * [object_name](master/object_name.html)
+* [prepare_shutdown](master/prepare_shutdown.html)
 * [preload](master/preload.html)
 * [privs_file](master/privs_file.html)
 * [retrieve_ed_setup](master/retrieve_ed_setup.html)

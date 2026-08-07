@@ -3812,6 +3812,46 @@ void destruct_object_for_test(object_t* object) {
 }
 }  // namespace
 
+TEST(FilenameToObnameTest, RejectsTruncatedOutputWithoutCrossingDestination) {
+  char destination[9];
+  std::memset(destination, 'S', sizeof(destination));
+
+  ASSERT_EQ(filename_to_obname("/12345678", destination, 8), 0);
+  ASSERT_EQ(destination[8], 'S');
+}
+
+TEST(FilenameToObnameTest, RejectsInvalidArguments) {
+  char destination[8] = {};
+
+  EXPECT_EQ(filename_to_obname("x", destination, 0), 0);
+  EXPECT_EQ(filename_to_obname("x", destination, -1), 0);
+  EXPECT_EQ(filename_to_obname(nullptr, destination, sizeof(destination)), 0);
+  EXPECT_EQ(filename_to_obname("x", nullptr, sizeof(destination)), 0);
+}
+
+TEST(FilenameToObnameTest, PreservesNormalizedObjectNameSemantics) {
+  char destination[32] = {};
+
+  ASSERT_EQ(filename_to_obname("//foo///bar.c.c", destination, sizeof(destination)), 1);
+  ASSERT_STREQ(destination, "foo/bar");
+}
+
+TEST(FilenameToObnameTest, ReclaimsCapacityAfterRemovingCSourceSuffix) {
+  char destination[8] = {};
+
+  ASSERT_EQ(filename_to_obname("/1234567.c", destination, sizeof(destination)), 1);
+  ASSERT_STREQ(destination, "1234567");
+}
+
+TEST_F(DriverTest, TestSimulEfunReservesCapacityForCSourceSuffix) {
+  const auto source = read_source_file_for_test("../src/vm/internal/simul_efun.cc");
+  const auto simulate_source = read_source_file_for_test("../src/vm/internal/simulate.cc");
+
+  ASSERT_NE(source.find("filename_to_obname(file, buf, sizeof(buf) - 2)"), std::string::npos);
+  ASSERT_NE(source.find("file_length < 2"), std::string::npos);
+  ASSERT_EQ(simulate_source.find("strcpy(inhbuf, inherit_file)"), std::string::npos);
+}
+
 TEST_F(DriverTest, TestPerfCounterUsesMonotonicSteadyClock) {
   const auto time_source = read_source_file_for_test("../src/packages/core/time.cc");
   const auto perf_counter_pos = time_source.find("void f_perf_counter_ns()");
@@ -4489,6 +4529,50 @@ TEST_F(DriverTest,
   ASSERT_LT(owner_stop_pos, gateway_cleanup_pos);
   ASSERT_LT(gateway_cleanup_pos, callout_cleanup_pos);
   ASSERT_LT(callout_cleanup_pos, tick_cleanup_pos);
+}
+
+TEST_F(DriverTest, TestSigtermUsesControlledShutdownWithSuccessExitCode) {
+  const auto main_source = read_source_file_for_test("../src/mainlib.cc");
+  const auto backend_source = read_source_file_for_test("../src/backend.cc");
+  const auto simulate_source =
+      read_source_file_for_test("../src/vm/internal/simulate.cc");
+
+  ASSERT_NE(main_source.find("signal(SIGTERM, startshutdownMudOS);"),
+            std::string::npos);
+  ASSERT_NE(main_source.find(
+                "// Install the async-signal-safe shutdown request before mudlib startup."),
+            std::string::npos);
+  ASSERT_EQ(main_source.find("signal(SIGTERM, attempt_shutdown);"),
+            std::string::npos);
+  ASSERT_NE(simulate_source.find("sig == SIGTERM ? 0 : -1"),
+            std::string::npos);
+  ASSERT_NE(backend_source.find("shutdownMudOS(MudOS_shutdown_exit_code);"),
+            std::string::npos);
+  ASSERT_NE(backend_source.find("event_base_loopbreak(g_event_base);"),
+            std::string::npos);
+}
+
+TEST_F(DriverTest, TestControlledShutdownPreparesMudlibBeforeRuntimeTeardown) {
+  const auto applies_source =
+      read_source_file_for_test("../src/vm/internal/applies");
+  const auto shutdown_source =
+      read_source_file_for_test("../src/vm/internal/simulate.cc");
+  const auto shutdown_pos =
+      shutdown_source.find("void shutdownMudOS(int exit_code)");
+  const auto prepare_pos = shutdown_source.find(
+      "safe_apply_master_ob(APPLY_PREPARE_SHUTDOWN, 1)", shutdown_pos);
+  const auto async_stop_pos =
+      shutdown_source.find("complete_all_asyncio();", shutdown_pos);
+  const auto owner_stop_pos =
+      shutdown_source.find("vm_owner_thread_stop();", shutdown_pos);
+
+  ASSERT_NE(applies_source.find("PREPARE_SHUTDOWN"), std::string::npos);
+  ASSERT_NE(shutdown_pos, std::string::npos);
+  ASSERT_NE(prepare_pos, std::string::npos);
+  ASSERT_NE(async_stop_pos, std::string::npos);
+  ASSERT_NE(owner_stop_pos, std::string::npos);
+  ASSERT_LT(prepare_pos, async_stop_pos);
+  ASSERT_LT(prepare_pos, owner_stop_pos);
 }
 
 TEST_F(DriverTest,

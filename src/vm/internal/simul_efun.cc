@@ -61,11 +61,12 @@ void init_simul_efun(const char *file) {
     debug_message("No simul_efun\n");
     return;
   }
-  if (!filename_to_obname(file, buf, sizeof buf)) {
+  if (!filename_to_obname(file, buf, sizeof(buf) - 2)) {
     error("Illegal simul_efun file name '%s'\n", file);
   }
 
-  if (file[strlen(file) - 2] != '.') {
+  const size_t file_length = strlen(file);
+  if (file_length < 2 || file[file_length - 2] != '.' || file[file_length - 1] != 'c') {
     strcat(buf, ".c");
   }
 

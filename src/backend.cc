@@ -310,6 +310,10 @@ inline size_t call_tick_events() {
 }
 
 void on_game_tick(evutil_socket_t /*fd*/, short /*what*/, void *arg) {
+  if (MudOS_is_being_shut_down) {
+    event_base_loopbreak(g_event_base);
+    return;
+  }
   drain_game_tick_slice(reinterpret_cast<struct event **>(arg), false);
 }
 
@@ -543,7 +547,7 @@ void backend(struct event_base *base) {
     fatal("BUG: jumped out of event loop!");
   }
   // We've reached here meaning we are in shutdown sequence.
-  shutdownMudOS(-1);
+  shutdownMudOS(MudOS_shutdown_exit_code);
 } /* backend() */
 
 namespace {

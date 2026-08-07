@@ -19,6 +19,7 @@ title: master
 * [log_error](log_error.html)
 * [make_path_absolute](make_path_absolute.html)
 * [object_name](object_name.html)
+* [prepare_shutdown](prepare_shutdown.html)
 * [preload](preload.html)
 * [privs_file](privs_file.html)
 * [retrieve_ed_setup](retrieve_ed_setup.html)

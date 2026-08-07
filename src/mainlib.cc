@@ -170,16 +170,12 @@ void attempt_shutdown(int sig) {
 
   const char *msg = "Unkonwn signal!";
   switch (sig) {
-    case SIGTERM:
-      msg = "SIGTERM: Process terminated";
-      break;
     case SIGINT:
       msg = "SIGINT: Process interrupted";
       break;
   }
 
   // Reverse all traps
-  signal(SIGTERM, SIG_DFL);
   signal(SIGINT, SIG_DFL);
 
   // Print backtrace
@@ -278,7 +274,7 @@ struct event_base *init_main(std::string_view config_file) {
 }
 
 void setup_signal_handlers() {
-  signal(SIGTERM, attempt_shutdown);
+  signal(SIGTERM, startshutdownMudOS);
   signal(SIGINT, attempt_shutdown);
 
 #ifndef _WIN32
@@ -307,6 +303,9 @@ int driver_main(int argc, char **argv);
 }
 
 int driver_main(int argc, char **argv) {
+  // Install the async-signal-safe shutdown request before mudlib startup.
+  signal(SIGTERM, startshutdownMudOS);
+
 #ifdef HAVE_JEMALLOC
   {
     bool var = true;
@@ -388,6 +387,10 @@ int driver_main(int argc, char **argv) {
 
   auto *base = init_main(config_file);
 
+  if (MudOS_is_being_shut_down) {
+    shutdownMudOS(MudOS_shutdown_exit_code);
+  }
+
   debug_message("==== Runtime Config Table ====\n");
   print_rc_table();
   debug_message("==============================\n");
@@ -399,6 +402,10 @@ int driver_main(int argc, char **argv) {
 
   // Start running.
   vm_start();
+
+  if (MudOS_is_being_shut_down) {
+    shutdownMudOS(MudOS_shutdown_exit_code);
+  }
 
   for (int i = 1; i < argc; i++) {
     if (argv[i][0] != '-') {
@@ -435,7 +442,7 @@ int driver_main(int argc, char **argv) {
     }
   }
   if (MudOS_is_being_shut_down) {
-    exit(1);
+    shutdownMudOS(MudOS_shutdown_exit_code);
   }
 
   // Owner worker threads are an explicit runtime profile.  Audit/enforced
@@ -452,6 +459,9 @@ int driver_main(int argc, char **argv) {
 
   debug_message("Initializations complete.\n\n");
   setup_signal_handlers();
+  if (MudOS_is_being_shut_down) {
+    shutdownMudOS(MudOS_shutdown_exit_code);
+  }
   backend(base);
 
   return 0;

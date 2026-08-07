@@ -3,6 +3,7 @@
 
 #include "vm/internal/base/machine.h"
 
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
 
@@ -25,7 +26,8 @@ struct VMObjectLifecyclePerfSnapshot {
 extern object_t *obj_list;
 extern object_t *obj_list_destruct;
 extern uint64_t tot_alloc_sentence;
-extern int MudOS_is_being_shut_down;
+extern volatile std::sig_atomic_t MudOS_is_being_shut_down;
+extern volatile std::sig_atomic_t MudOS_shutdown_exit_code;
 #ifdef DEBUG
 extern object_t *obj_list_dangling;
 #endif
