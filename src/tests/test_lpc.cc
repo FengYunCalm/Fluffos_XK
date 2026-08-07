@@ -3852,6 +3852,65 @@ TEST_F(DriverTest, TestSimulEfunReservesCapacityForCSourceSuffix) {
   ASSERT_EQ(simulate_source.find("strcpy(inhbuf, inherit_file)"), std::string::npos);
 }
 
+TEST_F(DriverTest, TestSaveObjectStringRejectsInvalidDestinationBeforeWriting) {
+  auto *object = load_object_for_test("single/void");
+  ASSERT_NE(object, nullptr);
+
+  char destination[32];
+  std::memset(destination, 'S', sizeof(destination));
+  ASSERT_EQ(save_object_str(object, 0, destination, 0), 0);
+  ASSERT_EQ(destination[0], 'S');
+  ASSERT_EQ(save_object_str(object, 0, destination, -1), 0);
+  ASSERT_EQ(save_object_str(object, 0, nullptr, sizeof(destination)), 0);
+
+  destruct_object_for_test(object);
+}
+
+TEST_F(DriverTest, TestSaveObjectStringRecursionAccountsForConsumedPrefix) {
+  const auto source = read_source_file_for_test("../src/vm/internal/base/object.cc");
+
+  ASSERT_NE(source.find("bufsize - (textsize - 1)"), std::string::npos);
+}
+
+TEST_F(DriverTest, TestSaveObjectStringPreservesHeaderAndRejectsShortHeader) {
+  auto *object = load_object_for_test("std/json");
+  ASSERT_NE(object, nullptr);
+
+  std::vector<char> destination(256, 'S');
+  ASSERT_EQ(save_object_str(object, 0, destination.data(), static_cast<int>(destination.size() - 1)), 1);
+  const std::string serialized(destination.data());
+  ASSERT_EQ(serialized.compare(0, std::strlen("#/std/json.c\n"), "#/std/json.c\n"), 0);
+
+  const auto header_size = serialized.find('\n') + 1;
+  ASSERT_GT(header_size, 0U);
+  std::vector<char> exact_header_destination(header_size + 1, 'S');
+  ASSERT_EQ(save_object_str(object, 0, exact_header_destination.data(),
+                            static_cast<int>(header_size)),
+            0);
+  ASSERT_EQ(exact_header_destination[0], 'S');
+  std::vector<char> short_destination(header_size + 1, 'S');
+  ASSERT_EQ(save_object_str(object, 0, short_destination.data(), static_cast<int>(header_size - 1)), 0);
+  ASSERT_EQ(short_destination[0], 'S');
+
+  destruct_object_for_test(object);
+}
+
+TEST_F(DriverTest, TestSaveObjectPathAvoidsFixedBuffers) {
+  const auto source = read_source_file_for_test("../src/vm/internal/base/object.cc");
+  const auto save_object_pos = source.find("int save_object(");
+  const auto save_object_str_pos = source.find("int save_object_str(");
+
+  ASSERT_NE(save_object_pos, std::string::npos);
+  ASSERT_NE(save_object_str_pos, std::string::npos);
+  const auto save_object_source = source.substr(save_object_pos, save_object_str_pos - save_object_pos);
+
+  ASSERT_NE(save_object_source.find("len >= 2 && file[len - 2]"), std::string::npos);
+  ASSERT_NE(save_object_source.find("const std::string tmp_name"), std::string::npos);
+  ASSERT_EQ(save_object_source.find("char save_name[256]"), std::string::npos);
+  ASSERT_EQ(save_object_source.find("char tmp_name[256]"), std::string::npos);
+  ASSERT_EQ(save_object_source.find("char buf[1024]"), std::string::npos);
+}
+
 TEST_F(DriverTest, TestPerfCounterUsesMonotonicSteadyClock) {
   const auto time_source = read_source_file_for_test("../src/packages/core/time.cc");
   const auto perf_counter_pos = time_source.find("void f_perf_counter_ns()");
