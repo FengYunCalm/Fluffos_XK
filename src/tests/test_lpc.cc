@@ -3927,6 +3927,23 @@ TEST_F(DriverTest, TestSocketAddressFormattingAvoidsFixedOutputBuffer) {
   ASSERT_NE(function_source.find("std::string(host) + \" \" + service"), std::string::npos);
 }
 
+TEST_F(DriverTest, TestFileMovePathConstructionUsesOwnedStrings) {
+  const auto source = read_source_file_for_test("../src/packages/core/file.cc");
+  const auto rename_start = source.find("int do_rename(");
+  const auto copy_start = source.find("int copy_file(");
+
+  ASSERT_NE(rename_start, std::string::npos);
+  ASSERT_NE(copy_start, std::string::npos);
+  const auto move_source = source.substr(rename_start, copy_start - rename_start);
+  ASSERT_EQ(move_source.find("char newfrom["), std::string::npos);
+  ASSERT_EQ(move_source.find("char newto["), std::string::npos);
+  ASSERT_EQ(move_source.find("sprintf("), std::string::npos);
+  ASSERT_NE(move_source.find("std::string from_path"), std::string::npos);
+  ASSERT_NE(move_source.find("std::string to_path"), std::string::npos);
+
+  ASSERT_EQ(copy_file(nullptr, nullptr), -1);
+}
+
 TEST_F(DriverTest, TestQueryIpNumberRejectsInvalidSocketAddress) {
   object_t object{};
   interactive_t interactive{};

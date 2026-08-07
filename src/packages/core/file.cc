@@ -936,10 +936,10 @@ void mark_file_sv() {
 
 #ifdef F_RENAME
 int do_rename(const char *fr, const char *t, int flag) {
-  const char *from;
-  const char *to;
-  char newfrom[MAX_FNAME_SIZE + MAX_PATH_LEN + 2];
-  int flen;
+  if (!fr || !t) {
+    return 1;
+  }
+
   extern FLUFFOS_VM_THREAD_LOCAL svalue_t apply_ret_value;
 
   /*
@@ -950,108 +950,94 @@ int do_rename(const char *fr, const char *t, int flag) {
    * is prevent linking to a file unless the person doing the linking has
    * permission to move the file.
    */
-  from = check_valid_path(fr, current_object, "rename", 1);
-  if (!from) {
+  const char *validated_from = check_valid_path(fr, current_object, "rename", 1);
+  if (!validated_from) {
     return 1;
   }
+  std::string from_path(validated_from);
 
   assign_svalue(&from_sv, &apply_ret_value);
 
-  to = check_valid_path(t, current_object, "rename", 1);
-  if (!to) {
+  const char *validated_to = check_valid_path(t, current_object, "rename", 1);
+  if (!validated_to) {
     return 1;
   }
+  std::string to_path(validated_to);
 
   assign_svalue(&to_sv, &apply_ret_value);
-  if (!strlen(to) && !strcmp(t, "/")) {
-    to = "./";
+  if (to_path.empty() && !strcmp(t, "/")) {
+    to_path = "./";
   }
 
   /* Strip trailing slashes */
-  flen = strlen(from);
-  if (flen > 1 && from[flen - 1] == '/') {
-    const char *p = from + flen - 2;
-    int n;
-
-    while (*p == '/' && (p > from)) {
-      p--;
+  if (from_path.size() > 1 && from_path.back() == '/') {
+    auto end = from_path.size();
+    while (end > 1 && from_path[end - 1] == '/') {
+      --end;
     }
-    n = p - from + 1;
-    memcpy(newfrom, from, n);
-    newfrom[n] = 0;
-    from = newfrom;
+    from_path.resize(end);
   }
 
-  if (file_size(to) == -2) {
+  if (file_size(to_path.c_str()) == -2) {
     /* Target is a directory; build full target filename. */
-    const char *cp;
-    char newto[MAX_FNAME_SIZE + MAX_PATH_LEN + 2];
-
-    cp = strrchr(from, '/');
-    if (cp) {
-      cp++;
-    } else {
-      cp = from;
-    }
-
-    sprintf(newto, "%s/%s", to, cp);
-    return do_move(from, newto, flag);
+    const auto slash = from_path.rfind('/');
+    const auto basename = slash == std::string::npos ? from_path : from_path.substr(slash + 1);
+    const auto new_to = to_path + "/" + basename;
+    return do_move(from_path.c_str(), new_to.c_str(), flag);
   }
-  return do_move(from, to, flag);
+  return do_move(from_path.c_str(), to_path.c_str(), flag);
 }
 #endif /* F_RENAME */
 
 int copy_file(const char *from, const char *to) {
+  if (!from || !to) {
+    return -1;
+  }
+
   extern FLUFFOS_VM_THREAD_LOCAL svalue_t apply_ret_value;
   struct stat from_stats, to_stats;
 
-  from = check_valid_path(from, current_object, "move_file", 0);
-  assign_svalue(&from_sv, &apply_ret_value);
-
-  to = check_valid_path(to, current_object, "move_file", 1);
-  assign_svalue(&to_sv, &apply_ret_value);
-
-  if (from == nullptr) {
+  const char *validated_from = check_valid_path(from, current_object, "move_file", 0);
+  if (!validated_from) {
     return -1;
   }
-  if (to == nullptr) {
+  std::string from_path(validated_from);
+  assign_svalue(&from_sv, &apply_ret_value);
+
+  const char *validated_to = check_valid_path(to, current_object, "move_file", 1);
+  if (!validated_to) {
     return -2;
   }
+  std::string to_path(validated_to);
+  assign_svalue(&to_sv, &apply_ret_value);
 
-  if (lstat(from, &from_stats) != 0) {
-    error("/%s: lstat failed\n", from);
+  if (lstat(from_path.c_str(), &from_stats) != 0) {
+    error("/%s: lstat failed\n", from_path.c_str());
     return 1;
   }
-  if (lstat(to, &to_stats) == 0) {
+  if (lstat(to_path.c_str(), &to_stats) == 0) {
 #ifdef __WIN32
-    if (!strcmp(from, to)) {
+    if (from_path == to_path) {
 #else
     if (from_stats.st_dev == to_stats.st_dev && from_stats.st_ino == to_stats.st_ino) {
 #endif
-      error("`/%s' and `/%s' are the same file", from, to);
+      error("`/%s' and `/%s' are the same file", from_path.c_str(), to_path.c_str());
       return 1;
     }
   } else if (errno != ENOENT) {
-    error("/%s: unknown error\n", to);
+    error("/%s: unknown error\n", to_path.c_str());
     return 1;
   }
 
-  if (file_size(to) == -2) {
+  if (file_size(to_path.c_str()) == -2) {
     /* Target is a directory; build full target filename. */
-    const char *cp;
-    char newto[MAX_FNAME_SIZE + MAX_PATH_LEN + 2];
-
-    cp = strrchr(from, '/');
-    if (cp) {
-      cp++;
-    } else {
-      cp = from;
-    }
-    sprintf(newto, "%s/%s", to, cp);
-    return copy_file(from, newto);
+    const auto slash = from_path.rfind('/');
+    const auto basename = slash == std::string::npos ? from_path : from_path.substr(slash + 1);
+    const auto new_to = to_path + "/" + basename;
+    return copy_file(from_path.c_str(), new_to.c_str());
   }
 
-  if (copy_file_unchecked(from, to) != 1) {
+  if (copy_file_unchecked(from_path.c_str(), to_path.c_str()) != 1) {
     return -1;
   }
 
