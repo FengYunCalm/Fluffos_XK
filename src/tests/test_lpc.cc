@@ -17,6 +17,11 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#ifndef _WIN32
+#include <fcntl.h>
+#include <poll.h>
+#include <sys/socket.h>
+#endif
 #include "base/package_api.h"
 #include "base/internal/rc.h"
 #include "base/internal/stats.h"
@@ -3353,6 +3358,17 @@ TEST_F(DriverTest, TestGatewayMasterListenerEnablesTcpNoDelayAndGatewayPriority)
             std::string::npos);
 }
 
+TEST_F(DriverTest, TestGatewayListenerDescriptorsCloseOnExec) {
+  const auto source = read_source_file_for_test("../src/packages/gateway/gateway.cc");
+  const auto listen_pos = source.find("int gateway_listen_internal");
+  ASSERT_NE(listen_pos, std::string::npos);
+  const auto listen_end = source.find("\nnamespace {", listen_pos);
+  ASSERT_NE(listen_end, std::string::npos);
+
+  const auto listen_source = source.substr(listen_pos, listen_end - listen_pos);
+  ASSERT_NE(listen_source.find("LEV_OPT_CLOSE_ON_EXEC"), std::string::npos);
+}
+
 TEST_F(DriverTest, TestGatewayRejectsExternalBindWithoutAuthenticatedTransport) {
   ASSERT_FALSE(gateway_external_bind_allowed_for_test());
   const auto rejected_before =
@@ -3423,6 +3439,64 @@ TEST_F(DriverTest, TestReadBytesPreservesLpc64BitOffsets) {
 }
 
 #ifndef _WIN32
+TEST_F(DriverTest, TestSocketAcceptMarksAcceptedDescriptorCloseOnExec) {
+  struct FixtureGuard {
+    object_t* saved_current_object;
+    int listener = -1;
+    int accepted = -1;
+    evutil_socket_t client = -1;
+    int accidental_fd = -1;
+    int accidental_fd_flags = -1;
+    ~FixtureGuard() {
+      current_object = master_ob;
+      if (accepted >= 0 && lpc_socks_get(accepted)->state != STATE_CLOSED) {
+        socket_close(accepted, 0);
+      }
+      if (listener >= 0 && lpc_socks_get(listener)->state != STATE_CLOSED) {
+        socket_close(listener, 0);
+      }
+      if (client >= 0) {
+        evutil_closesocket(client);
+      }
+      if (accidental_fd_flags >= 0) {
+        fcntl(accidental_fd, F_SETFD, accidental_fd_flags);
+      }
+      current_object = saved_current_object;
+    }
+  } guard{current_object};
+  current_object = master_ob;
+
+  guard.listener = socket_create(STREAM, nullptr, nullptr);
+  ASSERT_GE(guard.listener, 0);
+  ASSERT_EQ(socket_bind(guard.listener, 0, "127.0.0.1 0"), EESUCCESS);
+  ASSERT_EQ(socket_listen(guard.listener, nullptr), EESUCCESS);
+
+  auto* listener = lpc_socks_get(guard.listener);
+  sockaddr_storage address{};
+  socklen_t address_length = sizeof(address);
+  ASSERT_EQ(getsockname(listener->fd, reinterpret_cast<sockaddr*>(&address),
+                        &address_length),
+            0);
+
+  guard.client = socket(address.ss_family, SOCK_STREAM, 0);
+  ASSERT_GE(guard.client, 0);
+  ASSERT_EQ(connect(guard.client, reinterpret_cast<sockaddr*>(&address), address_length), 0);
+
+  pollfd listener_ready{listener->fd, POLLIN, 0};
+  ASSERT_EQ(poll(&listener_ready, 1, 1000), 1);
+  ASSERT_NE(listener_ready.revents & POLLIN, 0);
+
+  guard.accidental_fd = guard.listener;
+  guard.accidental_fd_flags = fcntl(guard.accidental_fd, F_GETFD);
+  guard.accepted = socket_accept(guard.listener, nullptr, nullptr);
+  ASSERT_GE(guard.accepted, 0);
+
+  const auto accepted_fd = lpc_socks_get(guard.accepted)->fd;
+  const auto descriptor_flags = fcntl(accepted_fd, F_GETFD);
+  ASSERT_NE(descriptor_flags, -1);
+  ASSERT_NE(descriptor_flags & FD_CLOEXEC, 0);
+}
+
 TEST_F(DriverTest, TestExternalSpawnFailureDoesNotPublishSocket) {
   char invalid_command[] = "/this/path/does/not/exist/fluffos-external-test";
   struct FixtureGuard {

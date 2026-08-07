@@ -2132,7 +2132,7 @@ int gateway_listen_internal(int port, int bind_all) {
 
   g_gateway_listener = evconnlistener_new_bind(
       g_event_base, gateway_listener_cb, nullptr,
-      LEV_OPT_REUSEABLE | LEV_OPT_CLOSE_ON_FREE, -1,
+      LEV_OPT_REUSEABLE | LEV_OPT_CLOSE_ON_FREE | LEV_OPT_CLOSE_ON_EXEC, -1,
       reinterpret_cast<sockaddr *>(&sin), sizeof(sin));
   if (!g_gateway_listener) {
     g_gateway_listen_port = 0;
