@@ -9,7 +9,7 @@ void dump_file_descriptors(outbuffer_t *);
 
 char *read_file(const char *, int, int);
 struct svalue_t read_json(const char *);
-char *read_bytes(const char *, int, int, int *);
+char *read_bytes(const char *, LPC_INT, LPC_INT, int *);
 int write_file(const char *, const char *, int);
 int write_json(const char *, const struct svalue_t *);
 int write_bytes(const char *, int, const char *, int);

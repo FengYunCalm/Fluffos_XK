@@ -38,6 +38,8 @@
 #include <sys/mkdev.h>
 #endif
 #include <fcntl.h>
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <sstream>
 #include <string>
@@ -529,13 +531,12 @@ char *read_file(const char *file, int start, int lines) {
   return string_copy(ptr_start, "read_file: result");
 }
 
-char *read_bytes(const char *file, int start, int len, int *rlen) {
+char *read_bytes(const char *file, LPC_INT start, LPC_INT len, int *rlen) {
   const auto max_byte_transfer = CONFIG_INT(__MAX_BYTE_TRANSFER__);
 
   struct stat st;
   FILE *fptr;
   char *str;
-  int size;
 
   if (len < 0) {
     return nullptr;
@@ -551,48 +552,65 @@ char *read_bytes(const char *file, int start, int len, int *rlen) {
   if (fstat(fileno(fptr), &st) == -1) {
     fatal("Could not stat an open file.\n");
   }
-  size = st.st_size;
-  if (start < 0) {
-    start = size + start;
+  const auto file_size = static_cast<std::intmax_t>(st.st_size);
+  if (file_size < 0) {
+    fclose(fptr);
+    return nullptr;
   }
 
-  if (len == 0) {
-    len = size;
+  auto offset = static_cast<std::intmax_t>(start);
+  if (offset < 0) {
+    if (offset < -file_size) {
+      fclose(fptr);
+      return nullptr;
+    }
+    offset += file_size;
   }
-  if (len > max_byte_transfer) {
+
+  auto requested_length = static_cast<std::intmax_t>(len);
+  if (requested_length == 0) {
+    requested_length = file_size;
+  }
+  if (requested_length > max_byte_transfer) {
     fclose(fptr);
     error("Transfer exceeded maximum allowed number of bytes.\n");
     return nullptr;
   }
-  if (start >= size) {
+  if (offset >= file_size) {
     fclose(fptr);
     return nullptr;
   }
-  if ((start + len) > size) {
-    len = (size - start);
-  }
+  const auto transfer_length =
+      std::min(requested_length, file_size - offset);
 
-  if ((size = fseek(fptr, start, 0)) < 0) {
+#ifdef _WIN32
+  const auto seek_result =
+      _fseeki64(fptr, static_cast<long long>(offset), SEEK_SET);
+#else
+  const auto seek_result = fseeko(fptr, static_cast<off_t>(offset), SEEK_SET);
+#endif
+  if (seek_result != 0) {
     fclose(fptr);
     return nullptr;
   }
 
-  str = new_string(len, "read_bytes: str");
+  const auto allocation_length = static_cast<unsigned int>(transfer_length);
+  str = new_string(allocation_length, "read_bytes: str");
 
-  size = fread(str, 1, len, fptr);
+  const auto bytes_read = fread(str, 1, allocation_length, fptr);
 
   fclose(fptr);
 
-  if (size <= 0) {
+  if (bytes_read == 0) {
     FREE_MSTR(str);
     return nullptr;
   }
   /*
    * The string has to end to '\0'!!!
    */
-  str[size] = '\0';
+  str[bytes_read] = '\0';
 
-  *rlen = size;
+  *rlen = static_cast<int>(bytes_read);
   return str;
 }
 

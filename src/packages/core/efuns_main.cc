@@ -10,6 +10,7 @@
 #include "base/package_api.h"
 
 #include <algorithm>
+#include <limits>
 #ifdef HAVE_SYS_STAT_H
 #include <sys/stat.h>
 #endif
@@ -1687,7 +1688,8 @@ void f_secure_random() {
 #ifdef F_READ_BYTES
 void f_read_bytes() {
   char *str;
-  int start = 0, len = 0, rlen = 0, num_arg = st_num_arg;
+  LPC_INT start = 0, len = 0;
+  int rlen = 0, num_arg = st_num_arg;
   svalue_t *arg;
 
   arg = sp - num_arg + 1;
@@ -1712,7 +1714,8 @@ void f_read_bytes() {
 #ifdef F_READ_BUFFER
 void f_read_buffer() {
   char *str;
-  int start = 0, len = 0, rlen = 0, num_arg = st_num_arg;
+  LPC_INT start = 0, len = 0;
+  int rlen = 0, num_arg = st_num_arg;
   int from_file = 0; /* new line */
   svalue_t *arg = sp - num_arg + 1;
 
@@ -1726,7 +1729,15 @@ void f_read_buffer() {
     from_file = 1; /* new line */
     str = read_bytes(arg[0].u.string, start, len, &rlen);
   } else { /* T_BUFFER */
-    str = read_buffer(arg[0].u.buf, start, len, &rlen);
+    if (start < std::numeric_limits<int>::min() ||
+        start > std::numeric_limits<int>::max() ||
+        len < std::numeric_limits<int>::min() ||
+        len > std::numeric_limits<int>::max()) {
+      str = nullptr;
+    } else {
+      str = read_buffer(arg[0].u.buf, static_cast<int>(start),
+                        static_cast<int>(len), &rlen);
+    }
   }
   pop_n_elems(num_arg);
   if (str == nullptr) {

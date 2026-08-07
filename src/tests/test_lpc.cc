@@ -3387,6 +3387,35 @@ TEST_F(DriverTest, TestMudPortRejectsInvalidWirePayloadLengths) {
   ASSERT_FALSE(decode_mud_port_payload_length_for_test(header, 3, &payload_length));
 }
 
+TEST_F(DriverTest, TestReadBytesPreservesLpc64BitOffsets) {
+  constexpr LPC_INT kLargeOffset = static_cast<LPC_INT>(1) << 32;
+  const char* relative_path = "log/read-bytes-large-offset.bin";
+  const char* mudlib_path = "/log/read-bytes-large-offset.bin";
+  struct FixtureGuard {
+    const char* path;
+    object_t* saved_current_object;
+    ~FixtureGuard() {
+      std::remove(path);
+      current_object = saved_current_object;
+    }
+  } guard{relative_path, current_object};
+  current_object = master_ob;
+
+  std::ofstream file(relative_path, std::ios::binary | std::ios::trunc);
+  ASSERT_TRUE(file.is_open());
+  file.seekp(static_cast<std::streamoff>(kLargeOffset));
+  file.put('Z');
+  file.close();
+  ASSERT_TRUE(file.good());
+
+  int length = 0;
+  char* contents = read_bytes(mudlib_path, kLargeOffset, 1, &length);
+  ASSERT_NE(contents, nullptr);
+  EXPECT_EQ(length, 1);
+  EXPECT_EQ(contents[0], 'Z');
+  FREE_MSTR(contents);
+}
+
 TEST_F(DriverTest, TestReadJsonRejectsUnsignedIntegerOutsideLpcRange) {
   const char* relative_path = "log/read-json-integer-boundary.json";
   const char* mudlib_path = "/log/read-json-integer-boundary.json";
