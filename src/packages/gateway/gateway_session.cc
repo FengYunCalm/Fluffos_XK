@@ -7340,9 +7340,9 @@ void f_gateway_create_session() {
   ob = gateway_create_session_internal(session_id, data, ip, port, master_fd);
   pop_n_elems(num_args);
   if (ob) {
-    put_unrefed_object(ob, "f_gateway_create_session");
+    push_object(ob);
   } else {
-    put_number(0);
+    push_number(0);
   }
 }
 
@@ -7380,9 +7380,9 @@ void f_gateway_session_info() {
   auto *sess = gateway_find_session_by_object(ob);
   mapping_t *map;
 
-  pop_stack();
   if (!sess) {
-    put_number(0);
+    pop_stack();
+    push_number(0);
     return;
   }
 
@@ -7419,13 +7419,15 @@ void f_gateway_session_info() {
   add_mapping_pair(map, "session_fifo_flushed", static_cast<long>(sess->output_fifo_flushed));
   add_mapping_pair(map, "session_fifo_rejected", static_cast<long>(sess->output_fifo_rejected));
   add_mapping_string(map, "gateway_io_boundary", "main_thread_io_adapter");
+  pop_stack();
   push_refed_mapping(map);
 }
 
 void f_gateway_inject_input() {
   const char *input = sp->u.string;
   auto *ob = (sp - 1)->u.ob;
+  const auto result = gateway_inject_input_internal(ob, input);
 
   pop_2_elems();
-  put_number(gateway_inject_input_internal(ob, input));
+  push_number(result);
 }

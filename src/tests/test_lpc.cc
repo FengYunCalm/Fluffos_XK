@@ -14966,6 +14966,86 @@ TEST_F(DriverTest, TestGatewayProbeSuppressionIsSessionScopedAndOneShot) {
   free_object(&ob, "TestGatewayProbeSuppressionIsSessionScopedAndOneShot");
 }
 
+TEST_F(DriverTest, TestGatewayInjectInputEfunPreservesArgumentLifetimeAndStack) {
+  constexpr const char *kSessionId = "gw-test-inject-input-efun";
+  auto *ob = create_gateway_session_for_test(
+      kSessionId, "/clone/gateway_login_example", 90);
+  ASSERT_NE(ob, nullptr);
+  ASSERT_NE(ob->interactive, nullptr);
+  add_ref(ob, "TestGatewayInjectInputEfunPreservesArgumentLifetimeAndStack");
+
+  const std::string input(128, 'x');
+  copy_and_push_string(input.c_str());
+  auto *result = call_lpc_method(ob, "inject_gateway_input_via_efun", 1);
+  ASSERT_NE(result, nullptr);
+  ASSERT_EQ(result->type, T_NUMBER);
+  ASSERT_EQ(result->u.number, 1);
+
+  const auto expected = input + "-efun\n";
+  ASSERT_EQ(ob->interactive->text_end,
+            static_cast<int>(expected.size()));
+  ASSERT_EQ(std::string(ob->interactive->text,
+                        static_cast<size_t>(ob->interactive->text_end)),
+            expected);
+
+  ASSERT_EQ(gateway_destroy_session_internal(kSessionId, "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(&ob,
+              "TestGatewayInjectInputEfunPreservesArgumentLifetimeAndStack");
+}
+
+TEST_F(DriverTest, TestGatewayCoreEfunsPreserveReturnStackContracts) {
+  constexpr const char *kSessionId = "gw-test-core-efun-stack-contract";
+  auto *ob = create_gateway_session_for_test(
+      kSessionId, "/clone/gateway_login_example", 91);
+  ASSERT_NE(ob, nullptr);
+  ASSERT_NE(ob->interactive, nullptr);
+  add_ref(ob, "TestGatewayCoreEfunsPreserveReturnStackContracts");
+
+  auto *pending = call_lpc_method(ob, "query_gateway_pending_counters_via_efun");
+  ASSERT_NE(pending, nullptr);
+  ASSERT_EQ(pending->type, T_NUMBER);
+  ASSERT_GE(pending->u.number, 0);
+
+  auto *listen = call_lpc_method(ob, "listen_gateway_via_efun");
+  ASSERT_NE(listen, nullptr);
+  ASSERT_EQ(listen->type, T_NUMBER);
+  ASSERT_EQ(listen->u.number, 0);
+
+  auto *empty_session =
+      call_lpc_method(ob, "create_empty_gateway_session_via_efun");
+  ASSERT_NE(empty_session, nullptr);
+  ASSERT_EQ(empty_session->type, T_NUMBER);
+  ASSERT_EQ(empty_session->u.number, 0);
+
+  auto *set_heartbeat =
+      call_lpc_method(ob, "set_gateway_heartbeat_via_efun");
+  ASSERT_NE(set_heartbeat, nullptr);
+  ASSERT_EQ(set_heartbeat->type, T_NUMBER);
+  ASSERT_EQ(set_heartbeat->u.number, 1);
+
+  auto *check_timeout =
+      call_lpc_method(ob, "check_gateway_timeout_via_efun");
+  ASSERT_NE(check_timeout, nullptr);
+  ASSERT_EQ(check_timeout->type, T_NUMBER);
+  ASSERT_EQ(check_timeout->u.number, 1);
+
+  auto *non_session = clone_object_for_test("clone/gateway_login_example");
+  ASSERT_NE(non_session, nullptr);
+  auto *info =
+      call_lpc_method(non_session, "gateway_session_info_non_session_via_efun");
+  ASSERT_NE(info, nullptr);
+  ASSERT_EQ(info->type, T_NUMBER);
+  ASSERT_EQ(info->u.number, 0);
+  destruct_object_for_test(non_session);
+
+  ASSERT_EQ(gateway_destroy_session_internal(kSessionId, "test_done", "done"),
+            1);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayCoreEfunsPreserveReturnStackContracts");
+}
+
 long gateway_test_mapping_number(mapping_t *map, const char *key) {
   auto *value = find_string_in_mapping(map, key);
   EXPECT_NE(value, nullptr) << key;

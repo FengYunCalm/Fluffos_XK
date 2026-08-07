@@ -75,6 +75,37 @@ int enable_gateway_get_char() {
   return get_char("gateway_get_char_callback", 3, "char-token");
 }
 
+int inject_gateway_input_via_efun(string input) {
+  return gateway_inject_input(this_object(), input + "-efun");
+}
+
+int query_gateway_pending_counters_via_efun() {
+  return gateway_main_queue_pending() + gateway_buffered_input_pending() +
+         gateway_command_pending();
+}
+
+int listen_gateway_via_efun() {
+  return gateway_listen(0);
+}
+
+mixed create_empty_gateway_session_via_efun() {
+  return gateway_create_session("", 0);
+}
+
+mixed gateway_session_info_non_session_via_efun() {
+  return gateway_session_info(this_object());
+}
+
+int set_gateway_heartbeat_via_efun() {
+  gateway_set_heartbeat(0, 0);
+  return 1;
+}
+
+int check_gateway_timeout_via_efun() {
+  gateway_check_timeout();
+  return 1;
+}
+
 int enable_gateway_ed() {
 #ifdef __OLD_ED__
   ed("/ed_test");

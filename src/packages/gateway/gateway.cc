@@ -3277,16 +3277,16 @@ void f_gateway_listen() {
     port = sp->u.number;
   }
   pop_stack();
-  put_number(gateway_listen_internal(port, bind_all));
+  push_number(gateway_listen_internal(port, bind_all));
 }
 
-void f_gateway_main_queue_pending() { put_number(gateway_main_queue_pending_count()); }
+void f_gateway_main_queue_pending() { push_number(gateway_main_queue_pending_count()); }
 
 void f_gateway_buffered_input_pending() {
-  put_number(gateway_buffered_input_pending_count());
+  push_number(gateway_buffered_input_pending_count());
 }
 
-void f_gateway_command_pending() { put_number(gateway_command_pressure_count()); }
+void f_gateway_command_pending() { push_number(gateway_command_pressure_count()); }
 
 void f_gateway_status() {
   auto *map = gateway_status_internal();
@@ -3385,7 +3385,6 @@ void f_gateway_set_heartbeat() {
     g_gateway_heartbeat_timeout = timeout;
   }
   gateway_start_heartbeat_timer();
-  push_number(1);
 }
 
 void f_gateway_check_timeout() {
@@ -3394,7 +3393,6 @@ void f_gateway_check_timeout() {
   }
   gateway_check_heartbeat_timeouts();
   gateway_check_session_timeouts();
-  push_number(1);
 }
 
 void f_gateway_ping_master() {
