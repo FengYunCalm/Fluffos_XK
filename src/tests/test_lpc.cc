@@ -61,6 +61,8 @@ void destruct_object_for_test(object_t* object);
 }
 extern bool vm_dns_test_support_dispatch_callback(object_t* owner, const char* method, LPC_INT key);
 extern bool vm_socket_test_support_dispatch_callback(object_t* owner, const char* method, LPC_INT fd);
+extern bool decode_mud_port_payload_length_for_test(const char* header, size_t header_size,
+                                                    size_t* payload_length);
 extern int replace_interactive(object_t *ob, object_t *obfrom);
 extern bool gateway_dispatch_message_for_test(int fd, const char *payload);
 extern int gateway_dispatch_buffered_frames_for_test(GatewayMaster *master, int budget);
@@ -3352,6 +3354,35 @@ TEST_F(DriverTest, TestGatewayRejectsExternalBindWithoutAuthenticatedTransport) 
   ASSERT_EQ(g_gateway_runtime_counters.external_bind_rejected.load(
                 std::memory_order_relaxed),
             rejected_before + 1);
+}
+
+TEST_F(DriverTest, TestMudPortRejectsInvalidWirePayloadLengths) {
+  char unaligned_header[5] = {0};
+  auto* header = unaligned_header + 1;
+  size_t payload_length = 0;
+
+  header[0] = 0x00;
+  header[1] = 0x0f;
+  header[2] = static_cast<char>(0xff);
+  header[3] = static_cast<char>(0xfb);
+  ASSERT_TRUE(decode_mud_port_payload_length_for_test(header, 4, &payload_length));
+  ASSERT_EQ(payload_length, static_cast<size_t>(MAX_TEXT - 5));
+
+  header[0] = static_cast<char>(0x80);
+  header[1] = 0x00;
+  header[2] = 0x00;
+  header[3] = 0x00;
+  ASSERT_FALSE(decode_mud_port_payload_length_for_test(header, 4, &payload_length));
+
+  header[0] = 0x00;
+  header[1] = 0x10;
+  header[2] = 0x00;
+  header[3] = 0x00;
+  ASSERT_FALSE(decode_mud_port_payload_length_for_test(header, 4, &payload_length));
+
+  std::memset(header, 0, 4);
+  ASSERT_FALSE(decode_mud_port_payload_length_for_test(header, 4, &payload_length));
+  ASSERT_FALSE(decode_mud_port_payload_length_for_test(header, 3, &payload_length));
 }
 
 TEST_F(DriverTest, TestGatewayLoginRunsThroughOwnerMainQueue) {

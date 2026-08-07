@@ -81,6 +81,26 @@ struct UserEventData {
   int idx;
 };
 
+bool decode_mud_port_payload_length(const char *header, size_t header_size,
+                                    size_t *payload_length) {
+  constexpr size_t kMudPortHeaderSize = sizeof(uint32_t);
+  constexpr size_t kMudPortMaxPayload = static_cast<size_t>(MAX_TEXT) -
+                                        kMudPortHeaderSize - 1;
+  if (!header || !payload_length || header_size < kMudPortHeaderSize) {
+    return false;
+  }
+
+  uint32_t network_length = 0;
+  // Do not type-pun the byte buffer: it is not guaranteed to be aligned.
+  std::memcpy(&network_length, header, sizeof(network_length));
+  const auto length = ntohl(network_length);
+  if (length == 0 || static_cast<size_t>(length) > kMudPortMaxPayload) {
+    return false;
+  }
+  *payload_length = static_cast<size_t>(length);
+  return true;
+}
+
 svalue_t *owner_bound_safe_apply(const char *fun, object_t *ob, int num_arg, int origin,
                                  const char *task_type) {
   if (!ob) {
@@ -433,6 +453,11 @@ void new_conn_handler(evconnlistener *listener, evutil_socket_t fd, struct socka
 } /* new_conn_handler() */
 
 }  // namespace
+
+bool decode_mud_port_payload_length_for_test(const char *header, size_t header_size,
+                                             size_t *payload_length) {
+  return decode_mud_port_payload_length(header, header_size, payload_length);
+}
 
 // Initialize an new user
 interactive_t *new_user(port_def_t *port, evutil_socket_t fd, sockaddr *addr,
@@ -1003,7 +1028,15 @@ void get_user_data(interactive_t *ip) {
       if (ip->text_end < 4) {
         text_space = 4 - ip->text_end;
       } else {
-        text_space = *reinterpret_cast<volatile int *>(ip->text) - ip->text_end + 4;
+        size_t payload_length = 0;
+        if (!decode_mud_port_payload_length(ip->text, sizeof(uint32_t),
+                                            &payload_length) ||
+            static_cast<size_t>(ip->text_end) > sizeof(uint32_t) + payload_length) {
+          remove_interactive(ip->ob, 0);
+          return;
+        }
+        text_space = static_cast<int>(sizeof(uint32_t) + payload_length -
+                                      static_cast<size_t>(ip->text_end));
       }
       break;
 
@@ -1068,9 +1101,11 @@ void get_user_data(interactive_t *ip) {
 
       if (num_bytes == text_space) {
         if (ip->text_end == 4) {
-          *reinterpret_cast<volatile int *>(ip->text) = ntohl(*reinterpret_cast<int *>(ip->text));
-          if (*reinterpret_cast<volatile int *>(ip->text) > MAX_TEXT - 5) {
+          size_t payload_length = 0;
+          if (!decode_mud_port_payload_length(ip->text, sizeof(uint32_t),
+                                              &payload_length)) {
             remove_interactive(ip->ob, 0);
+            return;
           }
         } else {
           svalue_t value;
