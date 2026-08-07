@@ -7347,9 +7347,14 @@ void f_gateway_create_session() {
 }
 
 void f_gateway_destroy_session() {
-  const char *session_id = sp->u.string;
+  if (sp->type != T_STRING || !sp->u.string) {
+    pop_stack();
+    push_number(0);
+    return;
+  }
+  const std::string session_id(sp->u.string, SVALUE_STRLEN(sp));
   pop_stack();
-  put_number(gateway_destroy_session_internal(session_id, "efun_destroy", "efun"));
+  push_number(gateway_destroy_session_internal(session_id.c_str(), "efun_destroy", "efun"));
 }
 
 void f_gateway_sessions() {
