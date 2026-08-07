@@ -3886,8 +3886,10 @@ TEST_F(DriverTest, TestSaveObjectStringPreservesHeaderAndRejectsShortHeader) {
   std::vector<char> exact_header_destination(header_size + 1, 'S');
   ASSERT_EQ(save_object_str(object, 0, exact_header_destination.data(),
                             static_cast<int>(header_size)),
-            0);
-  ASSERT_EQ(exact_header_destination[0], 'S');
+            1);
+  ASSERT_EQ(std::string(exact_header_destination.data(), header_size),
+            serialized.substr(0, header_size));
+  ASSERT_EQ(exact_header_destination[header_size], '\0');
   std::vector<char> short_destination(header_size + 1, 'S');
   ASSERT_EQ(save_object_str(object, 0, short_destination.data(), static_cast<int>(header_size - 1)), 0);
   ASSERT_EQ(short_destination[0], 'S');

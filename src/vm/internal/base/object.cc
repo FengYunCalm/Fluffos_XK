@@ -1655,7 +1655,7 @@ int save_object_str(object_t *ob, int save_zeros, char *saved, int size) {
 
   const std::string save_name = make_save_object_name(ob->obname);
   const size_t header_size = 2 + save_name.size() + 1;
-  if (header_size >= static_cast<size_t>(size)) {
+  if (header_size > static_cast<size_t>(size)) {
     return 0;
   }
 
