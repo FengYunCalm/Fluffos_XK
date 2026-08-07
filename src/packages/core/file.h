@@ -17,7 +17,7 @@ int write_json(const char *, const struct svalue_t *);
 int write_bytes(const char *, LPC_INT, const char *, std::size_t);
 array_t *get_dir(const char *, int);
 int tail(char *);
-int file_size(const char *);
+LPC_INT file_size(const char *);
 int copy_file(const char *, const char *);
 int do_rename(const char *, const char *, int);
 int remove_file(const char *);

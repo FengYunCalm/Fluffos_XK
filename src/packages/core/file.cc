@@ -686,9 +686,9 @@ int write_bytes(const char *file, LPC_INT start, const char *str, std::size_t th
   return 1;
 }
 
-int file_size(const char *file) {
+LPC_INT file_size(const char *file) {
   struct stat st;
-  long ret;
+  LPC_INT ret;
 
   file = check_valid_path(file, current_object, "file_size", 0);
   if (!file) {

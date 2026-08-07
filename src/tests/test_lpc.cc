@@ -3468,6 +3468,30 @@ TEST_F(DriverTest, TestWriteBytesPreservesLpc64BitOffsets) {
   FREE_MSTR(contents);
 }
 
+TEST_F(DriverTest, TestFileSizePreservesLpc64BitSize) {
+  constexpr LPC_INT kLargeSize = static_cast<LPC_INT>(1) << 32;
+  const char* relative_path = "log/file-size-large.bin";
+  const char* mudlib_path = "/log/file-size-large.bin";
+  struct FixtureGuard {
+    const char* path;
+    object_t* saved_current_object;
+    ~FixtureGuard() {
+      std::remove(path);
+      current_object = saved_current_object;
+    }
+  } guard{relative_path, current_object};
+  current_object = master_ob;
+
+  std::ofstream file(relative_path, std::ios::binary | std::ios::trunc);
+  ASSERT_TRUE(file.is_open());
+  file.seekp(static_cast<std::streamoff>(kLargeSize - 1));
+  file.put('\0');
+  file.close();
+  ASSERT_TRUE(file.good());
+
+  ASSERT_EQ(file_size(mudlib_path), kLargeSize);
+}
+
 #ifndef _WIN32
 TEST_F(DriverTest, TestSocketAcceptMarksAcceptedDescriptorCloseOnExec) {
   struct FixtureGuard {
