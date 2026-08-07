@@ -528,6 +528,10 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "session_fifo_wire_bytes"), 0);
   ASSERT_GE(mapping_number(status, "session_fifo_wire_limit_bytes"),
             64 * 1024);
+  ASSERT_GE(mapping_number(status,
+                           "session_fifo_wire_aggregate_limit_bytes"),
+            64 * 1024);
+  ASSERT_GE(mapping_number(status, "session_fifo_wire_detached_bytes"), 0);
   ASSERT_GE(mapping_number(status, "session_fifo_wire_bytes_rejected"), 0);
   ASSERT_GE(mapping_number(status, "session_fifo_enqueued"), 0);
   ASSERT_GE(mapping_number(status, "session_fifo_flushed"), 0);
@@ -591,6 +595,14 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_rejected"), 0);
   ASSERT_GE(mapping_number(status,
                            "gateway_output_fifo_wire_bytes_rejected"),
+            0);
+  ASSERT_GE(mapping_number(
+                status,
+                "gateway_output_fifo_aggregate_wire_bytes_rejected"),
+            0);
+  ASSERT_GE(mapping_number(
+                status,
+                "gateway_output_fifo_rebucket_wire_bytes_dropped"),
             0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_reserved"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_fifo_filled"), 0);
@@ -14201,6 +14213,272 @@ object_t *create_gateway_session_for_test(const char *session_id, const char *lo
   return ob;
 }
 
+TEST_F(DriverTest, TestGatewayMasterSessionFifoBytesAreAggregatelyBounded) {
+  struct PacketSizeGuard {
+    size_t original{g_gateway_max_packet_size};
+    ~PacketSizeGuard() { g_gateway_max_packet_size = original; }
+  } packet_size_guard;
+
+  g_gateway_max_packet_size = 1024;
+  constexpr int master_fd = 1709;
+  const char *first_session_id = "gw-test-master-fifo-budget-first";
+  const char *second_session_id = "gw-test-master-fifo-budget-second";
+  bufferevent *pair[2] = {nullptr, nullptr};
+  ASSERT_EQ(bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, pair), 0);
+  ASSERT_NE(pair[0], nullptr);
+  ASSERT_NE(pair[1], nullptr);
+  ASSERT_NE(gateway_register_master_for_test(master_fd, pair[0]), nullptr);
+
+  auto *first_ob = create_gateway_session_for_test(
+      first_session_id, "/clone/gateway_login_example", master_fd);
+  ASSERT_NE(first_ob, nullptr);
+  add_ref(first_ob, "TestGatewayMasterSessionFifoBytesAreAggregatelyBoundedFirst");
+  auto *second_ob = create_gateway_session_for_test(
+      second_session_id, "/clone/gateway_login_example", master_fd);
+  ASSERT_NE(second_ob, nullptr);
+  add_ref(second_ob,
+          "TestGatewayMasterSessionFifoBytesAreAggregatelyBoundedSecond");
+  auto *first = gateway_find_session(first_session_id);
+  auto *second = gateway_find_session(second_session_id);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+
+  const auto aggregate_limit = gateway_write_buffer_limit_for_test();
+  const auto aggregate_rejected_before =
+      g_gateway_runtime_counters.output_fifo_aggregate_wire_bytes_rejected.load(
+          std::memory_order_relaxed);
+  const std::string payload(512, 'x');
+  bool rejected = false;
+  for (int attempt = 0; attempt < 4096; ++attempt) {
+    auto *session = attempt % 2 == 0 ? first : second;
+    if (!gateway_enqueue_session_protocol_output(
+            session, payload.data(), payload.size())) {
+      rejected = true;
+      break;
+    }
+  }
+
+  ASSERT_TRUE(rejected);
+  EXPECT_LE(first->output_fifo_wire_bytes + second->output_fifo_wire_bytes,
+            aggregate_limit);
+  EXPECT_EQ(
+      g_gateway_runtime_counters.output_fifo_aggregate_wire_bytes_rejected.load(
+          std::memory_order_relaxed),
+      aggregate_rejected_before + 1);
+
+  ASSERT_EQ(gateway_destroy_session_internal(first_session_id, "test_done", "done"),
+            1);
+  destruct_object(first_ob);
+  free_object(
+      &first_ob,
+      "TestGatewayMasterSessionFifoBytesAreAggregatelyBoundedFirst");
+  ASSERT_EQ(
+      gateway_destroy_session_internal(second_session_id, "test_done", "done"),
+      1);
+  destruct_object(second_ob);
+  free_object(
+      &second_ob,
+      "TestGatewayMasterSessionFifoBytesAreAggregatelyBoundedSecond");
+  gateway_remove_master_for_test(master_fd);
+  pair[0] = nullptr;
+  bufferevent_free(pair[1]);
+}
+
+TEST_F(DriverTest,
+       TestGatewayDetachedSessionFifoBytesRemainAggregatelyBounded) {
+  struct PacketSizeGuard {
+    size_t original{g_gateway_max_packet_size};
+    ~PacketSizeGuard() { g_gateway_max_packet_size = original; }
+  } packet_size_guard;
+
+  g_gateway_max_packet_size = 1024;
+  constexpr int first_master_fd = 1711;
+  constexpr int second_master_fd = 1712;
+  const char *first_session_id = "gw-test-detached-fifo-budget-first";
+  const char *second_session_id = "gw-test-detached-fifo-budget-second";
+  auto *first_ob = create_gateway_session_for_test(
+      first_session_id, "/clone/gateway_login_example", first_master_fd);
+  ASSERT_NE(first_ob, nullptr);
+  add_ref(
+      first_ob,
+      "TestGatewayDetachedSessionFifoBytesRemainAggregatelyBoundedFirst");
+  auto *second_ob = create_gateway_session_for_test(
+      second_session_id, "/clone/gateway_login_example", second_master_fd);
+  ASSERT_NE(second_ob, nullptr);
+  add_ref(
+      second_ob,
+      "TestGatewayDetachedSessionFifoBytesRemainAggregatelyBoundedSecond");
+  auto *first = gateway_find_session(first_session_id);
+  auto *second = gateway_find_session(second_session_id);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+
+  const auto aggregate_limit = gateway_write_buffer_limit_for_test();
+  const std::string payload(512, 'x');
+  while (gateway_enqueue_session_protocol_output(
+      first, payload.data(), payload.size())) {
+    EXPECT_LE(first->output_fifo_wire_bytes, aggregate_limit);
+  }
+  while (gateway_enqueue_session_protocol_output(
+      second, payload.data(), payload.size())) {
+    EXPECT_LE(second->output_fifo_wire_bytes, aggregate_limit);
+  }
+  ASSERT_GT(first->output_fifo_wire_bytes, aggregate_limit / 2);
+  ASSERT_GT(second->output_fifo_wire_bytes, aggregate_limit / 2);
+  EXPECT_EQ(gateway_session_fifo_wire_detached_bytes(), 0u);
+  const auto rebucket_dropped_before =
+      g_gateway_runtime_counters.output_fifo_rebucket_wire_bytes_dropped.load(
+          std::memory_order_relaxed);
+
+  gateway_cleanup_master_sessions(first_master_fd);
+  EXPECT_EQ(gateway_session_fifo_wire_detached_bytes(),
+            first->output_fifo_wire_bytes);
+  gateway_cleanup_master_sessions(second_master_fd);
+  EXPECT_LE(gateway_session_fifo_wire_detached_bytes(), aggregate_limit);
+  EXPECT_GT(
+      g_gateway_runtime_counters.output_fifo_rebucket_wire_bytes_dropped.load(
+          std::memory_order_relaxed),
+      rebucket_dropped_before);
+
+  ASSERT_EQ(
+      gateway_destroy_session_internal(first_session_id, "test_done", "done"),
+      1);
+  destruct_object(first_ob);
+  free_object(
+      &first_ob,
+      "TestGatewayDetachedSessionFifoBytesRemainAggregatelyBoundedFirst");
+  ASSERT_EQ(gateway_destroy_session_internal(
+                second_session_id, "test_done", "done"),
+            1);
+  destruct_object(second_ob);
+  free_object(
+      &second_ob,
+      "TestGatewayDetachedSessionFifoBytesRemainAggregatelyBoundedSecond");
+  EXPECT_EQ(gateway_session_fifo_wire_detached_bytes(), 0u);
+}
+
+TEST_F(DriverTest,
+       TestGatewayProjectedWireBatchRejectsAggregateBudgetAtomically) {
+  struct PacketSizeGuard {
+    size_t original{g_gateway_max_packet_size};
+    ~PacketSizeGuard() { g_gateway_max_packet_size = original; }
+  } packet_size_guard;
+  static std::vector<std::string> writes;
+  writes.clear();
+  auto writer = [](int, const char *data, size_t len) -> int {
+    writes.emplace_back(data, len);
+    return 1;
+  };
+
+  g_gateway_max_packet_size = 1024;
+  constexpr int master_fd = 1713;
+  const char *prefill_session_id = "gw-test-aggregate-batch-prefill";
+  const char *first_session_id = "gw-test-aggregate-batch-first";
+  const char *second_session_id = "gw-test-aggregate-batch-second";
+  auto *prefill_ob = create_gateway_session_for_test(
+      prefill_session_id, "/clone/gateway_login_example", master_fd);
+  ASSERT_NE(prefill_ob, nullptr);
+  add_ref(prefill_ob,
+          "TestGatewayProjectedWireBatchRejectsAggregateBudgetPrefill");
+  auto *first_ob = create_gateway_session_for_test(
+      first_session_id, "/clone/gateway_login_example", master_fd);
+  ASSERT_NE(first_ob, nullptr);
+  add_ref(first_ob,
+          "TestGatewayProjectedWireBatchRejectsAggregateBudgetFirst");
+  auto *second_ob = create_gateway_session_for_test(
+      second_session_id, "/clone/gateway_login_example", master_fd);
+  ASSERT_NE(second_ob, nullptr);
+  add_ref(second_ob,
+          "TestGatewayProjectedWireBatchRejectsAggregateBudgetSecond");
+  auto *prefill = gateway_find_session(prefill_session_id);
+  auto *first = gateway_find_session(first_session_id);
+  auto *second = gateway_find_session(second_session_id);
+  ASSERT_NE(prefill, nullptr);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+
+  const auto first_reservation = gateway_reserve_session_output(first);
+  const auto second_reservation = gateway_reserve_session_output(second);
+  ASSERT_GT(first_reservation, 0u);
+  ASSERT_GT(second_reservation, 0u);
+  const std::string first_payload(256, 'a');
+  const std::string second_payload(256, 'b');
+  const auto first_wire = gateway_encode_output_envelope_for_test(
+      first_session_id, first_payload.data(), first_payload.size());
+  const auto second_wire = gateway_encode_output_envelope_for_test(
+      second_session_id, second_payload.data(), second_payload.size());
+  const auto largest_batch_wire = std::max(first_wire.size(), second_wire.size());
+  const auto batch_wire_bytes = first_wire.size() + second_wire.size();
+  const auto aggregate_limit = gateway_write_buffer_limit_for_test();
+  const auto target_remaining = largest_batch_wire + 1;
+  ASSERT_LT(target_remaining, batch_wire_bytes);
+  ASSERT_LT(batch_wire_bytes, aggregate_limit);
+
+  const std::string filler_payload(800, 'f');
+  const auto filler_wire = gateway_encode_output_envelope_for_test(
+      prefill_session_id, filler_payload.data(), filler_payload.size());
+  const auto target_prefill = aggregate_limit - target_remaining;
+  while (prefill->output_fifo_wire_bytes + filler_wire.size() <=
+         target_prefill) {
+    ASSERT_EQ(gateway_enqueue_session_protocol_output(
+                  prefill, filler_payload.data(), filler_payload.size()),
+              1);
+  }
+  const auto minimum_wire = gateway_encode_output_envelope_for_test(
+      prefill_session_id, "", 0);
+  const auto padding_wire_bytes =
+      target_prefill - prefill->output_fifo_wire_bytes;
+  if (padding_wire_bytes >= minimum_wire.size()) {
+    const std::string padding_payload(
+        padding_wire_bytes - minimum_wire.size(), 'p');
+    ASSERT_EQ(gateway_enqueue_session_protocol_output(
+                  prefill, padding_payload.data(), padding_payload.size()),
+              1);
+  }
+  const auto remaining =
+      aggregate_limit - prefill->output_fifo_wire_bytes;
+  ASSERT_GT(remaining, largest_batch_wire);
+  ASSERT_LT(remaining, batch_wire_bytes);
+
+  const auto aggregate_rejected_before =
+      g_gateway_runtime_counters.output_fifo_aggregate_wire_bytes_rejected.load(
+          std::memory_order_relaxed);
+  ASSERT_FALSE(gateway_fill_projected_wires_for_test(
+      {first, second}, {first_reservation, second_reservation},
+      {first_wire, second_wire}, writer));
+  EXPECT_TRUE(writes.empty());
+  EXPECT_FALSE(first->output_fifo.front().ready);
+  EXPECT_TRUE(first->output_fifo.front().wire_bytes.empty());
+  EXPECT_FALSE(second->output_fifo.front().ready);
+  EXPECT_TRUE(second->output_fifo.front().wire_bytes.empty());
+  EXPECT_EQ(first->output_fifo_wire_bytes, 0u);
+  EXPECT_EQ(second->output_fifo_wire_bytes, 0u);
+  EXPECT_EQ(
+      g_gateway_runtime_counters.output_fifo_aggregate_wire_bytes_rejected.load(
+          std::memory_order_relaxed),
+      aggregate_rejected_before + 1);
+
+  ASSERT_EQ(gateway_destroy_session_internal(
+                prefill_session_id, "test_done", "done"),
+            1);
+  destruct_object(prefill_ob);
+  free_object(
+      &prefill_ob,
+      "TestGatewayProjectedWireBatchRejectsAggregateBudgetPrefill");
+  ASSERT_EQ(
+      gateway_destroy_session_internal(first_session_id, "test_done", "done"),
+      1);
+  destruct_object(first_ob);
+  free_object(&first_ob,
+              "TestGatewayProjectedWireBatchRejectsAggregateBudgetFirst");
+  ASSERT_EQ(gateway_destroy_session_internal(
+                second_session_id, "test_done", "done"),
+            1);
+  destruct_object(second_ob);
+  free_object(&second_ob,
+              "TestGatewayProjectedWireBatchRejectsAggregateBudgetSecond");
+}
+
 TEST_F(DriverTest, TestGatewayMasterWriteCallbackRetriesBackpressuredSessionFifo) {
   struct PacketSizeGuard {
     size_t original{g_gateway_max_packet_size};
@@ -18193,6 +18471,8 @@ TEST_F(DriverTest, TestGatewayMasterReconnectRebindsExistingSessionWithoutLosing
   ASSERT_NE(session, nullptr);
   ASSERT_EQ(session->master_fd, old_master_fd);
   ASSERT_EQ(ob->interactive->gateway_master_fd, old_master_fd);
+  const auto detached_bytes_before =
+      gateway_session_fifo_wire_detached_bytes();
 
   gateway_cleanup_master_sessions(old_master_fd);
   session = gateway_find_session(session_id);
@@ -18207,6 +18487,8 @@ TEST_F(DriverTest, TestGatewayMasterReconnectRebindsExistingSessionWithoutLosing
                 sizeof("queued-while-detached") - 1),
             1);
   ASSERT_EQ(session->output_fifo.size(), 1u);
+  ASSERT_EQ(gateway_session_fifo_wire_detached_bytes(),
+            detached_bytes_before + session->output_fifo_wire_bytes);
 
   ASSERT_TRUE(gateway_dispatch_message_for_test(
       new_master_fd,
@@ -18217,7 +18499,10 @@ TEST_F(DriverTest, TestGatewayMasterReconnectRebindsExistingSessionWithoutLosing
   ASSERT_EQ(ob->interactive->gateway_master_fd, new_master_fd);
   ASSERT_STREQ(ob->interactive->gateway_real_ip, "127.0.0.2");
   ASSERT_EQ(ob->interactive->gateway_real_port, 6041);
+  ASSERT_EQ(gateway_session_fifo_wire_detached_bytes(),
+            detached_bytes_before);
   ASSERT_EQ(gateway_flush_session_output_fifo_with_writer(session, writer), 1);
+  ASSERT_EQ(session->output_fifo_wire_bytes, 0u);
   ASSERT_EQ(writes.size(), 1u);
   ASSERT_EQ(writes[0].first, new_master_fd);
   const auto queued_wire = nlohmann::json::parse(writes[0].second);

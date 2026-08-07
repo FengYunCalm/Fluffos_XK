@@ -2273,7 +2273,7 @@ mapping_t *gateway_status_internal() {
   const auto backend_status = backend_runtime_status();
 
   uptime = g_gateway_started_at ? static_cast<int>(get_current_time() - g_gateway_started_at) : 0;
-  map = allocate_mapping(208);
+  map = allocate_mapping(212);
   add_mapping_pair(map, "listening", g_gateway_listener ? 1 : 0);
   add_mapping_pair(map, "gateway_event_priority_levels",
                    kBackendEventPriorityLevels);
@@ -2369,6 +2369,12 @@ mapping_t *gateway_status_internal() {
       static_cast<long>(gateway_session_fifo_wire_bytes_total()));
   add_mapping_pair(map, "session_fifo_wire_limit_bytes",
                    static_cast<long>(gateway_write_buffer_limit()));
+  add_mapping_pair(
+      map, "session_fifo_wire_aggregate_limit_bytes",
+      static_cast<long>(gateway_session_fifo_wire_aggregate_limit()));
+  add_mapping_pair(
+      map, "session_fifo_wire_detached_bytes",
+      static_cast<long>(gateway_session_fifo_wire_detached_bytes()));
   add_mapping_pair(
       map, "session_fifo_wire_bytes_rejected",
       static_cast<long>(gateway_session_fifo_wire_bytes_rejected_total()));
@@ -2512,6 +2518,16 @@ mapping_t *gateway_status_internal() {
       static_cast<long>(
           g_gateway_runtime_counters.output_fifo_wire_bytes_rejected.load(
               std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_output_fifo_aggregate_wire_bytes_rejected",
+      static_cast<long>(g_gateway_runtime_counters
+                            .output_fifo_aggregate_wire_bytes_rejected.load(
+                                std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_output_fifo_rebucket_wire_bytes_dropped",
+      static_cast<long>(g_gateway_runtime_counters
+                            .output_fifo_rebucket_wire_bytes_dropped.load(
+                                std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_reserved",
       static_cast<long>(g_gateway_runtime_counters.output_fifo_reserved.load(std::memory_order_relaxed)));

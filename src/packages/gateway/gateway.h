@@ -89,6 +89,8 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> output_fifo_flushed{0};
   std::atomic<uint64_t> output_fifo_rejected{0};
   std::atomic<uint64_t> output_fifo_wire_bytes_rejected{0};
+  std::atomic<uint64_t> output_fifo_aggregate_wire_bytes_rejected{0};
+  std::atomic<uint64_t> output_fifo_rebucket_wire_bytes_dropped{0};
   std::atomic<uint64_t> output_fifo_reserved{0};
   std::atomic<uint64_t> output_fifo_filled{0};
   std::atomic<uint64_t> output_fifo_released{0};
@@ -377,6 +379,10 @@ struct GatewaySession {
   // embeddings may set a smaller explicit limit.
   size_t output_fifo_max_wire_bytes{0};
   size_t output_fifo_max_depth{4096};
+  // Only sessions owned by the gateway registry participate in aggregate
+  // master/detached FIFO accounting. Stack-allocated test fixtures stay
+  // isolated from process-wide budgets.
+  bool output_fifo_budget_tracked{false};
 };
 
 struct GatewaySessionBatchReservationResult {
@@ -459,6 +465,8 @@ uint64_t gateway_session_fifo_flushed_total();
 uint64_t gateway_session_fifo_rejected_total();
 uint64_t gateway_session_fifo_wire_bytes_total();
 uint64_t gateway_session_fifo_wire_bytes_rejected_total();
+size_t gateway_session_fifo_wire_aggregate_limit();
+size_t gateway_session_fifo_wire_detached_bytes();
 size_t gateway_write_buffer_limit();
 int gateway_flush_session_output_fifo_with_writer(GatewaySession *sess, GatewayOutputWriter writer);
 int gateway_flush_session_output_fifo(GatewaySession *sess);
