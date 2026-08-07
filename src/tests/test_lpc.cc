@@ -35,6 +35,7 @@
 #include "compiler/internal/compiler.h"
 #include "compiler/internal/lpc_modern_profile.h"
 #include "packages/core/call_out.h"
+#include "packages/core/dns.h"
 #include "packages/core/file.h"
 #include "packages/core/heartbeat.h"
 #include "packages/gateway/gateway.h"
@@ -3911,6 +3912,29 @@ TEST_F(DriverTest, TestSaveObjectPathAvoidsFixedBuffers) {
   ASSERT_EQ(save_object_source.find("char save_name[256]"), std::string::npos);
   ASSERT_EQ(save_object_source.find("char tmp_name[256]"), std::string::npos);
   ASSERT_EQ(save_object_source.find("char buf[1024]"), std::string::npos);
+}
+
+TEST_F(DriverTest, TestSocketAddressFormattingAvoidsFixedOutputBuffer) {
+  const auto source = read_source_file_for_test("../src/packages/sockets/sockets.cc");
+  const auto function_start = source.find("void f_socket_address()");
+  const auto function_end = source.find("void f_socket_status()", function_start);
+
+  ASSERT_NE(function_start, std::string::npos);
+  ASSERT_NE(function_end, std::string::npos);
+  const auto function_source = source.substr(function_start, function_end - function_start);
+  ASSERT_EQ(function_source.find("char buf["), std::string::npos);
+  ASSERT_EQ(function_source.find("sprintf("), std::string::npos);
+  ASSERT_NE(function_source.find("std::string(host) + \" \" + service"), std::string::npos);
+}
+
+TEST_F(DriverTest, TestQueryIpNumberRejectsInvalidSocketAddress) {
+  object_t object{};
+  interactive_t interactive{};
+  object.interactive = &interactive;
+  interactive.addr.ss_family = AF_UNSPEC;
+  interactive.addrlen = sizeof(interactive.addr);
+
+  ASSERT_EQ(query_ip_number(&object), nullptr);
 }
 
 TEST_F(DriverTest, TestPerfCounterUsesMonotonicSteadyClock) {
@@ -14711,6 +14735,24 @@ object_t *create_gateway_session_for_test(const char *session_id, const char *lo
   safe_apply("reset_test_login_ob", master_ob, 0, ORIGIN_DRIVER);
   free_svalue(&data, "create_gateway_session_for_test");
   return ob;
+}
+
+TEST_F(DriverTest, TestGatewayQueryIpNumberUsesForwardedClientAddress) {
+  const char *session_id = "gw-test-query-ip-number";
+  auto *ob = create_gateway_session_for_test(session_id, "/clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayQueryIpNumberUsesForwardedClientAddress");
+
+  const char *address = query_ip_number(ob);
+  EXPECT_NE(address, nullptr);
+  if (address) {
+    EXPECT_STREQ(address, "127.0.0.1");
+    free_string(address);
+  }
+
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayQueryIpNumberUsesForwardedClientAddress");
 }
 
 TEST_F(DriverTest, TestGatewayMasterSessionFifoBytesAreAggregatelyBounded) {

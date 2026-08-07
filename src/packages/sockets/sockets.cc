@@ -7,6 +7,8 @@
 
 #include "packages/sockets/socket_efuns.h"
 
+#include <string>
+
 #ifdef _WIN32
 #include <ws2tcpip.h>
 #endif
@@ -238,7 +240,6 @@ void f_socket_address() {
   char *str;
   int local, port;
   char addr[ADDR_BUF_SIZE];
-  char buf[2 * ADDR_BUF_SIZE]; /* a bit of overkill to be safe */
 
   /*
    * Ok, we will add in a cute little check thing here to see if it is
@@ -261,16 +262,16 @@ void f_socket_address() {
       strcpy(host, "0.0.0.0");
       strcpy(service, "0");
     }
-    sprintf(buf, "%s %s", host, service);
+    const std::string address = std::string(host) + " " + service;
 
-    str = string_copy(buf, "f_socket_address");
+    str = string_copy(address.c_str(), "f_socket_address");
     pop_stack();
     push_malloced_string(str);
     return;
   }
   get_socket_address(sp->u.number, addr, &port, local);
-  sprintf(buf, "%s %d", addr, port);
-  str = string_copy(buf, "f_socket_address");
+  const std::string address = std::string(addr) + " " + std::to_string(port);
+  str = string_copy(address.c_str(), "f_socket_address");
   put_malloced_string(str);
 } /* f_socket_address() */
 #endif

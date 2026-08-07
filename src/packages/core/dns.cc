@@ -52,11 +52,27 @@ void on_addr_name_result(int err, char type, int count, int /*ttl*/, void *addre
 
 // Start a reverse lookup.
 void query_name_by_addr(object_t *ob) {
-  auto *query = new addr_name_query_t;
+  if (!ob || !ob->interactive) {
+    return;
+  }
 
   const char *addr = query_ip_number(ob);
+  if (!addr) {
+    return;
+  }
   debug(dns, "query_name_by_addr: starting lookup for %s.\n", addr);
   free_string(addr);
+
+  if (ob->interactive->iflags & GATEWAY_SESSION) {
+    return;
+  }
+
+  if (ob->interactive->addrlen == 0 ||
+      ob->interactive->addrlen > sizeof(ob->interactive->addr)) {
+    return;
+  }
+
+  auto *query = new addr_name_query_t;
 
   // By the time resolve finish, ob may be already gone, we have to
   // copy the address.
@@ -204,12 +220,12 @@ void on_query_addr_by_name_finish(AddrNumberQuery *query, bool cleanup_main_requ
                                   0, NI_NUMERICHOST);
       if (!ret) {
         copy_and_push_string(host);
+        debug(dns, "DNS lookup success: id %" LPC_INT_FMTSTR_P ": %s -> %s \n", query->key,
+              query->name, host);
       } else {
         debug(dns, "on_query_addr_by_name_finish: getnameinfo: %s \n", evutil_gai_strerror(ret));
         push_undefined();
       }
-      debug(dns, "DNS lookup success: id %" LPC_INT_FMTSTR_P ": %s -> %s \n", query->key,
-            query->name, host);
     }
   }
 
@@ -382,8 +398,23 @@ const char *query_ip_number(object_t *ob) {
   if (!ob || ob->interactive == nullptr) {
     return nullptr;
   }
+
+  if ((ob->interactive->iflags & GATEWAY_SESSION) && ob->interactive->gateway_real_ip) {
+    return make_shared_string(ob->interactive->gateway_real_ip);
+  }
+
+  if (ob->interactive->addrlen == 0 ||
+      ob->interactive->addrlen > sizeof(ob->interactive->addr)) {
+    return nullptr;
+  }
+
   char host[NI_MAXHOST];
-  getnameinfo(reinterpret_cast<sockaddr *>(&ob->interactive->addr), sizeof(ob->interactive->addr),
-              host, sizeof(host), nullptr, 0, NI_NUMERICHOST);
+  int const ret = getnameinfo(reinterpret_cast<sockaddr *>(&ob->interactive->addr),
+                              ob->interactive->addrlen, host, sizeof(host), nullptr, 0,
+                              NI_NUMERICHOST);
+  if (ret) {
+    debug(dns, "query_ip_number: getnameinfo: %s\n", evutil_gai_strerror(ret));
+    return nullptr;
+  }
   return make_shared_string(host);
 }
