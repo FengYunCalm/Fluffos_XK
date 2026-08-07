@@ -1346,7 +1346,7 @@ void gateway_schedule_future_watch_timer() {
     delay_ms = due_at_ms > now_ms ? due_at_ms - now_ms : 1;
   }
   timeval delay{static_cast<time_t>(delay_ms / 1000),
-                static_cast<suseconds_t>((delay_ms % 1000) * 1000)};
+                static_cast<decltype(timeval{}.tv_usec)>((delay_ms % 1000) * 1000)};
   evtimer_add(g_gateway_future_watch_timer, &delay);
 }
 
