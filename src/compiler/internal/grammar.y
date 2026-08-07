@@ -3557,7 +3557,9 @@ function_name:
       p = $$ + l;
       while (p--,l--)
         *(p+3) = *p;
-      strncpy($$, ":::", 3);
+      $$[0] = ':';
+      $$[1] = ':';
+      $$[2] = ':';
     }
   | L_BASIC_TYPE L_COLON_COLON identifier
     {

@@ -220,7 +220,7 @@ void on_query_addr_by_name_finish(AddrNumberQuery *query, bool cleanup_main_requ
                                   0, NI_NUMERICHOST);
       if (!ret) {
         copy_and_push_string(host);
-        debug(dns, "DNS lookup success: id %" LPC_INT_FMTSTR_P ": %s -> %s \n", query->key,
+        debug(dns, "DNS lookup success: id %" LPC_INT_FMTSTR_P ": %.480s -> %.480s \n", query->key,
               query->name, host);
       } else {
         debug(dns, "on_query_addr_by_name_finish: getnameinfo: %s \n", evutil_gai_strerror(ret));
