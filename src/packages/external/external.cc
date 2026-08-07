@@ -27,13 +27,6 @@ void split(const std::string &s, char delim, Out result) {
   }
 }
 
-// Added because debug() macro won't take a struct tm as an argument.
-std::string format_time(const struct tm& timeinfo) {
-  char buffer[64];
-  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo);
-  return std::string(buffer);
-}
-
 int external_start(int which, svalue_t *args, svalue_t *arg1, svalue_t *arg2, svalue_t *arg3) {
   std::vector<std::string> newargs_data = {std::string(external_cmd[which])};
   if (args->type == T_ARRAY) {
@@ -62,33 +55,62 @@ int external_start(int which, svalue_t *args, svalue_t *arg1, svalue_t *arg2, sv
   }
   DEFER { posix_spawn_file_actions_destroy(&file_actions); };
 
-  evutil_socket_t sv[2];
+  evutil_socket_t sv[2] = {-1, -1};
   if (evutil_socketpair(PF_UNIX, SOCK_STREAM, 0, sv) == -1) {
     return EESOCKET;
   }
   DEFER {
-    if (sv[0] > 0) {
+    if (sv[0] >= 0) {
       evutil_closesocket(sv[0]);
     }
-    if (sv[1] > 0) {
+    if (sv[1] >= 0) {
       evutil_closesocket(sv[1]);
     }
   };
-  if (evutil_make_socket_nonblocking(sv[0]) == -1 || evutil_make_socket_nonblocking(sv[1]) == -1) {
+  if (evutil_make_socket_nonblocking(sv[0]) == -1 ||
+      evutil_make_socket_nonblocking(sv[1]) == -1 ||
+      evutil_make_socket_closeonexec(sv[0]) == -1 ||
+      evutil_make_socket_closeonexec(sv[1]) == -1) {
     return EESOCKET;
   }
-  ret = posix_spawn_file_actions_adddup2(&file_actions, sv[1], 0) ||
-        posix_spawn_file_actions_adddup2(&file_actions, sv[1], 1) ||
-        posix_spawn_file_actions_adddup2(&file_actions, sv[1], 2);
-  if (ret != 0) {
-    debug(external_start, "external_start: posix_spawn_file_actions_adddup2() error: %s\n", strerror(ret));
-    return EESOCKET;
+
+  for (int child_fd = 0; child_fd <= 2; ++child_fd) {
+    ret = posix_spawn_file_actions_adddup2(&file_actions, sv[1], child_fd);
+    if (ret != 0) {
+      debug(external_start,
+            "external_start: posix_spawn_file_actions_adddup2() error: %s\n",
+            strerror(ret));
+      return EESOCKET;
+    }
+  }
+  for (const auto endpoint : sv) {
+    if (endpoint <= 2) {
+      continue;
+    }
+    ret = posix_spawn_file_actions_addclose(&file_actions, endpoint);
+    if (ret != 0) {
+      debug(external_start,
+            "external_start: posix_spawn_file_actions_addclose() error: %s\n",
+            strerror(ret));
+      return EESOCKET;
+    }
   }
 
   int fd = find_new_socket();
   if (fd < 0) {
     return fd;
   }
+
+  pid_t pid;
+  char *newenviron[] = {nullptr};
+  ret = posix_spawn(&pid, newargs[0], &file_actions, nullptr, newargs.data(), newenviron);
+  if (ret) {
+    debug(external_start, "external_start: posix_spawn() error: %s\n", strerror(ret));
+    return EESOCKET;
+  }
+
+  evutil_closesocket(sv[1]);
+  sv[1] = -1;
 
   auto *sock = lpc_socks_get(fd);
   new_lpc_socket_event_listener(fd, sock, sv[0]);
@@ -103,7 +125,6 @@ int external_start(int which, svalue_t *args, svalue_t *arg1, svalue_t *arg2, sv
   sock->state = STATE_DATA_XFER;
   memset(reinterpret_cast<char *>(&sock->l_addr), 0, sizeof(sock->l_addr));
   memset(reinterpret_cast<char *>(&sock->r_addr), 0, sizeof(sock->r_addr));
-  sock->owner_ob = current_object;
   sock->release_ob = nullptr;
   sock->r_buf = nullptr;
   sock->r_off = 0;
@@ -113,48 +134,41 @@ int external_start(int which, svalue_t *args, svalue_t *arg1, svalue_t *arg2, sv
   sock->w_len = 0;
 
   current_object->flags |= O_EFUN_SOCKET;
-
   event_add(sock->ev_write, nullptr);
   event_add(sock->ev_read, nullptr);
-
-  pid_t pid;
-  char *newenviron[] = {nullptr};
-  ret = posix_spawn(&pid, newargs[0], &file_actions, nullptr, newargs.data(), newenviron);
-  if (ret) {
-    debug(external_start, "external_start: posix_spawn() error: %s\n", strerror(ret));
-    return EESOCKET;
-  }
-
-  evutil_closesocket(sv[1]);
-  sv[1] = -1;
-
-  evutil_socket_t childfd = sv[0];
   sv[0] = -1;
 
   debug(external_start, "external_start: Launching external command '%s %s', pid: %jd.\n", external_cmd[which],
                 args->type == T_STRING ? args->u.string : "<ARRAY>", (intmax_t)pid);
 
   std::thread([=]() {
-    int status;
-    do {
+    int status = 0;
+    for (;;) {
       const int s = waitpid(pid, &status, WUNTRACED | WCONTINUED);
+      if (s == -1 && errno == EINTR) {
+        continue;
+      }
       if (s == -1) {
         debug(external_start, "external_start: waitpid() error: %s (%d).\n", strerror(errno), errno);
         return;
       }
-      std::string res = fmt::format(FMT_STRING("external_start(): child {} status: "), pid);
+      std::string status_message =
+          fmt::format(FMT_STRING("external_start(): child {} status: "), pid);
       if (WIFEXITED(status)) {
-        res += fmt::format(FMT_STRING("exited, status={}\n"), WEXITSTATUS(status));
+        status_message += fmt::format(FMT_STRING("exited, status={}\n"), WEXITSTATUS(status));
       } else if (WIFSIGNALED(status)) {
-        res += fmt::format(FMT_STRING("killed by signal {}\n"), WTERMSIG(status));
+        status_message += fmt::format(FMT_STRING("killed by signal {}\n"), WTERMSIG(status));
       } else if (WIFSTOPPED(status)) {
-        res += fmt::format(FMT_STRING("stopped by signal {}\n"), WSTOPSIG(status));
+        status_message += fmt::format(FMT_STRING("stopped by signal {}\n"), WSTOPSIG(status));
       } else if (WIFCONTINUED(status)) {
-        res += "continued\n";
+        status_message += "continued\n";
       }
 
-      debug(external_start, "external_start: %s\n", format_time(res).c_str());
-    } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+      debug(external_start, "external_start: %s\n", status_message.c_str());
+      if (WIFEXITED(status) || WIFSIGNALED(status)) {
+        break;
+      }
+    }
   }).detach();
 
   return fd;
