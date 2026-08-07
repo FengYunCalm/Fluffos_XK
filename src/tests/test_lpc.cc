@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <initializer_list>
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -257,6 +258,43 @@ class DriverTest : public ::testing::Test {
     clear_state();
   }
 };
+
+TEST_F(DriverTest, TestArraySetOperationsDistinguishExtremeIntegers) {
+  const auto make_number_array = [](std::initializer_list<LPC_INT> values) {
+    auto *array = allocate_empty_array(static_cast<int>(values.size()));
+    int index = 0;
+    for (const LPC_INT value : values) {
+      array->item[index] = const0u;
+      array->item[index++].u.number = value;
+    }
+    return array;
+  };
+
+  auto *difference = subtract_array(
+      make_number_array({std::numeric_limits<LPC_INT>::min()}), make_number_array({0}));
+  ASSERT_EQ(difference->size, 1);
+  ASSERT_EQ(difference->item[0].type, T_NUMBER);
+  ASSERT_EQ(difference->item[0].u.number, std::numeric_limits<LPC_INT>::min());
+  free_array(difference);
+
+  auto *intersection = intersect_array(
+      make_number_array({0}), make_number_array({std::numeric_limits<LPC_INT>::min()}));
+  ASSERT_EQ(intersection, &the_null_array);
+
+  auto *array_union = union_array(
+      make_number_array({0}), make_number_array({std::numeric_limits<LPC_INT>::min()}));
+  ASSERT_EQ(array_union->size, 2);
+  bool found_zero = false;
+  bool found_min = false;
+  for (int index = 0; index < array_union->size; ++index) {
+    found_zero = found_zero || array_union->item[index].u.number == 0;
+    found_min = found_min ||
+                array_union->item[index].u.number == std::numeric_limits<LPC_INT>::min();
+  }
+  ASSERT_TRUE(found_zero);
+  ASSERT_TRUE(found_min);
+  free_array(array_union);
+}
 
 TEST_F(DriverTest, TestLpcModernProfilePragmasAndAuditRules) {
   int flag = 0;

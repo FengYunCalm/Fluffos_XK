@@ -24,6 +24,7 @@
 static int builtin_sort_array_cmp_fwd(const void * /*vp1*/, const void * /*vp2*/);
 static int builtin_sort_array_cmp_rev(const void * /*vp1*/, const void * /*vp2*/);
 static int sort_array_cmp(const void * /*vp1*/, const void * /*vp2*/);
+static int checked_array_size(const array_t * /*array*/, const char * /*operation*/);
 static long alist_cmp(svalue_t * /*p1*/, svalue_t * /*p2*/);
 /*
  * Make an empty array for everyone to use, never to be deallocated.
@@ -837,6 +838,8 @@ void f_unique_array(void) {
  */
 array_t *add_array(array_t *p, array_t *r) {
   auto max_array_size = CONFIG_INT(__MAX_ARRAY_SIZE__);
+  const int p_size = checked_array_size(p, "array addition");
+  const int r_size = checked_array_size(r, "array addition");
 
   int cnt, res;
   array_t *d; /* destination */
@@ -854,10 +857,11 @@ array_t *add_array(array_t *p, array_t *r) {
     return p->ref > 1 ? (p->ref--, copy_array(p)) : p;
   }
 
-  res = p->size + r->size;
-  if (res < 0 || res > max_array_size) {
+  const auto combined_size = static_cast<int64_t>(p_size) + static_cast<int64_t>(r_size);
+  if (combined_size > max_array_size) {
     error("result of array addition is greater than maximum array size.\n");
   }
+  res = static_cast<int>(combined_size);
 
   /* x += x */
   if ((p == r) && (p->ref == 2)) {
@@ -1445,32 +1449,37 @@ array_t *deep_inventory_array(array_t *arr, int take_top, funptr_t *fp) {
 }
 #endif
 
-static long alist_cmp(svalue_t *p1, svalue_t *p2) {
-  long d;
+static int checked_array_size(const array_t *array, const char *operation) {
+  const int size = array->size;
+  const int max_array_size = CONFIG_INT(__MAX_ARRAY_SIZE__);
+  if (size < 0 || size > max_array_size) {
+    error("%s: invalid array size.\n", operation);
+  }
+  return size;
+}
 
-  if ((d = p1->u.number - p2->u.number)) {
-    if (d == LONG_MIN) {
-      d = p1->u.number > p2->u.number;
-    }
-    return d;
+static long alist_cmp(svalue_t *p1, svalue_t *p2) {
+  if (p1->u.number < p2->u.number) {
+    return -1;
   }
-  if ((d = p1->type - p2->type)) {
-    return d;
+  if (p1->u.number > p2->u.number) {
+    return 1;
   }
-  return 0;
+  return p1->type - p2->type;
 }
 
 static svalue_t *alist_sort(array_t *inlist) {
-  long size, j, curix, parix, child1, child2, flag;
+  const int size = checked_array_size(inlist, "alist_sort");
+  long j, curix, parix, child1, child2, flag;
   svalue_t *sv_tab, *tmp, *table, *sv_ptr, val;
   const char *str;
 
-  if (!(size = inlist->size)) {
+  if (!size) {
     return (svalue_t *)nullptr;
   }
   if ((flag = (inlist->ref > 1))) {
     sv_tab = reinterpret_cast<svalue_t *>(
-        DCALLOC(size, sizeof(svalue_t), TAG_TEMPORARY, "alist_sort: sv_tab"));
+        DCALLOC(static_cast<size_t>(size), sizeof(svalue_t), TAG_TEMPORARY, "alist_sort: sv_tab"));
     sv_ptr = inlist->item;
     for (j = 0; j < size; j++) {
       if (((tmp = (sv_ptr + j))->type == T_OBJECT) && (tmp->u.ob->flags & O_DESTRUCTED)) {
@@ -1524,7 +1533,7 @@ static svalue_t *alist_sort(array_t *inlist) {
   }
 
   table = reinterpret_cast<svalue_t *>(
-      DCALLOC(size, sizeof(svalue_t), TAG_TEMPORARY, "alist_sort: table"));
+      DCALLOC(static_cast<size_t>(size), sizeof(svalue_t), TAG_TEMPORARY, "alist_sort: table"));
 
   for (j = 0; j < size; j++) {
     table[j] = sv_tab[0];
@@ -1558,12 +1567,14 @@ array_t *subtract_array(array_t *minuend, array_t *subtrahend) {
   array_t *difference;
   svalue_t *source, *dest, *svt;
   long i, size, o, d, l, h, msize;
+  const int subtrahend_size = checked_array_size(subtrahend, "subtract_array");
+  const int minuend_size = checked_array_size(minuend, "subtract_array");
 
-  if (!(size = subtrahend->size)) {
+  if (!(size = subtrahend_size)) {
     subtrahend->ref--;
     return minuend->ref > 1 ? (minuend->ref--, copy_array(minuend)) : minuend;
   }
-  if (!(msize = minuend->size)) {
+  if (!(msize = minuend_size)) {
     free_array(subtrahend);
     return &the_null_array;
   }
@@ -1624,7 +1635,9 @@ array_t *subtract_array(array_t *minuend, array_t *subtrahend) {
 
 array_t *intersect_array(array_t *a1, array_t *a2) {
   array_t *a3;
-  long d, l, j, i, a1s = a1->size, a2s = a2->size, flag;
+  const int a1s = checked_array_size(a1, "intersect_array");
+  const int a2s = checked_array_size(a2, "intersect_array");
+  long d, l, j, i, flag;
   svalue_t *svt_1, *ntab, *sv_tab, *sv_ptr, val, *tmp;
   long curix, parix, child1, child2;
 
@@ -1637,7 +1650,8 @@ array_t *intersect_array(array_t *a1, array_t *a2) {
   svt_1 = alist_sort(a1);
   if ((flag = (a2->ref > 1))) {
     sv_tab = reinterpret_cast<svalue_t *>(
-        DCALLOC(a2s, sizeof(svalue_t), TAG_TEMPORARY, "intersect_array: sv2_tab"));
+        DCALLOC(static_cast<size_t>(a2s), sizeof(svalue_t), TAG_TEMPORARY,
+                "intersect_array: sv2_tab"));
     sv_ptr = a2->item;
     for (j = 0; j < a2s; j++) {
       if (((tmp = (sv_ptr + j))->type == T_OBJECT) && (tmp->u.ob->flags & O_DESTRUCTED)) {
@@ -1762,7 +1776,8 @@ settle_business:
 array_t *union_array(array_t *a1, array_t *a2) {
   auto max_array_size = CONFIG_INT(__MAX_ARRAY_SIZE__);
 
-  int a1s = a1->size, a2s = a2->size;
+  const int a1s = checked_array_size(a1, "union_array");
+  const int a2s = checked_array_size(a2, "union_array");
   long d, l, j, i, cnt, flag;
   array_t *a3; /* destination */
   svalue_t *svt_1, *ntab, *sv_tab, *tmp, *sv_ptr, val;
@@ -1778,11 +1793,12 @@ array_t *union_array(array_t *a1, array_t *a2) {
     return a1->ref > 1 ? (a1->ref--, copy_array(a1)) : a1;
   }
   /* allocating a new place, a1s + a2s must be enough */
-  d = a1s + a2s;
-  if (d < 0 || d > max_array_size) {
+  const auto combined_size = static_cast<int64_t>(a1s) + static_cast<int64_t>(a2s);
+  if (combined_size > max_array_size) {
     error("result of array union could be greater than maximum array size.\n");
   }
-  a3 = int_allocate_empty_array(d);
+  d = static_cast<long>(combined_size);
+  a3 = int_allocate_empty_array(static_cast<unsigned int>(combined_size));
   tmp = a1->item;
   ntab = a3->item;
   l = cnt = a1s;
@@ -1793,7 +1809,8 @@ array_t *union_array(array_t *a1, array_t *a2) {
   svt_1 = alist_sort(a1);
   if ((flag = (a2->ref > 1))) {
     sv_tab = reinterpret_cast<svalue_t *>(
-        DCALLOC(a2s, sizeof(svalue_t), TAG_TEMPORARY, "union_array: sv2_tab"));
+        DCALLOC(static_cast<size_t>(a2s), sizeof(svalue_t), TAG_TEMPORARY,
+                "union_array: sv2_tab"));
     sv_ptr = a2->item;
     for (j = 0; j < a2s; j++) {
       if (((tmp = (sv_ptr + j))->type == T_OBJECT) && (tmp->u.ob->flags & O_DESTRUCTED)) {

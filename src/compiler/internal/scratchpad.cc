@@ -2,8 +2,10 @@
 
 #include "scratchpad.h"
 
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 
 // FIXME: figure out where this is
 extern void yywarn(const char *, ...);
@@ -57,10 +59,19 @@ extern void yywarn(const char *, ...);
 #define Strcpy(x, y) (memcpy((char *)x, (char *)y, strlen((char *)y) + 1))
 #define Strncpy(x, y, z) (strncpy((char *)x, (char *)y, z))
 
-/* not strictly ANSI, but should always work ... */
-#define HDR_SIZE ((char *)&scratch_head.block[2] - (char *)&scratch_head)
-#define FIND_HDR(x) ((sp_block_t *)(x - HDR_SIZE))
-#define SIZE_WITH_HDR(x) (x + HDR_SIZE)
+/* Keep the allocation layout explicit instead of relying on block[2] object
+ * size inference.  The extra two bytes are the magic/check byte area. */
+constexpr size_t kScratchHeaderSize =
+    offsetof(sp_block_t, block) + sizeof(((sp_block_t *)nullptr)->block);
+#define HDR_SIZE kScratchHeaderSize
+#define FIND_HDR(x) (reinterpret_cast<sp_block_t *>(reinterpret_cast<char *>(x) - HDR_SIZE))
+
+static size_t scratch_size_with_header(int size) {
+  if (size < 0 || static_cast<size_t>(size) > std::numeric_limits<size_t>::max() - HDR_SIZE) {
+    fatal("invalid scratchpad allocation size");
+  }
+  return static_cast<size_t>(size) + HDR_SIZE;
+}
 
 static unsigned char scratchblock[SCRATCHPAD_SIZE];
 static sp_block_t scratch_head = {nullptr, nullptr};
@@ -173,14 +184,15 @@ char *scratch_large_alloc(int size) {
 
   SDEBUG(printf("scratch_large_alloc(%i)\n", size));
 
-  spt = reinterpret_cast<sp_block_t *>(DMALLOC(SIZE_WITH_HDR(size), TAG_COMPILER, "scratch_alloc"));
+  spt = reinterpret_cast<sp_block_t *>(
+      DMALLOC(scratch_size_with_header(size), TAG_COMPILER, "scratch_alloc"));
   if ((spt->next = scratch_head.next)) {
     spt->next->prev = spt;
   }
   spt->prev = &scratch_head;
   spt->block[0] = SCRATCH_MAGIC;
   scratch_head.next = spt;
-  return &spt->block[2];
+  return reinterpret_cast<char *>(spt) + HDR_SIZE;
 }
 
 /* warning: unlike REALLOC(), this one only allows increases */
@@ -208,12 +220,12 @@ char *scratch_realloc(char *ptr, int size) {
     SDEBUG(printf("block\n"));
     sbt = FIND_HDR(ptr);
     newsbt = reinterpret_cast<sp_block_t *>(
-        DREALLOC(sbt, SIZE_WITH_HDR(size), TAG_COMPILER, "scratch_realloc"));
+        DREALLOC(sbt, scratch_size_with_header(size), TAG_COMPILER, "scratch_realloc"));
     newsbt->prev->next = newsbt;
     if (newsbt->next) {
       newsbt->next->prev = newsbt;
     }
-    return &newsbt->block[2];
+    return reinterpret_cast<char *>(newsbt) + HDR_SIZE;
   } else {
     char *res;
 

@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cctype>
+#include <cstring>
+#include <string>
 
 #define YYDEBUG 1
 #define YYERROR_VERBOSE 1
@@ -86,6 +88,24 @@ type types[] = {
 };
 
 #define NELEMS(arr) (sizeof arr / sizeof arr[0])
+
+static char *duplicate_string(const std::string &value) {
+  auto *result = static_cast<char *>(malloc(value.size() + 1));
+  if (!result) {
+    yyerror("Out of memory");
+  }
+  memcpy(result, value.c_str(), value.size() + 1);
+  return result;
+}
+
+static void uppercase_identifier(std::string &value) {
+  for (char &character : value) {
+    const auto byte = static_cast<unsigned char>(character);
+    if (std::islower(byte)) {
+      character = static_cast<char>(std::toupper(byte));
+    }
+  }
+}
 %}
 
 %union {
@@ -110,17 +130,11 @@ operator: OPERATOR op_list ';';
 op_list: op | op_list ',' op;
 
 op: ID {
-  char f_name[500], c;
-  int i = 2;
-  sprintf(f_name, "F_%s", $1);
-  while ((c = f_name[i])) {
-    if (islower(c))
-      f_name[i++] = toupper(c);
-    else
-      i++;
-  }
-  oper_codes[op_code] = (char *)malloc(i + 1);
-  strcpy(oper_codes[op_code], f_name);
+  if (op_code >= MAX_FUNC) yyerror("Too many operators");
+  std::string f_name = "F_";
+  f_name += $1;
+  uppercase_identifier(f_name);
+  oper_codes[op_code] = duplicate_string(f_name);
   free((void *)$1);
 
   op_code++;
@@ -130,9 +144,9 @@ optional_ID: ID | /* empty */ { $$ = ""; };
 
 optional_default : /* empty */ { $$ = "DEFAULT_NONE"; }
 | DEFAULT ':' NUM {
-  static char buf[40];
-  sprintf(buf, "%i", $3);
-  $$ = buf;
+  static std::string default_value;
+  default_value = std::to_string($3);
+  $$ = default_value.c_str();
 }
 | DEFAULT ':' ID {
   if (strcmp($3, "F__THIS_OBJECT")) yyerror("Illegal default");
@@ -141,32 +155,24 @@ optional_default : /* empty */ { $$ = "DEFAULT_NONE"; }
 };
 
 func: type ID optional_ID '(' arg_list optional_default ')' ';' {
-  char buff[500];
-  char f_name[500];
-  int i, len;
+  int i;
+  std::string f_name = "F_";
   if (min_arg == -1) min_arg = $5;
   if (min_arg > 127) yyerror("min_arg > 127\n");
   if ($3[0] == '\0') {
-    if (strlen($2) + 1 + 2 > sizeof f_name) yyerror("A local buffer was too small!(1)\n");
-    sprintf(f_name, "F_%s", $2);
-    len = strlen(f_name);
-    for (i = 0; i < len; i++) {
-      if (islower(f_name[i])) f_name[i] = toupper(f_name[i]);
-    }
-    efun_codes[efun_code] = (char *)malloc(len + 1);
-    strcpy(efun_codes[efun_code], f_name);
-    efun_names[efun_code] = (char *)malloc(len - 1);
-    strcpy(efun_names[efun_code], $2);
+    if (efun_code >= MAX_FUNC) yyerror("Too many efuns");
+    f_name += $2;
+    uppercase_identifier(f_name);
+    efun_codes[efun_code] = duplicate_string(f_name);
+    efun_names[efun_code] = duplicate_string(std::string($2));
     efun_code++;
   } else {
-    if (strlen($3) + 1 + 17 > sizeof f_name) yyerror("A local buffer was too small(2)!\n");
-    sprintf(f_name, "F_%s | F_ALIAS_FLAG", $3);
-    len = strlen(f_name);
-    for (i = 0; i < len; i++) {
-      if (islower(f_name[i])) f_name[i] = toupper(f_name[i]);
-    }
+    f_name += $3;
+    f_name += " | F_ALIAS_FLAG";
+    uppercase_identifier(f_name);
     free((void *)$3);
   }
+
   for (i = 0; i < last_current_type; i++) {
     int j;
     for (j = 0; j + i < last_current_type && j < curr_arg_type_size; j++) {
@@ -175,10 +181,11 @@ func: type ID optional_ID '(' arg_list optional_default ')' ';' {
     if (j == curr_arg_type_size) break;
   }
   if (i == last_current_type) {
-    int j;
-    for (j = 0; j < curr_arg_type_size; j++) {
+    if (curr_arg_type_size > static_cast<int>(NELEMS(arg_types)) - last_current_type) {
+      yyerror("Array 'arg_types' is too small");
+    }
+    for (int j = 0; j < curr_arg_type_size; j++) {
       arg_types[last_current_type++] = curr_arg_types[j];
-      if (last_current_type == NELEMS(arg_types)) yyerror("Array 'arg_types' is too small");
     }
   }
 #ifndef CAST_CALL_OTHER
@@ -186,15 +193,38 @@ func: type ID optional_ID '(' arg_list optional_default ')' ';' {
     $1 = T_MIXED;
   }
 #endif
-  sprintf(buff, "{\"%s\",%s,0,0,%d,%d,%s,%s,%s,%s,%s,%d,%s},\n", $2, f_name, min_arg,
-          limit_max ? -1 : $5, $1 != T_VOID ? ctype($1) : "TYPE_NOVALUE",
-          etype(0).c_str(), etype(1).c_str(), etype(2).c_str(), etype(3).c_str(), i, $6);
+  const std::string return_type = $1 != T_VOID ? ctype($1) : "TYPE_NOVALUE";
+  const std::string arg_type0 = etype(0);
+  const std::string arg_type1 = etype(1);
+  const std::string arg_type2 = etype(2);
+  const std::string arg_type3 = etype(3);
+  std::string buff = "{\"";
+  buff += $2;
+  buff += "\",";
+  buff += f_name;
+  buff += ",0,0,";
+  buff += std::to_string(min_arg);
+  buff += ",";
+  buff += std::to_string(limit_max ? -1 : $5);
+  buff += ",";
+  buff += return_type;
+  buff += ",";
+  buff += arg_type0;
+  buff += ",";
+  buff += arg_type1;
+  buff += ",";
+  buff += arg_type2;
+  buff += ",";
+  buff += arg_type3;
+  buff += ",";
+  buff += std::to_string(i);
+  buff += ",";
+  buff += $6;
+  buff += "},\n";
 
-  if (strlen(buff) > sizeof buff) yyerror("Local buffer overwritten !\n");
-
+  if (num_buff >= MAX_FUNC) yyerror("Too many function definitions");
   key[num_buff] = $2;
-  buf[num_buff] = (char *)malloc(strlen(buff) + 1);
-  strcpy((char *)buf[num_buff], buff);
+  buf[num_buff] = duplicate_string(buff);
   num_buff++;
   min_arg = -1;
   limit_max = 0;
@@ -213,9 +243,9 @@ basic: ID {
     }
   }
   if (!$$) {
-    char buf[256];
-    sprintf(buf, "Invalid type: %s", $1);
-    yyerror(buf);
+    std::string message = "Invalid type: ";
+    message += $1;
+    yyerror(message.c_str());
   }
   free((void *)$1);
 };
@@ -328,31 +358,21 @@ const char *etype1(int n) {
 
 std::string etype(int n) {
   int i;
-  int local_size = 100;
-  std::string buff = "";
+  std::string buff;
 
   for (i = 0; i < curr_arg_type_size; i++) {
     if (n == 0) break;
     if (curr_arg_types[i] == 0) n--;
   }
   if (i == curr_arg_type_size) return "T_ANY";
-  buff[0] = '\0';
   for (; curr_arg_types[i] != 0; i++) {
-    const char *p;
     if (curr_arg_types[i] == T_VOID) continue;
-    if (buff[0] != '\0') buff = buff + "|";
-    p = etype1(curr_arg_types[i]);
-    /*
-     * The number 2 below is to include the zero-byte and the next
-     * '|' (which may not come).
-     */
-    if (strlen(p) + buff.size() + 2 > local_size) {
-      fprintf(stderr, "Buffer overflow!\n");
-      exit(1);
+    if (!buff.empty()) {
+      buff += '|';
     }
     buff += etype1(curr_arg_types[i]);
   }
-  if (buff == "") buff = "T_ANY";
+  if (buff.empty()) buff = "T_ANY";
   return buff;
 }
 
