@@ -4,6 +4,8 @@
  * file.c
  */
 
+#include <cstddef>
+
 const char *check_valid_path(const char *, object_t *, const char *const, int);
 void dump_file_descriptors(outbuffer_t *);
 
@@ -12,7 +14,7 @@ struct svalue_t read_json(const char *);
 char *read_bytes(const char *, LPC_INT, LPC_INT, int *);
 int write_file(const char *, const char *, int);
 int write_json(const char *, const struct svalue_t *);
-int write_bytes(const char *, int, const char *, int);
+int write_bytes(const char *, LPC_INT, const char *, std::size_t);
 array_t *get_dir(const char *, int);
 int tail(char *);
 int file_size(const char *);

@@ -3438,6 +3438,38 @@ TEST_F(DriverTest, TestReadBytesPreservesLpc64BitOffsets) {
   FREE_MSTR(contents);
 }
 
+TEST_F(DriverTest, TestWriteBytesPreservesLpc64BitOffsets) {
+  constexpr LPC_INT kLargeOffset = static_cast<LPC_INT>(1) << 32;
+  const char* relative_path = "log/write-bytes-large-offset.bin";
+  const char* mudlib_path = "/log/write-bytes-large-offset.bin";
+  struct FixtureGuard {
+    const char* path;
+    object_t* saved_current_object;
+    ~FixtureGuard() {
+      std::remove(path);
+      current_object = saved_current_object;
+    }
+  } guard{relative_path, current_object};
+  current_object = master_ob;
+
+  std::ofstream file(relative_path, std::ios::binary | std::ios::trunc);
+  ASSERT_TRUE(file.is_open());
+  file.seekp(static_cast<std::streamoff>(kLargeOffset));
+  file.put('\0');
+  file.close();
+  ASSERT_TRUE(file.good());
+
+  const char marker = 'W';
+  ASSERT_EQ(write_bytes(mudlib_path, kLargeOffset, &marker, 1), 1);
+
+  int length = 0;
+  char* contents = read_bytes(mudlib_path, kLargeOffset, 1, &length);
+  ASSERT_NE(contents, nullptr);
+  EXPECT_EQ(length, 1);
+  EXPECT_EQ(contents[0], marker);
+  FREE_MSTR(contents);
+}
+
 #ifndef _WIN32
 TEST_F(DriverTest, TestSocketAcceptMarksAcceptedDescriptorCloseOnExec) {
   struct FixtureGuard {

@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <unistd.h>
@@ -614,11 +615,10 @@ char *read_bytes(const char *file, LPC_INT start, LPC_INT len, int *rlen) {
   return str;
 }
 
-int write_bytes(const char *file, int start, const char *str, int theLength) {
+int write_bytes(const char *file, LPC_INT start, const char *str, std::size_t theLength) {
   const auto max_byte_transfer = CONFIG_INT(__MAX_BYTE_TRANSFER__);
 
   struct stat st;
-  int size;
   FILE *fptr;
 
   file = check_valid_path(file, current_object, "write_bytes", 1);
@@ -626,7 +626,8 @@ int write_bytes(const char *file, int start, const char *str, int theLength) {
   if (!file) {
     return 0;
   }
-  if (theLength > max_byte_transfer) {
+  if (!str || theLength == 0 || max_byte_transfer <= 0 ||
+      theLength > static_cast<std::size_t>(max_byte_transfer)) {
     return 0;
   }
   fptr = open_binary_rw_existing_or_create(file);
@@ -636,23 +637,50 @@ int write_bytes(const char *file, int start, const char *str, int theLength) {
   if (fstat(fileno(fptr), &st) == -1) {
     fatal("Could not stat an open file.\n");
   }
-  size = st.st_size;
-  if (start < 0) {
-    start = size + start;
-  }
-  if (start < 0 || start > size) {
+
+  const auto file_size = static_cast<std::intmax_t>(st.st_size);
+  if (file_size < 0) {
     fclose(fptr);
     return 0;
   }
-  if ((size = fseek(fptr, start, 0)) < 0) {
+
+  auto offset = static_cast<std::intmax_t>(start);
+  if (offset < 0) {
+    if (offset < -file_size) {
+      fclose(fptr);
+      return 0;
+    }
+    offset += file_size;
+  }
+
+#ifdef _WIN32
+  constexpr auto max_seek_offset =
+      static_cast<std::intmax_t>(std::numeric_limits<long long>::max());
+#else
+  constexpr auto max_seek_offset =
+      static_cast<std::intmax_t>(std::numeric_limits<off_t>::max());
+#endif
+  if (offset < 0 || offset > file_size || offset > max_seek_offset ||
+      static_cast<std::uintmax_t>(theLength) >
+          static_cast<std::uintmax_t>(max_seek_offset - offset)) {
     fclose(fptr);
     return 0;
   }
-  size = fwrite(str, 1, theLength, fptr);
 
-  fclose(fptr);
+#ifdef _WIN32
+  const auto seek_result = _fseeki64(fptr, static_cast<long long>(offset), SEEK_SET);
+#else
+  const auto seek_result = fseeko(fptr, static_cast<off_t>(offset), SEEK_SET);
+#endif
+  if (seek_result != 0) {
+    fclose(fptr);
+    return 0;
+  }
 
-  if (size <= 0) {
+  const auto bytes_written = fwrite(str, 1, theLength, fptr);
+  const auto close_result = fclose(fptr);
+
+  if (close_result != 0 || bytes_written != theLength) {
     return 0;
   }
   return 1;
