@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <string>
 
 namespace {
@@ -169,23 +170,33 @@ svalue_t json_to_svalue_plain(const nlohmann::json &value, int depth) {
   if (value.is_object()) {
     auto count = static_cast<int>(value.size());
     array_t *keys = allocate_array(count);
-    array_t *values = allocate_array(count);
+    array_t *values = nullptr;
 
-    int i = 0;
-    for (const auto &entry : value.items()) {
-      keys->item[i].type = T_STRING;
-      keys->item[i].subtype = STRING_MALLOC;
-      keys->item[i].u.string =
-          string_copy(entry.key().c_str(), "read_json: key");
+    try {
+      values = allocate_array(count);
+      int i = 0;
+      for (const auto &entry : value.items()) {
+        keys->item[i].type = T_STRING;
+        keys->item[i].subtype = STRING_MALLOC;
+        keys->item[i].u.string =
+            string_copy(entry.key().c_str(), "read_json: key");
 
-      auto item = json_to_svalue_plain(entry.value(), depth + 1);
-      assign_svalue_no_free(&values->item[i], &item);
-      free_svalue(&item, "read_json: value");
-      i++;
+        auto item = json_to_svalue_plain(entry.value(), depth + 1);
+        assign_svalue_no_free(&values->item[i], &item);
+        free_svalue(&item, "read_json: value");
+        i++;
+      }
+
+      sv.type = T_MAPPING;
+      sv.u.map = mkmapping(keys, values);
+    } catch (...) {
+      free_array(keys);
+      if (values) {
+        free_array(values);
+      }
+      throw;
     }
 
-    sv.type = T_MAPPING;
-    sv.u.map = mkmapping(keys, values);
     free_array(keys);
     free_array(values);
     return sv;
@@ -195,10 +206,15 @@ svalue_t json_to_svalue_plain(const nlohmann::json &value, int depth) {
     sv.type = T_ARRAY;
     auto count = static_cast<int>(value.size());
     sv.u.arr = allocate_array(count);
-    for (int i = 0; i < count; i++) {
-      auto item = json_to_svalue_plain(value[i], depth + 1);
-      assign_svalue_no_free(&sv.u.arr->item[i], &item);
-      free_svalue(&item, "read_json: array item");
+    try {
+      for (int i = 0; i < count; i++) {
+        auto item = json_to_svalue_plain(value[i], depth + 1);
+        assign_svalue_no_free(&sv.u.arr->item[i], &item);
+        free_svalue(&item, "read_json: array item");
+      }
+    } catch (...) {
+      free_array(sv.u.arr);
+      throw;
     }
     return sv;
   }
@@ -218,8 +234,13 @@ svalue_t json_to_svalue_plain(const nlohmann::json &value, int depth) {
   }
 
   if (value.is_number_unsigned()) {
+    const auto number = value.get<std::uint64_t>();
+    if (number >
+        static_cast<std::uint64_t>(std::numeric_limits<LPC_INT>::max())) {
+      error("read_json: unsigned integer exceeds LPC integer range.\n");
+    }
     sv.type = T_NUMBER;
-    sv.u.number = static_cast<LPC_INT>(value.get<std::uint64_t>());
+    sv.u.number = static_cast<LPC_INT>(number);
     return sv;
   }
 
@@ -287,6 +308,9 @@ svalue_t read_json(const char *file) {
   } catch (const nlohmann::json::exception &err) {
     FREE_MSTR(content);
     error("read_json: %s\n", err.what());
+  } catch (...) {
+    FREE_MSTR(content);
+    throw;
   }
 
   FREE_MSTR(content);

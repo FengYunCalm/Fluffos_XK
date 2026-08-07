@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -28,6 +29,7 @@
 #include "compiler/internal/compiler.h"
 #include "compiler/internal/lpc_modern_profile.h"
 #include "packages/core/call_out.h"
+#include "packages/core/file.h"
 #include "packages/core/heartbeat.h"
 #include "packages/gateway/gateway.h"
 #include "vm/context.h"
@@ -3383,6 +3385,61 @@ TEST_F(DriverTest, TestMudPortRejectsInvalidWirePayloadLengths) {
   std::memset(header, 0, 4);
   ASSERT_FALSE(decode_mud_port_payload_length_for_test(header, 4, &payload_length));
   ASSERT_FALSE(decode_mud_port_payload_length_for_test(header, 3, &payload_length));
+}
+
+TEST_F(DriverTest, TestReadJsonRejectsUnsignedIntegerOutsideLpcRange) {
+  const char* relative_path = "log/read-json-integer-boundary.json";
+  const char* mudlib_path = "/log/read-json-integer-boundary.json";
+  struct FixtureGuard {
+    const char* path;
+    object_t* saved_current_object;
+    ~FixtureGuard() {
+      std::remove(path);
+      current_object = saved_current_object;
+    }
+  } guard{relative_path, current_object};
+  current_object = master_ob;
+
+  auto write_fixture = [relative_path](const char* contents) {
+    std::ofstream file(relative_path, std::ios::trunc);
+    file << contents;
+    return file.good();
+  };
+
+  ASSERT_TRUE(write_fixture("9223372036854775807"));
+  auto max_value = read_json(mudlib_path);
+  ASSERT_EQ(max_value.type, T_NUMBER);
+  ASSERT_EQ(max_value.u.number, std::numeric_limits<LPC_INT>::max());
+  free_svalue(&max_value, "read_json max integer test");
+
+  ASSERT_TRUE(write_fixture("9223372036854775808"));
+  bool rejected = false;
+  error_context_t econ{};
+  save_context(&econ);
+  try {
+    auto overflow = read_json(mudlib_path);
+    free_svalue(&overflow, "read_json overflow test");
+    pop_context(&econ);
+  } catch (...) {
+    restore_context(&econ);
+    rejected = true;
+  }
+  ASSERT_TRUE(rejected);
+
+  ASSERT_TRUE(write_fixture(R"({"outer":[9223372036854775808]})"));
+  const auto arrays_before = num_arrays;
+  rejected = false;
+  save_context(&econ);
+  try {
+    auto overflow = read_json(mudlib_path);
+    free_svalue(&overflow, "read_json nested overflow test");
+    pop_context(&econ);
+  } catch (...) {
+    restore_context(&econ);
+    rejected = true;
+  }
+  ASSERT_TRUE(rejected);
+  ASSERT_EQ(num_arrays, arrays_before);
 }
 
 TEST_F(DriverTest, TestGatewayLoginRunsThroughOwnerMainQueue) {

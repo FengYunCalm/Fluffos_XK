@@ -22,7 +22,8 @@ title: filesystem / read_json
 ### ERRORS
 
     read_json() raises an error if the file is missing/unreadable, if the JSON
-    is invalid, or if the nesting depth exceeds the maximum allowed.
+    is invalid, if an unsigned integer exceeds the LPC integer range, or if
+    the nesting depth exceeds the maximum allowed.
 
 ### SEE ALSO
 
