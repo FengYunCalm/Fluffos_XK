@@ -91,6 +91,7 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> output_fifo_wire_bytes_rejected{0};
   std::atomic<uint64_t> output_fifo_aggregate_wire_bytes_rejected{0};
   std::atomic<uint64_t> output_fifo_rebucket_wire_bytes_dropped{0};
+  std::atomic<uint64_t> external_bind_rejected{0};
   std::atomic<uint64_t> output_fifo_reserved{0};
   std::atomic<uint64_t> output_fifo_filled{0};
   std::atomic<uint64_t> output_fifo_released{0};
@@ -578,6 +579,7 @@ void gateway_check_heartbeat_timeouts();
 bool gateway_has_master(int fd);
 
 // C++ regression hooks; not part of the LPC/runtime API.
+bool gateway_external_bind_allowed_for_test();
 bool gateway_dispatch_message_for_test(int fd, const char *payload);
 int gateway_dispatch_buffered_frames_for_test(GatewayMaster *master, int budget);
 void gateway_set_read_dispatch_pending_for_test(GatewayMaster *master, bool pending);

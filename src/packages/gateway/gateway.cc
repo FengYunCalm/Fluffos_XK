@@ -47,6 +47,9 @@ constexpr int kGatewayDefaultMaxMasters = 16;
 constexpr int kGatewayDefaultHeartbeatInterval = 15;
 constexpr int kGatewayDefaultHeartbeatTimeout = 45;
 constexpr int kGatewayDefaultReconnectGrace = 60;
+// The gateway protocol has no authenticated or encrypted master transport.
+// Keep it loopback-only until that trust boundary is implemented end to end.
+constexpr bool kGatewayExternalBindAllowed = false;
 constexpr size_t kGatewayMinPacketSize = 1024;
 constexpr size_t kGatewayAbsoluteMaxPacketSize = 16 * 1024 * 1024;
 constexpr size_t kGatewayWriteFlushBudget = 128;
@@ -1936,7 +1939,11 @@ int gateway_svalue_to_json_string(const svalue_t *sv, std::string *out) {
   return gateway_svalue_to_json_string_impl(sv, out);
 }
 
-// C++ regression hook for gateway owner-scope tests; not part of the LPC/runtime API.
+// C++ regression hooks; not part of the LPC/runtime API.
+bool gateway_external_bind_allowed_for_test() {
+  return kGatewayExternalBindAllowed;
+}
+
 bool gateway_dispatch_message_for_test(int fd, const char *payload) {
   if (!payload) {
     return false;
@@ -2103,6 +2110,14 @@ int gateway_listen_internal(int port, int bind_all) {
 
   if (port <= 0 || port > 65535 || !g_event_base) {
     debug_message("Gateway listen skipped: invalid port or missing event base.\n");
+    return 0;
+  }
+  if (bind_all && !kGatewayExternalBindAllowed) {
+    g_gateway_runtime_counters.external_bind_rejected.fetch_add(
+        1, std::memory_order_relaxed);
+    debug_message(
+        "Gateway external listen rejected: authenticated transport is not "
+        "available; use a secured proxy to the loopback listener.\n");
     return 0;
   }
 
@@ -2273,8 +2288,14 @@ mapping_t *gateway_status_internal() {
   const auto backend_status = backend_runtime_status();
 
   uptime = g_gateway_started_at ? static_cast<int>(get_current_time() - g_gateway_started_at) : 0;
-  map = allocate_mapping(212);
+  map = allocate_mapping(214);
   add_mapping_pair(map, "listening", g_gateway_listener ? 1 : 0);
+  add_mapping_pair(map, "gateway_external_bind_allowed",
+                   kGatewayExternalBindAllowed ? 1 : 0);
+  add_mapping_pair(
+      map, "gateway_external_bind_rejected",
+      static_cast<long>(g_gateway_runtime_counters.external_bind_rejected.load(
+          std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_event_priority_levels",
                    kBackendEventPriorityLevels);
   add_mapping_pair(map, "gateway_normal_event_priority",

@@ -452,6 +452,8 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
 
   mapping_t* status = gateway_status_internal();
   ASSERT_NE(status, nullptr);
+  ASSERT_EQ(mapping_number(status, "gateway_external_bind_allowed"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_external_bind_rejected"), 0);
   ASSERT_EQ(mapping_number(status, "gateway_event_priority_levels"), 2);
   ASSERT_EQ(mapping_number(status, "gateway_normal_event_priority"), 0);
   ASSERT_EQ(mapping_number(status, "gateway_io_event_priority"), 0);
@@ -3339,6 +3341,17 @@ TEST_F(DriverTest, TestGatewayMasterListenerEnablesTcpNoDelayAndGatewayPriority)
   ASSERT_NE(listener_source.find("bufferevent_priority_set("), std::string::npos);
   ASSERT_NE(listener_source.find("BackendEventPriority::kGateway"),
             std::string::npos);
+}
+
+TEST_F(DriverTest, TestGatewayRejectsExternalBindWithoutAuthenticatedTransport) {
+  ASSERT_FALSE(gateway_external_bind_allowed_for_test());
+  const auto rejected_before =
+      g_gateway_runtime_counters.external_bind_rejected.load(
+          std::memory_order_relaxed);
+  ASSERT_EQ(gateway_listen_internal(65535, 1), 0);
+  ASSERT_EQ(g_gateway_runtime_counters.external_bind_rejected.load(
+                std::memory_order_relaxed),
+            rejected_before + 1);
 }
 
 TEST_F(DriverTest, TestGatewayLoginRunsThroughOwnerMainQueue) {
