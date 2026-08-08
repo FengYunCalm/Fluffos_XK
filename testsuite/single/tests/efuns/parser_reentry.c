@@ -3,6 +3,7 @@ string* parse_command_id_list() {
 }
 
 nosave int nested_parse_rejected = 0;
+nosave int nested_rules_rejected = 0;
 nosave int do_callback_parse_result = 0;
 
 void create() {
@@ -28,6 +29,8 @@ int do_inner_obj() {
 int can_outer_obj() {
   mixed err = catch(parse_sentence("inner bag", 0, all_inventory()));
   nested_parse_rejected = stringp(err) && strsrch(err, "recursively") >= 0;
+  mixed rules_err = catch(parse_my_rules(this_object(), "inner bag", 0));
+  nested_rules_rejected = stringp(rules_err) && strsrch(rules_err, "recursively") >= 0;
   return 1;
 }
 
@@ -64,6 +67,7 @@ void do_tests() {
 
   ASSERT_EQ(1, parse_sentence("outer bag", 0, all_inventory()));
   ASSERT_EQ(1, nested_parse_rejected);
+  ASSERT_EQ(1, nested_rules_rejected);
 
   ASSERT_EQ(1, parse_sentence("follow bag", 0, all_inventory()));
   ASSERT_EQ(1, do_callback_parse_result);
