@@ -719,8 +719,8 @@ static const yytype_int16 yyrline[] =
     2959,  2966,  2976,  2985,  2996,  2995,  3009,  3014,  3028,  3036,
     3037,  3041,  3048,  3049,  3056,  3067,  3070,  3079,  3078,  3092,
     3091,  3122,  3157,  3176,  3175,  3311,  3310,  3379,  3378,  3430,
-    3429,  3481,  3480,  3511,  3531,  3547,  3548,  3562,  3577,  3592,
-    3626,  3630
+    3429,  3481,  3480,  3511,  3531,  3547,  3548,  3564,  3579,  3594,
+    3628,  3632
 };
 #endif
 
@@ -6332,13 +6332,15 @@ yyreduce:
       p = (yyval.string) + l;
       while (p--,l--)
         *(p+3) = *p;
-      strncpy((yyval.string), ":::", 3);
+      (yyval.string)[0] = ':';
+      (yyval.string)[1] = ':';
+      (yyval.string)[2] = ':';
     }
-#line 6338 "/home/mechrevo/projects/fluffos-src/build/src/grammar.autogen.cc"
+#line 6340 "/home/mechrevo/projects/fluffos-src/build/src/grammar.autogen.cc"
     break;
 
   case 267: /* function_name: L_BASIC_TYPE L_COLON_COLON identifier  */
-#line 3563 "/home/mechrevo/projects/fluffos-src/src/compiler/internal/grammar.y"
+#line 3565 "/home/mechrevo/projects/fluffos-src/src/compiler/internal/grammar.y"
     {
       int z, l = strlen((yyvsp[0].string)) + 1;
       char *p;
@@ -6353,11 +6355,11 @@ yyreduce:
       (yyval.string)[z-2] = ':';
       (yyval.string)[z-1] = ':';
     }
-#line 6357 "/home/mechrevo/projects/fluffos-src/build/src/grammar.autogen.cc"
+#line 6359 "/home/mechrevo/projects/fluffos-src/build/src/grammar.autogen.cc"
     break;
 
   case 268: /* function_name: identifier L_COLON_COLON identifier  */
-#line 3578 "/home/mechrevo/projects/fluffos-src/src/compiler/internal/grammar.y"
+#line 3580 "/home/mechrevo/projects/fluffos-src/src/compiler/internal/grammar.y"
     {
       int l = strlen((yyvsp[-2].string));
       /* "ob" and "name" -> ":ob::name" */
@@ -6369,11 +6371,11 @@ yyreduce:
       scratch_free((yyvsp[-2].string));
       scratch_free((yyvsp[0].string));
     }
-#line 6373 "/home/mechrevo/projects/fluffos-src/build/src/grammar.autogen.cc"
+#line 6375 "/home/mechrevo/projects/fluffos-src/build/src/grammar.autogen.cc"
     break;
 
   case 269: /* cond: L_IF '(' comma_expr ')' statement optional_else_part  */
-#line 3593 "/home/mechrevo/projects/fluffos-src/src/compiler/internal/grammar.y"
+#line 3595 "/home/mechrevo/projects/fluffos-src/src/compiler/internal/grammar.y"
     {
       /* x != 0 -> x */
       if (IS_NODE((yyvsp[-3].node), NODE_BINARY_OP, F_NE)) {
@@ -6404,27 +6406,27 @@ yyreduce:
       }
       CREATE_IF((yyval.node), (yyvsp[-3].node), (yyvsp[-1].node), (yyvsp[0].node));
     }
-#line 6408 "/home/mechrevo/projects/fluffos-src/build/src/grammar.autogen.cc"
+#line 6410 "/home/mechrevo/projects/fluffos-src/build/src/grammar.autogen.cc"
     break;
 
   case 270: /* optional_else_part: %empty  */
-#line 3627 "/home/mechrevo/projects/fluffos-src/src/compiler/internal/grammar.y"
+#line 3629 "/home/mechrevo/projects/fluffos-src/src/compiler/internal/grammar.y"
     {
       (yyval.node) = 0;
     }
-#line 6416 "/home/mechrevo/projects/fluffos-src/build/src/grammar.autogen.cc"
+#line 6418 "/home/mechrevo/projects/fluffos-src/build/src/grammar.autogen.cc"
     break;
 
   case 271: /* optional_else_part: L_ELSE statement  */
-#line 3631 "/home/mechrevo/projects/fluffos-src/src/compiler/internal/grammar.y"
+#line 3633 "/home/mechrevo/projects/fluffos-src/src/compiler/internal/grammar.y"
     {
       (yyval.node) = (yyvsp[0].node);
     }
-#line 6424 "/home/mechrevo/projects/fluffos-src/build/src/grammar.autogen.cc"
+#line 6426 "/home/mechrevo/projects/fluffos-src/build/src/grammar.autogen.cc"
     break;
 
 
-#line 6428 "/home/mechrevo/projects/fluffos-src/build/src/grammar.autogen.cc"
+#line 6430 "/home/mechrevo/projects/fluffos-src/build/src/grammar.autogen.cc"
 
         default: break;
       }
@@ -6659,5 +6661,5 @@ yyreturnlab:
   return yyresult;
 }
 
-#line 3635 "/home/mechrevo/projects/fluffos-src/src/compiler/internal/grammar.y"
+#line 3637 "/home/mechrevo/projects/fluffos-src/src/compiler/internal/grammar.y"
 
