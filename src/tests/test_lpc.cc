@@ -4356,6 +4356,35 @@ TEST_F(DriverTest, TestGatewayStatusMappingsUseLpcIntegerWidth) {
   EXPECT_NE(status_body.find("static_cast<LPC_INT>"), std::string::npos);
 }
 
+TEST_F(DriverTest, TestVmWorkerMappingCountersUseLpcIntegerWidth) {
+  const auto worker_source =
+      read_source_file_for_test("../src/packages/core/vm_worker.cc");
+  auto assert_mapping_uses_lpc_width = [&](const char* start_marker,
+                                           const char* end_marker) {
+    const auto start = worker_source.find(start_marker);
+    const auto end = worker_source.find(end_marker, start);
+
+    ASSERT_NE(start, std::string::npos) << start_marker;
+    ASSERT_NE(end, std::string::npos) << end_marker;
+    ASSERT_GT(end, start) << start_marker;
+    const auto body = worker_source.substr(start, end - start);
+    EXPECT_EQ(body.find("static_cast<long>"), std::string::npos)
+        << start_marker;
+    EXPECT_NE(body.find("static_cast<LPC_INT>"), std::string::npos)
+        << start_marker;
+  };
+
+  assert_mapping_uses_lpc_width(
+      "mapping_t *worker_bench_response(mapping_t *options)",
+      "mapping_t *worker_actor_bench_response(mapping_t *options)");
+  assert_mapping_uses_lpc_width(
+      "mapping_t *worker_status_response()",
+      "mapping_t *worker_submit_response(");
+  assert_mapping_uses_lpc_width(
+      "void f_vm_worker_bench()",
+      "#ifdef F_VM_WORKER_TASK");
+}
+
 TEST_F(DriverTest, TestOwnerDiagnosticMappingsUseLpcIntegerWidth) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   auto assert_mapping_uses_lpc_width = [&](const char* start_marker,

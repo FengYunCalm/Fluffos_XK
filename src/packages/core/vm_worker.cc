@@ -325,8 +325,8 @@ mapping_t *worker_bench_response(mapping_t *options) {
   add_mapping_pair(result_spec, "max_parallel", result.max_parallel);
   add_mapping_pair(result_spec, "elapsed_ms", result.elapsed_ms);
   add_mapping_pair(result_spec, "checksum", static_cast<LPC_INT>(result.checksum));
-  add_mapping_pair(result_spec, "submitted", static_cast<long>(stats.submitted));
-  add_mapping_pair(result_spec, "completed", static_cast<long>(stats.completed));
+  add_mapping_pair(result_spec, "submitted", static_cast<LPC_INT>(stats.submitted));
+  add_mapping_pair(result_spec, "completed", static_cast<LPC_INT>(stats.completed));
   add_mapping_pair(result_spec, "active", stats.active);
 
   auto *response = allocate_mapping(2);
@@ -410,16 +410,16 @@ mapping_t *worker_status_response() {
   auto *map = allocate_mapping(12);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "worker_count", stats.worker_count);
-  add_mapping_pair(map, "submitted", static_cast<long>(stats.submitted));
-  add_mapping_pair(map, "completed", static_cast<long>(stats.completed));
+  add_mapping_pair(map, "submitted", static_cast<LPC_INT>(stats.submitted));
+  add_mapping_pair(map, "completed", static_cast<LPC_INT>(stats.completed));
   add_mapping_pair(map, "active", stats.active);
-  add_mapping_pair(map, "queue_depth", static_cast<long>(stats.queue_depth));
-  add_mapping_pair(map, "queue_high_watermark", static_cast<long>(stats.queue_high_watermark));
-  add_mapping_pair(map, "owner_queue_depth", static_cast<long>(stats.owner_queue_depth));
+  add_mapping_pair(map, "queue_depth", static_cast<LPC_INT>(stats.queue_depth));
+  add_mapping_pair(map, "queue_high_watermark", static_cast<LPC_INT>(stats.queue_high_watermark));
+  add_mapping_pair(map, "owner_queue_depth", static_cast<LPC_INT>(stats.owner_queue_depth));
   add_mapping_pair(map, "active_owners", stats.active_owners);
-  add_mapping_pair(map, "async_pending", static_cast<long>(stats.async_pending));
-  add_mapping_pair(map, "async_ready", static_cast<long>(stats.async_ready));
-  add_mapping_pair(map, "async_failed", static_cast<long>(stats.async_failed));
+  add_mapping_pair(map, "async_pending", static_cast<LPC_INT>(stats.async_pending));
+  add_mapping_pair(map, "async_ready", static_cast<LPC_INT>(stats.async_ready));
+  add_mapping_pair(map, "async_failed", static_cast<LPC_INT>(stats.async_failed));
   return map;
 }
 
@@ -626,8 +626,8 @@ void f_vm_worker_bench() {
   add_mapping_pair(map, "max_parallel", result.max_parallel);
   add_mapping_pair(map, "elapsed_ms", result.elapsed_ms);
   add_mapping_pair(map, "checksum", static_cast<LPC_INT>(result.checksum));
-  add_mapping_pair(map, "submitted", static_cast<long>(stats.submitted));
-  add_mapping_pair(map, "completed", static_cast<long>(stats.completed));
+  add_mapping_pair(map, "submitted", static_cast<LPC_INT>(stats.submitted));
+  add_mapping_pair(map, "completed", static_cast<LPC_INT>(stats.completed));
   add_mapping_pair(map, "active", stats.active);
   push_refed_mapping(map);
 }
