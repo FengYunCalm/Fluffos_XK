@@ -4456,6 +4456,39 @@ TEST_F(DriverTest, TestGatewaySessionCountMappingsUseLpcIntegerWidth) {
   EXPECT_EQ(quiesce_body.find("std::max<long>"), std::string::npos);
 }
 
+TEST_F(DriverTest, TestGatewaySessionInfoMappingsUseLpcIntegerWidth) {
+  const auto session_source =
+      read_source_file_for_test("../src/packages/gateway/gateway_session.cc");
+  const auto payload_start = session_source.find(
+      "svalue_t gateway_command_task_payload(");
+  const auto payload_end = session_source.find(
+      "void cleanup_temp_gateway_interactive(", payload_start);
+  const auto info_start =
+      session_source.find("void f_gateway_session_info()");
+  const auto info_end =
+      session_source.find("void f_gateway_inject_input()", info_start);
+
+  ASSERT_NE(payload_start, std::string::npos);
+  ASSERT_NE(payload_end, std::string::npos);
+  ASSERT_GT(payload_end, payload_start);
+  ASSERT_NE(info_start, std::string::npos);
+  ASSERT_NE(info_end, std::string::npos);
+  ASSERT_GT(info_end, info_start);
+  const auto payload_body =
+      session_source.substr(payload_start, payload_end - payload_start);
+  const auto info_body =
+      session_source.substr(info_start, info_end - info_start);
+  EXPECT_EQ(payload_body.find("static_cast<long>"), std::string::npos);
+  EXPECT_NE(payload_body.find("static_cast<LPC_INT>"),
+            std::string::npos);
+  EXPECT_EQ(info_body.find("static_cast<long>"), std::string::npos);
+  EXPECT_NE(info_body.find("static_cast<LPC_INT>"), std::string::npos);
+  EXPECT_EQ(info_body.find("long pending_reservations"),
+            std::string::npos);
+  EXPECT_NE(info_body.find("LPC_INT pending_reservations"),
+            std::string::npos);
+}
+
 TEST_F(DriverTest, TestOwnerDiagnosticMappingsUseLpcIntegerWidth) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   auto assert_mapping_uses_lpc_width = [&](const char* start_marker,

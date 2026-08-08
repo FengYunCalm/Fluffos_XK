@@ -1626,7 +1626,8 @@ svalue_t gateway_command_task_payload(interactive_t *user, bool snapshot_ready, 
   add_mapping_string(payload.u.map, "gateway_command_payload_encoding", "utf-8");
   add_mapping_string(payload.u.map, "command_text_snapshot_policy", "owner_private_redacted_from_trace");
   add_mapping_pair(payload.u.map, "command_text_snapshot_ready", snapshot_ready ? 1 : 0);
-  add_mapping_pair(payload.u.map, "command_text_snapshot_bytes", static_cast<long>(snapshot_bytes));
+  add_mapping_pair(payload.u.map, "command_text_snapshot_bytes",
+                   static_cast<LPC_INT>(snapshot_bytes));
   add_mapping_pair(payload.u.map, "command_text_snapshot_redacted", snapshot_ready ? 1 : 0);
   add_mapping_string(payload.u.map, "input_callback_state_policy", "redacted_input_to_get_char_state_v1");
   add_mapping_pair(payload.u.map, "input_callback_state_snapshot_ready", 1);
@@ -7411,8 +7412,9 @@ void f_gateway_session_info() {
   add_mapping_string(map, "owner_id", session_ob ? vm_owner_id(session_ob) : "");
   add_mapping_pair(map, "owner_epoch", session_ob ? static_cast<LPC_INT>(vm_owner_epoch(session_ob)) : 0);
   add_mapping_pair(map, "session_fifo_contract_ready", 1);
-  add_mapping_pair(map, "session_fifo_depth", static_cast<long>(sess->output_fifo.size()));
-  long pending_reservations = 0;
+  add_mapping_pair(map, "session_fifo_depth",
+                   static_cast<LPC_INT>(sess->output_fifo.size()));
+  LPC_INT pending_reservations = 0;
   for (const auto &entry : sess->output_fifo) {
     if (!entry.ready) {
       pending_reservations++;
@@ -7420,17 +7422,21 @@ void f_gateway_session_info() {
   }
   add_mapping_pair(map, "session_fifo_pending_reservations", pending_reservations);
   add_mapping_pair(map, "session_fifo_wire_bytes",
-                   static_cast<long>(sess->output_fifo_wire_bytes));
+                   static_cast<LPC_INT>(sess->output_fifo_wire_bytes));
   add_mapping_pair(
       map, "session_fifo_wire_limit_bytes",
-      static_cast<long>(gateway_session_output_fifo_wire_limit(sess)));
+      static_cast<LPC_INT>(gateway_session_output_fifo_wire_limit(sess)));
   add_mapping_pair(
       map, "session_fifo_wire_bytes_rejected",
-      static_cast<long>(sess->output_fifo_wire_bytes_rejected));
-  add_mapping_pair(map, "session_fifo_max_depth", static_cast<long>(sess->output_fifo_max_depth));
-  add_mapping_pair(map, "session_fifo_enqueued", static_cast<long>(sess->output_fifo_enqueued));
-  add_mapping_pair(map, "session_fifo_flushed", static_cast<long>(sess->output_fifo_flushed));
-  add_mapping_pair(map, "session_fifo_rejected", static_cast<long>(sess->output_fifo_rejected));
+      static_cast<LPC_INT>(sess->output_fifo_wire_bytes_rejected));
+  add_mapping_pair(map, "session_fifo_max_depth",
+                   static_cast<LPC_INT>(sess->output_fifo_max_depth));
+  add_mapping_pair(map, "session_fifo_enqueued",
+                   static_cast<LPC_INT>(sess->output_fifo_enqueued));
+  add_mapping_pair(map, "session_fifo_flushed",
+                   static_cast<LPC_INT>(sess->output_fifo_flushed));
+  add_mapping_pair(map, "session_fifo_rejected",
+                   static_cast<LPC_INT>(sess->output_fifo_rejected));
   add_mapping_string(map, "gateway_io_boundary", "main_thread_io_adapter");
   pop_stack();
   push_refed_mapping(map);
