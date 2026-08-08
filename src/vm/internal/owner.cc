@@ -4871,24 +4871,51 @@ mapping_t *vm_owner_schedule(int limit) {
 }
 
 mapping_t *vm_owner_mailbox_status(const char *owner_id) {
-  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
   std::string normalized_owner_id = normalize_owner_id(owner_id);
+  long owner_queue_depth;
+  long owner_executor_runnable_depth;
+  long owner_executor_safe_depth;
+  long owner_main_required_depth;
+  long owner_main_queue_depth_value;
+  long queue_depth;
+  long executor_runnable_depth;
+  long executor_safe_depth;
+  long main_required_depth;
+  long main_queue_depth_value;
+  long active_owners;
+  long main_active_owners;
+  {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    owner_queue_depth = owner_mailbox_depth(normalized_owner_id);
+    owner_executor_runnable_depth = owner_executor_runnable_queue_depth(normalized_owner_id);
+    owner_executor_safe_depth = owner_executor_safe_queue_depth(normalized_owner_id);
+    owner_main_required_depth = owner_main_required_queue_depth(normalized_owner_id);
+    owner_main_queue_depth_value = owner_main_queue_depth(normalized_owner_id);
+    queue_depth = owner_mailbox_total_depth();
+    executor_runnable_depth = owner_executor_runnable_queue_depth();
+    executor_safe_depth = owner_executor_safe_queue_depth();
+    main_required_depth = owner_main_required_queue_depth();
+    main_queue_depth_value = owner_main_queue_total_depth();
+    active_owners = owner_mailbox_active_owners();
+    main_active_owners = owner_scheduler_state.active_main_owner_count();
+  }
+
   auto *map = allocate_mapping(17);
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
-  add_mapping_pair(map, "owner_queue_depth", owner_mailbox_depth(normalized_owner_id));
+  add_mapping_pair(map, "owner_queue_depth", owner_queue_depth);
   add_mapping_pair(map, "owner_executor_runnable_queue_depth",
-                   owner_executor_runnable_queue_depth(normalized_owner_id));
-  add_mapping_pair(map, "owner_executor_safe_queue_depth", owner_executor_safe_queue_depth(normalized_owner_id));
-  add_mapping_pair(map, "owner_main_required_queue_depth", owner_main_required_queue_depth(normalized_owner_id));
-  add_mapping_pair(map, "owner_main_queue_depth", owner_main_queue_depth(normalized_owner_id));
-  add_mapping_pair(map, "queue_depth", owner_mailbox_total_depth());
-  add_mapping_pair(map, "executor_runnable_queue_depth", owner_executor_runnable_queue_depth());
-  add_mapping_pair(map, "executor_safe_queue_depth", owner_executor_safe_queue_depth());
-  add_mapping_pair(map, "main_required_queue_depth", owner_main_required_queue_depth());
-  add_mapping_pair(map, "main_queue_depth", owner_main_queue_total_depth());
-  add_mapping_pair(map, "active_owners", owner_mailbox_active_owners());
-  add_mapping_pair(map, "main_active_owners", owner_scheduler_state.active_main_owner_count());
+                   owner_executor_runnable_depth);
+  add_mapping_pair(map, "owner_executor_safe_queue_depth", owner_executor_safe_depth);
+  add_mapping_pair(map, "owner_main_required_queue_depth", owner_main_required_depth);
+  add_mapping_pair(map, "owner_main_queue_depth", owner_main_queue_depth_value);
+  add_mapping_pair(map, "queue_depth", queue_depth);
+  add_mapping_pair(map, "executor_runnable_queue_depth", executor_runnable_depth);
+  add_mapping_pair(map, "executor_safe_queue_depth", executor_safe_depth);
+  add_mapping_pair(map, "main_required_queue_depth", main_required_depth);
+  add_mapping_pair(map, "main_queue_depth", main_queue_depth_value);
+  add_mapping_pair(map, "active_owners", active_owners);
+  add_mapping_pair(map, "main_active_owners", main_active_owners);
   add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "total_drained", static_cast<long>(total_drained.load(std::memory_order_relaxed)));
   return map;

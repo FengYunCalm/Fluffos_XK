@@ -4526,6 +4526,45 @@ TEST_F(DriverTest, TestOwnerScheduleProcessesDetachedTasksAfterRuntimeUnlock) {
             std::string::npos);
 }
 
+TEST_F(DriverTest, TestOwnerMailboxStatusBuildsMappingAfterRuntimeUnlock) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  const auto start = owner_source.find("mapping_t *vm_owner_mailbox_status(");
+  const auto end = owner_source.find("mapping_t *vm_owner_task_trace(", start);
+
+  ASSERT_NE(start, std::string::npos);
+  ASSERT_NE(end, std::string::npos);
+  ASSERT_GT(end, start);
+  const auto body = owner_source.substr(start, end - start);
+  const auto snapshot_pos = body.find("long owner_queue_depth;");
+  const auto lock_pos = body.find(
+      "std::lock_guard<std::mutex> lock(owner_runtime_mutex);", snapshot_pos);
+  const auto lock_scope_end = body.find("\n  }\n", lock_pos);
+  const auto mapping_pos = body.find("auto *map = allocate_mapping", lock_scope_end);
+
+  ASSERT_NE(snapshot_pos, std::string::npos);
+  ASSERT_NE(lock_pos, std::string::npos);
+  ASSERT_NE(lock_scope_end, std::string::npos);
+  ASSERT_NE(mapping_pos, std::string::npos);
+  EXPECT_LT(snapshot_pos, lock_pos);
+  EXPECT_LT(lock_pos, lock_scope_end);
+  EXPECT_LT(lock_scope_end, mapping_pos);
+  const auto mapping_body = body.substr(mapping_pos);
+  for (const char* protected_read : {
+           "owner_mailbox_depth(",
+           "owner_executor_runnable_queue_depth(",
+           "owner_executor_safe_queue_depth(",
+           "owner_main_required_queue_depth(",
+           "owner_main_queue_depth(",
+           "owner_mailbox_total_depth()",
+           "owner_main_queue_total_depth()",
+           "owner_mailbox_active_owners()",
+           "owner_scheduler_state.active_main_owner_count()",
+       }) {
+    EXPECT_EQ(mapping_body.find(protected_read), std::string::npos)
+        << protected_read;
+  }
+}
+
 TEST_F(DriverTest, TestGatewayFutureCompletionExposesMainThreadCpuCounter) {
   const auto gateway_header = read_source_file_for_test("../src/packages/gateway/gateway.h");
   const auto gateway_source =
