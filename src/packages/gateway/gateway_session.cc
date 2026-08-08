@@ -1924,7 +1924,7 @@ bool gateway_session_pending_reservation_has_ready_successor(
 
 int gateway_get_session_count() { return static_cast<int>(g_gateway_sessions.size()); }
 
-long gateway_room_output_projection_pending_count() {
+LPC_INT gateway_room_output_projection_pending_count() {
   size_t pending = 0;
   for (const auto &[wave_id, wave] : g_gateway_room_output_waves) {
     (void)wave_id;
@@ -1932,23 +1932,23 @@ long gateway_room_output_projection_pending_count() {
       if (item.terminal) {
         continue;
       }
-      if (pending == static_cast<size_t>(std::numeric_limits<long>::max())) {
-        return std::numeric_limits<long>::max();
+      if (pending == static_cast<size_t>(std::numeric_limits<LPC_INT>::max())) {
+        return std::numeric_limits<LPC_INT>::max();
       }
       ++pending;
     }
   }
-  return static_cast<long>(pending);
+  return static_cast<LPC_INT>(pending);
 }
 
-long gateway_room_output_projection_wave_count() {
+LPC_INT gateway_room_output_projection_wave_count() {
   return g_gateway_room_output_waves.size() >
-          static_cast<size_t>(std::numeric_limits<long>::max())
-      ? std::numeric_limits<long>::max()
-      : static_cast<long>(g_gateway_room_output_waves.size());
+          static_cast<size_t>(std::numeric_limits<LPC_INT>::max())
+      ? std::numeric_limits<LPC_INT>::max()
+      : static_cast<LPC_INT>(g_gateway_room_output_waves.size());
 }
 
-long gateway_room_output_projection_reservation_count() {
+LPC_INT gateway_room_output_projection_reservation_count() {
   size_t reservations = 0;
   for (const auto &[wave_id, wave] : g_gateway_room_output_waves) {
     (void)wave_id;
@@ -1957,20 +1957,20 @@ long gateway_room_output_projection_reservation_count() {
         continue;
       }
       if (reservations ==
-          static_cast<size_t>(std::numeric_limits<long>::max())) {
-        return std::numeric_limits<long>::max();
+          static_cast<size_t>(std::numeric_limits<LPC_INT>::max())) {
+        return std::numeric_limits<LPC_INT>::max();
       }
       ++reservations;
     }
   }
-  return static_cast<long>(reservations);
+  return static_cast<LPC_INT>(reservations);
 }
 
-long gateway_room_output_projection_retry_count() {
+LPC_INT gateway_room_output_projection_retry_count() {
   return g_gateway_room_output_retry_schedule.size() >
-          static_cast<size_t>(std::numeric_limits<long>::max())
-      ? std::numeric_limits<long>::max()
-      : static_cast<long>(g_gateway_room_output_retry_schedule.size());
+          static_cast<size_t>(std::numeric_limits<LPC_INT>::max())
+      ? std::numeric_limits<LPC_INT>::max()
+      : static_cast<LPC_INT>(g_gateway_room_output_retry_schedule.size());
 }
 
 GatewaySession *gateway_find_session(const char *session_id) {
@@ -2439,8 +2439,8 @@ int gateway_process_session_future_watches_at(uint64_t now_ms) {
   return processed;
 }
 
-long gateway_session_future_watch_count() {
-  return static_cast<long>(g_gateway_session_future_watches.size());
+LPC_INT gateway_session_future_watch_count() {
+  return static_cast<LPC_INT>(g_gateway_session_future_watches.size());
 }
 
 int gateway_watch_future_for_object(object_t *ob, uint64_t context_id,
@@ -2593,20 +2593,20 @@ int gateway_process_future_watches_at(uint64_t now_ms) {
   return processed;
 }
 
-long gateway_future_watch_count() {
-  return static_cast<long>(g_gateway_future_watches.size());
+LPC_INT gateway_future_watch_count() {
+  return static_cast<LPC_INT>(g_gateway_future_watches.size());
 }
 
-long gateway_session_fifo_depth_total() {
-  long depth = 0;
+LPC_INT gateway_session_fifo_depth_total() {
+  LPC_INT depth = 0;
   for (const auto &entry : g_gateway_sessions) {
-    depth += static_cast<long>(entry.second->output_fifo.size());
+    depth += static_cast<LPC_INT>(entry.second->output_fifo.size());
   }
   return depth;
 }
 
-long gateway_session_fifo_pending_reservations_total() {
-  long pending = 0;
+LPC_INT gateway_session_fifo_pending_reservations_total() {
+  LPC_INT pending = 0;
   for (const auto &session_entry : g_gateway_sessions) {
     for (const auto &output_entry : session_entry.second->output_fifo) {
       if (!output_entry.ready) {
@@ -5496,7 +5496,7 @@ mapping_t *gateway_owner_output_quiesce(const char *reason) {
   }
 
   const auto count_room_watches = [] {
-    long count = 0;
+    LPC_INT count = 0;
     for (const auto &[reservation_id, watch] :
          g_gateway_session_future_watches) {
       (void)reservation_id;
@@ -5509,14 +5509,14 @@ mapping_t *gateway_owner_output_quiesce(const char *reason) {
   };
   const auto count_session_watches = [] {
     return g_gateway_session_future_watches.size() >
-            static_cast<size_t>(std::numeric_limits<long>::max())
-        ? std::numeric_limits<long>::max()
-        : static_cast<long>(g_gateway_session_future_watches.size());
+            static_cast<size_t>(std::numeric_limits<LPC_INT>::max())
+        ? std::numeric_limits<LPC_INT>::max()
+        : static_cast<LPC_INT>(g_gateway_session_future_watches.size());
   };
   const auto count_reservations = [](bool room_only) {
-    long count = 0;
+    LPC_INT count = 0;
     const auto increment = [&count] {
-      if (count < std::numeric_limits<long>::max()) {
+      if (count < std::numeric_limits<LPC_INT>::max()) {
         ++count;
       }
     };
@@ -5556,7 +5556,7 @@ mapping_t *gateway_owner_output_quiesce(const char *reason) {
   };
 
   const auto waves_before =
-      static_cast<long>(g_gateway_room_output_waves.size());
+      static_cast<LPC_INT>(g_gateway_room_output_waves.size());
   const auto pending_before = gateway_room_output_projection_pending_count();
   const auto watches_before = count_room_watches();
   const auto reservations_before = count_reservations(true);
@@ -5597,7 +5597,7 @@ mapping_t *gateway_owner_output_quiesce(const char *reason) {
   }
 
   const auto waves_after =
-      static_cast<long>(g_gateway_room_output_waves.size());
+      static_cast<LPC_INT>(g_gateway_room_output_waves.size());
   const auto pending_after = gateway_room_output_projection_pending_count();
   const auto watches_after = count_room_watches();
   const auto reservations_after = count_reservations(true);
@@ -5622,9 +5622,9 @@ mapping_t *gateway_owner_output_quiesce(const char *reason) {
   add_mapping_pair(result, "session_reservations_before",
                    session_reservations_before);
   add_mapping_pair(result, "cancelled_futures",
-                   static_cast<long>(cancelled_futures));
+                   static_cast<LPC_INT>(cancelled_futures));
   add_mapping_pair(result, "released_reservations",
-                   std::max<long>(
+                   std::max<LPC_INT>(
                        0, session_reservations_before -
                               session_reservations_after));
   add_mapping_pair(result, "room_waves_after", waves_after);

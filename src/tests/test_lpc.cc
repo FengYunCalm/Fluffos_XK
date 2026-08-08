@@ -4385,6 +4385,77 @@ TEST_F(DriverTest, TestVmWorkerMappingCountersUseLpcIntegerWidth) {
       "#ifdef F_VM_WORKER_TASK");
 }
 
+TEST_F(DriverTest, TestGatewaySessionCountMappingsUseLpcIntegerWidth) {
+  const auto gateway_header =
+      read_source_file_for_test("../src/packages/gateway/gateway.h");
+  const auto session_source =
+      read_source_file_for_test("../src/packages/gateway/gateway_session.cc");
+  const char* count_functions[] = {
+      "gateway_session_fifo_depth_total",
+      "gateway_session_fifo_pending_reservations_total",
+      "gateway_session_future_watch_count",
+      "gateway_room_output_projection_pending_count",
+      "gateway_room_output_projection_wave_count",
+      "gateway_room_output_projection_reservation_count",
+      "gateway_room_output_projection_retry_count",
+      "gateway_future_watch_count",
+  };
+
+  for (const auto* function_name : count_functions) {
+    const auto long_signature =
+        std::string("long ") + function_name + "(";
+    const auto lpc_signature =
+        std::string("LPC_INT ") + function_name + "(";
+    EXPECT_EQ(gateway_header.find(long_signature), std::string::npos)
+        << function_name;
+    EXPECT_NE(gateway_header.find(lpc_signature), std::string::npos)
+        << function_name;
+    EXPECT_EQ(session_source.find(long_signature), std::string::npos)
+        << function_name;
+    EXPECT_NE(session_source.find(lpc_signature), std::string::npos)
+        << function_name;
+  }
+
+  const auto projection_start = session_source.find(
+      "gateway_room_output_projection_pending_count()");
+  const auto projection_end = session_source.find(
+      "GatewaySession *gateway_find_session(", projection_start);
+  const auto watch_start =
+      session_source.find("gateway_session_future_watch_count()");
+  const auto watch_end = session_source.find(
+      "uint64_t gateway_session_fifo_enqueued_total()", watch_start);
+  const auto quiesce_start = session_source.find(
+      "mapping_t *gateway_owner_output_quiesce(const char *reason)");
+  const auto quiesce_end = session_source.find(
+      "int gateway_fill_session_protocol_output_with_writer(",
+      quiesce_start);
+
+  ASSERT_NE(projection_start, std::string::npos);
+  ASSERT_NE(projection_end, std::string::npos);
+  ASSERT_GT(projection_end, projection_start);
+  ASSERT_NE(watch_start, std::string::npos);
+  ASSERT_NE(watch_end, std::string::npos);
+  ASSERT_GT(watch_end, watch_start);
+  ASSERT_NE(quiesce_start, std::string::npos);
+  ASSERT_NE(quiesce_end, std::string::npos);
+  ASSERT_GT(quiesce_end, quiesce_start);
+
+  const auto projection_body = session_source.substr(
+      projection_start, projection_end - projection_start);
+  const auto watch_body =
+      session_source.substr(watch_start, watch_end - watch_start);
+  const auto quiesce_body =
+      session_source.substr(quiesce_start, quiesce_end - quiesce_start);
+  EXPECT_EQ(projection_body.find("static_cast<long>"), std::string::npos);
+  EXPECT_EQ(projection_body.find("numeric_limits<long>"),
+            std::string::npos);
+  EXPECT_EQ(watch_body.find("static_cast<long>"), std::string::npos);
+  EXPECT_EQ(quiesce_body.find("static_cast<long>"), std::string::npos);
+  EXPECT_EQ(quiesce_body.find("numeric_limits<long>"),
+            std::string::npos);
+  EXPECT_EQ(quiesce_body.find("std::max<long>"), std::string::npos);
+}
+
 TEST_F(DriverTest, TestOwnerDiagnosticMappingsUseLpcIntegerWidth) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   auto assert_mapping_uses_lpc_width = [&](const char* start_marker,
@@ -18696,7 +18767,7 @@ TEST_F(DriverTest, TestGatewayRoomOutputRetrySchedulerHasHardBudgets) {
   const auto watch_start =
       source.find("int gateway_process_session_future_watches_at");
   const auto watch_end =
-      source.find("long gateway_session_future_watch_count", watch_start);
+      source.find("gateway_session_future_watch_count()", watch_start);
   ASSERT_NE(watch_start, std::string::npos);
   ASSERT_NE(watch_end, std::string::npos);
   const auto watch_body = source.substr(watch_start, watch_end - watch_start);
@@ -18829,7 +18900,7 @@ TEST_F(DriverTest, TestGatewayFutureWatchQueueMutationIsTransactional) {
   const auto process_session_start =
       source.find("int gateway_process_session_future_watches_at");
   const auto process_session_end =
-      source.find("long gateway_session_future_watch_count", process_session_start);
+      source.find("gateway_session_future_watch_count()", process_session_start);
   ASSERT_NE(process_session_start, std::string::npos);
   ASSERT_NE(process_session_end, std::string::npos);
   const auto process_session_body = source.substr(
@@ -18841,7 +18912,7 @@ TEST_F(DriverTest, TestGatewayFutureWatchQueueMutationIsTransactional) {
   const auto process_generic_start =
       source.find("int gateway_process_future_watches_at");
   const auto process_generic_end =
-      source.find("long gateway_future_watch_count", process_generic_start);
+      source.find("gateway_future_watch_count()", process_generic_start);
   ASSERT_NE(process_generic_start, std::string::npos);
   ASSERT_NE(process_generic_end, std::string::npos);
   const auto process_generic_body = source.substr(
