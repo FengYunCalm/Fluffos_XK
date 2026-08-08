@@ -4274,7 +4274,7 @@ TEST_F(DriverTest, TestOwnerAsyncLpcAndCompletionExposeWorkerThreadCpuCounters) 
 TEST_F(DriverTest, TestOwnerRuntimeMetricMappingsUseLpcIntegerWidth) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   const auto status_start =
-      owner_source.find("void add_owner_runtime_v2_status_fields(mapping_t *map)");
+      owner_source.find("void add_owner_runtime_v2_status_fields(");
   const auto status_end = owner_source.find(
       "std::shared_ptr<VMFrozenValue> frozen_compute_result_mapping", status_start);
 
@@ -4307,6 +4307,65 @@ TEST_F(DriverTest, TestOwnerStatusMappingsUseLpcIntegerWidth) {
       "mapping_t *vm_owner_thread_status()",
       "mapping_t *vm_owner_runtime_status()");
   assert_status_uses_lpc_width(
+      "mapping_t *vm_owner_runtime_status()",
+      "#ifdef DEBUGMALLOC_EXTENSIONS");
+}
+
+TEST_F(DriverTest, TestOwnerStatusMappingsBuildAfterRuntimeSnapshotLockScope) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  ASSERT_NE(owner_source.find("OwnerStatusSnapshot owner_status_snapshot_locked()"),
+            std::string::npos);
+
+  auto assert_mapping_builds_after_snapshot = [&](const char* start_marker,
+                                                   const char* end_marker) {
+    const auto start = owner_source.find(start_marker);
+    const auto end = owner_source.find(end_marker, start);
+
+    ASSERT_NE(start, std::string::npos) << start_marker;
+    ASSERT_NE(end, std::string::npos) << end_marker;
+    ASSERT_GT(end, start) << start_marker;
+    const auto body = owner_source.substr(start, end - start);
+    const auto lock_pos =
+        body.find("std::lock_guard<std::mutex> lock(owner_runtime_mutex);");
+    const auto snapshot_pos = body.find("owner_status_snapshot_locked();");
+    const auto lock_scope_end = body.find("\n  }\n", snapshot_pos);
+    const auto mapping_pos = body.find("allocate_mapping", lock_scope_end);
+
+    ASSERT_NE(lock_pos, std::string::npos) << start_marker;
+    ASSERT_NE(snapshot_pos, std::string::npos) << start_marker;
+    ASSERT_NE(lock_scope_end, std::string::npos) << start_marker;
+    ASSERT_NE(mapping_pos, std::string::npos) << start_marker;
+    EXPECT_LT(lock_pos, snapshot_pos) << start_marker;
+    EXPECT_LT(snapshot_pos, lock_scope_end) << start_marker;
+    EXPECT_LT(lock_scope_end, mapping_pos) << start_marker;
+    const auto mapping_body = body.substr(mapping_pos);
+    for (const char* protected_access : {
+             "owner_scheduler_state.",
+             "owner_threads.empty()",
+             "owner_threads.size()",
+             "owner_thread_stopping",
+             "owner_executor_callback_main_cleanups",
+             "owner_deferred_target_releases",
+             "owner_executor_last_budget_yield_owner",
+             "owner_executor_last_budget_yield_backlog",
+             "owner_executor_last_budget_yield_safe_backlog",
+             "owner_mailbox_total_depth()",
+             "owner_executor_runnable_queue_depth()",
+             "owner_executor_safe_queue_depth()",
+             "owner_main_required_queue_depth()",
+             "owner_runnable_owner_count()",
+             "owner_main_queue_total_depth()",
+             "owner_main_runnable_owner_count()",
+         }) {
+      EXPECT_EQ(mapping_body.find(protected_access), std::string::npos)
+          << start_marker << ": " << protected_access;
+    }
+  };
+
+  assert_mapping_builds_after_snapshot(
+      "mapping_t *vm_owner_thread_status()",
+      "mapping_t *vm_owner_runtime_status()");
+  assert_mapping_builds_after_snapshot(
       "mapping_t *vm_owner_runtime_status()",
       "#ifdef DEBUGMALLOC_EXTENSIONS");
 }

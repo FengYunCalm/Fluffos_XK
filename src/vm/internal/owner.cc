@@ -452,16 +452,66 @@ long owner_pending_future_count() {
 long owner_executor_runnable_queue_depth();
 long owner_executor_safe_queue_depth();
 long owner_main_required_queue_depth();
+long owner_runnable_owner_count();
+long owner_main_runnable_owner_count();
 long owner_executor_callback_allowlist_count();
 bool owner_task_executor_runnable(const OwnerMailboxTask &task);
 bool owner_task_executor_safe(const OwnerMailboxTask &task);
 bool owner_task_requires_main_drain(const OwnerMailboxTask &task);
 void add_owner_scheduler_backpressure_fields(mapping_t *map, const OwnerQueueFairnessSnapshot &snapshot);
 
-void add_owner_runtime_v2_status_fields(mapping_t *map) {
+struct OwnerStatusSnapshot {
+  bool threads_enabled{false};
+  size_t thread_count{0};
+  bool thread_stopping{false};
+  long queue_depth{0};
+  long executor_runnable_queue_depth{0};
+  long executor_safe_queue_depth{0};
+  long main_required_queue_depth{0};
+  long runnable_owner_count{0};
+  long main_queue_depth{0};
+  long main_runnable_owner_count{0};
+  long active_owner_count{0};
+  long active_main_owner_count{0};
+  long active_claim_count{0};
+  size_t callback_main_cleanup_backlog{0};
+  size_t deferred_target_release_count{0};
+  std::string last_budget_yield_owner;
+  long last_budget_yield_backlog{0};
+  long last_budget_yield_safe_backlog{0};
+  long pending_futures{0};
+  OwnerQueueFairnessSnapshot fairness;
+};
+
+OwnerStatusSnapshot owner_status_snapshot_locked() {
+  OwnerStatusSnapshot status;
+  status.threads_enabled = !owner_threads.empty();
+  status.thread_count = owner_threads.size();
+  status.thread_stopping = owner_thread_stopping;
+  status.queue_depth = owner_mailbox_total_depth();
+  status.executor_runnable_queue_depth = owner_executor_runnable_queue_depth();
+  status.executor_safe_queue_depth = owner_executor_safe_queue_depth();
+  status.main_required_queue_depth = owner_main_required_queue_depth();
+  status.runnable_owner_count = owner_runnable_owner_count();
+  status.main_queue_depth = owner_main_queue_total_depth();
+  status.main_runnable_owner_count = owner_main_runnable_owner_count();
+  status.active_owner_count = owner_scheduler_state.active_owner_count();
+  status.active_main_owner_count = owner_scheduler_state.active_main_owner_count();
+  status.active_claim_count = owner_scheduler_state.active_claim_count();
+  status.callback_main_cleanup_backlog = owner_executor_callback_main_cleanups.size();
+  status.deferred_target_release_count = owner_deferred_target_releases.size();
+  status.last_budget_yield_owner = owner_executor_last_budget_yield_owner;
+  status.last_budget_yield_backlog = owner_executor_last_budget_yield_backlog;
+  status.last_budget_yield_safe_backlog = owner_executor_last_budget_yield_safe_backlog;
+  status.fairness = owner_scheduler_state.fairness_snapshot(
+      owner_task_executor_runnable, owner_task_executor_safe,
+      owner_task_requires_main_drain);
+  return status;
+}
+
+void add_owner_runtime_v2_status_fields(mapping_t *map,
+                                        const OwnerStatusSnapshot &status) {
   auto metrics = owner_runtime_metrics.snapshot();
-  auto fairness = owner_scheduler_state.fairness_snapshot(owner_task_executor_runnable, owner_task_executor_safe,
-                                                          owner_task_requires_main_drain);
   auto normal_path_main_fallbacks = static_cast<LPC_INT>(metrics.owner_normal_path_main_fallback_count);
   add_mapping_pair(map, "owner_runtime_split_ready", 1);
   add_mapping_string(map, "owner_runtime_split_model", "runtime_v4_modules_with_owner_runtime_coordinator");
@@ -596,10 +646,13 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
       map, "owner_async_result_completion_thread_cpu_unavailable",
       static_cast<LPC_INT>(metrics.owner_async_result_completion_thread_cpu_unavailable));
   add_mapping_pair(map, "owner_executor_queue_depth_metrics_ready", 1);
-  add_mapping_pair(map, "owner_executor_queue_depth", owner_mailbox_total_depth());
-  add_mapping_pair(map, "owner_executor_runnable_queue_depth", owner_executor_runnable_queue_depth());
-  add_mapping_pair(map, "owner_executor_safe_queue_depth", owner_executor_safe_queue_depth());
-  add_mapping_pair(map, "owner_executor_main_required_queue_depth", owner_main_required_queue_depth());
+  add_mapping_pair(map, "owner_executor_queue_depth", status.queue_depth);
+  add_mapping_pair(map, "owner_executor_runnable_queue_depth",
+                   status.executor_runnable_queue_depth);
+  add_mapping_pair(map, "owner_executor_safe_queue_depth",
+                   status.executor_safe_queue_depth);
+  add_mapping_pair(map, "owner_executor_main_required_queue_depth",
+                   status.main_required_queue_depth);
   add_mapping_pair(map, "owner_executor_future_timeout_cancel_ready", 1);
   add_mapping_pair(map, "owner_executor_future_terminal_take_ready", 1);
   add_mapping_pair(map, "owner_executor_future_timeout", static_cast<LPC_INT>(metrics.owner_executor_future_timeout));
@@ -617,14 +670,15 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
       static_cast<LPC_INT>(metrics.owner_other_task_cancelled_before_dispatch));
   add_mapping_pair(map, "owner_executor_backpressure_rejected",
                    static_cast<LPC_INT>(metrics.owner_executor_backpressure_rejected));
-  add_owner_scheduler_backpressure_fields(map, fairness);
+  add_owner_scheduler_backpressure_fields(map, status.fairness);
   add_mapping_pair(map, "owner_executor_stale_drop", static_cast<LPC_INT>(metrics.owner_executor_stale_drop));
   add_mapping_pair(map, "owner_executor_destructed_drop", static_cast<LPC_INT>(metrics.owner_executor_destructed_drop));
   add_mapping_pair(map, "owner_executor_epoch_mismatch_drop",
                    static_cast<LPC_INT>(metrics.owner_executor_epoch_mismatch_drop));
   add_mapping_pair(map, "owner_executor_context_cleanup_leaks",
                    static_cast<LPC_INT>(metrics.owner_thread_context_leak_detected));
-  add_mapping_pair(map, "owner_executor_future_pending_backlog", owner_pending_future_count());
+  add_mapping_pair(map, "owner_executor_future_pending_backlog",
+                   status.pending_futures);
   add_mapping_pair(map, "owner_executor_socket_release_trace_ready", 1);
   add_mapping_pair(map, "registered_owner_task_domains_ready", 1);
   add_mapping_pair(map, "registered_owner_task_domain_count",
@@ -2757,10 +2811,8 @@ void add_owner_scheduler_backpressure_fields(mapping_t *map, const OwnerQueueFai
   add_mapping_pair(map, "owner_scheduler_fairness_guard_ready", 1);
 }
 
-mapping_t *owner_queue_fairness_mapping() {
-  auto snapshot = owner_scheduler_state.fairness_snapshot(owner_task_executor_runnable, owner_task_executor_safe,
-                                                          owner_task_requires_main_drain);
-
+mapping_t *owner_queue_fairness_mapping(
+    const OwnerQueueFairnessSnapshot &snapshot) {
   auto *map = allocate_mapping(23);
   add_mapping_pair(map, "owner_mailbox_owner_count", snapshot.mailbox_owner_count);
   add_mapping_pair(map, "executor_ready_owner_count", snapshot.executor_ready_owner_count);
@@ -5399,12 +5451,17 @@ void vm_owner_thread_stop() {
 }
 
 mapping_t *vm_owner_thread_status() {
-  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+  OwnerStatusSnapshot status;
+  {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    status = owner_status_snapshot_locked();
+  }
+  status.pending_futures = owner_pending_future_count();
   auto *map = allocate_mapping(192);
   add_mapping_pair(map, "success", 1);
-  add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
-  add_mapping_pair(map, "thread_count", static_cast<LPC_INT>(owner_threads.size()));
-  add_mapping_pair(map, "stopping", owner_thread_stopping ? 1 : 0);
+  add_mapping_pair(map, "enabled", status.threads_enabled ? 1 : 0);
+  add_mapping_pair(map, "thread_count", static_cast<LPC_INT>(status.thread_count));
+  add_mapping_pair(map, "stopping", status.thread_stopping ? 1 : 0);
   add_mapping_pair(map, "thread_dispatched", static_cast<LPC_INT>(owner_thread_dispatched.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_context_bound",
                    static_cast<LPC_INT>(owner_thread_context_bound.load(std::memory_order_relaxed)));
@@ -5566,7 +5623,7 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_pair(map, "executor_callback_dropped",
                    static_cast<LPC_INT>(owner_executor_callback_dropped.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_main_cleanup_backlog",
-                   static_cast<LPC_INT>(owner_executor_callback_main_cleanups.size()));
+                   static_cast<LPC_INT>(status.callback_main_cleanup_backlog));
   add_mapping_pair(map, "executor_callback_main_cleanup_queued",
                    static_cast<LPC_INT>(owner_executor_callback_main_cleanup_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_main_cleanup_dispatched",
@@ -5574,16 +5631,19 @@ mapping_t *vm_owner_thread_status() {
   auto *callback_contracts = owner_executor_callback_contracts_array();
   add_mapping_array(map, "executor_callback_task_contracts", callback_contracts);
   free_array(callback_contracts);
-  add_mapping_pair(map, "active_owners", owner_scheduler_state.active_owner_count());
-  add_mapping_pair(map, "claimed_owners", owner_scheduler_state.active_owner_count());
-  add_mapping_pair(map, "claimed_main_owners", owner_scheduler_state.active_main_owner_count());
+  add_mapping_pair(map, "active_owners", status.active_owner_count);
+  add_mapping_pair(map, "claimed_owners", status.active_owner_count);
+  add_mapping_pair(map, "claimed_main_owners", status.active_main_owner_count);
   add_mapping_pair(map, "max_owner_threads", 4);
   add_mapping_pair(map, "executor_task_budget", kOwnerExecutorTaskBudget);
   add_mapping_pair(map, "executor_budget_yields",
                    static_cast<LPC_INT>(owner_executor_budget_yields.load(std::memory_order_relaxed)));
-  add_mapping_string(map, "executor_last_budget_yield_owner", owner_executor_last_budget_yield_owner.c_str());
-  add_mapping_pair(map, "executor_last_budget_yield_backlog", owner_executor_last_budget_yield_backlog);
-  add_mapping_pair(map, "executor_last_budget_yield_safe_backlog", owner_executor_last_budget_yield_safe_backlog);
+  add_mapping_string(map, "executor_last_budget_yield_owner",
+                     status.last_budget_yield_owner.c_str());
+  add_mapping_pair(map, "executor_last_budget_yield_backlog",
+                   status.last_budget_yield_backlog);
+  add_mapping_pair(map, "executor_last_budget_yield_safe_backlog",
+                   status.last_budget_yield_safe_backlog);
   add_mapping_pair(map, "executor_owner_claims",
                    static_cast<LPC_INT>(owner_executor_owner_claims.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_owner_releases",
@@ -5602,7 +5662,7 @@ mapping_t *vm_owner_thread_status() {
                    static_cast<LPC_INT>(owner_executor_max_owner_parallel.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_same_owner_claim_conflicts",
                    static_cast<LPC_INT>(owner_executor_same_owner_claim_conflicts.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "executor_active_claims", owner_scheduler_state.active_claim_count());
+  add_mapping_pair(map, "executor_active_claims", status.active_claim_count);
   add_mapping_pair(map, "ordinary_lpc_default_closed", 1);
   add_mapping_pair(map, "ordinary_lpc_activation_policy_ready", 1);
   add_mapping_pair(map, "ordinary_lpc_dispatch_path_ready", 1);
@@ -5629,20 +5689,26 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_owned_mapping(map, "frozen_payload_contract", frozen_payload_contract_mapping());
   add_mapping_owned_mapping(map, "gateway_owner_task_contract", gateway_owner_task_contract_mapping());
   add_mapping_owned_mapping(map, "owner_executor_boundary_contract", owner_executor_boundary_contract_mapping());
-  add_mapping_owned_mapping(map, "executor_queue_fairness", owner_queue_fairness_mapping());
-  add_mapping_pair(map, "deferred_target_releases", static_cast<LPC_INT>(owner_deferred_target_releases.size()));
+  add_mapping_owned_mapping(map, "executor_queue_fairness",
+                            owner_queue_fairness_mapping(status.fairness));
+  add_mapping_pair(map, "deferred_target_releases",
+                   static_cast<LPC_INT>(status.deferred_target_release_count));
   add_mapping_pair(map, "thread_starts", static_cast<LPC_INT>(owner_thread_starts.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_stops", static_cast<LPC_INT>(owner_thread_stops.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "queue_depth", owner_mailbox_total_depth());
-  add_mapping_pair(map, "executor_runnable_queue_depth", owner_executor_runnable_queue_depth());
-  add_mapping_pair(map, "executor_safe_queue_depth", owner_executor_safe_queue_depth());
-  add_mapping_pair(map, "main_required_queue_depth", owner_main_required_queue_depth());
-  add_mapping_pair(map, "runnable_owner_count", owner_runnable_owner_count());
-  add_mapping_pair(map, "main_queue_depth", owner_main_queue_total_depth());
-  add_mapping_pair(map, "main_runnable_owner_count", owner_main_runnable_owner_count());
-  add_mapping_pair(map, "pending_futures", owner_pending_future_count());
-  add_owner_runtime_v2_status_fields(map);
-  add_mapping_pair(map, "main_active_owners", owner_scheduler_state.active_main_owner_count());
+  add_mapping_pair(map, "queue_depth", status.queue_depth);
+  add_mapping_pair(map, "executor_runnable_queue_depth",
+                   status.executor_runnable_queue_depth);
+  add_mapping_pair(map, "executor_safe_queue_depth",
+                   status.executor_safe_queue_depth);
+  add_mapping_pair(map, "main_required_queue_depth",
+                   status.main_required_queue_depth);
+  add_mapping_pair(map, "runnable_owner_count", status.runnable_owner_count);
+  add_mapping_pair(map, "main_queue_depth", status.main_queue_depth);
+  add_mapping_pair(map, "main_runnable_owner_count",
+                   status.main_runnable_owner_count);
+  add_mapping_pair(map, "pending_futures", status.pending_futures);
+  add_owner_runtime_v2_status_fields(map, status);
+  add_mapping_pair(map, "main_active_owners", status.active_main_owner_count);
   add_mapping_pair(map, "main_queued", static_cast<LPC_INT>(owner_main_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "main_dispatched", static_cast<LPC_INT>(owner_main_dispatched.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "main_stale", static_cast<LPC_INT>(owner_main_stale.load(std::memory_order_relaxed)));
@@ -5654,7 +5720,12 @@ mapping_t *vm_owner_thread_status() {
 }
 
 mapping_t *vm_owner_runtime_status() {
-  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+  OwnerStatusSnapshot status;
+  {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    status = owner_status_snapshot_locked();
+  }
+  status.pending_futures = owner_pending_future_count();
   auto *map = allocate_mapping(192);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
@@ -5662,16 +5733,20 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_pair(map, "audit_enabled", vm_multicore_audit_enabled() ? 1 : 0);
   add_mapping_pair(map, "enforced", vm_multicore_enforced() ? 1 : 0);
   add_mapping_string(map, "default_owner_id", kDefaultOwnerId);
-  add_mapping_pair(map, "queue_depth", owner_mailbox_total_depth());
-  add_mapping_pair(map, "executor_runnable_queue_depth", owner_executor_runnable_queue_depth());
-  add_mapping_pair(map, "executor_safe_queue_depth", owner_executor_safe_queue_depth());
-  add_mapping_pair(map, "main_required_queue_depth", owner_main_required_queue_depth());
-  add_mapping_pair(map, "runnable_owner_count", owner_runnable_owner_count());
-  add_mapping_pair(map, "main_queue_depth", owner_main_queue_total_depth());
-  add_mapping_pair(map, "main_runnable_owner_count", owner_main_runnable_owner_count());
-  add_mapping_pair(map, "main_active_owners", owner_scheduler_state.active_main_owner_count());
-  add_mapping_pair(map, "claimed_owners", owner_scheduler_state.active_owner_count());
-  add_mapping_pair(map, "claimed_main_owners", owner_scheduler_state.active_main_owner_count());
+  add_mapping_pair(map, "queue_depth", status.queue_depth);
+  add_mapping_pair(map, "executor_runnable_queue_depth",
+                   status.executor_runnable_queue_depth);
+  add_mapping_pair(map, "executor_safe_queue_depth",
+                   status.executor_safe_queue_depth);
+  add_mapping_pair(map, "main_required_queue_depth",
+                   status.main_required_queue_depth);
+  add_mapping_pair(map, "runnable_owner_count", status.runnable_owner_count);
+  add_mapping_pair(map, "main_queue_depth", status.main_queue_depth);
+  add_mapping_pair(map, "main_runnable_owner_count",
+                   status.main_runnable_owner_count);
+  add_mapping_pair(map, "main_active_owners", status.active_main_owner_count);
+  add_mapping_pair(map, "claimed_owners", status.active_owner_count);
+  add_mapping_pair(map, "claimed_main_owners", status.active_main_owner_count);
   add_mapping_pair(map, "main_queued", static_cast<LPC_INT>(owner_main_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "main_dispatched", static_cast<LPC_INT>(owner_main_dispatched.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "main_stale", static_cast<LPC_INT>(owner_main_stale.load(std::memory_order_relaxed)));
@@ -5687,21 +5762,24 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_pair(map, "destructed_object_cleanup_last_removed",
                    static_cast<LPC_INT>(vm_destructed_object_cleanup_last_removed()));
   add_mapping_pair(map, "destructed_object_incremental_cleanup_ready", 1);
-  add_mapping_pair(map, "active_owners", owner_scheduler_state.active_owner_count());
-  add_mapping_pair(map, "owner_threads", static_cast<LPC_INT>(owner_threads.size()));
+  add_mapping_pair(map, "active_owners", status.active_owner_count);
+  add_mapping_pair(map, "owner_threads", static_cast<LPC_INT>(status.thread_count));
   add_mapping_pair(map, "total_enqueued", static_cast<LPC_INT>(total_enqueued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "total_drained", static_cast<LPC_INT>(total_drained.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "future_count", owner_future_store.size());
-  add_mapping_pair(map, "pending_futures", owner_pending_future_count());
+  add_mapping_pair(map, "pending_futures", status.pending_futures);
   add_mapping_pair(map, "future_terminal_take_ready", 1);
-  add_owner_runtime_v2_status_fields(map);
+  add_owner_runtime_v2_status_fields(map, status);
   add_mapping_pair(map, "futures_completed", static_cast<LPC_INT>(owner_future_store.completed_count()));
   add_mapping_pair(map, "futures_failed", static_cast<LPC_INT>(owner_future_store.failed_count()));
   add_mapping_pair(map, "executor_budget_yields",
                    static_cast<LPC_INT>(owner_executor_budget_yields.load(std::memory_order_relaxed)));
-  add_mapping_string(map, "executor_last_budget_yield_owner", owner_executor_last_budget_yield_owner.c_str());
-  add_mapping_pair(map, "executor_last_budget_yield_backlog", owner_executor_last_budget_yield_backlog);
-  add_mapping_pair(map, "executor_last_budget_yield_safe_backlog", owner_executor_last_budget_yield_safe_backlog);
+  add_mapping_string(map, "executor_last_budget_yield_owner",
+                     status.last_budget_yield_owner.c_str());
+  add_mapping_pair(map, "executor_last_budget_yield_backlog",
+                   status.last_budget_yield_backlog);
+  add_mapping_pair(map, "executor_last_budget_yield_safe_backlog",
+                   status.last_budget_yield_safe_backlog);
   add_mapping_pair(map, "executor_owner_claims",
                    static_cast<LPC_INT>(owner_executor_owner_claims.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_owner_releases",
@@ -5788,7 +5866,7 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_pair(map, "executor_callback_dropped",
                    static_cast<LPC_INT>(owner_executor_callback_dropped.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_main_cleanup_backlog",
-                   static_cast<LPC_INT>(owner_executor_callback_main_cleanups.size()));
+                   static_cast<LPC_INT>(status.callback_main_cleanup_backlog));
   add_mapping_pair(map, "executor_callback_main_cleanup_queued",
                    static_cast<LPC_INT>(owner_executor_callback_main_cleanup_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_main_cleanup_dispatched",
@@ -5846,7 +5924,7 @@ mapping_t *vm_owner_runtime_status() {
                    static_cast<LPC_INT>(owner_executor_max_owner_parallel.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_same_owner_claim_conflicts",
                    static_cast<LPC_INT>(owner_executor_same_owner_claim_conflicts.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "executor_active_claims", owner_scheduler_state.active_claim_count());
+  add_mapping_pair(map, "executor_active_claims", status.active_claim_count);
   add_mapping_pair(map, "ordinary_lpc_default_closed", 1);
   add_mapping_pair(map, "ordinary_lpc_activation_policy_ready", 1);
   add_mapping_pair(map, "ordinary_lpc_dispatch_path_ready", 1);
@@ -5873,7 +5951,8 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_owned_mapping(map, "frozen_payload_contract", frozen_payload_contract_mapping());
   add_mapping_owned_mapping(map, "gateway_owner_task_contract", gateway_owner_task_contract_mapping());
   add_mapping_owned_mapping(map, "owner_executor_boundary_contract", owner_executor_boundary_contract_mapping());
-  add_mapping_owned_mapping(map, "executor_queue_fairness", owner_queue_fairness_mapping());
+  add_mapping_owned_mapping(map, "executor_queue_fairness",
+                            owner_queue_fairness_mapping(status.fairness));
   add_mapping_pair(map, "cross_owner", static_cast<LPC_INT>(total_cross_owner_accesses.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "snapshot_required",
                    static_cast<LPC_INT>(total_cross_owner_snapshot_accesses.load(std::memory_order_relaxed)));
