@@ -5069,44 +5069,49 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
   future.state = "pending";
   future.created_at_ms = owner_now_ms();
 
+  vm_object_store_record_message(target_owner.c_str(), target_task_id);
+  VMObjectHandleResolveResult admission_target;
+  if (target_handle) {
+    admission_target = vm_object_handle_resolve_status(*target_handle);
+  }
+
   bool notify_owner_thread = false;
   bool enqueued_owner_task = false;
+  std::string submission_error;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    vm_object_store_record_message(target_owner.c_str(), target_task_id);
     owner_future_store.insert(std::move(future));
     owner_trace_store.append_message(std::move(trace));
     if (target_handle) {
-      auto resolved_target = vm_object_handle_resolve_status(*target_handle);
-      if (resolved_target.status == VMObjectHandleResolveStatus::kCurrent && resolved_target.object) {
+      if (admission_target.status == VMObjectHandleResolveStatus::kCurrent && admission_target.object) {
         enqueued_owner_task = enqueue_owner_task_locked(task, target_owner, &notify_owner_thread);
         if (enqueued_owner_task) {
           owner_trace_store.update_message_route_for_task(target_task_id,
-                                                          vm_object_handle_resolve_status_name(resolved_target.status),
+                                                          vm_object_handle_resolve_status_name(admission_target.status),
                                                           true, false, false);
         } else {
           owner_trace_store.update_message_route_for_task(target_task_id, "owner_scheduler_backpressure", false, false,
                                                           false);
-          vm_object_store_remove_message(target_owner.c_str(), target_task_id);
-          complete_owner_future_for_task_locked(target_task_id, "failed", "", "owner scheduler backpressure");
+          submission_error = "owner scheduler backpressure";
         }
       } else {
         owner_trace_store.update_message_route_for_task(target_task_id,
-                                                        vm_object_handle_resolve_status_name(resolved_target.status),
+                                                        vm_object_handle_resolve_status_name(admission_target.status),
                                                         false, false, false);
-        vm_object_store_remove_message(target_owner.c_str(), target_task_id);
-        auto error = stale_target_error(resolved_target.status);
-        complete_owner_future_for_task_locked(target_task_id, "failed", "", error.c_str());
+        submission_error = stale_target_error(admission_target.status);
       }
     } else {
       enqueued_owner_task = enqueue_owner_task_locked(task, target_owner, &notify_owner_thread);
       if (!enqueued_owner_task) {
         owner_trace_store.update_message_route_for_task(target_task_id, "owner_scheduler_backpressure", false, false,
                                                         false);
-        vm_object_store_remove_message(target_owner.c_str(), target_task_id);
-        complete_owner_future_for_task_locked(target_task_id, "failed", "", "owner scheduler backpressure");
+        submission_error = "owner scheduler backpressure";
       }
     }
+  }
+  if (!enqueued_owner_task) {
+    vm_object_store_remove_message(target_owner.c_str(), target_task_id);
+    complete_owner_future_for_task_locked(target_task_id, "failed", "", submission_error.c_str());
   }
   if (notify_owner_thread) {
     owner_runtime_cv.notify_one();

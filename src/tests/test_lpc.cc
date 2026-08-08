@@ -4475,6 +4475,67 @@ TEST_F(DriverTest, TestOwnerTraceAppendMetadataUsesStoreLockBoundary) {
             std::string::npos);
 }
 
+TEST_F(DriverTest, TestOwnerMessageSubmissionLimitsCoordinatorLockToRegistrationAndEnqueue) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  const auto start = owner_source.find("mapping_t *submit_owner_message(");
+  const auto end = owner_source.find("mapping_t *vm_owner_submit_message(", start);
+
+  ASSERT_NE(start, std::string::npos);
+  ASSERT_NE(end, std::string::npos);
+  ASSERT_GT(end, start);
+  const auto body = owner_source.substr(start, end - start);
+  const auto lock_pos =
+      body.find("std::lock_guard<std::mutex> lock(owner_runtime_mutex);");
+  ASSERT_NE(lock_pos, std::string::npos);
+  const auto lock_scope_start = body.rfind('{', lock_pos);
+  ASSERT_NE(lock_scope_start, std::string::npos);
+
+  size_t depth = 0;
+  size_t lock_scope_end = std::string::npos;
+  for (size_t i = lock_scope_start; i < body.size(); i++) {
+    if (body[i] == '{') {
+      depth++;
+    } else if (body[i] == '}') {
+      ASSERT_GT(depth, 0u);
+      depth--;
+      if (depth == 0) {
+        lock_scope_end = i + 1;
+        break;
+      }
+    }
+  }
+  ASSERT_NE(lock_scope_end, std::string::npos);
+
+  const auto before_lock = body.substr(0, lock_scope_start);
+  const auto locked_body =
+      body.substr(lock_scope_start, lock_scope_end - lock_scope_start);
+  const auto after_lock = body.substr(lock_scope_end);
+
+  EXPECT_NE(before_lock.find("vm_object_store_record_message("),
+            std::string::npos);
+  EXPECT_NE(before_lock.find("vm_object_handle_resolve_status("),
+            std::string::npos);
+  EXPECT_NE(locked_body.find("owner_future_store.insert("),
+            std::string::npos);
+  EXPECT_NE(locked_body.find("owner_trace_store.append_message("),
+            std::string::npos);
+  EXPECT_NE(locked_body.find("enqueue_owner_task_locked("),
+            std::string::npos);
+  for (const char* external_store_work : {
+           "vm_object_store_record_message(",
+           "vm_object_store_remove_message(",
+           "complete_owner_future_for_task_locked(",
+           "vm_object_handle_resolve_status(",
+       }) {
+    EXPECT_EQ(locked_body.find(external_store_work), std::string::npos)
+        << external_store_work;
+  }
+  EXPECT_NE(after_lock.find("vm_object_store_remove_message("),
+            std::string::npos);
+  EXPECT_NE(after_lock.find("complete_owner_future_for_task_locked("),
+            std::string::npos);
+}
+
 TEST_F(DriverTest, TestOwnerStatusMappingsBuildAfterRuntimeSnapshotLockScope) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   ASSERT_NE(owner_source.find("OwnerStatusSnapshot owner_status_snapshot_locked()"),
