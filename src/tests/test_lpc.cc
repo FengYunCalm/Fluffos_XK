@@ -179,6 +179,21 @@ TEST(OwnerFutureStoreTest, RejectsNonTerminalCompletionStateWithoutCounterDrift)
   EXPECT_EQ(task_store.failed_count(), 0u);
 }
 
+TEST(OwnerTraceStoreTest, AssignsTraceIdToUnsequencedTaskTrace) {
+  OwnerTraceStore store;
+  OwnerTaskTrace trace;
+  trace.owner_id = "owner/test/trace-store";
+  trace.state = "observed";
+
+  const auto trace_id = store.append_task(std::move(trace));
+  const auto snapshot = store.task_snapshot(1);
+
+  ASSERT_EQ(snapshot.events.size(), 1u);
+  EXPECT_EQ(snapshot.total_traced, 1u);
+  EXPECT_EQ(snapshot.events[0].trace_id, trace_id);
+  EXPECT_EQ(snapshot.events[0].sequence, trace_id);
+}
+
 TEST(OwnerSchedulerStateTest, RemovesOneQueuedTaskWithoutDroppingNeighbors) {
   OwnerSchedulerState state;
   const auto runnable = [](const OwnerMailboxTask &task) {
@@ -4373,6 +4388,90 @@ TEST_F(DriverTest, TestOwnerDiagnosticMappingsUseLpcIntegerWidth) {
             std::string::npos);
   EXPECT_NE(context_body.find(
                 "static_cast<LPC_INT>(vm_context_object_store_sync_rejections())"),
+            std::string::npos);
+}
+
+TEST_F(DriverTest, TestOwnerTraceAppendMetadataUsesStoreLockBoundary) {
+  const auto trace_source =
+      read_source_file_for_test("../src/vm/internal/owner_trace_store.cc");
+  auto assert_ordered_markers = [&](const char* start_marker,
+                                    const char* end_marker,
+                                    std::initializer_list<const char*> markers) {
+    const auto start = trace_source.find(start_marker);
+    const auto end = trace_source.find(end_marker, start);
+
+    ASSERT_NE(start, std::string::npos) << start_marker;
+    ASSERT_NE(end, std::string::npos) << end_marker;
+    ASSERT_GT(end, start) << start_marker;
+    const auto body = trace_source.substr(start, end - start);
+    size_t cursor = 0;
+    for (const auto* marker : markers) {
+      const auto pos = body.find(marker, cursor);
+      ASSERT_NE(pos, std::string::npos) << start_marker << ": " << marker;
+      cursor = pos + std::strlen(marker);
+    }
+  };
+
+  assert_ordered_markers(
+      "uint64_t OwnerTraceStore::append_task(",
+      "uint64_t OwnerTraceStore::append_executor(",
+      {"std::lock_guard<std::mutex> lock(mutex_);",
+       "next_task_trace_id_.fetch_add(",
+       "if (trace.sequence == 0)",
+       "task_traces_.push_back(",
+       "total_task_traced_.fetch_add("});
+  assert_ordered_markers(
+      "uint64_t OwnerTraceStore::append_executor(",
+      "uint64_t OwnerTraceStore::append_access(",
+      {"std::lock_guard<std::mutex> lock(mutex_);",
+       "next_executor_trace_id_.fetch_add(",
+       "trace.sequence = trace.trace_id;",
+       "executor_traces_.push_back(",
+       "total_executor_traced_.fetch_add("});
+  assert_ordered_markers(
+      "uint64_t OwnerTraceStore::append_access(",
+      "void OwnerTraceStore::append_message(",
+      {"std::lock_guard<std::mutex> lock(mutex_);",
+       "next_access_trace_id_.fetch_add(",
+       "total_access_traced_.load(",
+       "access_traces_.push_back(",
+       "total_access_traced_.fetch_add("});
+  assert_ordered_markers(
+      "void OwnerTraceStore::append_message(",
+      "OwnerCommitTrace OwnerTraceStore::append_commit(",
+      {"std::lock_guard<std::mutex> lock(mutex_);",
+       "total_message_traced_.load(",
+       "message_traces_.push_back(",
+       "total_message_traced_.fetch_add("});
+  assert_ordered_markers(
+      "OwnerCommitTrace OwnerTraceStore::append_commit(",
+      "uint64_t OwnerTraceStore::append_commit_observed(",
+      {"std::lock_guard<std::mutex> lock(mutex_);",
+       "next_commit_trace_id_.fetch_add(",
+       "total_commit_traced_.load(",
+       "commit_traces_.push_back(",
+       "total_commit_traced_.fetch_add("});
+  assert_ordered_markers(
+      "uint64_t OwnerTraceStore::append_commit_observed(",
+      "uint64_t OwnerTraceStore::next_message_id(",
+      {"std::lock_guard<std::mutex> lock(mutex_);",
+       "next_commit_trace_id_.fetch_add(",
+       "total_commit_traced_.load(",
+       "commit_traces_.push_back(",
+       "total_commit_traced_.fetch_add("});
+
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  const auto record_start = owner_source.find(
+      "uint64_t vm_owner_record_task_trace(");
+  const auto record_end = owner_source.find(
+      "void record_owner_main_queue_fallback(", record_start);
+  ASSERT_NE(record_start, std::string::npos);
+  ASSERT_NE(record_end, std::string::npos);
+  ASSERT_GT(record_end, record_start);
+  const auto record_body =
+      owner_source.substr(record_start, record_end - record_start);
+  EXPECT_EQ(record_body.find("total_task_traced()"), std::string::npos);
+  EXPECT_NE(record_body.find("append_owner_task_trace(0, 0,"),
             std::string::npos);
 }
 

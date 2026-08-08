@@ -20,8 +20,11 @@ void trim_trace_deque(std::deque<Trace> &events, size_t limit) {
 }  // namespace
 
 uint64_t OwnerTraceStore::append_task(OwnerTaskTrace trace) {
-  trace.trace_id = next_task_trace_id_.fetch_add(1, std::memory_order_relaxed);
   std::lock_guard<std::mutex> lock(mutex_);
+  trace.trace_id = next_task_trace_id_.fetch_add(1, std::memory_order_relaxed);
+  if (trace.sequence == 0) {
+    trace.sequence = trace.trace_id;
+  }
   task_traces_.push_back(std::move(trace));
   trim_trace_deque(task_traces_, kOwnerTraceLimit);
   total_task_traced_.fetch_add(1, std::memory_order_relaxed);
@@ -29,9 +32,9 @@ uint64_t OwnerTraceStore::append_task(OwnerTaskTrace trace) {
 }
 
 uint64_t OwnerTraceStore::append_executor(OwnerExecutorTrace trace) {
+  std::lock_guard<std::mutex> lock(mutex_);
   trace.trace_id = next_executor_trace_id_.fetch_add(1, std::memory_order_relaxed);
   trace.sequence = trace.trace_id;
-  std::lock_guard<std::mutex> lock(mutex_);
   executor_traces_.push_back(std::move(trace));
   trim_trace_deque(executor_traces_, kOwnerExecutorTraceLimit);
   total_executor_traced_.fetch_add(1, std::memory_order_relaxed);
@@ -39,39 +42,43 @@ uint64_t OwnerTraceStore::append_executor(OwnerExecutorTrace trace) {
 }
 
 uint64_t OwnerTraceStore::append_access(OwnerAccessTrace trace) {
-  trace.access_id = next_access_trace_id_.fetch_add(1, std::memory_order_relaxed);
-  trace.sequence = total_access_traced_.fetch_add(1, std::memory_order_relaxed) + 1;
-  auto access_id = trace.access_id;
   std::lock_guard<std::mutex> lock(mutex_);
+  trace.access_id = next_access_trace_id_.fetch_add(1, std::memory_order_relaxed);
+  trace.sequence = total_access_traced_.load(std::memory_order_relaxed) + 1;
+  auto access_id = trace.access_id;
   access_traces_.push_back(std::move(trace));
   trim_trace_deque(access_traces_, kOwnerAccessTraceLimit);
+  total_access_traced_.fetch_add(1, std::memory_order_relaxed);
   return access_id;
 }
 
 void OwnerTraceStore::append_message(OwnerMessageTrace trace) {
-  trace.sequence = total_message_traced_.fetch_add(1, std::memory_order_relaxed) + 1;
   std::lock_guard<std::mutex> lock(mutex_);
+  trace.sequence = total_message_traced_.load(std::memory_order_relaxed) + 1;
   message_traces_.push_back(std::move(trace));
   trim_trace_deque(message_traces_, kOwnerMessageTraceLimit);
+  total_message_traced_.fetch_add(1, std::memory_order_relaxed);
 }
 
 OwnerCommitTrace OwnerTraceStore::append_commit(OwnerCommitTrace trace) {
-  trace.commit_id = next_commit_trace_id_.fetch_add(1, std::memory_order_relaxed);
-  trace.sequence = total_commit_traced_.fetch_add(1, std::memory_order_relaxed) + 1;
-  auto stored_trace = trace;
   std::lock_guard<std::mutex> lock(mutex_);
+  trace.commit_id = next_commit_trace_id_.fetch_add(1, std::memory_order_relaxed);
+  trace.sequence = total_commit_traced_.load(std::memory_order_relaxed) + 1;
+  auto stored_trace = trace;
   commit_traces_.push_back(std::move(trace));
   trim_trace_deque(commit_traces_, kOwnerCommitTraceLimit);
+  total_commit_traced_.fetch_add(1, std::memory_order_relaxed);
   return stored_trace;
 }
 
 uint64_t OwnerTraceStore::append_commit_observed(OwnerCommitTrace trace) {
-  trace.commit_id = next_commit_trace_id_.fetch_add(1, std::memory_order_relaxed);
-  trace.sequence = total_commit_traced_.fetch_add(1, std::memory_order_relaxed) + 1;
-  auto commit_id = trace.commit_id;
   std::lock_guard<std::mutex> lock(mutex_);
+  trace.commit_id = next_commit_trace_id_.fetch_add(1, std::memory_order_relaxed);
+  trace.sequence = total_commit_traced_.load(std::memory_order_relaxed) + 1;
+  auto commit_id = trace.commit_id;
   commit_traces_.push_back(std::move(trace));
   trim_trace_deque(commit_traces_, kOwnerCommitTraceLimit);
+  total_commit_traced_.fetch_add(1, std::memory_order_relaxed);
   return commit_id;
 }
 

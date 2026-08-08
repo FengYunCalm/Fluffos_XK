@@ -4326,9 +4326,8 @@ uint64_t vm_owner_record_task_trace(const char *owner_id, const char *task_type,
   if (!vm_multicore_audit_enabled()) {
     return 0;
   }
-  auto sequence = owner_trace_store.total_task_traced() + 1;
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  return append_owner_task_trace(0, sequence, normalize_owner_id(owner_id), owner_epoch,
+  return append_owner_task_trace(0, 0, normalize_owner_id(owner_id), owner_epoch,
                                   normalize_task_text(task_type, "generic"), normalize_task_text(task_key, ""), state);
 }
 
