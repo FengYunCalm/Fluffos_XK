@@ -8,6 +8,7 @@
 #include "include/opcodes_extra.h"
 
 #include <fmt/format.h>
+#include <fmt/printf.h>
 
 static void disassemble(FILE *f /*f*/, char *code /*code*/, int /*start*/ start, int /*end*/ end,
                         program_t *prog /*prog*/);
@@ -166,7 +167,7 @@ void dump_prog(program_t *prog, FILE *f, int flags) {
 }
 
 static const char *disassem_string(const char *str) {
-  static char buf[30 * 2 + 1];
+  static FLUFFOS_VM_THREAD_LOCAL char buf[30 * 2 + 1];
   char *b;
   int i;
 
@@ -254,7 +255,8 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
   LPC_INT iarg;
   unsigned short sarg;
   unsigned short offset;
-  char *pc, buff[2048];
+  char *pc;
+  std::string buff;
   int next_func;
 
   short *offsets;
@@ -306,7 +308,7 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
 
     auto saved_pc = pc;
     instr = *pc++;
-    buff[0] = 0;
+    buff.clear();
     sarg = 0;
 
     {
@@ -327,14 +329,13 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
 
     switch (instr) {
       case F_PUSH: {
-        auto p = buff;
-        p += sprintf(p, "push ");
+        buff = "push ";
         i = EXTRACT_UCHAR(pc++);
         while (i--) {
           j = EXTRACT_UCHAR(pc++);
-          p += sprintf(p, "%s %d", pushes[(j & PUSH_WHAT) >> 6], j & PUSH_MASK);
+          buff += fmt::sprintf("%s %d", pushes[(j & PUSH_WHAT) >> 6], j & PUSH_MASK);
           if (i) {
-            p += sprintf(p, ", ");
+            buff += ", ";
           } else {
             break;
           }
@@ -361,7 +362,8 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
       case F_NULLISH_EQ:
         COPY_SHORT(&sarg, pc);
         offset = (pc - code) + sarg;
-        sprintf(buff, "%04x (%04x)", static_cast<unsigned>(sarg), static_cast<unsigned>(offset));
+        buff = fmt::sprintf("%04x (%04x)", static_cast<unsigned>(sarg),
+                            static_cast<unsigned>(offset));
         pc += 2;
         break;
 
@@ -369,7 +371,8 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
       case F_BBRANCH_LT:
         COPY_SHORT(&sarg, pc);
         offset = (pc - code) - sarg;
-        sprintf(buff, "%04x (%04x)", static_cast<unsigned>(sarg), static_cast<unsigned>(offset));
+        buff = fmt::sprintf("%04x (%04x)", static_cast<unsigned>(sarg),
+                            static_cast<unsigned>(offset));
         pc += 2;
         break;
       case F_FOREACH: {
@@ -392,10 +395,10 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
 
         if (flags & FOREACH_MAPPING) {
           char *tmp = pc++;
-          sprintf(buff, "(mapping) %s %i, %s %i", left, EXTRACT_UCHAR(tmp), right,
-                  EXTRACT_UCHAR(pc++));
+          buff = fmt::sprintf("(mapping) %s %i, %s %i", left, EXTRACT_UCHAR(tmp), right,
+                              EXTRACT_UCHAR(pc++));
         } else {
-          sprintf(buff, "(array | string) %s %i", left, EXTRACT_UCHAR(pc++));
+          buff = fmt::sprintf("(array | string) %s %i", left, EXTRACT_UCHAR(pc++));
         }
         break;
       }
@@ -405,7 +408,8 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
       case F_BBRANCH:
         COPY_SHORT(&sarg, pc);
         offset = (pc - code) - sarg;
-        sprintf(buff, "%04x (%04x)", static_cast<unsigned>(sarg), static_cast<unsigned>(offset));
+        buff = fmt::sprintf("%04x (%04x)", static_cast<unsigned>(sarg),
+                            static_cast<unsigned>(offset));
         pc += 2;
         break;
 
@@ -418,14 +422,14 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
 #endif
       case F_CATCH:
         COPY_SHORT(&sarg, pc);
-        sprintf(buff, "%04x", static_cast<unsigned>(sarg));
+        buff = fmt::sprintf("%04x", static_cast<unsigned>(sarg));
         pc += 2;
         break;
 
       case F_AGGREGATE:
       case F_AGGREGATE_ASSOC:
         COPY_SHORT(&sarg, pc);
-        sprintf(buff, "%d", sarg);
+        buff = fmt::sprintf("%d", sarg);
         pc += 2;
         break;
 
@@ -433,22 +437,22 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
       case F_KILL_REFS:
       case F_MEMBER:
       case F_MEMBER_LVALUE:
-        sprintf(buff, "%d", EXTRACT_UCHAR(pc++));
+        buff = fmt::sprintf("%d", EXTRACT_UCHAR(pc++));
         break;
 
       case F_EXPAND_VARARGS: {
         int which = EXTRACT_UCHAR(pc++);
         if (which) {
-          sprintf(buff, "%d from top of stack", which);
+          buff = fmt::sprintf("%d from top of stack", which);
         } else {
-          strcpy(buff, "top of stack");
+          buff = "top of stack";
         }
       } break;
 
       case F_NEW_EMPTY_CLASS:
       case F_NEW_CLASS: {
         int which = EXTRACT_UCHAR(pc++);
-        strcpy(buff, STRS[CLSS[which].classname]);
+        buff = STRS[CLSS[which].classname];
         break;
       }
 
@@ -457,9 +461,9 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
         pc += sizeof(short);
         const uint8_t args = EXTRACT_UCHAR(pc++);
         if (sarg < NUM_FUNS) {
-          sprintf(buff, "%s, pushed_args:%d", function_name(prog, sarg), args);
+          buff = fmt::sprintf("%s, pushed_args:%d", function_name(prog, sarg), args);
         } else {
-          sprintf(buff, "<out of range %d>", sarg);
+          buff = fmt::sprintf("<out of range %d>", sarg);
         }
       }
       break;
@@ -471,9 +475,10 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
         COPY_SHORT(&sarg, pc);
         pc += 3;
         if (sarg < (newprog->num_functions_defined + newprog->last_inherited)) {
-          sprintf(buff, "%30s::%-12s %5d", newprog->filename, function_name(newprog, sarg), sarg);
+          buff = fmt::sprintf("%30s::%-12s %5d", newprog->filename,
+                              function_name(newprog, sarg), sarg);
         } else {
-          sprintf(buff, "<out of range in %30s - %d>", newprog->filename, sarg);
+          buff = fmt::sprintf("<out of range in %30s - %d>", newprog->filename, sarg);
         }
         break;
       }
@@ -482,21 +487,21 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
         short iarg;
         LOAD2(iarg, pc);
         if (iarg < NUM_VARS) {
-          sprintf(buff, "%s(%d)", variable_name(prog, iarg), iarg);
+          buff = fmt::sprintf("%s(%d)", variable_name(prog, iarg), iarg);
         } else {
-          sprintf(buff, "<out of range %d >", iarg);
+          buff = fmt::sprintf("<out of range %d >", iarg);
         }
         break;
       }
       case F_LOOP_INCR:
-        sprintf(buff, "LV%d", EXTRACT_UCHAR(pc));
+        buff = fmt::sprintf("LV%d", EXTRACT_UCHAR(pc));
         pc++;
         break;
       case F_WHILE_DEC:
         COPY_SHORT(&sarg, pc + 1);
         offset = (pc - code) - sarg;
-        sprintf(buff, "LV%d--, branch %04x (%04x)", EXTRACT_UCHAR(pc), static_cast<unsigned>(sarg),
-                static_cast<unsigned>(offset));
+        buff = fmt::sprintf("LV%d--, branch %04x (%04x)", EXTRACT_UCHAR(pc),
+                            static_cast<unsigned>(sarg), static_cast<unsigned>(offset));
         pc += 3;
         break;
       case F_TRANSFER_LOCAL:
@@ -505,7 +510,7 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
       case F_VOID_ASSIGN_LOCAL:
       case F_REF:
       case F_REF_LVALUE:
-        sprintf(buff, "LV%d", EXTRACT_UCHAR(pc));
+        buff = fmt::sprintf("LV%d", EXTRACT_UCHAR(pc));
         pc++;
         break;
       case F_LOOP_COND_NUMBER:
@@ -515,8 +520,8 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
         COPY_SHORT(&sarg, pc);
         offset = (pc - code) - sarg;
         pc += 2;
-        sprintf(buff, "LV%d < %" LPC_INT_FMTSTR_P " bbranch_when_non_zero %04x (%04x)", i, iarg,
-                sarg, offset);
+        buff = fmt::sprintf("LV%d < %" LPC_INT_FMTSTR_P " bbranch_when_non_zero %04x (%04x)",
+                            i, iarg, sarg, offset);
         break;
       case F_LOOP_COND_LOCAL:
         i = EXTRACT_UCHAR(pc++);
@@ -524,32 +529,32 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
         COPY_SHORT(&sarg, pc);
         offset = (pc - code) - sarg;
         pc += 2;
-        sprintf(buff, "LV%d < LV%" LPC_INT_FMTSTR_P " bbranch_when_non_zero %04x (%04x)", i, iarg,
-                sarg, offset);
+        buff = fmt::sprintf("LV%d < LV%" LPC_INT_FMTSTR_P " bbranch_when_non_zero %04x (%04x)",
+                            i, iarg, sarg, offset);
         break;
       case F_STRING:
         COPY_SHORT(&sarg, pc);
         if (sarg < NUM_STRS) {
-          sprintf(buff, "\"%s\"", disassem_string(STRS[sarg]));
+          buff = fmt::sprintf("\"%s\"", disassem_string(STRS[sarg]));
         } else {
-          sprintf(buff, "<out of range %d>", sarg);
+          buff = fmt::sprintf("<out of range %d>", sarg);
         }
         pc += 2;
         break;
       case F_SHORT_STRING:
         if (EXTRACT_UCHAR(pc) < NUM_STRS) {
-          sprintf(buff, "\"%s\"", disassem_string(STRS[EXTRACT_UCHAR(pc)]));
+          buff = fmt::sprintf("\"%s\"", disassem_string(STRS[EXTRACT_UCHAR(pc)]));
         } else {
-          sprintf(buff, "<out of range %d>", EXTRACT_UCHAR(pc));
+          buff = fmt::sprintf("<out of range %d>", EXTRACT_UCHAR(pc));
         }
         pc++;
         break;
       case F_SIMUL_EFUN:
         COPY_SHORT(&sarg, pc);
         if (sarg >= num_simul_efun) {
-          sprintf(buff, "<invalid %d> %d\n", sarg, pc[2]);
+          buff = fmt::sprintf("<invalid %d> %d\n", sarg, pc[2]);
         } else {
-          sprintf(buff, "\"%s\" args: %d", simuls[sarg].func->funcname, pc[2]);
+          buff = fmt::sprintf("\"%s\" args: %d", simuls[sarg].func->funcname, pc[2]);
         }
         pc += 3;
         break;
@@ -558,18 +563,18 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
         switch (EXTRACT_UCHAR(pc++)) {
           case FP_SIMUL:
             LOAD_SHORT(sarg, pc);
-            sprintf(buff, "<simul_efun> \"%s\"", simuls[sarg].func->funcname);
+            buff = fmt::sprintf("<simul_efun> \"%s\"", simuls[sarg].func->funcname);
             break;
           case FP_EFUN:
             LOAD_SHORT(sarg, pc);
-            sprintf(buff, "<efun> %s", instrs[sarg].name);
+            buff = fmt::sprintf("<efun> %s", instrs[sarg].name);
             break;
           case FP_LOCAL:
             LOAD_SHORT(sarg, pc);
             if (sarg < NUM_FUNS) {
-              sprintf(buff, "<local_fun> %s", function_name(prog, sarg));
+              buff = fmt::sprintf("<local_fun> %s", function_name(prog, sarg));
             } else {
-              sprintf(buff, "<local_fun> <out of range %d>", sarg);
+              buff = fmt::sprintf("<local_fun> <out of range %d>", sarg);
             }
             break;
           case FP_FUNCTIONAL:
@@ -577,16 +582,15 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
             uint8_t num_args = EXTRACT_UCHAR(pc++);
             uint16_t size;
             LOAD_SHORT(size, pc);
-            sprintf(buff, "<functional, %d args>: Code size: %d,", num_args, size);
+            buff = fmt::sprintf("<functional, %d args>: Code size: %d,", num_args, size);
             break;
           }
           case FP_ANONYMOUS:
           case FP_ANONYMOUS | FP_NOT_BINDABLE:
             COPY_SHORT(&sarg, &pc[2]);
-            sprintf(buff,
-                    "<anonymous function, %d args, %d locals, ends at "
-                    "%04tu>\nCode:",
-                    pc[0], pc[1], (pc + 3 + sarg - code));
+            buff = fmt::sprintf("<anonymous function, %d args, %d locals, ends at "
+                                "%04tu>\nCode:",
+                                pc[0], pc[1], (pc + 3 + sarg - code));
             pc += 4;
             break;
         }
@@ -595,7 +599,7 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
         short iarg_tmp;
 
         COPY_SHORT(&iarg_tmp, pc);
-        sprintf(buff, "short %d", iarg_tmp);
+        buff = fmt::sprintf("short %d", iarg_tmp);
         pc += sizeof(iarg_tmp);
         break;
       };
@@ -603,7 +607,7 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
         LPC_INT iarg_tmp;
 
         COPY_INT(&iarg_tmp, pc);
-        sprintf(buff, "%" LPC_INT_FMTSTR_P, iarg_tmp);
+        buff = fmt::sprintf("%" LPC_INT_FMTSTR_P, iarg_tmp);
         pc += sizeof(LPC_INT);
         break;
       }
@@ -611,19 +615,19 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
         LPC_FLOAT farg;
 
         COPY_FLOAT(&farg, pc);
-        sprintf(buff, "%" LPC_FLOAT_FMTSTR_P, farg);
+        buff = fmt::sprintf("%" LPC_FLOAT_FMTSTR_P, farg);
         pc += sizeof(LPC_FLOAT);
         break;
       }
       case F_SSCANF:
       case F_PARSE_COMMAND:
       case F_BYTE:
-        sprintf(buff, "%d", EXTRACT_UCHAR(pc));
+        buff = fmt::sprintf("%d", EXTRACT_UCHAR(pc));
         pc++;
         break;
 
       case F_NBYTE:
-        sprintf(buff, "-%d", EXTRACT_UCHAR(pc));
+        buff = fmt::sprintf("-%d", EXTRACT_UCHAR(pc));
         pc++;
         break;
 
@@ -690,8 +694,7 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
         short efun;
         LOAD_SHORT(efun, pc);
         auto args = EXTRACT_UCHAR(pc++);
-        sprintf(buff, "EFUN_V (ARGS: %d) %s(%d)", args, query_instr_name(efun), efun);
-        sprintf(buff, "EFUN: %s(%d)", query_instr_name(efun), efun);
+        buff = fmt::sprintf("EFUN_V (ARGS: %d) %s(%d)", args, query_instr_name(efun), efun);
         break;
       }
       case F_EFUN0:
@@ -700,7 +703,7 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
       case F_EFUN3: {
         short efun;
         LOAD_SHORT(efun, pc);
-        sprintf(buff, "EFUN: %s(%d)", query_instr_name(efun), efun);
+        buff = fmt::sprintf("EFUN: %s(%d)", query_instr_name(efun), efun);
         break;
       }
       case 0:
@@ -712,18 +715,19 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
         break;
     }
     {
-      char tmp[256 + 1] = {};
-      auto p = &tmp[0];
+      std::string tmp;
       while (saved_pc != pc) {
-        p += sprintf(p, "%02hhX ", *saved_pc++);
+        tmp += fmt::sprintf("%02hhX ", *saved_pc++);
       }
-      fprintf(f, " %-25s", tmp); // byte code in HEX
+      fprintf(f, " %-25s", tmp.c_str()); // byte code in HEX
     }
-    fprintf(f, " %-35s; %s\n", query_instr_name(instr), buff);
+    fprintf(f, " %-35s; %s\n", query_instr_name(instr), buff.c_str());
   }
 
   // print last line
-  fprintf(f, "; %s:%d\n", last_file, last_line);
+  if (last_file && last_line > 0) {
+    fprintf(f, "; %s:%d\n", last_file, last_line);
+  }
 
   if (offsets) {
     free(offsets);

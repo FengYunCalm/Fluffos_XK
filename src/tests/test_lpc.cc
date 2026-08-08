@@ -4294,6 +4294,21 @@ TEST_F(DriverTest, TestCompileDumpProgWorks) {
   free_object(&obj, "DriverTest::TestCompileDumpProgWorks");
 }
 
+TEST_F(DriverTest, TestCompileDumpProgHandlesLongFunctionNames) {
+  std::string function_name(3000, 'f');
+  std::string source = "void " + function_name + "() {}\n";
+  std::istringstream stream(source);
+  auto program = compile_file(std::make_unique<IStreamLexStream>(stream),
+                              "long_dump_prog_test");
+
+  ASSERT_NE(program, nullptr);
+  FILE* output = tmpfile();
+  ASSERT_NE(output, nullptr);
+  dump_prog(program, output, 1);
+  ASSERT_EQ(fclose(output), 0);
+  deallocate_program(program);
+}
+
 TEST_F(DriverTest, TestVmContextTracksTopLevelState) {
   ASSERT_EQ(vm_context().event_loop, g_event_base);
   ASSERT_EQ(vm_context().current_gametick, current_gametick());
