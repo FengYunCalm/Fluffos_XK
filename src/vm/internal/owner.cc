@@ -1503,7 +1503,7 @@ mapping_t *vm_context_contract_mapping() {
   add_mapping_pair(contract, "owner_scope_contextualized", 1);
   add_mapping_pair(contract, "object_store_main_thread_only", 0);
   add_mapping_pair(contract, "object_store_sync_rejections",
-                   static_cast<long>(vm_context_object_store_sync_rejections()));
+                   static_cast<LPC_INT>(vm_context_object_store_sync_rejections()));
   add_mapping_pair(contract, "off_main_object_store_sync_allowed", 0);
   add_mapping_string(contract, "ordinary_lpc_readiness_gate_model", "all_gates_required_before_open");
   add_mapping_string(contract, "ordinary_lpc_next_blocker", "");
@@ -3625,8 +3625,8 @@ mapping_t *vm_owner_status(object_t *object) {
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
   add_mapping_string(map, "multicore_mode_name", vm_multicore_mode_name(vm_multicore_mode()));
   add_mapping_pair(map, "multicore_enforced", vm_multicore_enforced() ? 1 : 0);
-  add_mapping_pair(map, "total_checks", static_cast<long>(vm_owner_total_checks()));
-  add_mapping_pair(map, "mismatch_checks", static_cast<long>(vm_owner_mismatch_checks()));
+  add_mapping_pair(map, "total_checks", static_cast<LPC_INT>(vm_owner_total_checks()));
+  add_mapping_pair(map, "mismatch_checks", static_cast<LPC_INT>(vm_owner_mismatch_checks()));
   if (object && object->obname) {
     add_mapping_string(map, "object", object->obname);
   } else {
@@ -4746,10 +4746,10 @@ mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
   auto *map = allocate_mapping(7);
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
-  add_mapping_pair(map, "drained", static_cast<long>(requested));
+  add_mapping_pair(map, "drained", static_cast<LPC_INT>(requested));
   add_mapping_pair(map, "remaining", remaining);
-  add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "total_drained", static_cast<long>(total_drained.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "total_enqueued", static_cast<LPC_INT>(total_enqueued.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "total_drained", static_cast<LPC_INT>(total_drained.load(std::memory_order_relaxed)));
   add_mapping_array(map, "tasks", tasks);
   free_array(tasks);
   return map;
@@ -4766,7 +4766,7 @@ mapping_t *vm_owner_purge_mailbox(const char *owner_id) {
     remaining = owner_mailbox_depth(normalized_owner_id);
     queue_depth = owner_mailbox_total_depth();
   }
-  auto purged = static_cast<long>(purged_tasks.size());
+  auto purged = purged_tasks.size();
   for (const auto &task : purged_tasks) {
     append_owner_task_trace(task, "purged");
   }
@@ -4792,11 +4792,11 @@ mapping_t *vm_owner_purge_mailbox(const char *owner_id) {
   auto *map = allocate_mapping(7);
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
-  add_mapping_pair(map, "purged", purged);
+  add_mapping_pair(map, "purged", static_cast<LPC_INT>(purged));
   add_mapping_pair(map, "remaining", remaining);
   add_mapping_pair(map, "queue_depth", queue_depth);
-  add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "total_drained", static_cast<long>(total_drained.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "total_enqueued", static_cast<LPC_INT>(total_enqueued.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "total_drained", static_cast<LPC_INT>(total_drained.load(std::memory_order_relaxed)));
   return map;
 }
 
@@ -4860,11 +4860,11 @@ mapping_t *vm_owner_schedule(int limit) {
 
   auto *map = allocate_mapping(7);
   add_mapping_pair(map, "success", 1);
-  add_mapping_pair(map, "dispatched", static_cast<long>(dispatched));
+  add_mapping_pair(map, "dispatched", static_cast<LPC_INT>(dispatched));
   add_mapping_pair(map, "remaining", remaining);
   add_mapping_pair(map, "active_owners", active_owners);
-  add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "total_drained", static_cast<long>(total_drained.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "total_enqueued", static_cast<LPC_INT>(total_enqueued.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "total_drained", static_cast<LPC_INT>(total_drained.load(std::memory_order_relaxed)));
   add_mapping_array(map, "tasks", tasks);
   free_array(tasks);
   return map;
@@ -4916,8 +4916,8 @@ mapping_t *vm_owner_mailbox_status(const char *owner_id) {
   add_mapping_pair(map, "main_queue_depth", main_queue_depth_value);
   add_mapping_pair(map, "active_owners", active_owners);
   add_mapping_pair(map, "main_active_owners", main_active_owners);
-  add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "total_drained", static_cast<long>(total_drained.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "total_enqueued", static_cast<LPC_INT>(total_enqueued.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "total_drained", static_cast<LPC_INT>(total_drained.load(std::memory_order_relaxed)));
   return map;
 }
 
@@ -4937,8 +4937,8 @@ mapping_t *vm_owner_task_trace(int limit) {
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "trace_kind", "owner_task_trace");
   add_mapping_string(map, "trace_model", "owner_task_lifecycle_trace");
-  add_mapping_pair(map, "returned", static_cast<long>(requested));
-  add_mapping_pair(map, "total_traced", static_cast<long>(snapshot.total_traced));
+  add_mapping_pair(map, "returned", static_cast<LPC_INT>(requested));
+  add_mapping_pair(map, "total_traced", static_cast<LPC_INT>(snapshot.total_traced));
   add_mapping_array(map, "events", events);
   free_array(events);
   return map;
@@ -4965,8 +4965,8 @@ mapping_t *vm_owner_executor_trace(int limit) {
   add_mapping_string(map, "admission_policy", kOwnerTaskAdmissionPolicyV2);
   add_mapping_string(map, "executor_contract_version", kOwnerExecutorContractVersion);
   add_mapping_string(map, "executor_model", "owner_executor");
-  add_mapping_pair(map, "returned", static_cast<long>(requested));
-  add_mapping_pair(map, "total_traced", static_cast<long>(snapshot.total_traced));
+  add_mapping_pair(map, "returned", static_cast<LPC_INT>(requested));
+  add_mapping_pair(map, "total_traced", static_cast<LPC_INT>(snapshot.total_traced));
   add_mapping_array(map, "events", events);
   free_array(events);
   return map;
@@ -4991,16 +4991,16 @@ mapping_t *vm_owner_access_trace(int limit) {
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
   add_mapping_string(map, "multicore_mode_name", vm_multicore_mode_name(vm_multicore_mode()));
   add_mapping_pair(map, "enforced_blocks",
-                   static_cast<long>(total_cross_owner_enforced_blocks.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "returned", static_cast<long>(requested));
-  add_mapping_pair(map, "total_traced", static_cast<long>(snapshot.total_traced));
-  add_mapping_pair(map, "cross_owner", static_cast<long>(total_cross_owner_accesses.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(total_cross_owner_enforced_blocks.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "returned", static_cast<LPC_INT>(requested));
+  add_mapping_pair(map, "total_traced", static_cast<LPC_INT>(snapshot.total_traced));
+  add_mapping_pair(map, "cross_owner", static_cast<LPC_INT>(total_cross_owner_accesses.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "snapshot_required",
-                   static_cast<long>(total_cross_owner_snapshot_accesses.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(total_cross_owner_snapshot_accesses.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "message_required",
-                   static_cast<long>(total_cross_owner_message_accesses.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(total_cross_owner_message_accesses.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "rejected_by_default",
-                   static_cast<long>(total_cross_owner_rejected_accesses.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(total_cross_owner_rejected_accesses.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "direct_cross_owner_write", 0);
   add_mapping_array(map, "events", events);
   free_array(events);
@@ -5238,8 +5238,8 @@ mapping_t *vm_owner_message_trace(int limit) {
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "trace_kind", "owner_message_trace");
   add_mapping_string(map, "trace_model", "owner_message_lifecycle_trace");
-  add_mapping_pair(map, "returned", static_cast<long>(requested));
-  add_mapping_pair(map, "total_traced", static_cast<long>(snapshot.total_traced));
+  add_mapping_pair(map, "returned", static_cast<LPC_INT>(requested));
+  add_mapping_pair(map, "total_traced", static_cast<LPC_INT>(snapshot.total_traced));
   add_mapping_array(map, "events", events);
   free_array(events);
   return map;
@@ -5442,8 +5442,8 @@ mapping_t *vm_owner_commit_trace(int limit) {
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "trace_kind", "owner_commit_trace");
   add_mapping_string(map, "trace_model", "owner_commit_boundary_trace");
-  add_mapping_pair(map, "returned", static_cast<long>(requested));
-  add_mapping_pair(map, "total_traced", static_cast<long>(snapshot.total_traced));
+  add_mapping_pair(map, "returned", static_cast<LPC_INT>(requested));
+  add_mapping_pair(map, "total_traced", static_cast<LPC_INT>(snapshot.total_traced));
   add_mapping_array(map, "events", events);
   free_array(events);
   return map;

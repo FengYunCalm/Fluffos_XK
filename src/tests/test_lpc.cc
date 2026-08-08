@@ -4311,6 +4311,71 @@ TEST_F(DriverTest, TestOwnerStatusMappingsUseLpcIntegerWidth) {
       "#ifdef DEBUGMALLOC_EXTENSIONS");
 }
 
+TEST_F(DriverTest, TestOwnerDiagnosticMappingsUseLpcIntegerWidth) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  auto assert_mapping_uses_lpc_width = [&](const char* start_marker,
+                                           const char* end_marker) {
+    const auto start = owner_source.find(start_marker);
+    const auto end = owner_source.find(end_marker, start);
+
+    ASSERT_NE(start, std::string::npos) << start_marker;
+    ASSERT_NE(end, std::string::npos) << end_marker;
+    ASSERT_GT(end, start) << start_marker;
+    const auto body = owner_source.substr(start, end - start);
+    EXPECT_EQ(body.find("static_cast<long>"), std::string::npos)
+        << start_marker;
+    EXPECT_NE(body.find("static_cast<LPC_INT>"), std::string::npos)
+        << start_marker;
+  };
+
+  assert_mapping_uses_lpc_width(
+      "mapping_t *vm_owner_status(object_t *object)",
+      "mapping_t *vm_owner_guard(");
+  assert_mapping_uses_lpc_width(
+      "mapping_t *vm_owner_drain_mailbox(",
+      "mapping_t *vm_owner_purge_mailbox(");
+  assert_mapping_uses_lpc_width(
+      "mapping_t *vm_owner_purge_mailbox(",
+      "mapping_t *vm_owner_schedule(");
+  assert_mapping_uses_lpc_width(
+      "mapping_t *vm_owner_schedule(",
+      "mapping_t *vm_owner_mailbox_status(");
+  assert_mapping_uses_lpc_width(
+      "mapping_t *vm_owner_mailbox_status(",
+      "mapping_t *vm_owner_task_trace(");
+  assert_mapping_uses_lpc_width(
+      "mapping_t *vm_owner_task_trace(",
+      "mapping_t *vm_owner_executor_trace(");
+  assert_mapping_uses_lpc_width(
+      "mapping_t *vm_owner_executor_trace(",
+      "mapping_t *vm_owner_access_trace(");
+  assert_mapping_uses_lpc_width(
+      "mapping_t *vm_owner_access_trace(",
+      "mapping_t *submit_owner_message(");
+  assert_mapping_uses_lpc_width(
+      "mapping_t *vm_owner_message_trace(",
+      "mapping_t *vm_owner_future_poll(");
+  assert_mapping_uses_lpc_width(
+      "mapping_t *vm_owner_commit_trace(",
+      "void vm_owner_thread_start(");
+
+  const auto context_start =
+      owner_source.find("mapping_t *vm_context_contract_mapping()");
+  const auto context_end = owner_source.find(
+      "mapping_t *owner_executor_boundary_contract_mapping()", context_start);
+  ASSERT_NE(context_start, std::string::npos);
+  ASSERT_NE(context_end, std::string::npos);
+  ASSERT_GT(context_end, context_start);
+  const auto context_body =
+      owner_source.substr(context_start, context_end - context_start);
+  EXPECT_EQ(context_body.find(
+                "static_cast<long>(vm_context_object_store_sync_rejections())"),
+            std::string::npos);
+  EXPECT_NE(context_body.find(
+                "static_cast<LPC_INT>(vm_context_object_store_sync_rejections())"),
+            std::string::npos);
+}
+
 TEST_F(DriverTest, TestOwnerStatusMappingsBuildAfterRuntimeSnapshotLockScope) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   ASSERT_NE(owner_source.find("OwnerStatusSnapshot owner_status_snapshot_locked()"),
