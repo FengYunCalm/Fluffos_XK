@@ -312,24 +312,26 @@ void gateway_enable_master_tcp_nodelay(evutil_socket_t fd) {
   g_gateway_runtime_counters.master_tcp_nodelay_failed.fetch_add(1, std::memory_order_relaxed);
 }
 
-long gateway_avg_us(const std::atomic<uint64_t> &total, const std::atomic<uint64_t> &samples) {
+LPC_INT gateway_avg_us(const std::atomic<uint64_t> &total,
+                       const std::atomic<uint64_t> &samples) {
   auto sample_count = samples.load(std::memory_order_relaxed);
   if (sample_count == 0) {
     return 0;
   }
-  return static_cast<long>((total.load(std::memory_order_relaxed) / sample_count) / 1000);
+  return static_cast<LPC_INT>((total.load(std::memory_order_relaxed) / sample_count) / 1000);
 }
 
-long gateway_avg_value(const std::atomic<uint64_t> &total, const std::atomic<uint64_t> &samples) {
+LPC_INT gateway_avg_value(const std::atomic<uint64_t> &total,
+                          const std::atomic<uint64_t> &samples) {
   auto sample_count = samples.load(std::memory_order_relaxed);
   if (sample_count == 0) {
     return 0;
   }
-  return static_cast<long>(total.load(std::memory_order_relaxed) / sample_count);
+  return static_cast<LPC_INT>(total.load(std::memory_order_relaxed) / sample_count);
 }
 
-long gateway_max_us(const std::atomic<uint64_t> &max) {
-  return static_cast<long>(max.load(std::memory_order_relaxed) / 1000);
+LPC_INT gateway_max_us(const std::atomic<uint64_t> &max) {
+  return static_cast<LPC_INT>(max.load(std::memory_order_relaxed) / 1000);
 }
 
 void gateway_add_latency_fields(mapping_t *map, const char *prefix,
@@ -338,9 +340,9 @@ void gateway_add_latency_fields(mapping_t *map, const char *prefix,
                                 const std::atomic<uint64_t> &samples) {
   auto field_prefix = std::string(prefix);
   add_mapping_pair(map, (field_prefix + "_samples").c_str(),
-                   static_cast<long>(samples.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(samples.load(std::memory_order_relaxed)));
   add_mapping_pair(map, (field_prefix + "_total_us").c_str(),
-                   static_cast<long>(total.load(std::memory_order_relaxed) / 1000));
+                   static_cast<LPC_INT>(total.load(std::memory_order_relaxed) / 1000));
   add_mapping_pair(map, (field_prefix + "_max_us").c_str(), gateway_max_us(max));
 }
 
@@ -2294,7 +2296,7 @@ mapping_t *gateway_status_internal() {
                    kGatewayExternalBindAllowed ? 1 : 0);
   add_mapping_pair(
       map, "gateway_external_bind_rejected",
-      static_cast<long>(g_gateway_runtime_counters.external_bind_rejected.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.external_bind_rejected.load(
           std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_event_priority_levels",
                    kBackendEventPriorityLevels);
@@ -2304,7 +2306,7 @@ mapping_t *gateway_status_internal() {
                    static_cast<int>(BackendEventPriority::kGateway));
   add_mapping_pair(
       map, "gateway_background_dispatch_max_interval_us",
-      static_cast<long>(std::chrono::duration_cast<std::chrono::microseconds>(
+      static_cast<LPC_INT>(std::chrono::duration_cast<std::chrono::microseconds>(
                             kBackendBackgroundDispatchMaxInterval)
                             .count()));
   add_mapping_pair(map, "gateway_background_dispatch_max_callbacks",
@@ -2312,69 +2314,69 @@ mapping_t *gateway_status_internal() {
   add_mapping_pair(map, "gateway_background_dispatch_min_priority",
                    static_cast<int>(kBackendBackgroundDispatchMinPriority));
   add_mapping_pair(map, "gateway_backend_tick_slice_budget",
-                   static_cast<long>(kBackendTickEventCallbackBudget));
+                   static_cast<LPC_INT>(kBackendTickEventCallbackBudget));
   add_mapping_pair(
       map, "gateway_backend_tick_slice_wall_budget_us",
-      static_cast<long>(std::chrono::duration_cast<std::chrono::microseconds>(
+      static_cast<LPC_INT>(std::chrono::duration_cast<std::chrono::microseconds>(
                             kBackendTickEventWallBudget)
                             .count()));
   add_mapping_pair(
       map, "gateway_backend_tick_continuation_delay_us",
-      static_cast<long>(std::chrono::duration_cast<std::chrono::microseconds>(
+      static_cast<LPC_INT>(std::chrono::duration_cast<std::chrono::microseconds>(
                             kBackendTickContinuationDelay)
                             .count()));
   add_mapping_pair(map, "gateway_backend_tick_slice_runs",
-                   static_cast<long>(backend_status.tick_slice_runs));
+                   static_cast<LPC_INT>(backend_status.tick_slice_runs));
   add_mapping_pair(
       map, "gateway_backend_tick_slice_callbacks_total",
-      static_cast<long>(backend_status.tick_slice_callbacks_total));
+      static_cast<LPC_INT>(backend_status.tick_slice_callbacks_total));
   add_mapping_pair(map, "gateway_backend_tick_slice_callbacks_max",
-                   static_cast<long>(backend_status.tick_slice_callbacks_max));
+                   static_cast<LPC_INT>(backend_status.tick_slice_callbacks_max));
   add_mapping_pair(map, "gateway_backend_tick_slice_budget_yields",
-                   static_cast<long>(backend_status.tick_slice_budget_yields));
+                   static_cast<LPC_INT>(backend_status.tick_slice_budget_yields));
   add_mapping_pair(map, "gateway_backend_tick_slice_wall_yields",
-                   static_cast<long>(backend_status.tick_slice_wall_yields));
+                   static_cast<LPC_INT>(backend_status.tick_slice_wall_yields));
   add_mapping_pair(
       map, "gateway_backend_tick_continuations_scheduled",
-      static_cast<long>(backend_status.tick_continuations_scheduled));
+      static_cast<LPC_INT>(backend_status.tick_continuations_scheduled));
   add_mapping_pair(
       map, "gateway_backend_tick_continuations_executed",
-      static_cast<long>(backend_status.tick_continuations_executed));
+      static_cast<LPC_INT>(backend_status.tick_continuations_executed));
   add_mapping_pair(map, "gateway_backend_owner_main_slice_budget",
                    kBackendOwnerMainDrainTaskBudget);
   add_mapping_pair(
       map, "gateway_backend_owner_main_slice_wall_budget_us",
-      static_cast<long>(std::chrono::duration_cast<std::chrono::microseconds>(
+      static_cast<LPC_INT>(std::chrono::duration_cast<std::chrono::microseconds>(
                             kBackendOwnerMainDrainWallBudget)
                             .count()));
   add_mapping_pair(
       map, "gateway_backend_owner_main_continuation_delay_us",
-      static_cast<long>(std::chrono::duration_cast<std::chrono::microseconds>(
+      static_cast<LPC_INT>(std::chrono::duration_cast<std::chrono::microseconds>(
                             kBackendOwnerMainDrainContinuationDelay)
                             .count()));
   add_mapping_pair(map, "gateway_backend_owner_main_slice_runs",
-                   static_cast<long>(backend_status.owner_main_slice_runs));
+                   static_cast<LPC_INT>(backend_status.owner_main_slice_runs));
   add_mapping_pair(
       map, "gateway_backend_owner_main_slice_tasks_total",
-      static_cast<long>(backend_status.owner_main_slice_tasks_total));
+      static_cast<LPC_INT>(backend_status.owner_main_slice_tasks_total));
   add_mapping_pair(
       map, "gateway_backend_owner_main_slice_tasks_max",
-      static_cast<long>(backend_status.owner_main_slice_tasks_max));
+      static_cast<LPC_INT>(backend_status.owner_main_slice_tasks_max));
   add_mapping_pair(
       map, "gateway_backend_owner_main_slice_task_budget_yields",
-      static_cast<long>(backend_status.owner_main_slice_task_budget_yields));
+      static_cast<LPC_INT>(backend_status.owner_main_slice_task_budget_yields));
   add_mapping_pair(
       map, "gateway_backend_owner_main_slice_wall_yields",
-      static_cast<long>(backend_status.owner_main_slice_wall_yields));
+      static_cast<LPC_INT>(backend_status.owner_main_slice_wall_yields));
   add_mapping_pair(
       map, "gateway_backend_owner_main_tasks_exceeding_wall_budget",
-      static_cast<long>(backend_status.owner_main_tasks_exceeding_wall_budget));
+      static_cast<LPC_INT>(backend_status.owner_main_tasks_exceeding_wall_budget));
   add_mapping_pair(
       map, "gateway_backend_owner_main_continuations_scheduled",
-      static_cast<long>(backend_status.owner_main_continuations_scheduled));
+      static_cast<LPC_INT>(backend_status.owner_main_continuations_scheduled));
   add_mapping_pair(
       map, "gateway_backend_owner_main_continuations_executed",
-      static_cast<long>(backend_status.owner_main_continuations_executed));
+      static_cast<LPC_INT>(backend_status.owner_main_continuations_executed));
   add_mapping_pair(
       map, "gateway_backend_owner_main_continuation_pending",
       backend_status.owner_main_continuation_pending ? 1 : 0);
@@ -2387,101 +2389,101 @@ mapping_t *gateway_status_internal() {
                    gateway_session_fifo_pending_reservations_total());
   add_mapping_pair(
       map, "session_fifo_wire_bytes",
-      static_cast<long>(gateway_session_fifo_wire_bytes_total()));
+      static_cast<LPC_INT>(gateway_session_fifo_wire_bytes_total()));
   add_mapping_pair(map, "session_fifo_wire_limit_bytes",
-                   static_cast<long>(gateway_write_buffer_limit()));
+                   static_cast<LPC_INT>(gateway_write_buffer_limit()));
   add_mapping_pair(
       map, "session_fifo_wire_aggregate_limit_bytes",
-      static_cast<long>(gateway_session_fifo_wire_aggregate_limit()));
+      static_cast<LPC_INT>(gateway_session_fifo_wire_aggregate_limit()));
   add_mapping_pair(
       map, "session_fifo_wire_detached_bytes",
-      static_cast<long>(gateway_session_fifo_wire_detached_bytes()));
+      static_cast<LPC_INT>(gateway_session_fifo_wire_detached_bytes()));
   add_mapping_pair(
       map, "session_fifo_wire_bytes_rejected",
-      static_cast<long>(gateway_session_fifo_wire_bytes_rejected_total()));
-  add_mapping_pair(map, "session_fifo_enqueued", static_cast<long>(gateway_session_fifo_enqueued_total()));
-  add_mapping_pair(map, "session_fifo_flushed", static_cast<long>(gateway_session_fifo_flushed_total()));
-  add_mapping_pair(map, "session_fifo_rejected", static_cast<long>(gateway_session_fifo_rejected_total()));
+      static_cast<LPC_INT>(gateway_session_fifo_wire_bytes_rejected_total()));
+  add_mapping_pair(map, "session_fifo_enqueued", static_cast<LPC_INT>(gateway_session_fifo_enqueued_total()));
+  add_mapping_pair(map, "session_fifo_flushed", static_cast<LPC_INT>(gateway_session_fifo_flushed_total()));
+  add_mapping_pair(map, "session_fifo_rejected", static_cast<LPC_INT>(gateway_session_fifo_rejected_total()));
   add_mapping_pair(map, "gateway_data_frames_received",
-                   static_cast<long>(g_gateway_runtime_counters.data_frames_received.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.data_frames_received.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_data_frames_applied",
-                   static_cast<long>(g_gateway_runtime_counters.data_frames_applied.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.data_frames_applied.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_data_frames_rejected",
-                   static_cast<long>(g_gateway_runtime_counters.data_frames_rejected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.data_frames_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_json_frames_rejected",
-                   static_cast<long>(g_gateway_runtime_counters.json_frames_rejected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.json_frames_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_session_id_max_bytes",
-                   static_cast<long>(kGatewayMaxSessionIdBytes));
+                   static_cast<LPC_INT>(kGatewayMaxSessionIdBytes));
   add_mapping_pair(
       map, "gateway_session_id_frames_rejected",
-      static_cast<long>(g_gateway_runtime_counters.session_id_frames_rejected.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.session_id_frames_rejected.load(
           std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_ingress_sequence_last_accepted",
-                   static_cast<long>(g_gateway_ingress_sequence.last_accepted));
+                   static_cast<LPC_INT>(g_gateway_ingress_sequence.last_accepted));
   add_mapping_pair(map, "gateway_ingress_sequence_duplicates",
-                   static_cast<long>(g_gateway_runtime_counters.ingress_sequence_duplicates.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.ingress_sequence_duplicates.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_ingress_sequence_gaps",
-                   static_cast<long>(g_gateway_runtime_counters.ingress_sequence_gaps.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.ingress_sequence_gaps.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_ingress_sequence_stream_mismatches",
-                   static_cast<long>(g_gateway_runtime_counters.ingress_sequence_stream_mismatches.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.ingress_sequence_stream_mismatches.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_ingress_sequence_stream_resets",
-                   static_cast<long>(g_gateway_runtime_counters.ingress_sequence_stream_resets.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.ingress_sequence_stream_resets.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_ingress_sequence_owner_fd",
       g_gateway_ingress_sequence.owner_fd == kGatewayIngressUnownedFd
           ? -1
-          : static_cast<long>(g_gateway_ingress_sequence.owner_fd));
+          : static_cast<LPC_INT>(g_gateway_ingress_sequence.owner_fd));
   add_mapping_pair(
       map, "gateway_ingress_sequence_owner_active",
       g_gateway_ingress_sequence.owner_fd == kGatewayIngressUnownedFd ? 0 : 1);
   add_mapping_pair(
       map, "gateway_ingress_sequence_owner_mismatches",
-      static_cast<long>(g_gateway_runtime_counters.ingress_sequence_owner_mismatches.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.ingress_sequence_owner_mismatches.load(
           std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_ingress_ack_frames_sent",
-                   static_cast<long>(g_gateway_runtime_counters.ingress_ack_frames_sent.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.ingress_ack_frames_sent.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_ingress_ack_frames_failed",
-                   static_cast<long>(g_gateway_runtime_counters.ingress_ack_frames_failed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.ingress_ack_frames_failed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_stale_master_frames_rejected",
-                   static_cast<long>(g_gateway_runtime_counters.stale_master_frames_rejected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.stale_master_frames_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_sessions_detached_total",
-                   static_cast<long>(g_gateway_runtime_counters.sessions_detached.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.sessions_detached.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_session_rebind_attempts",
-                   static_cast<long>(g_gateway_runtime_counters.session_rebind_attempts.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.session_rebind_attempts.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_session_rebind_completed",
-                   static_cast<long>(g_gateway_runtime_counters.session_rebind_completed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.session_rebind_completed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_session_rebind_rejected",
-                   static_cast<long>(g_gateway_runtime_counters.session_rebind_rejected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.session_rebind_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_session_reconnect_expired",
-                   static_cast<long>(g_gateway_runtime_counters.session_reconnect_expired.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.session_reconnect_expired.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_receive_tasks_enqueued",
-      static_cast<long>(g_gateway_runtime_counters.receive_tasks_enqueued.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.receive_tasks_enqueued.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_receive_tasks_dispatched",
-      static_cast<long>(g_gateway_runtime_counters.receive_tasks_dispatched.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.receive_tasks_dispatched.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_receive_tasks_rejected",
-      static_cast<long>(g_gateway_runtime_counters.receive_tasks_rejected.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.receive_tasks_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_command_callbacks",
-                   static_cast<long>(g_gateway_runtime_counters.command_callbacks.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.command_callbacks.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_command_tasks_enqueued",
-      static_cast<long>(g_gateway_runtime_counters.command_tasks_enqueued.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.command_tasks_enqueued.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_command_tasks_rejected",
-      static_cast<long>(g_gateway_runtime_counters.command_tasks_rejected.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.command_tasks_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_command_tasks_rejected_pending",
-      static_cast<long>(g_gateway_runtime_counters.command_tasks_rejected_pending.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.command_tasks_rejected_pending.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_command_tasks_finished",
-      static_cast<long>(g_gateway_runtime_counters.command_tasks_finished.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.command_tasks_finished.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_command_tasks_stale",
-                   static_cast<long>(g_gateway_runtime_counters.command_tasks_stale.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.command_tasks_stale.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_command_tasks_cleared",
-      static_cast<long>(g_gateway_runtime_counters.command_tasks_cleared.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.command_tasks_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_command_input_pending_sessions",
                    gateway_session_command_input_pending_count());
   add_mapping_pair(map, "gateway_command_task_pending_sessions",
@@ -2500,185 +2502,185 @@ mapping_t *gateway_status_internal() {
                    kGatewayMainQueueReadLowWatermark);
   add_mapping_pair(
       map, "gateway_main_queue_read_admission_limited",
-      static_cast<long>(g_gateway_runtime_counters.main_queue_read_admission_limited.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_queue_read_admission_limited.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_queue_read_pressure_events",
-      static_cast<long>(g_gateway_runtime_counters.main_queue_read_pressure_events.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_queue_read_pressure_events.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_queue_read_paused",
-      static_cast<long>(g_gateway_runtime_counters.main_queue_read_paused.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_queue_read_paused.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_queue_read_resumed",
-      static_cast<long>(g_gateway_runtime_counters.main_queue_read_resumed.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_queue_read_resumed.load(
           std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_main_queue_read_paused_masters",
                    gateway_main_queue_read_paused_count());
   add_mapping_pair(map, "gateway_reply_tasks_enqueued",
-                   static_cast<long>(g_gateway_runtime_counters.reply_tasks_enqueued.load(
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.reply_tasks_enqueued.load(
                        std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_reply_tasks_inline_fallbacks",
-                   static_cast<long>(g_gateway_runtime_counters.reply_tasks_inline_fallbacks.load(
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.reply_tasks_inline_fallbacks.load(
                        std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_reply_reschedule_cmd_in_buf",
-                   static_cast<long>(g_gateway_runtime_counters.reply_reschedule_cmd_in_buf.load(
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.reply_reschedule_cmd_in_buf.load(
                        std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_enqueued",
-      static_cast<long>(g_gateway_runtime_counters.output_fifo_enqueued.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.output_fifo_enqueued.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_flushed",
-      static_cast<long>(g_gateway_runtime_counters.output_fifo_flushed.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.output_fifo_flushed.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_rejected",
-      static_cast<long>(g_gateway_runtime_counters.output_fifo_rejected.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.output_fifo_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_wire_bytes_rejected",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.output_fifo_wire_bytes_rejected.load(
               std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_aggregate_wire_bytes_rejected",
-      static_cast<long>(g_gateway_runtime_counters
+      static_cast<LPC_INT>(g_gateway_runtime_counters
                             .output_fifo_aggregate_wire_bytes_rejected.load(
                                 std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_rebucket_wire_bytes_dropped",
-      static_cast<long>(g_gateway_runtime_counters
+      static_cast<LPC_INT>(g_gateway_runtime_counters
                             .output_fifo_rebucket_wire_bytes_dropped.load(
                                 std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_reserved",
-      static_cast<long>(g_gateway_runtime_counters.output_fifo_reserved.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.output_fifo_reserved.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_filled",
-      static_cast<long>(g_gateway_runtime_counters.output_fifo_filled.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.output_fifo_filled.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_released",
-      static_cast<long>(g_gateway_runtime_counters.output_fifo_released.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.output_fifo_released.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_reservation_misses",
-      static_cast<long>(g_gateway_runtime_counters.output_fifo_reservation_misses.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.output_fifo_reservation_misses.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_writer_failures",
-      static_cast<long>(g_gateway_runtime_counters.output_fifo_writer_failures.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.output_fifo_writer_failures.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_oversize_dropped",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.output_fifo_oversize_dropped.load(
               std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_destroyed_ready",
-      static_cast<long>(g_gateway_runtime_counters.output_fifo_destroyed_ready.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.output_fifo_destroyed_ready.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_destroyed_pending",
-      static_cast<long>(g_gateway_runtime_counters.output_fifo_destroyed_pending.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.output_fifo_destroyed_pending.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_head_blocked_fills",
-      static_cast<long>(g_gateway_runtime_counters.output_fifo_head_blocked_fills.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.output_fifo_head_blocked_fills.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_head_blocked_predecessors_total",
-      static_cast<long>(g_gateway_runtime_counters.output_fifo_head_blocked_predecessors_total.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.output_fifo_head_blocked_predecessors_total.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_output_fifo_head_blocked_predecessors_max",
-      static_cast<long>(g_gateway_runtime_counters.output_fifo_head_blocked_predecessors_max.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.output_fifo_head_blocked_predecessors_max.load(
           std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_future_watch_pending", gateway_session_future_watch_count());
   add_mapping_pair(map, "gateway_generic_future_watch_pending", gateway_future_watch_count());
   add_mapping_pair(
       map, "gateway_generic_future_watches_registered",
-      static_cast<long>(g_gateway_runtime_counters.generic_future_watches_registered.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.generic_future_watches_registered.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_generic_future_watches_rejected",
-      static_cast<long>(g_gateway_runtime_counters.generic_future_watches_rejected.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.generic_future_watches_rejected.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_generic_future_watches_completed",
-      static_cast<long>(g_gateway_runtime_counters.generic_future_watches_completed.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.generic_future_watches_completed.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_generic_future_watches_failed",
-      static_cast<long>(g_gateway_runtime_counters.generic_future_watches_failed.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.generic_future_watches_failed.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_generic_future_watches_timed_out",
-      static_cast<long>(g_gateway_runtime_counters.generic_future_watches_timed_out.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.generic_future_watches_timed_out.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_generic_future_watches_cancelled",
-      static_cast<long>(g_gateway_runtime_counters.generic_future_watches_cancelled.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.generic_future_watches_cancelled.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_generic_future_watch_callbacks",
-      static_cast<long>(g_gateway_runtime_counters.generic_future_watch_callbacks.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.generic_future_watch_callbacks.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_generic_future_watch_callback_failures",
-      static_cast<long>(g_gateway_runtime_counters.generic_future_watch_callback_failures.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.generic_future_watch_callback_failures.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_generic_future_watch_poll_runs",
-      static_cast<long>(g_gateway_runtime_counters.generic_future_watch_poll_runs.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.generic_future_watch_poll_runs.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_generic_future_watch_poll_items",
-      static_cast<long>(g_gateway_runtime_counters.generic_future_watch_poll_items.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.generic_future_watch_poll_items.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_generic_future_watch_poll_budget_hits",
-      static_cast<long>(g_gateway_runtime_counters.generic_future_watch_poll_budget_hits.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.generic_future_watch_poll_budget_hits.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_future_watches_registered",
-      static_cast<long>(g_gateway_runtime_counters.future_watches_registered.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.future_watches_registered.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_future_watches_rejected",
-      static_cast<long>(g_gateway_runtime_counters.future_watches_rejected.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.future_watches_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_future_watches_completed",
-      static_cast<long>(g_gateway_runtime_counters.future_watches_completed.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.future_watches_completed.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_future_watches_failed",
-      static_cast<long>(g_gateway_runtime_counters.future_watches_failed.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.future_watches_failed.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_future_watches_timed_out",
-      static_cast<long>(g_gateway_runtime_counters.future_watches_timed_out.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.future_watches_timed_out.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_future_watches_cancelled",
-      static_cast<long>(g_gateway_runtime_counters.future_watches_cancelled.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.future_watches_cancelled.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_future_watch_callbacks",
-      static_cast<long>(g_gateway_runtime_counters.future_watch_callbacks.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.future_watch_callbacks.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_future_watch_callback_failures",
-      static_cast<long>(g_gateway_runtime_counters.future_watch_callback_failures.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.future_watch_callback_failures.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_future_watch_poll_runs",
-      static_cast<long>(g_gateway_runtime_counters.future_watch_poll_runs.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.future_watch_poll_runs.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_future_watch_poll_items",
-      static_cast<long>(g_gateway_runtime_counters.future_watch_poll_items.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.future_watch_poll_items.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_future_watch_poll_budget_hits",
-      static_cast<long>(g_gateway_runtime_counters.future_watch_poll_budget_hits.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.future_watch_poll_budget_hits.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_future_watch_completion_event_ready", 1);
   add_mapping_pair(
       map, "gateway_future_watch_completion_notifications",
-      static_cast<long>(g_gateway_runtime_counters.future_watch_completion_notifications.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.future_watch_completion_notifications.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_future_watch_completion_wakeups",
-      static_cast<long>(g_gateway_runtime_counters.future_watch_completion_wakeups.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.future_watch_completion_wakeups.load(
           std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_future_watch_timer_wakeups",
-                   static_cast<long>(g_gateway_runtime_counters.future_watch_timer_wakeups.load(
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.future_watch_timer_wakeups.load(
                        std::memory_order_relaxed)));
   gateway_add_latency_fields(map, "gateway_output_reserve",
                              g_gateway_runtime_counters.output_reserve_ns_total,
@@ -2706,80 +2708,80 @@ mapping_t *gateway_status_internal() {
                              g_gateway_runtime_counters.future_watch_end_to_end_samples);
   add_mapping_pair(
       map, "gateway_future_watch_main_completion_thread_cpu_total_us",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.future_watch_main_completion_thread_cpu_ns_total.load(
               std::memory_order_relaxed) /
           1000));
   add_mapping_pair(
       map, "gateway_future_watch_main_completion_thread_cpu_unavailable",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.future_watch_main_completion_thread_cpu_unavailable.load(
               std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_raw_writes_sent",
-                   static_cast<long>(g_gateway_runtime_counters.raw_writes_sent.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.raw_writes_sent.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_raw_writes_failed",
-                   static_cast<long>(g_gateway_runtime_counters.raw_writes_failed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.raw_writes_failed.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_raw_write_backpressure_rejected",
-      static_cast<long>(g_gateway_runtime_counters.raw_write_backpressure_rejected.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.raw_write_backpressure_rejected.load(
           std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_write_buffer_limit_bytes",
-                   static_cast<long>(gateway_write_buffer_limit()));
+                   static_cast<LPC_INT>(gateway_write_buffer_limit()));
   add_mapping_pair(
       map, "gateway_master_tcp_nodelay_enabled",
-      static_cast<long>(g_gateway_runtime_counters.master_tcp_nodelay_enabled.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_tcp_nodelay_enabled.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_master_tcp_nodelay_failed",
-      static_cast<long>(g_gateway_runtime_counters.master_tcp_nodelay_failed.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_tcp_nodelay_failed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_main_drain_runs",
-                   static_cast<long>(g_gateway_runtime_counters.main_drain_runs.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_runs.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_tasks_total",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_tasks_total.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_tasks_total.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_tasks_max",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_tasks_max.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_tasks_max.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_budget_hits",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_budget_hits.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_budget_hits.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_scheduled",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_scheduled.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_scheduled.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_coalesced",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_coalesced.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_coalesced.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_executed",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_executed.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_main_drain_deferred_task_budget",
                    kGatewayDeferredMainDrainBudget);
   add_mapping_pair(
       map, "gateway_main_drain_deferred_base_wall_budget_us",
-      static_cast<long>(kGatewayDeferredMainDrainBaseWallBudget.count() * 1000));
+      static_cast<LPC_INT>(kGatewayDeferredMainDrainBaseWallBudget.count() * 1000));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_backlog_wall_budget_us",
-      static_cast<long>(kGatewayDeferredMainDrainBacklogWallBudget.count() * 1000));
+      static_cast<LPC_INT>(kGatewayDeferredMainDrainBacklogWallBudget.count() * 1000));
   add_mapping_pair(map, "gateway_main_drain_deferred_backlog_threshold",
                    kGatewayDeferredMainDrainBacklogThreshold);
   add_mapping_pair(
       map, "gateway_main_drain_deferred_backlog_boosted",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_backlog_boosted.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_backlog_boosted.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_tasks_total",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_tasks_total.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_tasks_total.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_tasks_max",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_tasks_max.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_tasks_max.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_wall_samples",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_wall_samples.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_wall_samples.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_wall_total_us",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_wall_ns_total.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_wall_ns_total.load(
                             std::memory_order_relaxed) /
                         1000));
   add_mapping_pair(
@@ -2791,19 +2793,19 @@ mapping_t *gateway_status_internal() {
       gateway_max_us(g_gateway_runtime_counters.main_drain_deferred_wall_ns_max));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_wall_budget_yields",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_wall_budget_yields.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_wall_budget_yields.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_task_budget_yields",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_task_budget_yields.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_task_budget_yields.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_remaining_samples",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_remaining_samples.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_remaining_samples.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_remaining_total",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_remaining_total.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_remaining_total.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_remaining_avg",
@@ -2811,41 +2813,41 @@ mapping_t *gateway_status_internal() {
                         g_gateway_runtime_counters.main_drain_deferred_remaining_samples));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_remaining_max",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_remaining_max.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_remaining_max.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_main_task_wall_max_us",
       gateway_max_us(g_gateway_runtime_counters.main_drain_deferred_main_task_wall_ns_max));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_main_tasks_exceeding_wall_budget",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.main_drain_deferred_main_tasks_exceeding_wall_budget.load(
               std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_read_batch_drain_task_budget",
                    kGatewayReadBatchMainDrainBudget);
   add_mapping_pair(
       map, "gateway_read_batch_drain_wall_budget_us",
-      static_cast<long>(kGatewayReadBatchMainDrainWallBudget.count() * 1000));
+      static_cast<LPC_INT>(kGatewayReadBatchMainDrainWallBudget.count() * 1000));
   add_mapping_pair(
       map, "gateway_read_batch_drain_runs",
-      static_cast<long>(g_gateway_runtime_counters.read_batch_drain_runs.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_batch_drain_runs.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_batch_drain_tasks_total",
-      static_cast<long>(g_gateway_runtime_counters.read_batch_drain_tasks_total.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_batch_drain_tasks_total.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_batch_drain_tasks_max",
-      static_cast<long>(g_gateway_runtime_counters.read_batch_drain_tasks_max.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_batch_drain_tasks_max.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_batch_drain_backlog_rescheduled",
-      static_cast<long>(g_gateway_runtime_counters.read_batch_drain_backlog_rescheduled.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_batch_drain_backlog_rescheduled.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_batch_drain_wall_samples",
-      static_cast<long>(g_gateway_runtime_counters.read_batch_drain_wall_samples.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_batch_drain_wall_samples.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_batch_drain_wall_total_us",
-      static_cast<long>(g_gateway_runtime_counters.read_batch_drain_wall_ns_total.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_batch_drain_wall_ns_total.load(
                             std::memory_order_relaxed) /
                         1000));
   add_mapping_pair(
@@ -2857,19 +2859,19 @@ mapping_t *gateway_status_internal() {
       gateway_max_us(g_gateway_runtime_counters.read_batch_drain_wall_ns_max));
   add_mapping_pair(
       map, "gateway_read_batch_drain_wall_budget_yields",
-      static_cast<long>(g_gateway_runtime_counters.read_batch_drain_wall_budget_yields.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_batch_drain_wall_budget_yields.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_batch_drain_task_budget_yields",
-      static_cast<long>(g_gateway_runtime_counters.read_batch_drain_task_budget_yields.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_batch_drain_task_budget_yields.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_batch_drain_remaining_samples",
-      static_cast<long>(g_gateway_runtime_counters.read_batch_drain_remaining_samples.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_batch_drain_remaining_samples.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_batch_drain_remaining_total",
-      static_cast<long>(g_gateway_runtime_counters.read_batch_drain_remaining_total.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_batch_drain_remaining_total.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_batch_drain_remaining_avg",
@@ -2877,106 +2879,106 @@ mapping_t *gateway_status_internal() {
                         g_gateway_runtime_counters.read_batch_drain_remaining_samples));
   add_mapping_pair(
       map, "gateway_read_batch_drain_remaining_max",
-      static_cast<long>(g_gateway_runtime_counters.read_batch_drain_remaining_max.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_batch_drain_remaining_max.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_batch_drain_main_task_wall_max_us",
       gateway_max_us(g_gateway_runtime_counters.read_batch_drain_main_task_wall_ns_max));
   add_mapping_pair(
       map, "gateway_read_batch_drain_main_tasks_exceeding_wall_budget",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.read_batch_drain_main_tasks_exceeding_wall_budget.load(
               std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_read_dispatch_budget", kGatewayReadFrameBudget);
   add_mapping_pair(
       map, "gateway_read_dispatch_runs",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_runs.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_runs.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_dispatch_frames_total",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_frames_total.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_frames_total.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_dispatch_frames_max",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_frames_max.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_frames_max.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_dispatch_budget_hits",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_budget_hits.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_budget_hits.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_dispatch_deferred_scheduled",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_deferred_scheduled.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_deferred_scheduled.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_dispatch_deferred_coalesced",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_deferred_coalesced.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_deferred_coalesced.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_dispatch_deferred_executed",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_deferred_executed.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_deferred_executed.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_dispatch_input_paused",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_input_paused.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_input_paused.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_dispatch_input_resumed",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_input_resumed.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_input_resumed.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_dispatch_buffer_compactions",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_buffer_compactions.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_buffer_compactions.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_dispatch_buffer_compacted_bytes",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_buffer_compacted_bytes.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_buffer_compacted_bytes.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_dispatch_front_shift_bytes_avoided",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_front_shift_bytes_avoided.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_front_shift_bytes_avoided.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_dispatch_buffer_peak_bytes",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_buffer_peak_bytes.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_buffer_peak_bytes.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_dispatch_frame_length_rejected",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_frame_length_rejected.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_frame_length_rejected.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_dispatch_buffer_limit_rejected",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_buffer_limit_rejected.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_buffer_limit_rejected.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_read_dispatch_native_bytes_deferred",
-      static_cast<long>(g_gateway_runtime_counters.read_dispatch_native_bytes_deferred.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.read_dispatch_native_bytes_deferred.load(
           std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_read_buffer_limit_bytes",
-                   static_cast<long>(gateway_read_buffer_limit()));
+                   static_cast<LPC_INT>(gateway_read_buffer_limit()));
   add_mapping_pair(map, "gateway_packet_size_hard_limit_bytes",
-                   static_cast<long>(kGatewayAbsoluteMaxPacketSize));
+                   static_cast<LPC_INT>(kGatewayAbsoluteMaxPacketSize));
   add_mapping_pair(
       map, "gateway_receive_inline_drain_calls",
-      static_cast<long>(g_gateway_runtime_counters.receive_inline_drain_calls.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.receive_inline_drain_calls.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_receive_deferred_drain_requests",
-      static_cast<long>(g_gateway_runtime_counters.receive_deferred_drain_requests.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.receive_deferred_drain_requests.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_receive_main_queue_depth_samples",
-      static_cast<long>(g_gateway_runtime_counters.receive_main_queue_depth_samples.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.receive_main_queue_depth_samples.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_receive_main_queue_depth_total",
-      static_cast<long>(g_gateway_runtime_counters.receive_main_queue_depth_total.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.receive_main_queue_depth_total.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_receive_main_queue_depth_avg",
       gateway_avg_value(g_gateway_runtime_counters.receive_main_queue_depth_total,
                         g_gateway_runtime_counters.receive_main_queue_depth_samples));
   add_mapping_pair(
       map, "gateway_receive_main_queue_depth_max",
-      static_cast<long>(g_gateway_runtime_counters.receive_main_queue_depth_max.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.receive_main_queue_depth_max.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_wait_samples",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_wait_samples.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_wait_samples.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_wait_total_us",
-      static_cast<long>(g_gateway_runtime_counters.main_drain_deferred_wait_ns_total.load(std::memory_order_relaxed) /
+      static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_wait_ns_total.load(std::memory_order_relaxed) /
                         1000));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_wait_avg_us",
@@ -2989,7 +2991,7 @@ mapping_t *gateway_status_internal() {
                    kGatewayDeferredMainDrainWaitTimerQueueOnly);
   add_mapping_pair(
       map, "gateway_receive_decode_samples",
-      static_cast<long>(g_gateway_runtime_counters.receive_decode_samples.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.receive_decode_samples.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_receive_decode_avg_us",
                    gateway_avg_us(g_gateway_runtime_counters.receive_decode_ns_total,
                                   g_gateway_runtime_counters.receive_decode_samples));
@@ -2997,7 +2999,7 @@ mapping_t *gateway_status_internal() {
                    gateway_max_us(g_gateway_runtime_counters.receive_decode_ns_max));
   add_mapping_pair(
       map, "gateway_receive_payload_copy_samples",
-      static_cast<long>(g_gateway_runtime_counters.receive_payload_copy_samples.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.receive_payload_copy_samples.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_receive_payload_copy_avg_us",
                    gateway_avg_us(g_gateway_runtime_counters.receive_payload_copy_ns_total,
                                   g_gateway_runtime_counters.receive_payload_copy_samples));
@@ -3005,11 +3007,11 @@ mapping_t *gateway_status_internal() {
                    gateway_max_us(g_gateway_runtime_counters.receive_payload_copy_ns_max));
   add_mapping_pair(
       map, "gateway_receive_enqueue_to_dispatch_samples",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.receive_enqueue_to_dispatch_samples.load(std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_receive_enqueue_to_dispatch_total_us",
-      static_cast<long>(g_gateway_runtime_counters.receive_enqueue_to_dispatch_ns_total.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.receive_enqueue_to_dispatch_ns_total.load(
                             std::memory_order_relaxed) /
                         1000));
   add_mapping_pair(map, "gateway_receive_enqueue_to_dispatch_avg_us",
@@ -3019,9 +3021,9 @@ mapping_t *gateway_status_internal() {
                    gateway_max_us(g_gateway_runtime_counters.receive_enqueue_to_dispatch_ns_max));
   add_mapping_pair(
       map, "gateway_receive_apply_samples",
-      static_cast<long>(g_gateway_runtime_counters.receive_apply_samples.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.receive_apply_samples.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_receive_apply_total_us",
-                   static_cast<long>(g_gateway_runtime_counters.receive_apply_ns_total.load(
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.receive_apply_ns_total.load(
                        std::memory_order_relaxed) /
                                       1000));
   add_mapping_pair(map, "gateway_receive_apply_avg_us",
@@ -3031,11 +3033,11 @@ mapping_t *gateway_status_internal() {
                    gateway_max_us(g_gateway_runtime_counters.receive_apply_ns_max));
   add_mapping_pair(
       map, "gateway_receive_apply_thread_cpu_samples",
-      static_cast<long>(g_gateway_runtime_counters.receive_apply_thread_cpu_samples.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.receive_apply_thread_cpu_samples.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_receive_apply_thread_cpu_total_us",
-      static_cast<long>(g_gateway_runtime_counters.receive_apply_thread_cpu_ns_total.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.receive_apply_thread_cpu_ns_total.load(
           std::memory_order_relaxed) /
                          1000));
   add_mapping_pair(
@@ -3047,11 +3049,11 @@ mapping_t *gateway_status_internal() {
       gateway_max_us(g_gateway_runtime_counters.receive_apply_thread_cpu_ns_max));
   add_mapping_pair(
       map, "gateway_receive_apply_thread_cpu_unavailable",
-      static_cast<long>(g_gateway_runtime_counters.receive_apply_thread_cpu_unavailable.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.receive_apply_thread_cpu_unavailable.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_command_enqueue_to_dispatch_samples",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.command_enqueue_to_dispatch_samples.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_command_enqueue_to_dispatch_avg_us",
                    gateway_avg_us(g_gateway_runtime_counters.command_enqueue_to_dispatch_ns_total,
@@ -3060,7 +3062,7 @@ mapping_t *gateway_status_internal() {
                    gateway_max_us(g_gateway_runtime_counters.command_enqueue_to_dispatch_ns_max));
   add_mapping_pair(
       map, "gateway_command_execute_samples",
-      static_cast<long>(g_gateway_runtime_counters.command_execute_samples.load(std::memory_order_relaxed)));
+      static_cast<LPC_INT>(g_gateway_runtime_counters.command_execute_samples.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_command_execute_avg_us",
                    gateway_avg_us(g_gateway_runtime_counters.command_execute_ns_total,
                                   g_gateway_runtime_counters.command_execute_samples));
@@ -3068,74 +3070,74 @@ mapping_t *gateway_status_internal() {
                    gateway_max_us(g_gateway_runtime_counters.command_execute_ns_max));
   add_mapping_pair(
       map, "gateway_reply_enqueue_to_dispatch_samples",
-      static_cast<long>(g_gateway_runtime_counters.reply_enqueue_to_dispatch_samples.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.reply_enqueue_to_dispatch_samples.load(
           std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_reply_enqueue_to_dispatch_avg_us",
                    gateway_avg_us(g_gateway_runtime_counters.reply_enqueue_to_dispatch_ns_total,
                                   g_gateway_runtime_counters.reply_enqueue_to_dispatch_samples));
   add_mapping_pair(map, "gateway_reply_enqueue_to_dispatch_total_us",
-                   static_cast<long>(g_gateway_runtime_counters.reply_enqueue_to_dispatch_ns_total.load(
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.reply_enqueue_to_dispatch_ns_total.load(
                                          std::memory_order_relaxed) /
                                      1000));
   add_mapping_pair(map, "gateway_reply_enqueue_to_dispatch_max_us",
                    gateway_max_us(g_gateway_runtime_counters.reply_enqueue_to_dispatch_ns_max));
   add_mapping_pair(
       map, "gateway_reply_execute_samples",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.reply_execute_samples.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_reply_execute_avg_us",
                    gateway_avg_us(g_gateway_runtime_counters.reply_execute_ns_total,
                                   g_gateway_runtime_counters.reply_execute_samples));
   add_mapping_pair(map, "gateway_reply_execute_total_us",
-                   static_cast<long>(g_gateway_runtime_counters.reply_execute_ns_total.load(
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.reply_execute_ns_total.load(
                                          std::memory_order_relaxed) /
                                      1000));
   add_mapping_pair(map, "gateway_reply_execute_max_us",
                    gateway_max_us(g_gateway_runtime_counters.reply_execute_ns_max));
   add_mapping_pair(
       map, "gateway_output_enqueue_to_dispatch_samples",
-      static_cast<long>(g_gateway_runtime_counters.output_enqueue_to_dispatch_samples.load(
+      static_cast<LPC_INT>(g_gateway_runtime_counters.output_enqueue_to_dispatch_samples.load(
           std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_output_enqueue_to_dispatch_avg_us",
                    gateway_avg_us(g_gateway_runtime_counters.output_enqueue_to_dispatch_ns_total,
                                   g_gateway_runtime_counters.output_enqueue_to_dispatch_samples));
   add_mapping_pair(map, "gateway_output_enqueue_to_dispatch_total_us",
-                   static_cast<long>(g_gateway_runtime_counters.output_enqueue_to_dispatch_ns_total.load(
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.output_enqueue_to_dispatch_ns_total.load(
                                          std::memory_order_relaxed) /
                                      1000));
   add_mapping_pair(map, "gateway_output_enqueue_to_dispatch_max_us",
                    gateway_max_us(g_gateway_runtime_counters.output_enqueue_to_dispatch_ns_max));
   add_mapping_pair(
       map, "gateway_output_execute_samples",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.output_execute_samples.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_output_execute_avg_us",
                    gateway_avg_us(g_gateway_runtime_counters.output_execute_ns_total,
                                   g_gateway_runtime_counters.output_execute_samples));
   add_mapping_pair(map, "gateway_output_execute_total_us",
-                   static_cast<long>(g_gateway_runtime_counters.output_execute_ns_total.load(
+                   static_cast<LPC_INT>(g_gateway_runtime_counters.output_execute_ns_total.load(
                                          std::memory_order_relaxed) /
                                      1000));
   add_mapping_pair(map, "gateway_output_execute_max_us",
                    gateway_max_us(g_gateway_runtime_counters.output_execute_ns_max));
   add_mapping_pair(
       map, "gateway_message_event_template_cache_hits",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.message_event_template_cache_hits.load(
               std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_message_event_template_cache_misses",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.message_event_template_cache_misses.load(
               std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_message_event_template_cache_evictions",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.message_event_template_cache_evictions.load(
               std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_message_event_template_cache_bypasses",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.message_event_template_cache_bypasses.load(
               std::memory_order_relaxed)));
   gateway_add_latency_fields(
@@ -3170,7 +3172,7 @@ mapping_t *gateway_status_internal() {
               .room_output_projection_worker_thread_cpu_samples));
   add_mapping_pair(
       map, "gateway_room_output_projection_worker_thread_cpu_unavailable",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters
               .room_output_projection_worker_thread_cpu_unavailable.load(
                   std::memory_order_relaxed)));
@@ -3191,7 +3193,7 @@ mapping_t *gateway_status_internal() {
               .room_output_projection_inline_thread_cpu_samples));
   add_mapping_pair(
       map, "gateway_room_output_projection_inline_thread_cpu_unavailable",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters
               .room_output_projection_inline_thread_cpu_unavailable.load(
                   std::memory_order_relaxed)));
@@ -3202,17 +3204,17 @@ mapping_t *gateway_status_internal() {
       g_gateway_runtime_counters.room_output_projection_publish_samples);
   add_mapping_pair(
       map, "gateway_room_output_projection_submitted",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.room_output_projection_submitted.load(
               std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_room_output_projection_completed",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.room_output_projection_completed.load(
               std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_room_output_projection_released",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.room_output_projection_released.load(
               std::memory_order_relaxed)));
   add_mapping_pair(map, "gateway_room_output_projection_pending",
@@ -3225,42 +3227,42 @@ mapping_t *gateway_status_internal() {
                    gateway_room_output_projection_retry_count());
   add_mapping_pair(
       map, "gateway_room_output_projection_inline_fallbacks",
-      static_cast<long>(g_gateway_runtime_counters
+      static_cast<LPC_INT>(g_gateway_runtime_counters
                             .room_output_projection_inline_fallbacks.load(
                                 std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_room_output_projection_failed",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           g_gateway_runtime_counters.room_output_projection_failed.load(
               std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_room_output_projection_forced_cleanup",
-      static_cast<long>(g_gateway_runtime_counters
+      static_cast<LPC_INT>(g_gateway_runtime_counters
                             .room_output_projection_forced_cleanup.load(
                                 std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_room_output_projection_retry_enqueued",
-      static_cast<long>(g_gateway_runtime_counters
+      static_cast<LPC_INT>(g_gateway_runtime_counters
                             .room_output_projection_retry_enqueued.load(
                                 std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_room_output_projection_retry_attempted",
-      static_cast<long>(g_gateway_runtime_counters
+      static_cast<LPC_INT>(g_gateway_runtime_counters
                             .room_output_projection_retry_attempted.load(
                                 std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_room_output_projection_retry_exhausted",
-      static_cast<long>(g_gateway_runtime_counters
+      static_cast<LPC_INT>(g_gateway_runtime_counters
                             .room_output_projection_retry_exhausted.load(
                                 std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_room_output_projection_retry_budget_hits",
-      static_cast<long>(g_gateway_runtime_counters
+      static_cast<LPC_INT>(g_gateway_runtime_counters
                             .room_output_projection_retry_budget_hits.load(
                                 std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_room_output_projection_retry_wall_budget_hits",
-      static_cast<long>(g_gateway_runtime_counters
+      static_cast<LPC_INT>(g_gateway_runtime_counters
                             .room_output_projection_retry_wall_budget_hits.load(
                                 std::memory_order_relaxed)));
   add_mapping_string(map, "gateway_io_boundary", "main_thread_io_adapter");

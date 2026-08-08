@@ -4326,6 +4326,36 @@ TEST_F(DriverTest, TestOwnerStatusMappingsUseLpcIntegerWidth) {
       "#ifdef DEBUGMALLOC_EXTENSIONS");
 }
 
+TEST_F(DriverTest, TestGatewayStatusMappingsUseLpcIntegerWidth) {
+  const auto gateway_source =
+      read_source_file_for_test("../src/packages/gateway/gateway.cc");
+  const auto helper_name = gateway_source.find("gateway_avg_us(");
+  const auto helper_start = gateway_source.rfind('\n', helper_name);
+  const auto helper_end =
+      gateway_source.find("void gateway_record_main_drain(", helper_name);
+  const auto status_start =
+      gateway_source.find("mapping_t *gateway_status_internal()");
+  const auto status_end =
+      gateway_source.find("void f_is_gateway_user()", status_start);
+
+  ASSERT_NE(helper_name, std::string::npos);
+  ASSERT_NE(helper_start, std::string::npos);
+  ASSERT_NE(helper_end, std::string::npos);
+  ASSERT_GT(helper_end, helper_start);
+  ASSERT_NE(status_start, std::string::npos);
+  ASSERT_NE(status_end, std::string::npos);
+  ASSERT_GT(status_end, status_start);
+  const auto helper_body =
+      gateway_source.substr(helper_start + 1, helper_end - helper_start - 1);
+  const auto status_body =
+      gateway_source.substr(status_start, status_end - status_start);
+  EXPECT_EQ(helper_body.find("static_cast<long>"), std::string::npos);
+  EXPECT_EQ(helper_body.find("long gateway_"), std::string::npos);
+  EXPECT_NE(helper_body.find("LPC_INT gateway_avg_us"), std::string::npos);
+  EXPECT_EQ(status_body.find("static_cast<long>"), std::string::npos);
+  EXPECT_NE(status_body.find("static_cast<LPC_INT>"), std::string::npos);
+}
+
 TEST_F(DriverTest, TestOwnerDiagnosticMappingsUseLpcIntegerWidth) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   auto assert_mapping_uses_lpc_width = [&](const char* start_marker,
