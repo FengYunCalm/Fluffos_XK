@@ -3923,11 +3923,12 @@ VMOwnerStringTaskSubmission vm_owner_submit_frozen_string_task(
                                                    std::memory_order_relaxed);
         }
       }
-      if (!queued) {
-        complete_owner_future_for_task_locked(
-            task_id, "failed", "", "owner scheduler backpressure");
-      }
     }
+  }
+
+  if (future_registered && !queued) {
+    complete_owner_future_for_task_locked(
+        task_id, "failed", "", "owner scheduler backpressure");
   }
 
   submission.queued = queued;
@@ -4158,11 +4159,9 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
     owner_future_store.insert(std::move(future));
     append_owner_task_trace(task, "queued");
     queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
-    if (!queued) {
-      complete_owner_future_for_task_locked(task_id, "failed", "", "owner scheduler backpressure");
-    }
   }
   if (!queued) {
+    complete_owner_future_for_task_locked(task_id, "failed", "", "owner scheduler backpressure");
     release_owner_task_target(&task);
   }
   if (notify_owner_thread) {
@@ -4279,11 +4278,9 @@ mapping_t *vm_owner_ordinary_lpc_task(object_t *target, const char *owner_id, co
     owner_future_store.insert(std::move(future));
     append_owner_task_trace(task, "queued");
     queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
-    if (!queued) {
-      complete_owner_future_for_task_locked(task_id, "failed", "", "owner scheduler backpressure");
-    }
   }
   if (!queued) {
+    complete_owner_future_for_task_locked(task_id, "failed", "", "owner scheduler backpressure");
     release_owner_task_target(&task);
   }
   if (notify_owner_thread) {
