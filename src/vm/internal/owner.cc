@@ -4485,6 +4485,24 @@ VMOwnerMainDrainResult vm_owner_drain_main_tasks_with_budget(
     }
     owner_main_draining = true;
   }
+  // Engine callback errors unwind through C++ exceptions, so keep the drain
+  // and per-task coordinator lifecycle balanced on both normal and error paths.
+  struct OwnerMainDrainResetGuard {
+    bool armed_{true};
+
+    ~OwnerMainDrainResetGuard() {
+      if (!armed_) {
+        return;
+      }
+      std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+      owner_main_draining = false;
+    }
+
+    void finish_locked() {
+      owner_main_draining = false;
+      armed_ = false;
+    }
+  } drain_reset_guard;
 
   auto started_at_ns = owner_now_ns();
   auto budget = limit <= 0 ? kOwnerExecutorTaskBudget : limit;
@@ -4502,6 +4520,26 @@ VMOwnerMainDrainResult vm_owner_drain_main_tasks_with_budget(
         break;
       }
     }
+    struct OwnerMainTaskReleaseGuard {
+      explicit OwnerMainTaskReleaseGuard(OwnerMainTask *task) : task_(task) {}
+
+      ~OwnerMainTaskReleaseGuard() { finish(); }
+
+      void finish() {
+        if (active_owner_held_) {
+          active_owner_held_ = false;
+          finish_active_main_owner_task(task_->owner_id);
+        }
+        if (target_ref_held_) {
+          target_ref_held_ = false;
+          release_owner_main_task_target(task_);
+        }
+      }
+
+      OwnerMainTask *task_;
+      bool active_owner_held_{true};
+      bool target_ref_held_{true};
+    } task_release_guard(&task);
     auto task_started_at_ns = owner_now_ns();
 
     auto *target = task.target;
@@ -4561,8 +4599,7 @@ VMOwnerMainDrainResult vm_owner_drain_main_tasks_with_budget(
     }
 
     dispatched++;
-    finish_active_main_owner_task(task.owner_id);
-    release_owner_main_task_target(&task);
+    task_release_guard.finish();
     auto task_elapsed_ns = owner_now_ns() - task_started_at_ns;
     result.max_main_task_elapsed_ns = std::max(
         result.max_main_task_elapsed_ns, task_elapsed_ns);
@@ -4590,7 +4627,7 @@ VMOwnerMainDrainResult vm_owner_drain_main_tasks_with_budget(
     if (result.task_budget_yielded || result.wall_budget_yielded) {
       owner_main_budget_yields.fetch_add(1, std::memory_order_relaxed);
     }
-    owner_main_draining = false;
+    drain_reset_guard.finish_locked();
   }
   return result;
 }

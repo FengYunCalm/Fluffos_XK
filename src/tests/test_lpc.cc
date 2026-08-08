@@ -5094,8 +5094,17 @@ TEST_F(DriverTest,
           if (lock_pos == std::string::npos) {
             break;
           }
-          const auto lock_scope_start = body.rfind('{', lock_pos);
-          ASSERT_NE(lock_scope_start, std::string::npos) << start_marker;
+          std::vector<size_t> open_scopes;
+          for (size_t i = 0; i < lock_pos; ++i) {
+            if (body[i] == '{') {
+              open_scopes.push_back(i);
+            } else if (body[i] == '}') {
+              ASSERT_FALSE(open_scopes.empty()) << start_marker;
+              open_scopes.pop_back();
+            }
+          }
+          ASSERT_FALSE(open_scopes.empty()) << start_marker;
+          const auto lock_scope_start = open_scopes.back();
 
           size_t depth = 0;
           size_t lock_scope_end = std::string::npos;
@@ -5112,12 +5121,13 @@ TEST_F(DriverTest,
             }
           }
           ASSERT_NE(lock_scope_end, std::string::npos) << start_marker;
+          ASSERT_GT(lock_scope_end, lock_pos) << start_marker;
           const auto locked_body = body.substr(
-              lock_scope_start, lock_scope_end - lock_scope_start);
+              lock_pos, lock_scope_end - lock_pos);
           EXPECT_EQ(locked_body.find("append_owner_task_trace("),
                     std::string::npos)
               << start_marker;
-          search_pos = lock_scope_end;
+          search_pos = lock_pos + 1;
           ++lock_count;
         }
         EXPECT_GT(lock_count, 0) << start_marker;
@@ -7037,6 +7047,61 @@ TEST_F(DriverTest, TestVmOwnerMainQueueDispatchesWithOwnerScope) {
 
   vm_owner_clear_id(obj);
   destruct_object(obj);
+}
+
+TEST_F(DriverTest, TestVmOwnerMainDrainRecoversAfterCallbackException) {
+  current_object = master_ob;
+  ASSERT_EQ(vm_owner_drain_main_tasks(1024), 0);
+  object_t* first = clone_object_for_test("single/void");
+  object_t* second = clone_object_for_test("single/void");
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  vm_owner_set_id(first, "owner/test/main-exception/first");
+  vm_owner_set_id(second, "owner/test/main-exception/second");
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  const auto first_ref_before = first->ref;
+  bool second_ran = false;
+  ASSERT_GT(vm_owner_enqueue_main_task(
+                first, "unit_main", "throws",
+                [] { throw "owner main callback test"; }),
+            0u);
+  ASSERT_GT(vm_owner_enqueue_main_task(
+                second, "unit_main", "after-throw",
+                [&] { second_ran = true; }),
+            0u);
+  ASSERT_EQ(first->ref, first_ref_before + 1);
+
+  bool caught = false;
+  try {
+    vm_owner_drain_main_tasks(1);
+  } catch (const char* message) {
+    caught = true;
+    EXPECT_STREQ(message, "owner main callback test");
+  }
+  ASSERT_TRUE(caught);
+  EXPECT_EQ(first->ref, first_ref_before);
+
+  auto* after_failure = vm_owner_thread_status();
+  EXPECT_EQ(mapping_number(after_failure, "main_active_owners"), 0);
+  free_mapping(after_failure);
+  EXPECT_EQ(vm_owner_drain_main_tasks(1), 1);
+  EXPECT_TRUE(second_ran);
+  EXPECT_EQ(vm_owner_main_queue_total_depth(), 0);
+
+  auto* after_recovery = vm_owner_thread_status();
+  EXPECT_EQ(mapping_number(after_recovery, "main_active_owners"), 0);
+  free_mapping(after_recovery);
+
+  vm_owner_clear_id(first);
+  vm_owner_clear_id(second);
+  destruct_object(first);
+  destruct_object(second);
 }
 
 TEST_F(DriverTest, TestVmOwnerMainDrainWallBudgetYieldsAfterFirstTask) {
