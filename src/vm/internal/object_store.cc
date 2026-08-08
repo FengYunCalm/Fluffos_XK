@@ -1217,16 +1217,16 @@ mapping_t *vm_object_shard_contract_mapping(const VMObjectShard &shard, const Ow
   add_mapping_string(map, "execution_model", "owner_execution_shard");
   add_mapping_string(map, "directory_model", "owner_local_object_directory");
   add_mapping_string(map, "storage_model", store_complete ? "owner_local_store" : "global_index_bridge");
-  add_mapping_pair(map, "object_directory_count", static_cast<long>(shard.object_directory.size()));
-  add_mapping_pair(map, "owner_local_record_count", static_cast<long>(shard.local_records.size()));
-  add_mapping_pair(map, "owner_local_destructed_record_count", static_cast<long>(shard.destructed_records.size()));
-  add_mapping_pair(map, "owner_local_object_ref_count", static_cast<long>(shard.local_objects.size()));
+  add_mapping_pair(map, "object_directory_count", static_cast<LPC_INT>(shard.object_directory.size()));
+  add_mapping_pair(map, "owner_local_record_count", static_cast<LPC_INT>(shard.local_records.size()));
+  add_mapping_pair(map, "owner_local_destructed_record_count", static_cast<LPC_INT>(shard.destructed_records.size()));
+  add_mapping_pair(map, "owner_local_object_ref_count", static_cast<LPC_INT>(shard.local_objects.size()));
   add_mapping_string(map, "owner_local_object_ref_source", "vm_object_shard.local_objects");
-  add_mapping_pair(map, "owner_local_object_ref_index_count", static_cast<long>(shard.local_object_index.size()));
+  add_mapping_pair(map, "owner_local_object_ref_index_count", static_cast<LPC_INT>(shard.local_object_index.size()));
   add_mapping_string(map, "owner_local_object_ref_index_source", "vm_object_shard.local_object_index");
-  add_mapping_pair(map, "owner_local_path_index_count", static_cast<long>(shard.object_path_index.size()));
+  add_mapping_pair(map, "owner_local_path_index_count", static_cast<LPC_INT>(shard.object_path_index.size()));
   add_mapping_pair(map, "owner_local_destructed_path_index_count",
-                   static_cast<long>(shard.destructed_path_index.size()));
+                   static_cast<LPC_INT>(shard.destructed_path_index.size()));
   add_mapping_pair(map, "owner_local_path_index_ready", 1);
   add_mapping_string(map, "owner_local_path_index_source", "vm_object_shard.object_path_index");
   add_mapping_string(map, "owner_local_destructed_path_index_source", "vm_object_shard.destructed_path_index");
@@ -1385,20 +1385,20 @@ array_t *object_directory_for_owner_locked(const VMObjectShard &shard) {
   return directory;
 }
 
-long execution_runnable_tasks(const ObjectExecutionShardRecord &execution) {
-  return static_cast<long>(execution.active_heartbeats.size() + execution.pending_callouts.size() +
-                           execution.pending_messages.size());
+LPC_INT execution_runnable_tasks(const ObjectExecutionShardRecord &execution) {
+  return static_cast<LPC_INT>(execution.active_heartbeats.size() + execution.pending_callouts.size() +
+                              execution.pending_messages.size());
 }
 
 mapping_t *status_record_mapping(const ObjectShardStatusRecord &status) {
   auto *map = allocate_mapping(7);
   add_mapping_string(map, "owner_id", status.owner_id.c_str());
-  add_mapping_pair(map, "objects", static_cast<long>(status.objects.size()));
-  add_mapping_pair(map, "registered", static_cast<long>(status.registered));
-  add_mapping_pair(map, "destructed", static_cast<long>(status.destructed));
-  add_mapping_pair(map, "heartbeats", static_cast<long>(status.heartbeats));
-  add_mapping_pair(map, "callouts", static_cast<long>(status.callouts));
-  add_mapping_pair(map, "messages", static_cast<long>(status.messages));
+  add_mapping_pair(map, "objects", static_cast<LPC_INT>(status.objects.size()));
+  add_mapping_pair(map, "registered", static_cast<LPC_INT>(status.registered));
+  add_mapping_pair(map, "destructed", static_cast<LPC_INT>(status.destructed));
+  add_mapping_pair(map, "heartbeats", static_cast<LPC_INT>(status.heartbeats));
+  add_mapping_pair(map, "callouts", static_cast<LPC_INT>(status.callouts));
+  add_mapping_pair(map, "messages", static_cast<LPC_INT>(status.messages));
   return map;
 }
 
@@ -1406,10 +1406,10 @@ mapping_t *execution_shard_mapping(const ObjectExecutionShardRecord &execution) 
   auto runnable_tasks = execution_runnable_tasks(execution);
   auto *map = allocate_mapping(6);
   add_mapping_string(map, "owner_id", execution.owner_id.c_str());
-  add_mapping_pair(map, "active_heartbeats", static_cast<long>(execution.active_heartbeats.size()));
-  add_mapping_pair(map, "pending_callouts", static_cast<long>(execution.pending_callouts.size()));
-  add_mapping_pair(map, "pending_messages", static_cast<long>(execution.pending_messages.size()));
-  add_mapping_pair(map, "runnable_tasks", static_cast<long>(runnable_tasks));
+  add_mapping_pair(map, "active_heartbeats", static_cast<LPC_INT>(execution.active_heartbeats.size()));
+  add_mapping_pair(map, "pending_callouts", static_cast<LPC_INT>(execution.pending_callouts.size()));
+  add_mapping_pair(map, "pending_messages", static_cast<LPC_INT>(execution.pending_messages.size()));
+  add_mapping_pair(map, "runnable_tasks", static_cast<LPC_INT>(runnable_tasks));
   add_mapping_pair(map, "executor_ready", runnable_tasks > 0 ? 1 : 0);
   return map;
 }
@@ -1425,15 +1425,15 @@ mapping_t *shard_mapping(const VMObjectShard &shard, const OwnerLocalBridgeSumma
   auto *shard_contract = vm_object_shard_contract_mapping(shard, summary);
   auto *map = allocate_mapping(48);
   add_mapping_string(map, "owner_id", shard.status.owner_id.c_str());
-  add_mapping_pair(map, "objects", static_cast<long>(shard.status.objects.size()));
-  add_mapping_pair(map, "registered", static_cast<long>(shard.status.registered));
-  add_mapping_pair(map, "destructed", static_cast<long>(shard.status.destructed));
-  add_mapping_pair(map, "heartbeats", static_cast<long>(shard.status.heartbeats));
-  add_mapping_pair(map, "active_heartbeats", static_cast<long>(shard.execution.active_heartbeats.size()));
-  add_mapping_pair(map, "callouts", static_cast<long>(shard.status.callouts));
-  add_mapping_pair(map, "pending_callouts", static_cast<long>(shard.execution.pending_callouts.size()));
-  add_mapping_pair(map, "messages", static_cast<long>(shard.status.messages));
-  add_mapping_pair(map, "pending_messages", static_cast<long>(shard.execution.pending_messages.size()));
+  add_mapping_pair(map, "objects", static_cast<LPC_INT>(shard.status.objects.size()));
+  add_mapping_pair(map, "registered", static_cast<LPC_INT>(shard.status.registered));
+  add_mapping_pair(map, "destructed", static_cast<LPC_INT>(shard.status.destructed));
+  add_mapping_pair(map, "heartbeats", static_cast<LPC_INT>(shard.status.heartbeats));
+  add_mapping_pair(map, "active_heartbeats", static_cast<LPC_INT>(shard.execution.active_heartbeats.size()));
+  add_mapping_pair(map, "callouts", static_cast<LPC_INT>(shard.status.callouts));
+  add_mapping_pair(map, "pending_callouts", static_cast<LPC_INT>(shard.execution.pending_callouts.size()));
+  add_mapping_pair(map, "messages", static_cast<LPC_INT>(shard.status.messages));
+  add_mapping_pair(map, "pending_messages", static_cast<LPC_INT>(shard.execution.pending_messages.size()));
   add_mapping_pair(map, "runnable_tasks", runnable_tasks);
   add_mapping_pair(map, "executor_ready", runnable_tasks > 0 ? 1 : 0);
   add_mapping_map(map, "vm_object_shard", shard_contract);
@@ -1443,17 +1443,17 @@ mapping_t *shard_mapping(const VMObjectShard &shard, const OwnerLocalBridgeSumma
   add_mapping_pair(map, "status_record_version", 1);
   add_mapping_pair(map, "execution_shard_ready", runnable_tasks > 0 ? 1 : 0);
   add_mapping_array(map, "object_directory", object_directory);
-  add_mapping_pair(map, "object_directory_count", static_cast<long>(object_directory->size));
-  add_mapping_pair(map, "owner_local_directory_count", static_cast<long>(shard.object_directory.size()));
-  add_mapping_pair(map, "owner_local_record_count", static_cast<long>(shard.local_records.size()));
-  add_mapping_pair(map, "owner_local_destructed_record_count", static_cast<long>(shard.destructed_records.size()));
-  add_mapping_pair(map, "owner_local_object_ref_count", static_cast<long>(shard.local_objects.size()));
+  add_mapping_pair(map, "object_directory_count", static_cast<LPC_INT>(object_directory->size));
+  add_mapping_pair(map, "owner_local_directory_count", static_cast<LPC_INT>(shard.object_directory.size()));
+  add_mapping_pair(map, "owner_local_record_count", static_cast<LPC_INT>(shard.local_records.size()));
+  add_mapping_pair(map, "owner_local_destructed_record_count", static_cast<LPC_INT>(shard.destructed_records.size()));
+  add_mapping_pair(map, "owner_local_object_ref_count", static_cast<LPC_INT>(shard.local_objects.size()));
   add_mapping_string(map, "owner_local_object_ref_source", "vm_object_shard.local_objects");
-  add_mapping_pair(map, "owner_local_object_ref_index_count", static_cast<long>(shard.local_object_index.size()));
+  add_mapping_pair(map, "owner_local_object_ref_index_count", static_cast<LPC_INT>(shard.local_object_index.size()));
   add_mapping_string(map, "owner_local_object_ref_index_source", "vm_object_shard.local_object_index");
-  add_mapping_pair(map, "owner_local_path_index_count", static_cast<long>(shard.object_path_index.size()));
+  add_mapping_pair(map, "owner_local_path_index_count", static_cast<LPC_INT>(shard.object_path_index.size()));
   add_mapping_pair(map, "owner_local_destructed_path_index_count",
-                   static_cast<long>(shard.destructed_path_index.size()));
+                   static_cast<LPC_INT>(shard.destructed_path_index.size()));
   add_mapping_pair(map, "owner_local_path_index_ready", 1);
   add_mapping_string(map, "owner_local_path_index_source", "vm_object_shard.object_path_index");
   add_mapping_string(map, "owner_local_destructed_path_index_source", "vm_object_shard.destructed_path_index");

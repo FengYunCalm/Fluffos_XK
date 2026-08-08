@@ -4489,6 +4489,45 @@ TEST_F(DriverTest, TestGatewaySessionInfoMappingsUseLpcIntegerWidth) {
             std::string::npos);
 }
 
+TEST_F(DriverTest, TestObjectStoreShardMappingsUseLpcIntegerWidth) {
+  const auto object_store_source =
+      read_source_file_for_test("../src/vm/internal/object_store.cc");
+  auto assert_mapping_uses_lpc_width = [&](const char* start_marker,
+                                           const char* end_marker) {
+    const auto start = object_store_source.find(start_marker);
+    const auto end = object_store_source.find(end_marker, start);
+
+    ASSERT_NE(start, std::string::npos) << start_marker;
+    ASSERT_NE(end, std::string::npos) << end_marker;
+    ASSERT_GT(end, start) << start_marker;
+    const auto body = object_store_source.substr(start, end - start);
+    EXPECT_EQ(body.find("static_cast<long>"), std::string::npos)
+        << start_marker;
+    EXPECT_NE(body.find("static_cast<LPC_INT>"), std::string::npos)
+        << start_marker;
+  };
+
+  assert_mapping_uses_lpc_width(
+      "mapping_t *vm_object_shard_contract_mapping(",
+      "void append_migration_trace_locked(");
+  assert_mapping_uses_lpc_width(
+      "execution_runnable_tasks(",
+      "mapping_t *status_record_mapping(");
+  assert_mapping_uses_lpc_width(
+      "mapping_t *status_record_mapping(",
+      "mapping_t *execution_shard_mapping(");
+  assert_mapping_uses_lpc_width(
+      "mapping_t *execution_shard_mapping(",
+      "mapping_t *shard_mapping(");
+  assert_mapping_uses_lpc_width(
+      "mapping_t *shard_mapping(",
+      "}  // namespace");
+  EXPECT_EQ(object_store_source.find("long execution_runnable_tasks("),
+            std::string::npos);
+  EXPECT_NE(object_store_source.find("LPC_INT execution_runnable_tasks("),
+            std::string::npos);
+}
+
 TEST_F(DriverTest, TestOwnerDiagnosticMappingsUseLpcIntegerWidth) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   auto assert_mapping_uses_lpc_width = [&](const char* start_marker,
