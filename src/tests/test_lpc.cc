@@ -4031,7 +4031,14 @@ TEST_F(DriverTest, TestPerformanceWallClockContainsCurrentThreadCpuInterval) {
     GTEST_SKIP() << "current platform lacks compatible performance clocks";
   }
 
+#ifdef _WIN32
+  // GetThreadTimes may report the next 15.625 ms tick ahead of the wall clock.
+  constexpr int64_t kTargetCpuNs = 100000000;
+  constexpr int64_t kCpuClockQuantizationAllowanceNs = 16000000;
+#else
   constexpr int64_t kTargetCpuNs = 10000000;
+  constexpr int64_t kCpuClockQuantizationAllowanceNs = 0;
+#endif
   constexpr int64_t kSafetyWallNs = 1000000000;
   volatile uint64_t accumulator = 0;
   int64_t cpu_after = cpu_before;
@@ -4047,7 +4054,8 @@ TEST_F(DriverTest, TestPerformanceWallClockContainsCurrentThreadCpuInterval) {
   ASSERT_GT(accumulator, 0u);
   ASSERT_GE(cpu_after - cpu_before, kTargetCpuNs);
   ASSERT_GE(wall_after, wall_before);
-  ASSERT_GE(wall_after - wall_before, cpu_after - cpu_before);
+  ASSERT_GE(wall_after - wall_before + kCpuClockQuantizationAllowanceNs,
+            cpu_after - cpu_before);
 }
 
 TEST_F(DriverTest, TestThreadCpuClockUsesDedicatedPerThreadSources) {
@@ -14656,14 +14664,21 @@ TEST_F(DriverTest, TestLpcVmRepresentativeWorkloadProbe) {
   object_t *probe = clone_object_for_test("single/void");
   ASSERT_NE(probe, nullptr);
 
-  push_number(8);
-  push_number(2);
+  constexpr LPC_INT kItemCount = 8;
+#ifdef _WIN32
+  // GetThreadTimes can quantize a two-iteration workload to zero.
+  constexpr LPC_INT kIterations = 256;
+#else
+  constexpr LPC_INT kIterations = 2;
+#endif
+  push_number(kItemCount);
+  push_number(kIterations);
   auto *result = safe_apply("benchmark_representative_lpc_workload", probe, 2,
                             ORIGIN_DRIVER);
   ASSERT_NE(result, nullptr);
   ASSERT_EQ(result->type, T_MAPPING);
-  ASSERT_EQ(mapping_number(result->u.map, "item_count"), 8);
-  ASSERT_EQ(mapping_number(result->u.map, "iterations"), 2);
+  ASSERT_EQ(mapping_number(result->u.map, "item_count"), kItemCount);
+  ASSERT_EQ(mapping_number(result->u.map, "iterations"), kIterations);
   ASSERT_GT(mapping_number(result->u.map, "checksum"), 0);
   ASSERT_GT(mapping_number(result->u.map, "cpu_total_ns"), 0);
 

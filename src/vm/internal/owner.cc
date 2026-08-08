@@ -335,7 +335,7 @@ void owner_record_thread_cpu(std::atomic<uint64_t> &total,
                              std::atomic<uint64_t> &unavailable,
                              int64_t started_ns) {
   auto finished_ns = get_current_thread_cpu_time_ns();
-  if (started_ns < 0 || finished_ns < started_ns) {
+  if (started_ns < 0 || finished_ns <= started_ns) {
     unavailable.fetch_add(1, std::memory_order_relaxed);
     return;
   }

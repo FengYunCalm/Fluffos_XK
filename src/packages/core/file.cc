@@ -82,8 +82,26 @@ namespace fs = ghc::filesystem;
 #define lstat(x, y) stat(x, y)
 #define link(x, y) ((-1))
 #define OS_mkdir(x, y) mkdir(x)
+using large_file_stat_t = struct _stat64;
+
+static int large_file_stat(const char *path, large_file_stat_t *st) {
+  return _stat64(path, st);
+}
+
+static int large_file_fstat(FILE *file, large_file_stat_t *st) {
+  return _fstat64(fileno(file), st);
+}
 #else
 #define OS_mkdir(x, y) mkdir(x, y)
+using large_file_stat_t = struct stat;
+
+static int large_file_stat(const char *path, large_file_stat_t *st) {
+  return stat(path, st);
+}
+
+static int large_file_fstat(FILE *file, large_file_stat_t *st) {
+  return fstat(fileno(file), st);
+}
 #endif
 
 static int match_string(char * /*match*/, char * /*str*/);
@@ -155,7 +173,7 @@ static int copy_file_unchecked(const char *from, const char *to) {
   return 1;
 }
 static int parrcmp(const void * /*p1*/, const void * /*p2*/);
-static void encode_stat(svalue_t * /*vp*/, int /*flags*/, char * /*str*/, struct stat * /*st*/);
+static void encode_stat(svalue_t * /*vp*/, int /*flags*/, char * /*str*/, large_file_stat_t * /*st*/);
 
 enum { MAX_LINES = 50 };
 
@@ -176,7 +194,7 @@ static int parrcmp(const void *p1, const void *p2) {
   return strcmp(x->u.arr->item[0].u.string, y->u.arr->item[0].u.string);
 }
 
-static void encode_stat(svalue_t *vp, int flags, char *str, struct stat *st) {
+static void encode_stat(svalue_t *vp, int flags, char *str, large_file_stat_t *st) {
   if (flags == -1) {
     array_t *v = allocate_empty_array(3);
 
@@ -229,7 +247,7 @@ array_t *get_dir(const char *path, int flags) {
   int namelen, do_match = 0;
 
   struct dirent *de;
-  struct stat st;
+  large_file_stat_t st;
   char *endtemp;
   char temppath[MAX_FNAME_SIZE + MAX_PATH_LEN + 2];
   char regexppath[MAX_FNAME_SIZE + MAX_PATH_LEN + 2];
@@ -264,7 +282,7 @@ array_t *get_dir(const char *path, int flags) {
     }
   }
 
-  if (stat(temppath, &st) < 0) {
+  if (large_file_stat(temppath, &st) < 0) {
     if (*p == '\0') {
       return nullptr;
     }
@@ -333,7 +351,7 @@ array_t *get_dir(const char *path, int flags) {
        * info.
        */
       strcpy(endtemp, de->d_name);
-      stat(temppath, &st); /* We assume it works. */
+      large_file_stat(temppath, &st); /* We assume it works. */
     }
     encode_stat(&v->item[i], flags, de->d_name, &st);
     i++;
@@ -535,7 +553,7 @@ char *read_file(const char *file, int start, int lines) {
 char *read_bytes(const char *file, LPC_INT start, LPC_INT len, int *rlen) {
   const auto max_byte_transfer = CONFIG_INT(__MAX_BYTE_TRANSFER__);
 
-  struct stat st;
+  large_file_stat_t st;
   FILE *fptr;
   char *str;
 
@@ -550,7 +568,7 @@ char *read_bytes(const char *file, LPC_INT start, LPC_INT len, int *rlen) {
   if (fptr == nullptr) {
     return nullptr;
   }
-  if (fstat(fileno(fptr), &st) == -1) {
+  if (large_file_fstat(fptr, &st) == -1) {
     fatal("Could not stat an open file.\n");
   }
   const auto file_size = static_cast<std::intmax_t>(st.st_size);
@@ -618,7 +636,7 @@ char *read_bytes(const char *file, LPC_INT start, LPC_INT len, int *rlen) {
 int write_bytes(const char *file, LPC_INT start, const char *str, std::size_t theLength) {
   const auto max_byte_transfer = CONFIG_INT(__MAX_BYTE_TRANSFER__);
 
-  struct stat st;
+  large_file_stat_t st;
   FILE *fptr;
 
   file = check_valid_path(file, current_object, "write_bytes", 1);
@@ -634,7 +652,7 @@ int write_bytes(const char *file, LPC_INT start, const char *str, std::size_t th
   if (fptr == nullptr) {
     return 0;
   }
-  if (fstat(fileno(fptr), &st) == -1) {
+  if (large_file_fstat(fptr, &st) == -1) {
     fatal("Could not stat an open file.\n");
   }
 
@@ -687,7 +705,7 @@ int write_bytes(const char *file, LPC_INT start, const char *str, std::size_t th
 }
 
 LPC_INT file_size(const char *file) {
-  struct stat st;
+  large_file_stat_t st;
   LPC_INT ret;
 
   file = check_valid_path(file, current_object, "file_size", 0);
@@ -695,7 +713,7 @@ LPC_INT file_size(const char *file) {
     return -1;
   }
 
-  if (stat(file, &st) == -1) {
+  if (large_file_stat(file, &st) == -1) {
     ret = -1;
   } else if (S_IFDIR & st.st_mode) {
     ret = -2;

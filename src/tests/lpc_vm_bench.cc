@@ -227,12 +227,31 @@ void run_dispatch_bench(Report &report) {
   auto direct = apply_cache_lookup("dummy", probe->prog);
   require(direct.funp != nullptr, "dispatch probe dummy() lookup failed");
 
+  auto run_direct_probe = [&](long iterations) {
+    error_context_t econ{};
+    save_context(&econ);
+    try {
+      for (long i = 0; i < iterations; i++) {
+        call_direct(probe, direct.runtime_index, ORIGIN_DRIVER, 0);
+        pop_stack();
+      }
+    } catch (const char *error) {
+      restore_context(&econ);
+      pop_context(&econ);
+      throw std::runtime_error(std::string("direct dispatch probe failed: ") + error);
+    } catch (...) {
+      restore_context(&econ);
+      pop_context(&econ);
+      throw;
+    }
+    pop_context(&econ);
+  };
+
   for (long i = 0; i < kWarmupIterations; i++) {
     require(safe_apply("dummy", probe, 0, ORIGIN_DRIVER) != nullptr,
             "dispatch apply warmup failed");
-    call_direct(probe, direct.runtime_index, ORIGIN_DRIVER, 0);
-    pop_stack();
   }
+  run_direct_probe(kWarmupIterations);
 
   auto apply_start = Clock::now();
   for (long i = 0; i < kMeasuredIterations; i++) {
@@ -242,10 +261,7 @@ void run_dispatch_bench(Report &report) {
   const auto apply_elapsed = elapsed_ns(apply_start);
 
   auto direct_start = Clock::now();
-  for (long i = 0; i < kMeasuredIterations; i++) {
-    call_direct(probe, direct.runtime_index, ORIGIN_DRIVER, 0);
-    pop_stack();
-  }
+  run_direct_probe(kMeasuredIterations);
   const auto direct_elapsed = elapsed_ns(direct_start);
 
   report.add("dispatch_iterations", kMeasuredIterations);
