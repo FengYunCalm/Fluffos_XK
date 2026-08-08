@@ -4398,6 +4398,54 @@ TEST_F(DriverTest, TestOwnerDebugReferenceMarkUsesCoordinatorLockBoundary) {
   EXPECT_LT(trace_pos, future_pos);
 }
 
+TEST_F(DriverTest, TestOwnerMainQueueDepthGetterUsesRuntimeLock) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  const auto start = owner_source.find("long vm_owner_main_queue_total_depth()");
+  const auto end = owner_source.find("uint64_t vm_owner_enqueue_executor_task", start);
+
+  ASSERT_NE(start, std::string::npos);
+  ASSERT_NE(end, std::string::npos);
+  ASSERT_GT(end, start);
+  const auto body = owner_source.substr(start, end - start);
+  const auto lock_pos =
+      body.find("std::lock_guard<std::mutex> lock(owner_runtime_mutex);");
+  const auto read_pos = body.find("return owner_main_queue_total_depth();");
+
+  ASSERT_NE(lock_pos, std::string::npos);
+  ASSERT_NE(read_pos, std::string::npos);
+  EXPECT_LT(lock_pos, read_pos);
+}
+
+TEST_F(DriverTest, TestOwnerDrainMailboxSnapshotsRemainingDepthUnderRuntimeLock) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  const auto start = owner_source.find("mapping_t *vm_owner_drain_mailbox(");
+  const auto end = owner_source.find("mapping_t *vm_owner_purge_mailbox(", start);
+
+  ASSERT_NE(start, std::string::npos);
+  ASSERT_NE(end, std::string::npos);
+  ASSERT_GT(end, start);
+  const auto body = owner_source.substr(start, end - start);
+  const auto snapshot_pos =
+      body.find("remaining = owner_mailbox_depth(normalized_owner_id);");
+  const auto lock_pos = body.rfind(
+      "std::lock_guard<std::mutex> lock(owner_runtime_mutex);", snapshot_pos);
+  const auto lock_scope_end = body.find("\n  }\n", snapshot_pos);
+  const auto mapping_pos = body.find("auto *map = allocate_mapping", snapshot_pos);
+
+  ASSERT_NE(snapshot_pos, std::string::npos);
+  ASSERT_NE(lock_pos, std::string::npos);
+  ASSERT_NE(lock_scope_end, std::string::npos);
+  ASSERT_NE(mapping_pos, std::string::npos);
+  EXPECT_LT(lock_pos, snapshot_pos);
+  EXPECT_LT(snapshot_pos, lock_scope_end);
+  EXPECT_LT(lock_scope_end, mapping_pos);
+  const auto mapping_body = body.substr(mapping_pos);
+  EXPECT_NE(mapping_body.find("add_mapping_pair(map, \"remaining\", remaining);"),
+            std::string::npos);
+  EXPECT_EQ(mapping_body.find("owner_mailbox_depth(normalized_owner_id)"),
+            std::string::npos);
+}
+
 TEST_F(DriverTest, TestGatewayFutureCompletionExposesMainThreadCpuCounter) {
   const auto gateway_header = read_source_file_for_test("../src/packages/gateway/gateway.h");
   const auto gateway_source =

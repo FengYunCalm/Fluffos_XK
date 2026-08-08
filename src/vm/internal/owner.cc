@@ -3763,6 +3763,7 @@ bool vm_owner_executor_available() {
 }
 
 long vm_owner_main_queue_total_depth() {
+  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
   return owner_main_queue_total_depth();
 }
 
@@ -4736,11 +4737,17 @@ mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
     release_owner_task_target(&task);
   }
 
+  long remaining;
+  {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    remaining = owner_mailbox_depth(normalized_owner_id);
+  }
+
   auto *map = allocate_mapping(7);
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
   add_mapping_pair(map, "drained", static_cast<long>(requested));
-  add_mapping_pair(map, "remaining", owner_mailbox_depth(normalized_owner_id));
+  add_mapping_pair(map, "remaining", remaining);
   add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "total_drained", static_cast<long>(total_drained.load(std::memory_order_relaxed)));
   add_mapping_array(map, "tasks", tasks);
