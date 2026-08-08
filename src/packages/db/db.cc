@@ -268,7 +268,7 @@ void f_db_commit() {
 #ifdef F_DB_CONNECT
 void f_db_connect() {
   char *errormsg = nullptr;
-  const char *user = "", *database, *host = nullptr;
+  const char *user = "", *database = "", *host = "";
   db_t *db;
   array_t *info;
   svalue_t *mret;
@@ -1182,18 +1182,10 @@ static int Postgres_execute(dbconn_t *c, const char *s) {
 
 static int Postgres_connect(dbconn_t *c, const char *host, const char *database,
                             const char *username, const char *password) {
-  int buffsize;
+  const char *keywords[] = {"host", "dbname", "user", "password", nullptr};
+  const char *values[] = {host, database, username, password, nullptr};
 
-  const char *connstr = "host = '%s' dbname = '%s' user = '%s' password = '%s'";
-  buffsize =
-      strlen(connstr) + strlen(host) + strlen(database) + strlen(username) + strlen(password);
-  char *conninfo = (char *)malloc(buffsize);
-  if (conninfo != NULL) {
-    sprintf(conninfo, connstr, host, database, username, password);
-  }
-
-  c->postgres.conn = PQconnectdb(conninfo);
-  free(conninfo);
+  c->postgres.conn = PQconnectdbParams(keywords, values, 0);
 
   if ((PQstatus(c->postgres.conn) != CONNECTION_OK)) {
     return 0;
