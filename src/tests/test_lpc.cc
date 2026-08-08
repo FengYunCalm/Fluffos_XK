@@ -17505,6 +17505,46 @@ TEST_F(DriverTest, TestGatewayFutureWatchQueueMutationIsTransactional) {
             std::string::npos);
 }
 
+TEST_F(DriverTest, TestGatewayFutureWatchLimitIsSharedAcrossWatchKinds) {
+  const auto source =
+      read_source_file_for_test("../src/packages/gateway/gateway_session.cc");
+
+  const auto limit_start =
+      source.find("bool gateway_future_watch_limit_reached()");
+  const auto limit_end =
+      source.find("void gateway_future_watch_timer_cb", limit_start);
+  ASSERT_NE(limit_start, std::string::npos);
+  ASSERT_NE(limit_end, std::string::npos);
+  const auto limit_body = source.substr(limit_start, limit_end - limit_start);
+  EXPECT_NE(limit_body.find("g_gateway_session_future_watches.size()"),
+            std::string::npos);
+  EXPECT_NE(limit_body.find("g_gateway_future_watches.size()"),
+            std::string::npos);
+  EXPECT_NE(limit_body.find("kGatewayMaxFutureWatches"), std::string::npos);
+
+  const auto session_start = source.find(
+      "int gateway_watch_session_future_for_object_internal");
+  const auto session_end = source.find(
+      "int gateway_watch_session_future_for_object(", session_start);
+  ASSERT_NE(session_start, std::string::npos);
+  ASSERT_NE(session_end, std::string::npos);
+  const auto session_body =
+      source.substr(session_start, session_end - session_start);
+  EXPECT_NE(session_body.find("gateway_future_watch_limit_reached()"),
+            std::string::npos);
+
+  const auto generic_start =
+      source.find("int gateway_watch_future_for_object");
+  const auto generic_end =
+      source.find("int gateway_process_future_watches_at", generic_start);
+  ASSERT_NE(generic_start, std::string::npos);
+  ASSERT_NE(generic_end, std::string::npos);
+  const auto generic_body =
+      source.substr(generic_start, generic_end - generic_start);
+  EXPECT_NE(generic_body.find("gateway_future_watch_limit_reached()"),
+            std::string::npos);
+}
+
 TEST_F(DriverTest,
        TestGatewayOwnerStaleNotificationDoesNotReuseWaveAfterCallback) {
   const auto source =
