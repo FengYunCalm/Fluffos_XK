@@ -135,6 +135,25 @@ TEST(OwnerFutureStoreTest, PendingTaskLookupTracksTerminalTransition) {
   ASSERT_FALSE(store.has_pending_for_task(707));
 }
 
+TEST(OwnerFutureStoreTest, PendingCountTracksRecordTransitions) {
+  OwnerFutureStore store;
+  store.insert(owner_future_store_test_record(8, 808));
+  ASSERT_EQ(store.pending_count(), 1);
+
+  store.insert(owner_future_store_test_record(8, 909));
+  ASSERT_EQ(store.pending_count(), 1);
+  ASSERT_TRUE(
+      store.complete_for_task(909, "completed", "result", "").has_value());
+  ASSERT_EQ(store.pending_count(), 0);
+
+  store.insert(owner_future_store_test_record(8, 1001));
+  ASSERT_EQ(store.pending_count(), 1);
+  ASSERT_TRUE(store.fail_terminal(8, "cancelled", true, false).changed);
+  ASSERT_EQ(store.pending_count(), 0);
+  ASSERT_TRUE(store.take(8).consumed);
+  ASSERT_EQ(store.pending_count(), 0);
+}
+
 TEST(OwnerSchedulerStateTest, RemovesOneQueuedTaskWithoutDroppingNeighbors) {
   OwnerSchedulerState state;
   const auto runnable = [](const OwnerMailboxTask &task) {
@@ -484,6 +503,23 @@ TEST_F(DriverTest, TestLpcVmProfileRecordingIsThreadLocal) {
 
 namespace {
 std::string read_source_file_for_test(const char* path);
+}
+
+TEST_F(DriverTest, TestOwnerFuturePendingCountUsesTransitionCounter) {
+  const auto header =
+      read_source_file_for_test("../src/vm/internal/owner_future_store.h");
+  const auto source =
+      read_source_file_for_test("../src/vm/internal/owner_future_store.cc");
+  const auto count_start = source.find("long OwnerFutureStore::pending_count()");
+  const auto count_end = source.find("long OwnerFutureStore::size()", count_start);
+
+  ASSERT_NE(count_start, std::string::npos);
+  ASSERT_NE(count_end, std::string::npos);
+  const auto count_body = source.substr(count_start, count_end - count_start);
+  EXPECT_NE(header.find("std::atomic<long> pending_"), std::string::npos);
+  EXPECT_NE(count_body.find("pending_.load(std::memory_order_relaxed)"),
+            std::string::npos);
+  EXPECT_EQ(count_body.find("for ("), std::string::npos);
 }
 
 TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {

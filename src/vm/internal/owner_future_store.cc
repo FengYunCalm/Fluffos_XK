@@ -14,12 +14,20 @@ void OwnerFutureStore::insert(OwnerFutureRecord record) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto future_id = record.future_id;
   auto existing = futures_.find(future_id);
+  const auto replaced_pending =
+      existing != futures_.end() && existing->second.state == "pending";
+  const auto inserted_pending = record.state == "pending";
   if (existing != futures_.end()) {
     erase_task_index_entry(existing->second.target_task_id, future_id);
   }
   auto target_task_id = record.target_task_id;
   futures_[future_id] = std::move(record);
   future_ids_by_task_.emplace(target_task_id, future_id);
+  if (inserted_pending && !replaced_pending) {
+    pending_.fetch_add(1, std::memory_order_relaxed);
+  } else if (!inserted_pending && replaced_pending) {
+    pending_.fetch_sub(1, std::memory_order_relaxed);
+  }
 }
 
 std::optional<OwnerFutureRecord> OwnerFutureStore::poll(uint64_t future_id) const {
@@ -131,6 +139,7 @@ std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_string_for_task(
     record.result.reset();
     record.native_string_result =
         std::make_shared<const std::string>(std::move(result));
+    pending_.fetch_sub(1, std::memory_order_relaxed);
     completed_.fetch_add(1, std::memory_order_relaxed);
 
     OwnerFutureCompletion completion;
@@ -161,6 +170,7 @@ OwnerFutureTerminalResult OwnerFutureStore::fail_terminal(uint64_t future_id, co
     future.timed_out = timed_out;
     future.terminal_cleanup_required = false;
     future.terminal_at_ns = owner_future_now_ns();
+    pending_.fetch_sub(1, std::memory_order_relaxed);
     failed_.fetch_add(1, std::memory_order_relaxed);
     result.changed = true;
   }
@@ -170,14 +180,7 @@ OwnerFutureTerminalResult OwnerFutureStore::fail_terminal(uint64_t future_id, co
 }
 
 long OwnerFutureStore::pending_count() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  long pending = 0;
-  for (const auto &entry : futures_) {
-    if (entry.second.state == "pending") {
-      pending++;
-    }
-  }
-  return pending;
+  return pending_.load(std::memory_order_relaxed);
 }
 
 long OwnerFutureStore::size() const {
@@ -231,6 +234,7 @@ OwnerFutureCompletion OwnerFutureStore::complete_record(OwnerFutureRecord &recor
   auto completed_with_frozen_result = record.state == "completed" && result != nullptr;
   record.result = std::move(result);
   record.native_string_result.reset();
+  pending_.fetch_sub(1, std::memory_order_relaxed);
   if (record.state == "failed") {
     failed_.fetch_add(1, std::memory_order_relaxed);
   } else {
