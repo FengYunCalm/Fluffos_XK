@@ -135,7 +135,7 @@ void add_actor_bench_result(mapping_t *map, const VMWorkerActorBenchResult &resu
   add_mapping_pair(map, "max_parallel", result.max_parallel);
   add_mapping_pair(map, "max_owner_parallel", result.max_owner_parallel);
   add_mapping_pair(map, "elapsed_ms", result.elapsed_ms);
-  add_mapping_pair(map, "checksum", static_cast<long>(result.checksum));
+  add_mapping_pair(map, "checksum", static_cast<LPC_INT>(result.checksum));
 }
 
 void add_snapshot_digest_result(mapping_t *map, const VMWorkerSnapshotDigestResult &result) {
@@ -143,9 +143,9 @@ void add_snapshot_digest_result(mapping_t *map, const VMWorkerSnapshotDigestResu
   add_mapping_string(map, "owner_key", result.owner_key.c_str());
   add_mapping_pair(map, "worker_count", result.worker_count);
   add_mapping_pair(map, "elapsed_ms", result.elapsed_ms);
-  add_mapping_pair(map, "input_bytes", static_cast<long>(result.input_bytes));
+  add_mapping_pair(map, "input_bytes", static_cast<LPC_INT>(result.input_bytes));
   add_mapping_pair(map, "repeat", result.repeat);
-  add_mapping_pair(map, "checksum", static_cast<long>(result.checksum));
+  add_mapping_pair(map, "checksum", static_cast<LPC_INT>(result.checksum));
 }
 
 void add_actor_score_result(mapping_t *map, const VMWorkerActorScoreResult &result) {
@@ -172,20 +172,20 @@ void add_combat_damage_result(mapping_t *map, const VMWorkerCombatDamageResult &
   add_mapping_pair(map, "reduction_bp", result.reduction_bp);
   add_mapping_pair(map, "critical_rate", result.critical_rate);
   add_mapping_pair(map, "critical_hit", result.critical_hit);
-  add_mapping_pair(map, "snapshot_hash", static_cast<long>(result.snapshot_hash));
-  add_mapping_pair(map, "input_hash", static_cast<long>(result.input_hash));
+  add_mapping_pair(map, "snapshot_hash", static_cast<LPC_INT>(result.snapshot_hash));
+  add_mapping_pair(map, "input_hash", static_cast<LPC_INT>(result.input_hash));
 }
 
 void add_task_envelope(mapping_t *map, const VMWorkerTaskEnvelope &envelope) {
-  add_mapping_pair(map, "task_id", static_cast<long>(envelope.task_id));
+  add_mapping_pair(map, "task_id", static_cast<LPC_INT>(envelope.task_id));
   add_mapping_string(map, "task_type", envelope.task_type.c_str());
   add_mapping_string(map, "owner_key", envelope.owner_key.c_str());
-  add_mapping_pair(map, "submitted_at_ms", static_cast<long>(envelope.submitted_at_ms));
-  add_mapping_pair(map, "deadline_at_ms", static_cast<long>(envelope.deadline_at_ms));
-  add_mapping_pair(map, "completed_at_ms", static_cast<long>(envelope.completed_at_ms));
-  add_mapping_pair(map, "expires_at_ms", static_cast<long>(envelope.expires_at_ms));
-  add_mapping_pair(map, "owner_future_id", static_cast<long>(envelope.owner_future_id));
-  add_mapping_pair(map, "input_hash", static_cast<long>(envelope.input_hash));
+  add_mapping_pair(map, "submitted_at_ms", static_cast<LPC_INT>(envelope.submitted_at_ms));
+  add_mapping_pair(map, "deadline_at_ms", static_cast<LPC_INT>(envelope.deadline_at_ms));
+  add_mapping_pair(map, "completed_at_ms", static_cast<LPC_INT>(envelope.completed_at_ms));
+  add_mapping_pair(map, "expires_at_ms", static_cast<LPC_INT>(envelope.expires_at_ms));
+  add_mapping_pair(map, "owner_future_id", static_cast<LPC_INT>(envelope.owner_future_id));
+  add_mapping_pair(map, "input_hash", static_cast<LPC_INT>(envelope.input_hash));
   add_mapping_pair(map, "timeout_ms", envelope.timeout_ms);
   add_mapping_pair(map, "ttl_ms", envelope.ttl_ms);
 }
@@ -293,15 +293,15 @@ void add_mapping_mapping(mapping_t *map, const char *key_name, mapping_t *value)
 
 mapping_t *worker_envelope_mapping(const VMWorkerTaskEnvelope &envelope) {
   auto *map = allocate_mapping(11);
-  add_mapping_pair(map, "task_id", static_cast<long>(envelope.task_id));
+  add_mapping_pair(map, "task_id", static_cast<LPC_INT>(envelope.task_id));
   add_mapping_string(map, "task_type", envelope.task_type.c_str());
   add_mapping_string(map, "owner_key", envelope.owner_key.c_str());
-  add_mapping_pair(map, "submitted_at_ms", static_cast<long>(envelope.submitted_at_ms));
-  add_mapping_pair(map, "deadline_at_ms", static_cast<long>(envelope.deadline_at_ms));
-  add_mapping_pair(map, "completed_at_ms", static_cast<long>(envelope.completed_at_ms));
-  add_mapping_pair(map, "expires_at_ms", static_cast<long>(envelope.expires_at_ms));
-  add_mapping_pair(map, "owner_future_id", static_cast<long>(envelope.owner_future_id));
-  add_mapping_pair(map, "input_hash", static_cast<long>(envelope.input_hash));
+  add_mapping_pair(map, "submitted_at_ms", static_cast<LPC_INT>(envelope.submitted_at_ms));
+  add_mapping_pair(map, "deadline_at_ms", static_cast<LPC_INT>(envelope.deadline_at_ms));
+  add_mapping_pair(map, "completed_at_ms", static_cast<LPC_INT>(envelope.completed_at_ms));
+  add_mapping_pair(map, "expires_at_ms", static_cast<LPC_INT>(envelope.expires_at_ms));
+  add_mapping_pair(map, "owner_future_id", static_cast<LPC_INT>(envelope.owner_future_id));
+  add_mapping_pair(map, "input_hash", static_cast<LPC_INT>(envelope.input_hash));
   add_mapping_pair(map, "timeout_ms", envelope.timeout_ms);
   add_mapping_pair(map, "ttl_ms", envelope.ttl_ms);
   return map;
@@ -324,7 +324,7 @@ mapping_t *worker_bench_response(mapping_t *options) {
   add_mapping_pair(result_spec, "worker_count", result.worker_count);
   add_mapping_pair(result_spec, "max_parallel", result.max_parallel);
   add_mapping_pair(result_spec, "elapsed_ms", result.elapsed_ms);
-  add_mapping_pair(result_spec, "checksum", static_cast<long>(result.checksum));
+  add_mapping_pair(result_spec, "checksum", static_cast<LPC_INT>(result.checksum));
   add_mapping_pair(result_spec, "submitted", static_cast<long>(stats.submitted));
   add_mapping_pair(result_spec, "completed", static_cast<long>(stats.completed));
   add_mapping_pair(result_spec, "active", stats.active);
@@ -464,8 +464,8 @@ mapping_t *worker_submit_response(const char *task_name, svalue_t *snapshot, map
   auto *response = allocate_mapping(7);
   add_mapping_pair(response, "success", 1);
   add_mapping_string(response, "status", "submitted");
-  add_mapping_pair(response, "task_id", static_cast<long>(task_id));
-  add_mapping_pair(response, "owner_future_id", static_cast<long>(owner_future_id));
+  add_mapping_pair(response, "task_id", static_cast<LPC_INT>(task_id));
+  add_mapping_pair(response, "owner_future_id", static_cast<LPC_INT>(owner_future_id));
   add_mapping_string(response, "task", task_name);
   add_mapping_pair(response, "timeout_ms", timeout_ms);
   add_mapping_pair(response, "ttl_ms", ttl_ms);
@@ -475,7 +475,7 @@ mapping_t *worker_submit_response(const char *task_name, svalue_t *snapshot, map
 mapping_t *worker_poll_response(uint64_t task_id) {
   auto result = vm_worker_poll_task(task_id);
   auto *response = allocate_mapping(8);
-  add_mapping_pair(response, "task_id", static_cast<long>(task_id));
+  add_mapping_pair(response, "task_id", static_cast<LPC_INT>(task_id));
   add_mapping_string(response, "status", worker_task_state_name(result.state));
   add_mapping_string(response, "task", result.type.c_str());
   auto *envelope = allocate_mapping(11);
@@ -512,7 +512,7 @@ mapping_t *worker_poll_response(uint64_t task_id) {
     add_mapping_pair(result_spec, "worker_count", result.bench.worker_count);
     add_mapping_pair(result_spec, "max_parallel", result.bench.max_parallel);
     add_mapping_pair(result_spec, "elapsed_ms", result.bench.elapsed_ms);
-    add_mapping_pair(result_spec, "checksum", static_cast<long>(result.bench.checksum));
+    add_mapping_pair(result_spec, "checksum", static_cast<LPC_INT>(result.bench.checksum));
   }
   add_mapping_pair(response, "success", 1);
   add_mapping_mapping(response, "result_spec", result_spec);
@@ -625,7 +625,7 @@ void f_vm_worker_bench() {
   add_mapping_pair(map, "worker_count", result.worker_count);
   add_mapping_pair(map, "max_parallel", result.max_parallel);
   add_mapping_pair(map, "elapsed_ms", result.elapsed_ms);
-  add_mapping_pair(map, "checksum", static_cast<long>(result.checksum));
+  add_mapping_pair(map, "checksum", static_cast<LPC_INT>(result.checksum));
   add_mapping_pair(map, "submitted", static_cast<long>(stats.submitted));
   add_mapping_pair(map, "completed", static_cast<long>(stats.completed));
   add_mapping_pair(map, "active", stats.active);

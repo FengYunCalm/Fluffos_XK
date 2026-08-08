@@ -1225,7 +1225,7 @@ static svalue_t *insert_in_mapping(mapping_t *m, const char *key) {
   return ret;
 }
 
-void add_mapping_pair(mapping_t *m, const char *key, long value) {
+void add_mapping_pair(mapping_t *m, const char *key, LPC_INT value) {
   svalue_t *s;
 
   s = insert_in_mapping(m, key);

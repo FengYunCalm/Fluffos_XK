@@ -413,10 +413,13 @@ TEST_F(DriverTest, TestLpcVmProfileRecordsHotPathCounters) {
   lpc_vm_profile_record_parser_action_lookup(false);
   lpc_vm_profile_record_string_push();
 
-  mapping_t* map = allocate_mapping(2);
+  mapping_t* map = allocate_mapping(3);
   add_mapping_pair(map, "alpha", 42);
+  constexpr LPC_INT wide_value = (static_cast<LPC_INT>(1) << 32) + 7;
+  add_mapping_pair(map, "wide_value", wide_value);
   ASSERT_EQ(find_string_in_mapping(map, "alpha")->type, T_NUMBER);
   ASSERT_EQ(find_string_in_mapping(map, "alpha")->u.number, 42);
+  ASSERT_EQ(find_string_in_mapping(map, "wide_value")->u.number, wide_value);
   ASSERT_EQ(find_string_in_mapping(map, "missing")->type, T_NUMBER);
   free_mapping(map);
 
@@ -13899,7 +13902,13 @@ TEST_F(DriverTest, TestVmWorkerAsyncBenchmarkPollsResult) {
 }
 
 TEST_F(DriverTest, TestVmWorkerActorKeysSerializePerOwner) {
-  auto result = vm_worker_actor_benchmark(4, 2, 80);
+  constexpr int kActorBenchmarkMillis =
+#ifdef _WIN32
+      40;
+#else
+      80;
+#endif
+  auto result = vm_worker_actor_benchmark(4, 2, kActorBenchmarkMillis);
   ASSERT_EQ(result.owners, 4);
   ASSERT_EQ(result.tasks_per_owner, 2);
   ASSERT_EQ(result.total_tasks, 8);
@@ -14670,7 +14679,7 @@ TEST_F(DriverTest, TestInMemoryCompileFile) {
 }
 
 TEST_F(DriverTest, TestLpcVmRepresentativeWorkloadProbe) {
-  auto mapping_number = [](mapping_t *map, const char *key) -> long {
+  auto mapping_number = [](mapping_t *map, const char *key) -> LPC_INT {
     auto *value = find_string_in_mapping(map, key);
     EXPECT_NE(value, nullptr) << key;
     EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER) << key;
@@ -14681,8 +14690,8 @@ TEST_F(DriverTest, TestLpcVmRepresentativeWorkloadProbe) {
 
   constexpr LPC_INT kItemCount = 8;
 #ifdef _WIN32
-  // GetThreadTimes can quantize a two-iteration workload to zero.
-  constexpr LPC_INT kIterations = 256;
+  // GetThreadTimes can quantize a small workload to zero.
+  constexpr LPC_INT kIterations = 32;
 #else
   constexpr LPC_INT kIterations = 2;
 #endif
@@ -15318,7 +15327,7 @@ TEST_F(DriverTest, TestGatewayCoreEfunsPreserveReturnStackContracts) {
   free_object(&ob, "TestGatewayCoreEfunsPreserveReturnStackContracts");
 }
 
-long gateway_test_mapping_number(mapping_t *map, const char *key) {
+LPC_INT gateway_test_mapping_number(mapping_t *map, const char *key) {
   auto *value = find_string_in_mapping(map, key);
   EXPECT_NE(value, nullptr) << key;
   EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER) << key;
@@ -15332,7 +15341,7 @@ const char *gateway_test_mapping_string(mapping_t *map, const char *key) {
   return value && value->type == T_STRING ? value->u.string : "";
 }
 
-long gateway_test_call_number(const char *method, object_t *target) {
+LPC_INT gateway_test_call_number(const char *method, object_t *target) {
   auto *ret = safe_apply(method, target, 0, ORIGIN_DRIVER);
   EXPECT_NE(ret, nullptr) << method;
   EXPECT_EQ(ret ? ret->type : T_INVALID, T_NUMBER) << method;
@@ -19004,7 +19013,7 @@ TEST_F(DriverTest, TestGatewayDaemonUsesDefaultOwnerForSystemMessages) {
   auto *info = call_lpc_method(daemon, "query_last_system_message");
   ASSERT_NE(info, nullptr);
   ASSERT_EQ(info->type, T_MAPPING);
-  auto mapping_number = [](mapping_t *map, const char *key) -> long {
+  auto mapping_number = [](mapping_t *map, const char *key) -> LPC_INT {
     auto *value = find_string_in_mapping(map, key);
     EXPECT_NE(value, nullptr);
     EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);

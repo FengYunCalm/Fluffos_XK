@@ -688,7 +688,7 @@ std::shared_ptr<VMFrozenValue> frozen_compute_result_mapping(const OwnerMailboxT
     if (field.is_string) {
       add_mapping_string(map, field.key.c_str(), field.string_value.c_str());
     } else {
-      add_mapping_pair(map, field.key.c_str(), static_cast<long>(field.number_value));
+      add_mapping_pair(map, field.key.c_str(), static_cast<LPC_INT>(field.number_value));
     }
   }
 
@@ -1798,10 +1798,10 @@ mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
       target_message ? message_route_contract.requires_owner_mailbox : descriptor.requires_owner_mailbox;
   const auto requires_owner_main_queue =
       target_message ? message_route_contract.requires_owner_main_queue : descriptor.requires_owner_main_queue;
-  add_mapping_pair(map, "task_id", static_cast<long>(task.task_id));
-  add_mapping_pair(map, "future_target_task_id", static_cast<long>(task.future_target_task_id));
-  add_mapping_pair(map, "sequence", static_cast<long>(task.sequence));
-  add_mapping_pair(map, "owner_epoch", static_cast<long>(task.owner_epoch));
+  add_mapping_pair(map, "task_id", static_cast<LPC_INT>(task.task_id));
+  add_mapping_pair(map, "future_target_task_id", static_cast<LPC_INT>(task.future_target_task_id));
+  add_mapping_pair(map, "sequence", static_cast<LPC_INT>(task.sequence));
+  add_mapping_pair(map, "owner_epoch", static_cast<LPC_INT>(task.owner_epoch));
   add_mapping_string(map, "owner_id", task.owner_id.c_str());
   add_mapping_string(map, "task_type", task.task_type.c_str());
   add_mapping_string(map, "task_key", task.task_key.c_str());
@@ -1833,7 +1833,7 @@ mapping_t *owner_mailbox_task_mapping(const OwnerMailboxTask &task) {
   add_mapping_string(map, "payload_policy_code", task.payload_policy.c_str());
   add_mapping_pair(map, "callback_payload_strict_required",
                    descriptor.dispatch_kind == OwnerExecutorDispatchKind::ExecutorCallback ? 1 : 0);
-  add_mapping_pair(map, "deadline_ms", static_cast<long>(task.deadline_ms));
+  add_mapping_pair(map, "deadline_ms", static_cast<LPC_INT>(task.deadline_ms));
   add_mapping_string(map, "task_contract_key", contract_key);
   add_mapping_string(map, "dispatch_kind", owner_executor_dispatch_kind_name(descriptor.dispatch_kind));
   add_mapping_string(map, "task_executor_mode", task_executor_mode);
@@ -1853,13 +1853,13 @@ mapping_t *owner_task_trace_mapping(const OwnerTaskTrace &trace) {
   auto target_status = trace.has_target_handle ? vm_object_handle_resolve_status(trace.target_handle).status
                                                : VMObjectHandleResolveStatus::kInvalidHandle;
   auto *map = allocate_mapping(61);
-  add_mapping_pair(map, "trace_id", static_cast<long>(trace.trace_id));
+  add_mapping_pair(map, "trace_id", static_cast<LPC_INT>(trace.trace_id));
   add_mapping_string(map, "trace_model", "owner_task_lifecycle_event");
-  add_mapping_pair(map, "task_id", static_cast<long>(trace.task_id));
-  add_mapping_pair(map, "sequence", static_cast<long>(trace.sequence));
-  add_mapping_pair(map, "owner_epoch", static_cast<long>(trace.owner_epoch));
+  add_mapping_pair(map, "task_id", static_cast<LPC_INT>(trace.task_id));
+  add_mapping_pair(map, "sequence", static_cast<LPC_INT>(trace.sequence));
+  add_mapping_pair(map, "owner_epoch", static_cast<LPC_INT>(trace.owner_epoch));
   add_mapping_pair(map, "manifest_version", trace.manifest_version);
-  add_mapping_pair(map, "deadline_ms", static_cast<long>(trace.deadline_ms));
+  add_mapping_pair(map, "deadline_ms", static_cast<LPC_INT>(trace.deadline_ms));
   add_mapping_string(map, "owner_id", trace.owner_id.c_str());
   add_mapping_string(map, "task_type", trace.task_type.c_str());
   add_mapping_string(map, "task_key", trace.task_key.c_str());
@@ -1893,9 +1893,9 @@ mapping_t *owner_task_trace_mapping(const OwnerTaskTrace &trace) {
                    target_status == VMObjectHandleResolveStatus::kCurrent ? 1 : 0);
   add_mapping_string(map, "target_handle_status",
                      trace.has_target_handle ? vm_object_handle_resolve_status_name(target_status) : "none");
-  add_mapping_pair(map, "target_object_id", trace.has_target_handle ? static_cast<long>(trace.target_handle.object_id) : 0);
+  add_mapping_pair(map, "target_object_id", trace.has_target_handle ? static_cast<LPC_INT>(trace.target_handle.object_id) : 0);
   add_mapping_string(map, "target_object_path", trace.has_target_handle ? trace.target_handle.object_path.c_str() : "");
-  add_mapping_pair(map, "target_owner_epoch", trace.has_target_handle ? static_cast<long>(trace.target_handle.owner_epoch) : 0);
+  add_mapping_pair(map, "target_owner_epoch", trace.has_target_handle ? static_cast<LPC_INT>(trace.target_handle.owner_epoch) : 0);
   add_mapping_string(map, "payload_key", trace.payload_key.c_str());
   add_mapping_string(map, "command_text_snapshot_policy", "owner_private_redacted_from_trace");
   add_mapping_pair(map, "command_text_snapshot_ready", trace.command_text_snapshot_ready ? 1 : 0);
@@ -2148,11 +2148,11 @@ long owner_runnable_owner_count();
 mapping_t *owner_access_trace_mapping(const OwnerAccessTrace &trace) {
   auto policy_mode = owner_access_policy_mode(trace.operation.c_str(), trace.cross_owner);
   auto *map = allocate_mapping(16);
-  add_mapping_pair(map, "access_id", static_cast<long>(trace.access_id));
+  add_mapping_pair(map, "access_id", static_cast<LPC_INT>(trace.access_id));
   add_mapping_string(map, "trace_model", "cross_owner_access_policy_event");
-  add_mapping_pair(map, "sequence", static_cast<long>(trace.sequence));
-  add_mapping_pair(map, "source_owner_epoch", static_cast<long>(trace.source_owner_epoch));
-  add_mapping_pair(map, "target_owner_epoch", static_cast<long>(trace.target_owner_epoch));
+  add_mapping_pair(map, "sequence", static_cast<LPC_INT>(trace.sequence));
+  add_mapping_pair(map, "source_owner_epoch", static_cast<LPC_INT>(trace.source_owner_epoch));
+  add_mapping_pair(map, "target_owner_epoch", static_cast<LPC_INT>(trace.target_owner_epoch));
   add_mapping_pair(map, "cross_owner", trace.cross_owner ? 1 : 0);
   add_mapping_string(map, "source_owner_id", trace.source_owner_id.c_str());
   add_mapping_string(map, "target_owner_id", trace.target_owner_id.c_str());
@@ -2173,10 +2173,10 @@ mapping_t *owner_message_trace_mapping(const OwnerMessageTrace &trace) {
   auto failed = trace.state == "failed";
   auto target_handle_current = !trace.has_target_handle || trace.target_handle_status == "current";
   auto *map = allocate_mapping(27);
-  add_mapping_pair(map, "message_id", static_cast<long>(trace.message_id));
+  add_mapping_pair(map, "message_id", static_cast<LPC_INT>(trace.message_id));
   add_mapping_string(map, "trace_model", "owner_message_lifecycle_event");
-  add_mapping_pair(map, "sequence", static_cast<long>(trace.sequence));
-  add_mapping_pair(map, "target_task_id", static_cast<long>(trace.target_task_id));
+  add_mapping_pair(map, "sequence", static_cast<LPC_INT>(trace.sequence));
+  add_mapping_pair(map, "target_task_id", static_cast<LPC_INT>(trace.target_task_id));
   add_mapping_string(map, "source_owner_id", trace.source_owner_id.c_str());
   add_mapping_string(map, "target_owner_id", trace.target_owner_id.c_str());
   add_mapping_string(map, "message_type", trace.message_type.c_str());
@@ -2205,10 +2205,10 @@ mapping_t *owner_message_trace_mapping(const OwnerMessageTrace &trace) {
 
 mapping_t *owner_commit_trace_mapping(const OwnerCommitTrace &trace) {
   auto *map = allocate_mapping(10);
-  add_mapping_pair(map, "commit_id", static_cast<long>(trace.commit_id));
+  add_mapping_pair(map, "commit_id", static_cast<LPC_INT>(trace.commit_id));
   add_mapping_string(map, "trace_model", "owner_commit_boundary_event");
-  add_mapping_pair(map, "sequence", static_cast<long>(trace.sequence));
-  add_mapping_pair(map, "message_id", static_cast<long>(trace.message_id));
+  add_mapping_pair(map, "sequence", static_cast<LPC_INT>(trace.sequence));
+  add_mapping_pair(map, "message_id", static_cast<LPC_INT>(trace.message_id));
   add_mapping_pair(map, "direct_write", trace.direct_write ? 1 : 0);
   add_mapping_string(map, "source_owner_id", trace.source_owner_id.c_str());
   add_mapping_string(map, "target_owner_id", trace.target_owner_id.c_str());
@@ -2233,8 +2233,8 @@ OwnerCommitTrace build_owner_commit_trace(const char *source_owner_id, const cha
 
 mapping_t *owner_executor_trace_mapping(const OwnerExecutorTrace &trace) {
   auto *map = allocate_mapping(18);
-  add_mapping_pair(map, "trace_id", static_cast<long>(trace.trace_id));
-  add_mapping_pair(map, "sequence", static_cast<long>(trace.sequence));
+  add_mapping_pair(map, "trace_id", static_cast<LPC_INT>(trace.trace_id));
+  add_mapping_pair(map, "sequence", static_cast<LPC_INT>(trace.sequence));
   add_mapping_string(map, "trace_model", "owner_executor_scheduler_event");
   add_mapping_string(map, "trace_schema", kOwnerExecutorTraceSchemaV2);
   add_mapping_string(map, "owner_task_manifest_schema", kOwnerTaskManifestSchemaV2);
@@ -2389,8 +2389,8 @@ mapping_t *owner_future_mapping(const OwnerFutureRecord &record) {
                                                 : VMObjectHandleResolveStatus::kCurrent;
   auto *map = allocate_mapping(29);
   add_mapping_pair(map, "success", 1);
-  add_mapping_pair(map, "future_id", static_cast<long>(record.future_id));
-  add_mapping_pair(map, "target_task_id", static_cast<long>(record.target_task_id));
+  add_mapping_pair(map, "future_id", static_cast<LPC_INT>(record.future_id));
+  add_mapping_pair(map, "target_task_id", static_cast<LPC_INT>(record.target_task_id));
   add_mapping_string(map, "source_owner_id", record.source_owner_id.c_str());
   add_mapping_string(map, "target_owner_id", record.target_owner_id.c_str());
   add_mapping_string(map, "message_type", record.message_type.c_str());
@@ -2403,9 +2403,9 @@ mapping_t *owner_future_mapping(const OwnerFutureRecord &record) {
   add_mapping_pair(map, "payload_frozen", 1);
   add_mapping_pair(map, "frozen_result",
                    record.result || record.native_string_result ? 1 : 0);
-  add_mapping_pair(map, "created_at_ms", static_cast<long>(record.created_at_ms));
-  add_mapping_pair(map, "deadline_ms", static_cast<long>(record.deadline_ms));
-  add_mapping_pair(map, "terminal_at_ns", static_cast<long>(record.terminal_at_ns));
+  add_mapping_pair(map, "created_at_ms", static_cast<LPC_INT>(record.created_at_ms));
+  add_mapping_pair(map, "deadline_ms", static_cast<LPC_INT>(record.deadline_ms));
+  add_mapping_pair(map, "terminal_at_ns", static_cast<LPC_INT>(record.terminal_at_ns));
   add_mapping_pair(map, "cancelled", record.cancelled ? 1 : 0);
   add_mapping_pair(map, "timed_out", record.timed_out ? 1 : 0);
   add_mapping_pair(map, "terminal_cleanup_required", record.terminal_cleanup_required ? 1 : 0);
@@ -2414,9 +2414,9 @@ mapping_t *owner_future_mapping(const OwnerFutureRecord &record) {
   add_mapping_pair(map, "target_handle_current",
                    target_status == VMObjectHandleResolveStatus::kCurrent ? 1 : 0);
   add_mapping_string(map, "target_handle_status", vm_object_handle_resolve_status_name(target_status));
-  add_mapping_pair(map, "target_object_id", static_cast<long>(record.target_handle.object_id));
+  add_mapping_pair(map, "target_object_id", static_cast<LPC_INT>(record.target_handle.object_id));
   add_mapping_string(map, "target_object_path", record.target_handle.object_path.c_str());
-  add_mapping_pair(map, "target_owner_epoch", static_cast<long>(record.target_handle.owner_epoch));
+  add_mapping_pair(map, "target_owner_epoch", static_cast<LPC_INT>(record.target_handle.owner_epoch));
   if (record.result) {
     add_mapping_svalue(map, "result", &record.result->value);
   }
@@ -2491,7 +2491,7 @@ mapping_t *mark_owner_future_failed_terminal(uint64_t future_id, const char *rea
   if (!result.found) {
     auto *map = allocate_mapping(11);
     add_mapping_pair(map, "success", 0);
-    add_mapping_pair(map, "future_id", static_cast<long>(future_id));
+    add_mapping_pair(map, "future_id", static_cast<LPC_INT>(future_id));
     add_mapping_string(map, "state", "unknown");
     add_mapping_string(map, "error", "unknown future");
     add_mapping_pair(map, "cancelled", cancelled ? 1 : 0);
@@ -3563,7 +3563,7 @@ uint64_t vm_owner_mismatch_checks() { return mismatch_checks.load(std::memory_or
 mapping_t *vm_owner_status(object_t *object) {
   auto *map = allocate_mapping(10);
   add_mapping_string(map, "owner_id", vm_owner_id(object));
-  add_mapping_pair(map, "owner_epoch", static_cast<long>(vm_owner_epoch(object)));
+  add_mapping_pair(map, "owner_epoch", static_cast<LPC_INT>(vm_owner_epoch(object)));
   add_mapping_string(map, "default_owner_id", kDefaultOwnerId);
   add_mapping_pair(map, "multicore_mode", vm_multicore_mode());
   add_mapping_string(map, "multicore_mode_name", vm_multicore_mode_name(vm_multicore_mode()));
@@ -3591,7 +3591,7 @@ mapping_t *vm_owner_guard(object_t *object, const char *expected_owner_id) {
   auto *map = allocate_mapping(5);
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "owner_id", vm_owner_id(object));
-  add_mapping_pair(map, "owner_epoch", static_cast<long>(vm_owner_epoch(object)));
+  add_mapping_pair(map, "owner_epoch", static_cast<LPC_INT>(vm_owner_epoch(object)));
   add_mapping_string(map, "expected_owner_id", normalized_owner_id);
   if (object && object->obname) {
     add_mapping_string(map, "object", object->obname);
@@ -3614,9 +3614,9 @@ mapping_t *vm_owner_guard_epoch(object_t *object, const char *expected_owner_id,
   auto *map = allocate_mapping(6);
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "owner_id", vm_owner_id(object));
-  add_mapping_pair(map, "owner_epoch", static_cast<long>(vm_owner_epoch(object)));
+  add_mapping_pair(map, "owner_epoch", static_cast<LPC_INT>(vm_owner_epoch(object)));
   add_mapping_string(map, "expected_owner_id", normalized_owner_id);
-  add_mapping_pair(map, "expected_owner_epoch", static_cast<long>(expected_epoch));
+  add_mapping_pair(map, "expected_owner_epoch", static_cast<LPC_INT>(expected_epoch));
   if (object && object->obname) {
     add_mapping_string(map, "object", object->obname);
   } else {
@@ -3969,7 +3969,7 @@ mapping_t *vm_owner_lpc_probe(object_t *target, const char *owner_id, const char
 
   auto *map = allocate_mapping(8);
   add_mapping_pair(map, "success", queued ? 1 : 0);
-  add_mapping_pair(map, "task_id", queued ? static_cast<long>(task_id) : 0);
+  add_mapping_pair(map, "task_id", queued ? static_cast<LPC_INT>(task_id) : 0);
   add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
   add_mapping_string(map, "task_type", "lpc_probe");
   add_mapping_string(map, "method", normalize_task_text(method, "owner_lpc_probe"));
@@ -4014,12 +4014,12 @@ mapping_t *vm_owner_lpc_canary(object_t *target, const char *owner_id, const cha
 
   auto *map = allocate_mapping(9);
   add_mapping_pair(map, "success", queued ? 1 : 0);
-  add_mapping_pair(map, "task_id", queued ? static_cast<long>(task_id) : 0);
+  add_mapping_pair(map, "task_id", queued ? static_cast<LPC_INT>(task_id) : 0);
   add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
   add_mapping_string(map, "task_type", "lpc_canary");
   add_mapping_string(map, "method", normalize_task_text(method, "owner_lpc_canary"));
   add_mapping_string(map, "target_object", target_name.c_str());
-  add_mapping_pair(map, "owner_epoch", static_cast<long>(target ? vm_owner_epoch(target) : 0));
+  add_mapping_pair(map, "owner_epoch", static_cast<LPC_INT>(target ? vm_owner_epoch(target) : 0));
   add_mapping_pair(map, "requires_owner_thread", 1);
   add_mapping_pair(map, "direct_cross_owner_write", 0);
   return map;
@@ -4043,7 +4043,7 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
     add_mapping_string(map, "task_type", "lpc_task");
     add_mapping_string(map, "method", method_name.c_str());
     add_mapping_string(map, "target_object", target_name.c_str());
-    add_mapping_pair(map, "owner_epoch", static_cast<long>(vm_owner_epoch(target)));
+    add_mapping_pair(map, "owner_epoch", static_cast<LPC_INT>(vm_owner_epoch(target)));
     add_mapping_string(map, "executor_mode", "rejected");
     add_mapping_string(map, "route", "owner_executor");
     add_mapping_string(map, "result_policy", "none");
@@ -4113,13 +4113,13 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
 
   auto *map = allocate_mapping(23);
   add_mapping_pair(map, "success", queued ? 1 : 0);
-  add_mapping_pair(map, "future_id", static_cast<long>(future_id));
-  add_mapping_pair(map, "task_id", static_cast<long>(task_id));
+  add_mapping_pair(map, "future_id", static_cast<LPC_INT>(future_id));
+  add_mapping_pair(map, "task_id", static_cast<LPC_INT>(task_id));
   add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
   add_mapping_string(map, "task_type", "lpc_task");
   add_mapping_string(map, "method", method_name.c_str());
   add_mapping_string(map, "target_object", target_name.c_str());
-  add_mapping_pair(map, "owner_epoch", static_cast<long>(target ? vm_owner_epoch(target) : 0));
+  add_mapping_pair(map, "owner_epoch", static_cast<LPC_INT>(target ? vm_owner_epoch(target) : 0));
   add_mapping_string(map, "executor_mode", descriptor ? descriptor->executor_mode : "rejected");
   add_mapping_string(map, "route", descriptor ? descriptor->route : "owner_executor");
   add_mapping_string(map, "result_policy", descriptor ? descriptor->result_policy : "none");
@@ -4164,7 +4164,7 @@ mapping_t *vm_owner_ordinary_lpc_task(object_t *target, const char *owner_id, co
     add_mapping_string(map, "task_type", "ordinary_lpc");
     add_mapping_string(map, "method", method_name.c_str());
     add_mapping_string(map, "target_object", target_name.c_str());
-    add_mapping_pair(map, "owner_epoch", static_cast<long>(target ? vm_owner_epoch(target) : 0));
+    add_mapping_pair(map, "owner_epoch", static_cast<LPC_INT>(target ? vm_owner_epoch(target) : 0));
     add_mapping_string(map, "executor_mode", "rejected");
     add_mapping_string(map, "route", "owner_executor");
     add_mapping_string(map, "result_policy", "none");
@@ -4234,14 +4234,14 @@ mapping_t *vm_owner_ordinary_lpc_task(object_t *target, const char *owner_id, co
 
   auto *map = allocate_mapping(29);
   add_mapping_pair(map, "success", queued ? 1 : 0);
-  add_mapping_pair(map, "future_id", static_cast<long>(future_id));
-  add_mapping_pair(map, "task_id", static_cast<long>(task_id));
+  add_mapping_pair(map, "future_id", static_cast<LPC_INT>(future_id));
+  add_mapping_pair(map, "task_id", static_cast<LPC_INT>(task_id));
   add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
   add_mapping_string(map, "target_owner_id", target_owner_id.c_str());
   add_mapping_string(map, "task_type", "ordinary_lpc");
   add_mapping_string(map, "method", method_name.c_str());
   add_mapping_string(map, "target_object", target_name.c_str());
-  add_mapping_pair(map, "owner_epoch", static_cast<long>(vm_owner_epoch(target)));
+  add_mapping_pair(map, "owner_epoch", static_cast<LPC_INT>(vm_owner_epoch(target)));
   add_mapping_string(map, "executor_mode", descriptor->executor_mode);
   add_mapping_string(map, "route", descriptor->route);
   add_mapping_string(map, "result_policy", "frozen_result_required");
@@ -5004,9 +5004,9 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
 
   auto *map = allocate_mapping(20);
   add_mapping_pair(map, "success", 1);
-  add_mapping_pair(map, "message_id", static_cast<long>(message_id));
-  add_mapping_pair(map, "future_id", static_cast<long>(message_id));
-  add_mapping_pair(map, "target_task_id", static_cast<long>(target_task_id));
+  add_mapping_pair(map, "message_id", static_cast<LPC_INT>(message_id));
+  add_mapping_pair(map, "future_id", static_cast<LPC_INT>(message_id));
+  add_mapping_pair(map, "target_task_id", static_cast<LPC_INT>(target_task_id));
   add_mapping_string(map, "source_owner_id", source_owner.c_str());
   add_mapping_string(map, "target_owner_id", target_owner.c_str());
   add_mapping_string(map, "message_type", normalized_type.c_str());
@@ -5022,9 +5022,9 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
   add_mapping_pair(map, "target_handle_current",
                    target_status == VMObjectHandleResolveStatus::kCurrent ? 1 : 0);
   add_mapping_string(map, "target_handle_status", vm_object_handle_resolve_status_name(target_status));
-  add_mapping_pair(map, "target_object_id", target_handle ? static_cast<long>(target_handle->object_id) : 0);
+  add_mapping_pair(map, "target_object_id", target_handle ? static_cast<LPC_INT>(target_handle->object_id) : 0);
   add_mapping_string(map, "target_object_path", target_handle ? target_handle->object_path.c_str() : "");
-  add_mapping_pair(map, "target_owner_epoch", target_handle ? static_cast<long>(target_handle->owner_epoch) : 0);
+  add_mapping_pair(map, "target_owner_epoch", target_handle ? static_cast<LPC_INT>(target_handle->owner_epoch) : 0);
   return map;
 }
 
@@ -5139,7 +5139,7 @@ mapping_t *vm_owner_future_poll(uint64_t future_id) {
   if (!record) {
     auto *map = allocate_mapping(6);
     add_mapping_pair(map, "success", 0);
-    add_mapping_pair(map, "future_id", static_cast<long>(future_id));
+    add_mapping_pair(map, "future_id", static_cast<LPC_INT>(future_id));
     add_mapping_string(map, "state", "unknown");
     add_mapping_string(map, "error", "unknown future");
     add_mapping_pair(map, "requires_owner_message_completion", 0);
@@ -5187,7 +5187,7 @@ mapping_t *vm_owner_future_take(uint64_t future_id, uint64_t *terminal_at_ns) {
   if (!result.found) {
     auto *map = allocate_mapping(7);
     add_mapping_pair(map, "success", 0);
-    add_mapping_pair(map, "future_id", static_cast<long>(future_id));
+    add_mapping_pair(map, "future_id", static_cast<LPC_INT>(future_id));
     add_mapping_string(map, "state", "unknown");
     add_mapping_string(map, "error", "unknown future");
     add_mapping_pair(map, "requires_owner_message_completion", 0);
@@ -5297,8 +5297,8 @@ mapping_t *vm_owner_record_commit_boundary(const char *source_owner_id, const ch
       build_owner_commit_trace(source_owner_id, target_owner_id, operation, message_id, state));
   auto *map = allocate_mapping(9);
   add_mapping_pair(map, "success", 1);
-  add_mapping_pair(map, "commit_id", static_cast<long>(result.commit_id));
-  add_mapping_pair(map, "message_id", static_cast<long>(result.message_id));
+  add_mapping_pair(map, "commit_id", static_cast<LPC_INT>(result.commit_id));
+  add_mapping_pair(map, "message_id", static_cast<LPC_INT>(result.message_id));
   add_mapping_pair(map, "direct_write", 0);
   add_mapping_string(map, "source_owner_id", result.source_owner_id.c_str());
   add_mapping_string(map, "target_owner_id", result.target_owner_id.c_str());

@@ -7396,7 +7396,7 @@ void f_gateway_session_info() {
   auto *session_ob = gateway_resolve_session_object(sess);
   add_mapping_string(map, "object_name", session_ob ? session_ob->obname : "");
   add_mapping_string(map, "owner_id", session_ob ? vm_owner_id(session_ob) : "");
-  add_mapping_pair(map, "owner_epoch", session_ob ? static_cast<long>(vm_owner_epoch(session_ob)) : 0);
+  add_mapping_pair(map, "owner_epoch", session_ob ? static_cast<LPC_INT>(vm_owner_epoch(session_ob)) : 0);
   add_mapping_pair(map, "session_fifo_contract_ready", 1);
   add_mapping_pair(map, "session_fifo_depth", static_cast<long>(sess->output_fifo.size()));
   long pending_reservations = 0;

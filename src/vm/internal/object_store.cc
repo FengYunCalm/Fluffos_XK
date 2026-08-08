@@ -1332,9 +1332,9 @@ void append_migration_trace_locked(const ObjectRecord &record, const std::string
 
 mapping_t *migration_trace_mapping(const ObjectMigrationRecord &trace) {
   auto *map = allocate_mapping(6);
-  add_mapping_pair(map, "migration_id", static_cast<long>(trace.migration_id));
-  add_mapping_pair(map, "object_id", static_cast<long>(trace.object_id));
-  add_mapping_pair(map, "owner_epoch", static_cast<long>(trace.owner_epoch));
+  add_mapping_pair(map, "migration_id", static_cast<LPC_INT>(trace.migration_id));
+  add_mapping_pair(map, "object_id", static_cast<LPC_INT>(trace.object_id));
+  add_mapping_pair(map, "owner_epoch", static_cast<LPC_INT>(trace.owner_epoch));
   add_mapping_string(map, "from_owner_id", trace.from_owner_id.c_str());
   add_mapping_string(map, "to_owner_id", trace.to_owner_id.c_str());
   add_mapping_string(map, "object_path", trace.object_path.c_str());
@@ -1343,9 +1343,9 @@ mapping_t *migration_trace_mapping(const ObjectMigrationRecord &trace) {
 
 mapping_t *object_record_mapping(const ObjectRecord &record) {
   auto *map = allocate_mapping(18);
-  add_mapping_pair(map, "object_id", static_cast<long>(record.object_id));
+  add_mapping_pair(map, "object_id", static_cast<LPC_INT>(record.object_id));
   add_mapping_string(map, "owner_id", record.owner_id.c_str());
-  add_mapping_pair(map, "owner_epoch", static_cast<long>(record.owner_epoch));
+  add_mapping_pair(map, "owner_epoch", static_cast<LPC_INT>(record.owner_epoch));
   add_mapping_string(map, "object_path", record.object_path.c_str());
   add_mapping_pair(map, "destructed", record.destructed ? 1 : 0);
   add_mapping_pair(map, "live", record.destructed ? 0 : 1);
@@ -1705,12 +1705,12 @@ mapping_t *vm_object_handle_status_with_intent(object_t *object, const char *per
   add_mapping_pair(map, "success", handle.valid ? 1 : 0);
   add_mapping_pair(map, "object_handle_capability_ready", 1);
   add_mapping_string(map, "capability_model", kVMObjectHandleCapabilityModelV1);
-  add_mapping_pair(map, "object_id", static_cast<long>(handle.object_id));
+  add_mapping_pair(map, "object_id", static_cast<LPC_INT>(handle.object_id));
   add_mapping_string(map, "owner_id", handle.owner_id.c_str());
-  add_mapping_pair(map, "owner_epoch", static_cast<long>(handle.owner_epoch));
+  add_mapping_pair(map, "owner_epoch", static_cast<LPC_INT>(handle.owner_epoch));
   add_mapping_string(map, "object_path", handle.object_path.c_str());
   add_mapping_string(map, "permission_intent", handle.permission_intent.c_str());
-  add_mapping_pair(map, "snapshot_version", static_cast<long>(handle.snapshot_version));
+  add_mapping_pair(map, "snapshot_version", static_cast<LPC_INT>(handle.snapshot_version));
   add_mapping_pair(map, "capability_epoch_guard", handle.owner_epoch == handle.snapshot_version ? 1 : 0);
   add_mapping_pair(map, "valid", handle.valid ? 1 : 0);
   add_mapping_pair(map, "current", status.status == VMObjectHandleResolveStatus::kCurrent ? 1 : 0);
@@ -1992,7 +1992,7 @@ mapping_t *vm_object_store_status() {
   add_mapping_pair(map, "owner_shards", static_cast<long>(owner_shards.size()));
   add_mapping_string(map, "default_owner_id", vm_owner_default_id());
   add_mapping_pair(map, "migration_count",
-                   static_cast<long>(next_migration_id.load(std::memory_order_relaxed) - 1));
+                   static_cast<LPC_INT>(next_migration_id.load(std::memory_order_relaxed) - 1));
   add_mapping_array(map, "migrations", migrations);
   add_mapping_array(map, "shards", shards);
   free_array(migrations);
@@ -2081,11 +2081,11 @@ mapping_t *vm_object_store_owner_lookup_status(const char *owner_id, uint64_t ob
   auto *map = allocate_mapping(62);
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "owner_id", result.owner_id.c_str());
-  add_mapping_pair(map, "object_id", static_cast<long>(object_id));
+  add_mapping_pair(map, "object_id", static_cast<LPC_INT>(object_id));
   add_mapping_pair(map, "record_found", result.record ? 1 : 0);
   add_mapping_pair(map, "found", result.found ? 1 : 0);
   add_mapping_string(map, "record_owner_id", result.record ? result.record->owner_id.c_str() : "");
-  add_mapping_pair(map, "owner_epoch", result.record ? static_cast<long>(result.record->owner_epoch) : 0);
+  add_mapping_pair(map, "owner_epoch", result.record ? static_cast<LPC_INT>(result.record->owner_epoch) : 0);
   add_mapping_string(map, "object_path", result.record ? result.record->object_path.c_str() : "");
   add_mapping_pair(map, "destructed", result.record && result.record->destructed ? 1 : 0);
   add_mapping_pair(map, "owner_mismatch", result.record && !result.same_owner ? 1 : 0);
@@ -2205,11 +2205,11 @@ mapping_t *vm_object_store_owner_path_lookup_status(const char *owner_id, const 
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "owner_id", result.owner_id.c_str());
   add_mapping_string(map, "object_path", result.query_path.c_str());
-  add_mapping_pair(map, "object_id", static_cast<long>(result.object_id));
+  add_mapping_pair(map, "object_id", static_cast<LPC_INT>(result.object_id));
   add_mapping_pair(map, "record_found", result.record ? 1 : 0);
   add_mapping_pair(map, "found", result.found ? 1 : 0);
   add_mapping_string(map, "record_owner_id", result.record ? result.record->owner_id.c_str() : "");
-  add_mapping_pair(map, "owner_epoch", result.record ? static_cast<long>(result.record->owner_epoch) : 0);
+  add_mapping_pair(map, "owner_epoch", result.record ? static_cast<LPC_INT>(result.record->owner_epoch) : 0);
   add_mapping_pair(map, "destructed", result.record && result.record->destructed ? 1 : 0);
   add_mapping_pair(map, "owner_mismatch", result.record && !result.same_owner ? 1 : 0);
   add_mapping_pair(map, "owner_local_directory_entry", result.found ? 1 : 0);

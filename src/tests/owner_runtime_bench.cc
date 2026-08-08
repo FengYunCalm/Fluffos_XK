@@ -77,7 +77,7 @@ struct Report {
   void add_string(const std::string &name, std::string value) { strings.push_back({name, std::move(value)}); }
 };
 
-long mapping_number(mapping_t *map, const char *key) {
+LPC_INT mapping_number(mapping_t *map, const char *key) {
   auto *value = find_string_in_mapping(map, key);
   if (!value || value->type != T_NUMBER) {
     std::ostringstream error;

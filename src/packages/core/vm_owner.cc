@@ -130,7 +130,7 @@ void f_vm_owner_id() {
 void f_vm_owner_epoch() {
   auto epoch = vm_owner_epoch(sp->u.ob);
   free_object(&sp->u.ob, "f_vm_owner_epoch");
-  put_number(static_cast<long>(epoch));
+  put_number(static_cast<LPC_INT>(epoch));
 }
 #endif
 
@@ -193,7 +193,7 @@ void f_vm_owner_enqueue() {
   auto *owner_id = sp - 2;
   auto task_id = vm_owner_enqueue_task(owner_id->u.string, task_type->u.string, task_key->u.string);
   pop_n_elems(3);
-  push_number(static_cast<long>(task_id));
+  push_number(static_cast<LPC_INT>(task_id));
 }
 #endif
 
@@ -206,7 +206,7 @@ void f_vm_owner_enqueue_epoch() {
   auto task_id = vm_owner_enqueue_task_epoch(owner_id->u.string, task_type->u.string, task_key->u.string,
                                             static_cast<uint64_t>(owner_epoch));
   pop_n_elems(4);
-  push_number(static_cast<long>(task_id));
+  push_number(static_cast<LPC_INT>(task_id));
 }
 #endif
 
@@ -220,7 +220,7 @@ void f_vm_owner_record() {
   auto trace_id = vm_owner_record_task_trace(owner_id->u.string, task_type->u.string, task_key->u.string,
                                             static_cast<uint64_t>(owner_epoch), state->u.string);
   pop_n_elems(5);
-  push_number(static_cast<long>(trace_id));
+  push_number(static_cast<LPC_INT>(trace_id));
 }
 #endif
 
@@ -231,7 +231,7 @@ void f_vm_owner_record_access() {
   auto *source = sp - 2;
   auto access_id = vm_owner_record_access(source->u.ob, target->u.ob, operation->u.string);
   pop_n_elems(3);
-  push_number(static_cast<long>(access_id));
+  push_number(static_cast<LPC_INT>(access_id));
 }
 #endif
 
@@ -316,7 +316,7 @@ void f_vm_owner_commit_observe() {
                                                     operation->u.string, static_cast<uint64_t>(message_id),
                                                     state->u.string);
   pop_n_elems(5);
-  push_number(static_cast<long>(commit_id));
+  push_number(static_cast<LPC_INT>(commit_id));
 }
 #endif
 
@@ -508,9 +508,9 @@ void f_owner_call_async() {
                                                 payload_key.c_str(), payload);
   add_mapping_pair(result, "frozen_payload", 1);
   add_mapping_pair(result, "async_only", 1);
-  add_mapping_pair(result, "target_object_id", static_cast<long>(handle.object_id));
+  add_mapping_pair(result, "target_object_id", static_cast<LPC_INT>(handle.object_id));
   add_mapping_string(result, "target_object_path", handle.object_path.c_str());
-  add_mapping_pair(result, "target_owner_epoch", static_cast<long>(handle.owner_epoch));
+  add_mapping_pair(result, "target_owner_epoch", static_cast<LPC_INT>(handle.owner_epoch));
   add_mapping_pair(result, "target_handle_valid", handle.valid ? 1 : 0);
   pop_n_elems(3);
   push_refed_mapping(result);
@@ -567,7 +567,7 @@ void f_owner_publish_snapshot() {
   auto *map = allocate_mapping(7);
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "owner_id", owner_id);
-  add_mapping_pair(map, "owner_epoch", current_object ? static_cast<long>(vm_owner_epoch(current_object)) : 0);
+  add_mapping_pair(map, "owner_epoch", current_object ? static_cast<LPC_INT>(vm_owner_epoch(current_object)) : 0);
   add_mapping_pair(map, "frozen_payload", 1);
   add_mapping_pair(map, "snapshot_only", 1);
   add_mapping_pair(map, "direct_cross_owner_write", 0);
@@ -626,9 +626,9 @@ void f_owner_async() {
     auto handle = vm_object_handle_with_intent(target->u.ob, "owner_async_message");
     result = vm_owner_submit_object_message(current_owner_id_for_message(), handle, method.c_str(),
                                             payload_key.c_str(), payload);
-    add_mapping_pair(result, "target_object_id", static_cast<long>(handle.object_id));
+    add_mapping_pair(result, "target_object_id", static_cast<LPC_INT>(handle.object_id));
     add_mapping_string(result, "target_object_path", handle.object_path.c_str());
-    add_mapping_pair(result, "target_owner_epoch", static_cast<long>(handle.owner_epoch));
+    add_mapping_pair(result, "target_owner_epoch", static_cast<LPC_INT>(handle.owner_epoch));
     add_mapping_pair(result, "target_handle_valid", handle.valid ? 1 : 0);
   } else if (target->type == T_STRING) {
     auto message_type = owner_mapping_string(payload->u.map, "type", "owner_async");
@@ -752,11 +752,11 @@ void f_owner_snapshot_persist() {
   add_mapping_pair(result, "object_handle_capability_ready", 1);
   add_mapping_string(result, "capability_model", kVMObjectHandleCapabilityModelV1);
   add_mapping_string(result, "permission_intent", handle.permission_intent.c_str());
-  add_mapping_pair(result, "target_object_id", static_cast<long>(handle.object_id));
+  add_mapping_pair(result, "target_object_id", static_cast<LPC_INT>(handle.object_id));
   add_mapping_string(result, "target_object_path", handle.object_path.c_str());
   add_mapping_string(result, "owner_id", target_owner.c_str());
-  add_mapping_pair(result, "owner_epoch", static_cast<long>(handle.owner_epoch));
-  add_mapping_pair(result, "snapshot_version", static_cast<long>(handle.snapshot_version));
+  add_mapping_pair(result, "owner_epoch", static_cast<LPC_INT>(handle.owner_epoch));
+  add_mapping_pair(result, "snapshot_version", static_cast<LPC_INT>(handle.snapshot_version));
   add_mapping_pair(result, "save_zeros", save_zeros);
   add_mapping_pair(result, "serialized_bytes", static_cast<long>(strlen(serialized.data())));
   add_mapping_string(result, "serialized", serialized.data());

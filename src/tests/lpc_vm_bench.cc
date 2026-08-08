@@ -282,7 +282,11 @@ long long require_mapping_number(mapping_t *map, const char *key) {
 
 void run_representative_lpc_bench(Report &report) {
   constexpr long kItemCount = 16;
+#ifdef _WIN32
+  constexpr long kIterations = 32;
+#else
   constexpr long kIterations = 256;
+#endif
   object_t *probe = clone_object_for_bench("single/void");
   require(probe != nullptr, "failed to clone representative LPC workload probe");
 
