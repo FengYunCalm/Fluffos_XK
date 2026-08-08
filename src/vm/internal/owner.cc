@@ -5403,93 +5403,93 @@ mapping_t *vm_owner_thread_status() {
   auto *map = allocate_mapping(192);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "enabled", owner_threads.empty() ? 0 : 1);
-  add_mapping_pair(map, "thread_count", static_cast<long>(owner_threads.size()));
+  add_mapping_pair(map, "thread_count", static_cast<LPC_INT>(owner_threads.size()));
   add_mapping_pair(map, "stopping", owner_thread_stopping ? 1 : 0);
-  add_mapping_pair(map, "thread_dispatched", static_cast<long>(owner_thread_dispatched.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_dispatched", static_cast<LPC_INT>(owner_thread_dispatched.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_context_bound",
-                   static_cast<long>(owner_thread_context_bound.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_context_bound.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_object_store_isolated",
-                   static_cast<long>(owner_thread_object_store_isolated.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_object_store_isolated.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_owner_bound",
-                   static_cast<long>(owner_thread_owner_bound.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_owner_bound.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_owner_cleared",
-                   static_cast<long>(owner_thread_owner_cleared.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_owner_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_execution_cleared",
-                   static_cast<long>(owner_thread_execution_cleared.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_execution_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_eval_stack_owner_bound",
-                   static_cast<long>(owner_thread_eval_stack_owner_bound.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_eval_stack_owner_bound.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_eval_stack_cleared",
-                   static_cast<long>(owner_thread_eval_stack_cleared.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_eval_stack_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_eval_stack_leak_detected",
-                   static_cast<long>(owner_thread_eval_stack_leak_detected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_eval_stack_leak_detected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_control_stack_owner_bound",
-                   static_cast<long>(owner_thread_control_stack_owner_bound.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_control_stack_owner_bound.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_control_stack_cleared",
-                   static_cast<long>(owner_thread_control_stack_cleared.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_control_stack_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_control_stack_leak_detected",
-                   static_cast<long>(owner_thread_control_stack_leak_detected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_control_stack_leak_detected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_value_stack_owner_bound",
-                   static_cast<long>(owner_thread_value_stack_owner_bound.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_value_stack_owner_bound.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_value_stack_cleared",
-                   static_cast<long>(owner_thread_value_stack_cleared.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_value_stack_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_value_stack_leak_detected",
-                   static_cast<long>(owner_thread_value_stack_leak_detected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_value_stack_leak_detected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_apply_return_owner_bound",
-                   static_cast<long>(owner_thread_apply_return_owner_bound.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_apply_return_owner_bound.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_apply_return_cleared",
-                   static_cast<long>(owner_thread_apply_return_cleared.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_apply_return_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_apply_return_leak_detected",
-                   static_cast<long>(owner_thread_apply_return_leak_detected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_apply_return_leak_detected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_canary_flag_cleared",
-                   static_cast<long>(owner_thread_lpc_canary_flag_cleared.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_lpc_canary_flag_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_context_leak_detected",
-                   static_cast<long>(owner_thread_context_leak_detected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_context_leak_detected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_rejected",
-                   static_cast<long>(owner_thread_lpc_rejected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_lpc_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_owner_state_guarded",
-                   static_cast<long>(owner_thread_owner_state_guarded.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_owner_state_guarded.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_message_dispatched",
-                   static_cast<long>(owner_thread_message_dispatched.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_message_dispatched.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_command_consume_entry_executed",
-                   static_cast<long>(owner_executor_command_consume_entry_executed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_command_consume_entry_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_command_frame_restore_entry_executed",
-                   static_cast<long>(owner_executor_command_frame_restore_entry_executed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_command_frame_restore_entry_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_gateway_command_guarded",
-                   static_cast<long>(owner_thread_gateway_command_guarded.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_gateway_command_guarded.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_gateway_command_rejected",
-                   static_cast<long>(owner_thread_gateway_command_rejected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_gateway_command_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_probe_executed",
-                   static_cast<long>(owner_thread_lpc_probe_executed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_lpc_probe_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_probe_failed",
-                   static_cast<long>(owner_thread_lpc_probe_failed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_lpc_probe_failed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_probe_guarded",
-                   static_cast<long>(owner_thread_lpc_probe_guarded.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_lpc_probe_guarded.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_canary_executed",
-                   static_cast<long>(owner_thread_lpc_canary_executed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_lpc_canary_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_canary_succeeded",
-                   static_cast<long>(owner_thread_lpc_canary_succeeded.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_lpc_canary_succeeded.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_canary_failed",
-                   static_cast<long>(owner_thread_lpc_canary_failed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_lpc_canary_failed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_canary_rejected",
-                   static_cast<long>(owner_thread_lpc_canary_rejected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_lpc_canary_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_task_executed",
-                   static_cast<long>(owner_thread_lpc_task_executed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_lpc_task_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_task_succeeded",
-                   static_cast<long>(owner_thread_lpc_task_succeeded.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_lpc_task_succeeded.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_task_failed",
-                   static_cast<long>(owner_thread_lpc_task_failed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_lpc_task_failed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_lpc_task_rejected",
-                   static_cast<long>(owner_thread_lpc_task_rejected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_lpc_task_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_ordinary_lpc_executed",
-                   static_cast<long>(owner_thread_ordinary_lpc_executed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_ordinary_lpc_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_ordinary_lpc_succeeded",
-                   static_cast<long>(owner_thread_ordinary_lpc_succeeded.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_ordinary_lpc_succeeded.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_ordinary_lpc_failed",
-                   static_cast<long>(owner_thread_ordinary_lpc_failed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_ordinary_lpc_failed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_ordinary_lpc_rejected",
-                   static_cast<long>(owner_thread_ordinary_lpc_rejected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_ordinary_lpc_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_compute_result_completed",
-                   static_cast<long>(owner_thread_compute_result_completed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_compute_result_completed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_task_boundary_ready", 1);
   add_mapping_pair(map, "executor_callback_allowlist_ready", 1);
   add_mapping_pair(map, "executor_callback_main_adapter_ready", 1);
@@ -5560,17 +5560,17 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_pair(map, "gateway_command_execute_context_cleanup_ready", 1);
   add_mapping_pair(map, "gateway_command_execute_session_revalidate_ready", 1);
   add_mapping_pair(map, "executor_callback_queued",
-                   static_cast<long>(owner_executor_callback_queued.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_callback_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_dispatched",
-                   static_cast<long>(owner_executor_callback_dispatched.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_callback_dispatched.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_dropped",
-                   static_cast<long>(owner_executor_callback_dropped.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_callback_dropped.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_main_cleanup_backlog",
-                   static_cast<long>(owner_executor_callback_main_cleanups.size()));
+                   static_cast<LPC_INT>(owner_executor_callback_main_cleanups.size()));
   add_mapping_pair(map, "executor_callback_main_cleanup_queued",
-                   static_cast<long>(owner_executor_callback_main_cleanup_queued.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_callback_main_cleanup_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_main_cleanup_dispatched",
-                   static_cast<long>(owner_executor_callback_main_cleanup_dispatched.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_callback_main_cleanup_dispatched.load(std::memory_order_relaxed)));
   auto *callback_contracts = owner_executor_callback_contracts_array();
   add_mapping_array(map, "executor_callback_task_contracts", callback_contracts);
   free_array(callback_contracts);
@@ -5580,28 +5580,28 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_pair(map, "max_owner_threads", 4);
   add_mapping_pair(map, "executor_task_budget", kOwnerExecutorTaskBudget);
   add_mapping_pair(map, "executor_budget_yields",
-                   static_cast<long>(owner_executor_budget_yields.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_budget_yields.load(std::memory_order_relaxed)));
   add_mapping_string(map, "executor_last_budget_yield_owner", owner_executor_last_budget_yield_owner.c_str());
   add_mapping_pair(map, "executor_last_budget_yield_backlog", owner_executor_last_budget_yield_backlog);
   add_mapping_pair(map, "executor_last_budget_yield_safe_backlog", owner_executor_last_budget_yield_safe_backlog);
   add_mapping_pair(map, "executor_owner_claims",
-                   static_cast<long>(owner_executor_owner_claims.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_owner_claims.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_owner_releases",
-                   static_cast<long>(owner_executor_owner_releases.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_owner_releases.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_runnable_task_dispatched",
-                   static_cast<long>(owner_executor_runnable_task_dispatched.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_runnable_task_dispatched.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_safe_task_dispatched",
-                   static_cast<long>(owner_executor_safe_task_dispatched.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_safe_task_dispatched.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_probe_executed",
-                   static_cast<long>(owner_executor_probe_executed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_probe_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_main_required_skipped",
-                   static_cast<long>(owner_executor_main_required_skipped.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_main_required_skipped.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_max_parallel_owners",
-                   static_cast<long>(owner_executor_max_parallel_owners.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_max_parallel_owners.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_max_owner_parallel",
-                   static_cast<long>(owner_executor_max_owner_parallel.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_max_owner_parallel.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_same_owner_claim_conflicts",
-                   static_cast<long>(owner_executor_same_owner_claim_conflicts.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_same_owner_claim_conflicts.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_active_claims", owner_scheduler_state.active_claim_count());
   add_mapping_pair(map, "ordinary_lpc_default_closed", 1);
   add_mapping_pair(map, "ordinary_lpc_activation_policy_ready", 1);
@@ -5615,7 +5615,7 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_string(map, "executor_lpc_model", "default_closed_explicit_open");
   add_mapping_string(map, "ordinary_lpc_default_policy", "default_closed_explicit_open");
   auto *allowlist = owner_lpc_task_allowlist_array();
-  add_mapping_pair(map, "lpc_task_allowlist_count", static_cast<long>(owner_lpc_task_descriptors().size()));
+  add_mapping_pair(map, "lpc_task_allowlist_count", static_cast<LPC_INT>(owner_lpc_task_descriptors().size()));
   add_mapping_array(map, "lpc_task_allowlist", allowlist);
   free_array(allowlist);
   auto *lpc_contracts = owner_lpc_task_contracts_array();
@@ -5630,9 +5630,9 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_owned_mapping(map, "gateway_owner_task_contract", gateway_owner_task_contract_mapping());
   add_mapping_owned_mapping(map, "owner_executor_boundary_contract", owner_executor_boundary_contract_mapping());
   add_mapping_owned_mapping(map, "executor_queue_fairness", owner_queue_fairness_mapping());
-  add_mapping_pair(map, "deferred_target_releases", static_cast<long>(owner_deferred_target_releases.size()));
-  add_mapping_pair(map, "thread_starts", static_cast<long>(owner_thread_starts.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "thread_stops", static_cast<long>(owner_thread_stops.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "deferred_target_releases", static_cast<LPC_INT>(owner_deferred_target_releases.size()));
+  add_mapping_pair(map, "thread_starts", static_cast<LPC_INT>(owner_thread_starts.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "thread_stops", static_cast<LPC_INT>(owner_thread_stops.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "queue_depth", owner_mailbox_total_depth());
   add_mapping_pair(map, "executor_runnable_queue_depth", owner_executor_runnable_queue_depth());
   add_mapping_pair(map, "executor_safe_queue_depth", owner_executor_safe_queue_depth());
@@ -5643,13 +5643,13 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_pair(map, "pending_futures", owner_pending_future_count());
   add_owner_runtime_v2_status_fields(map);
   add_mapping_pair(map, "main_active_owners", owner_scheduler_state.active_main_owner_count());
-  add_mapping_pair(map, "main_queued", static_cast<long>(owner_main_queued.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "main_dispatched", static_cast<long>(owner_main_dispatched.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "main_stale", static_cast<long>(owner_main_stale.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "main_destructed", static_cast<long>(owner_main_destructed.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "main_budget_yields", static_cast<long>(owner_main_budget_yields.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "main_owner_claims", static_cast<long>(owner_main_owner_claims.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "main_owner_releases", static_cast<long>(owner_main_owner_releases.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_queued", static_cast<LPC_INT>(owner_main_queued.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_dispatched", static_cast<LPC_INT>(owner_main_dispatched.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_stale", static_cast<LPC_INT>(owner_main_stale.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_destructed", static_cast<LPC_INT>(owner_main_destructed.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_budget_yields", static_cast<LPC_INT>(owner_main_budget_yields.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_owner_claims", static_cast<LPC_INT>(owner_main_owner_claims.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_owner_releases", static_cast<LPC_INT>(owner_main_owner_releases.load(std::memory_order_relaxed)));
   return map;
 }
 
@@ -5672,46 +5672,46 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_pair(map, "main_active_owners", owner_scheduler_state.active_main_owner_count());
   add_mapping_pair(map, "claimed_owners", owner_scheduler_state.active_owner_count());
   add_mapping_pair(map, "claimed_main_owners", owner_scheduler_state.active_main_owner_count());
-  add_mapping_pair(map, "main_queued", static_cast<long>(owner_main_queued.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "main_dispatched", static_cast<long>(owner_main_dispatched.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "main_stale", static_cast<long>(owner_main_stale.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "main_destructed", static_cast<long>(owner_main_destructed.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "main_budget_yields", static_cast<long>(owner_main_budget_yields.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "main_owner_claims", static_cast<long>(owner_main_owner_claims.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "main_owner_releases", static_cast<long>(owner_main_owner_releases.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "destructed_object_backlog", static_cast<long>(vm_destructed_object_backlog_size()));
+  add_mapping_pair(map, "main_queued", static_cast<LPC_INT>(owner_main_queued.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_dispatched", static_cast<LPC_INT>(owner_main_dispatched.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_stale", static_cast<LPC_INT>(owner_main_stale.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_destructed", static_cast<LPC_INT>(owner_main_destructed.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_budget_yields", static_cast<LPC_INT>(owner_main_budget_yields.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_owner_claims", static_cast<LPC_INT>(owner_main_owner_claims.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "main_owner_releases", static_cast<LPC_INT>(owner_main_owner_releases.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "destructed_object_backlog", static_cast<LPC_INT>(vm_destructed_object_backlog_size()));
   add_mapping_pair(map, "destructed_object_cleanup_total",
-                   static_cast<long>(vm_destructed_object_cleanup_total()));
+                   static_cast<LPC_INT>(vm_destructed_object_cleanup_total()));
   add_mapping_pair(map, "destructed_object_cleanup_batches",
-                   static_cast<long>(vm_destructed_object_cleanup_batches()));
+                   static_cast<LPC_INT>(vm_destructed_object_cleanup_batches()));
   add_mapping_pair(map, "destructed_object_cleanup_last_removed",
-                   static_cast<long>(vm_destructed_object_cleanup_last_removed()));
+                   static_cast<LPC_INT>(vm_destructed_object_cleanup_last_removed()));
   add_mapping_pair(map, "destructed_object_incremental_cleanup_ready", 1);
   add_mapping_pair(map, "active_owners", owner_scheduler_state.active_owner_count());
-  add_mapping_pair(map, "owner_threads", static_cast<long>(owner_threads.size()));
-  add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
-  add_mapping_pair(map, "total_drained", static_cast<long>(total_drained.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "owner_threads", static_cast<LPC_INT>(owner_threads.size()));
+  add_mapping_pair(map, "total_enqueued", static_cast<LPC_INT>(total_enqueued.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "total_drained", static_cast<LPC_INT>(total_drained.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "future_count", owner_future_store.size());
   add_mapping_pair(map, "pending_futures", owner_pending_future_count());
   add_mapping_pair(map, "future_terminal_take_ready", 1);
   add_owner_runtime_v2_status_fields(map);
-  add_mapping_pair(map, "futures_completed", static_cast<long>(owner_future_store.completed_count()));
-  add_mapping_pair(map, "futures_failed", static_cast<long>(owner_future_store.failed_count()));
+  add_mapping_pair(map, "futures_completed", static_cast<LPC_INT>(owner_future_store.completed_count()));
+  add_mapping_pair(map, "futures_failed", static_cast<LPC_INT>(owner_future_store.failed_count()));
   add_mapping_pair(map, "executor_budget_yields",
-                   static_cast<long>(owner_executor_budget_yields.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_budget_yields.load(std::memory_order_relaxed)));
   add_mapping_string(map, "executor_last_budget_yield_owner", owner_executor_last_budget_yield_owner.c_str());
   add_mapping_pair(map, "executor_last_budget_yield_backlog", owner_executor_last_budget_yield_backlog);
   add_mapping_pair(map, "executor_last_budget_yield_safe_backlog", owner_executor_last_budget_yield_safe_backlog);
   add_mapping_pair(map, "executor_owner_claims",
-                   static_cast<long>(owner_executor_owner_claims.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_owner_claims.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_owner_releases",
-                   static_cast<long>(owner_executor_owner_releases.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_owner_releases.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_runnable_task_dispatched",
-                   static_cast<long>(owner_executor_runnable_task_dispatched.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_runnable_task_dispatched.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_safe_task_dispatched",
-                   static_cast<long>(owner_executor_safe_task_dispatched.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_safe_task_dispatched.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_compute_result_completed",
-                   static_cast<long>(owner_thread_compute_result_completed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_compute_result_completed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_task_boundary_ready", 1);
   add_mapping_pair(map, "executor_callback_allowlist_ready", 1);
   add_mapping_pair(map, "executor_callback_main_adapter_ready", 1);
@@ -5782,70 +5782,70 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_pair(map, "gateway_command_execute_context_cleanup_ready", 1);
   add_mapping_pair(map, "gateway_command_execute_session_revalidate_ready", 1);
   add_mapping_pair(map, "executor_callback_queued",
-                   static_cast<long>(owner_executor_callback_queued.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_callback_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_dispatched",
-                   static_cast<long>(owner_executor_callback_dispatched.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_callback_dispatched.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_dropped",
-                   static_cast<long>(owner_executor_callback_dropped.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_callback_dropped.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_main_cleanup_backlog",
-                   static_cast<long>(owner_executor_callback_main_cleanups.size()));
+                   static_cast<LPC_INT>(owner_executor_callback_main_cleanups.size()));
   add_mapping_pair(map, "executor_callback_main_cleanup_queued",
-                   static_cast<long>(owner_executor_callback_main_cleanup_queued.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_callback_main_cleanup_queued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_callback_main_cleanup_dispatched",
-                   static_cast<long>(owner_executor_callback_main_cleanup_dispatched.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_callback_main_cleanup_dispatched.load(std::memory_order_relaxed)));
   auto *callback_contracts = owner_executor_callback_contracts_array();
   add_mapping_array(map, "executor_callback_task_contracts", callback_contracts);
   free_array(callback_contracts);
   add_mapping_pair(map, "thread_ordinary_lpc_executed",
-                   static_cast<long>(owner_thread_ordinary_lpc_executed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_ordinary_lpc_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_ordinary_lpc_succeeded",
-                   static_cast<long>(owner_thread_ordinary_lpc_succeeded.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_ordinary_lpc_succeeded.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_ordinary_lpc_failed",
-                   static_cast<long>(owner_thread_ordinary_lpc_failed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_ordinary_lpc_failed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_ordinary_lpc_rejected",
-                   static_cast<long>(owner_thread_ordinary_lpc_rejected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_ordinary_lpc_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_command_consume_entry_executed",
-                   static_cast<long>(owner_executor_command_consume_entry_executed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_command_consume_entry_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_command_frame_restore_entry_executed",
-                   static_cast<long>(owner_executor_command_frame_restore_entry_executed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_command_frame_restore_entry_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_gateway_command_guarded",
-                   static_cast<long>(owner_thread_gateway_command_guarded.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_gateway_command_guarded.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_gateway_command_rejected",
-                   static_cast<long>(owner_thread_gateway_command_rejected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_gateway_command_rejected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_eval_stack_owner_bound",
-                   static_cast<long>(owner_thread_eval_stack_owner_bound.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_eval_stack_owner_bound.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_eval_stack_cleared",
-                   static_cast<long>(owner_thread_eval_stack_cleared.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_eval_stack_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_eval_stack_leak_detected",
-                   static_cast<long>(owner_thread_eval_stack_leak_detected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_eval_stack_leak_detected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_control_stack_owner_bound",
-                   static_cast<long>(owner_thread_control_stack_owner_bound.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_control_stack_owner_bound.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_control_stack_cleared",
-                   static_cast<long>(owner_thread_control_stack_cleared.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_control_stack_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_control_stack_leak_detected",
-                   static_cast<long>(owner_thread_control_stack_leak_detected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_control_stack_leak_detected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_value_stack_owner_bound",
-                   static_cast<long>(owner_thread_value_stack_owner_bound.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_value_stack_owner_bound.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_value_stack_cleared",
-                   static_cast<long>(owner_thread_value_stack_cleared.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_value_stack_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_value_stack_leak_detected",
-                   static_cast<long>(owner_thread_value_stack_leak_detected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_value_stack_leak_detected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_apply_return_owner_bound",
-                   static_cast<long>(owner_thread_apply_return_owner_bound.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_apply_return_owner_bound.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_apply_return_cleared",
-                   static_cast<long>(owner_thread_apply_return_cleared.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_apply_return_cleared.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "thread_apply_return_leak_detected",
-                   static_cast<long>(owner_thread_apply_return_leak_detected.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_thread_apply_return_leak_detected.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_probe_executed",
-                   static_cast<long>(owner_executor_probe_executed.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_probe_executed.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_main_required_skipped",
-                   static_cast<long>(owner_executor_main_required_skipped.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_main_required_skipped.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_max_parallel_owners",
-                   static_cast<long>(owner_executor_max_parallel_owners.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_max_parallel_owners.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_max_owner_parallel",
-                   static_cast<long>(owner_executor_max_owner_parallel.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_max_owner_parallel.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_same_owner_claim_conflicts",
-                   static_cast<long>(owner_executor_same_owner_claim_conflicts.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(owner_executor_same_owner_claim_conflicts.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_active_claims", owner_scheduler_state.active_claim_count());
   add_mapping_pair(map, "ordinary_lpc_default_closed", 1);
   add_mapping_pair(map, "ordinary_lpc_activation_policy_ready", 1);
@@ -5859,7 +5859,7 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_string(map, "executor_lpc_model", "default_closed_explicit_open");
   add_mapping_string(map, "ordinary_lpc_default_policy", "default_closed_explicit_open");
   auto *allowlist = owner_lpc_task_allowlist_array();
-  add_mapping_pair(map, "lpc_task_allowlist_count", static_cast<long>(owner_lpc_task_descriptors().size()));
+  add_mapping_pair(map, "lpc_task_allowlist_count", static_cast<LPC_INT>(owner_lpc_task_descriptors().size()));
   add_mapping_array(map, "lpc_task_allowlist", allowlist);
   free_array(allowlist);
   auto *lpc_contracts = owner_lpc_task_contracts_array();
@@ -5874,17 +5874,17 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_owned_mapping(map, "gateway_owner_task_contract", gateway_owner_task_contract_mapping());
   add_mapping_owned_mapping(map, "owner_executor_boundary_contract", owner_executor_boundary_contract_mapping());
   add_mapping_owned_mapping(map, "executor_queue_fairness", owner_queue_fairness_mapping());
-  add_mapping_pair(map, "cross_owner", static_cast<long>(total_cross_owner_accesses.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "cross_owner", static_cast<LPC_INT>(total_cross_owner_accesses.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "snapshot_required",
-                   static_cast<long>(total_cross_owner_snapshot_accesses.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(total_cross_owner_snapshot_accesses.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "message_required",
-                   static_cast<long>(total_cross_owner_message_accesses.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(total_cross_owner_message_accesses.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "rejected_by_default",
-                   static_cast<long>(total_cross_owner_rejected_accesses.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(total_cross_owner_rejected_accesses.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "enforced_blocks",
-                   static_cast<long>(total_cross_owner_enforced_blocks.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(total_cross_owner_enforced_blocks.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "object_store_sync_rejections",
-                   static_cast<long>(vm_context_object_store_sync_rejections()));
+                   static_cast<LPC_INT>(vm_context_object_store_sync_rejections()));
   return map;
 }
 

@@ -4286,6 +4286,31 @@ TEST_F(DriverTest, TestOwnerRuntimeMetricMappingsUseLpcIntegerWidth) {
   ASSERT_EQ(status_body.find("static_cast<long>"), std::string::npos);
 }
 
+TEST_F(DriverTest, TestOwnerStatusMappingsUseLpcIntegerWidth) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  auto assert_status_uses_lpc_width = [&](const char* start_marker,
+                                          const char* end_marker) {
+    const auto start = owner_source.find(start_marker);
+    const auto end = owner_source.find(end_marker, start);
+
+    ASSERT_NE(start, std::string::npos) << start_marker;
+    ASSERT_NE(end, std::string::npos) << end_marker;
+    ASSERT_GT(end, start) << start_marker;
+    const auto body = owner_source.substr(start, end - start);
+    EXPECT_EQ(body.find("static_cast<long>"), std::string::npos)
+        << start_marker;
+    EXPECT_NE(body.find("static_cast<LPC_INT>"), std::string::npos)
+        << start_marker;
+  };
+
+  assert_status_uses_lpc_width(
+      "mapping_t *vm_owner_thread_status()",
+      "mapping_t *vm_owner_runtime_status()");
+  assert_status_uses_lpc_width(
+      "mapping_t *vm_owner_runtime_status()",
+      "#ifdef DEBUGMALLOC_EXTENSIONS");
+}
+
 TEST_F(DriverTest, TestGatewayFutureCompletionExposesMainThreadCpuCounter) {
   const auto gateway_header = read_source_file_for_test("../src/packages/gateway/gateway.h");
   const auto gateway_source =
