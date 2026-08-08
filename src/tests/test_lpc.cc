@@ -718,6 +718,9 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_generic_future_watches_cancelled"), 0);
   ASSERT_GE(mapping_number(status, "gateway_generic_future_watch_callbacks"), 0);
   ASSERT_GE(mapping_number(status, "gateway_generic_future_watch_callback_failures"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_generic_future_watch_poll_runs"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_generic_future_watch_poll_items"), 0);
+  ASSERT_GE(mapping_number(status, "gateway_generic_future_watch_poll_budget_hits"), 0);
   ASSERT_GE(mapping_number(status, "gateway_future_watches_registered"), 0);
   ASSERT_GE(mapping_number(status, "gateway_future_watches_rejected"), 0);
   ASSERT_GE(mapping_number(status, "gateway_future_watches_completed"), 0);
@@ -18831,6 +18834,70 @@ TEST_F(DriverTest, TestGatewayGenericFutureWatchDispatchesNonSessionObjectOnMain
 
   destruct_object(ob);
   free_object(&ob, "TestGatewayGenericFutureWatchDispatchesNonSessionObjectOnMain");
+}
+
+TEST_F(DriverTest, TestGatewayGenericFutureWatchPollCountersReportBudgetedWork) {
+  auto *ob = clone_object_for_test("clone/gateway_login_example");
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayGenericFutureWatchPollCountersReportBudgetedWork");
+  vm_owner_set_id(ob, "owner/test/gateway/generic-future-poll-counters");
+
+  std::vector<uint64_t> future_ids;
+  future_ids.reserve(65);
+  for (int index = 0; index < 65; ++index) {
+    push_number(index);
+    auto *submitted = call_lpc_method(ob, "submit_gateway_owner_future", 1);
+    ASSERT_NE(submitted, nullptr);
+    ASSERT_EQ(submitted->type, T_MAPPING);
+    auto future_id = gateway_test_mapping_number(submitted->u.map, "future_id");
+    ASSERT_GT(future_id, 0);
+    ASSERT_EQ(gateway_watch_future_for_object(
+                  ob, static_cast<uint64_t>(800 + index),
+                  static_cast<uint64_t>(future_id), 1000),
+              1);
+    future_ids.push_back(static_cast<uint64_t>(future_id));
+  }
+  ASSERT_EQ(gateway_future_watch_count(), 65);
+
+  auto *before = gateway_status_internal();
+  ASSERT_NE(before, nullptr);
+  const auto poll_runs_before = gateway_test_mapping_number(
+      before, "gateway_generic_future_watch_poll_runs");
+  const auto poll_items_before = gateway_test_mapping_number(
+      before, "gateway_generic_future_watch_poll_items");
+  const auto budget_hits_before = gateway_test_mapping_number(
+      before, "gateway_generic_future_watch_poll_budget_hits");
+  free_mapping(before);
+
+  ASSERT_EQ(gateway_process_future_watches_at(0), 0);
+  ASSERT_EQ(gateway_future_watch_count(), 65);
+
+  auto *after = gateway_status_internal();
+  ASSERT_NE(after, nullptr);
+  EXPECT_EQ(gateway_test_mapping_number(
+                after, "gateway_generic_future_watch_poll_runs") -
+                poll_runs_before,
+            1);
+  EXPECT_EQ(gateway_test_mapping_number(
+                after, "gateway_generic_future_watch_poll_items") -
+                poll_items_before,
+            64);
+  EXPECT_EQ(gateway_test_mapping_number(
+                after, "gateway_generic_future_watch_poll_budget_hits") -
+                budget_hits_before,
+            1);
+  free_mapping(after);
+
+  destruct_object(ob);
+  for (int attempt = 0;
+       attempt < 4 && gateway_future_watch_count() != 0; ++attempt) {
+    gateway_process_future_watches_at(std::numeric_limits<uint64_t>::max());
+  }
+  ASSERT_EQ(gateway_future_watch_count(), 0);
+  for (const auto future_id : future_ids) {
+    EXPECT_EQ(vm_owner_future_state(future_id), VM_OWNER_FUTURE_UNKNOWN);
+  }
+  free_object(&ob, "TestGatewayGenericFutureWatchPollCountersReportBudgetedWork");
 }
 
 TEST_F(DriverTest, TestGatewaySessionWatchCancellationKeepsGenericWatchWakeups) {

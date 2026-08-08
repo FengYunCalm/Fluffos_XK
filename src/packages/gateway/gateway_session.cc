@@ -2501,8 +2501,14 @@ int gateway_process_future_watches_at(uint64_t now_ms) {
     return 0;
   }
 
+  g_gateway_runtime_counters.generic_future_watch_poll_runs.fetch_add(
+      1, std::memory_order_relaxed);
   auto queued_at_start = g_gateway_generic_future_watch_queue.size();
   auto poll_count = std::min(queued_at_start, kGatewayFutureWatchPollBudget);
+  if (queued_at_start > kGatewayFutureWatchPollBudget) {
+    g_gateway_runtime_counters.generic_future_watch_poll_budget_hits.fetch_add(
+        1, std::memory_order_relaxed);
+  }
   int processed = 0;
   for (size_t index = 0; index < poll_count; index++) {
     auto future_id = g_gateway_generic_future_watch_queue.front();
@@ -2511,6 +2517,8 @@ int gateway_process_future_watches_at(uint64_t now_ms) {
     if (watch_it == g_gateway_future_watches.end()) {
       continue;
     }
+    g_gateway_runtime_counters.generic_future_watch_poll_items.fetch_add(
+        1, std::memory_order_relaxed);
     auto watch = watch_it->second;
     auto completion_cpu_started_ns = get_current_thread_cpu_time_ns();
     auto *ob = gateway_resolve_future_watch_object(watch);

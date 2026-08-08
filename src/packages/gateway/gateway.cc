@@ -2624,6 +2624,18 @@ mapping_t *gateway_status_internal() {
       static_cast<long>(g_gateway_runtime_counters.generic_future_watch_callback_failures.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
+      map, "gateway_generic_future_watch_poll_runs",
+      static_cast<long>(g_gateway_runtime_counters.generic_future_watch_poll_runs.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_generic_future_watch_poll_items",
+      static_cast<long>(g_gateway_runtime_counters.generic_future_watch_poll_items.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_generic_future_watch_poll_budget_hits",
+      static_cast<long>(g_gateway_runtime_counters.generic_future_watch_poll_budget_hits.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
       map, "gateway_future_watches_registered",
       static_cast<long>(g_gateway_runtime_counters.future_watches_registered.load(std::memory_order_relaxed)));
   add_mapping_pair(

@@ -150,6 +150,9 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> generic_future_watches_cancelled{0};
   std::atomic<uint64_t> generic_future_watch_callbacks{0};
   std::atomic<uint64_t> generic_future_watch_callback_failures{0};
+  std::atomic<uint64_t> generic_future_watch_poll_runs{0};
+  std::atomic<uint64_t> generic_future_watch_poll_items{0};
+  std::atomic<uint64_t> generic_future_watch_poll_budget_hits{0};
   std::atomic<uint64_t> raw_writes_sent{0};
   std::atomic<uint64_t> raw_writes_failed{0};
   std::atomic<uint64_t> raw_write_backpressure_rejected{0};
