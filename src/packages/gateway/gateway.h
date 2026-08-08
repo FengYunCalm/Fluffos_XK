@@ -463,7 +463,7 @@ long gateway_session_command_pending_count();
 long gateway_read_dispatch_pending_count();
 long gateway_buffered_input_pending_count();
 long gateway_command_pressure_count();
-long gateway_main_queue_pending_count();
+int64_t gateway_main_queue_pending_count();
 uint64_t gateway_session_fifo_enqueued_total();
 uint64_t gateway_session_fifo_flushed_total();
 uint64_t gateway_session_fifo_rejected_total();

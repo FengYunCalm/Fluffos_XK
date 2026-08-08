@@ -3312,7 +3312,23 @@ TEST_F(DriverTest, TestGatewayMainQueueReadAdmissionUsesComposedHighLowWaterBack
                 "gateway_resume_main_queue_reads_if_below_low_watermark();"),
             std::string::npos);
 
-  ASSERT_NE(source.find("long gateway_main_queue_pending_count()"), std::string::npos);
+  ASSERT_NE(source.find("int64_t gateway_main_queue_pending_count()"), std::string::npos);
+  ASSERT_EQ(source.find("long gateway_main_queue_pending_count()"), std::string::npos);
+  ASSERT_NE(header.find("int64_t gateway_main_queue_pending_count();"), std::string::npos);
+  ASSERT_EQ(header.find("long gateway_main_queue_pending_count();"), std::string::npos);
+  ASSERT_NE(source.find(
+                "std::chrono::nanoseconds gateway_deferred_main_drain_wall_budget(int64_t backlog)"),
+            std::string::npos);
+  ASSERT_EQ(source.find("gateway_deferred_main_drain_wall_budget(long backlog)"),
+            std::string::npos);
+  ASSERT_NE(source.find("std::max<int64_t>(0, vm_owner_main_queue_total_depth())"),
+            std::string::npos);
+  ASSERT_NE(source.find("std::max<int64_t>(0, drain_result.remaining_main_tasks)"),
+            std::string::npos);
+  ASSERT_EQ(source.find("std::max<long>(0, vm_owner_main_queue_total_depth())"),
+            std::string::npos);
+  ASSERT_EQ(source.find("std::max<long>(0, drain_result.remaining_main_tasks)"),
+            std::string::npos);
   ASSERT_NE(spec.find("int gateway_main_queue_pending();"), std::string::npos);
   ASSERT_NE(source.find("long gateway_buffered_input_pending_count()"),
             std::string::npos);
@@ -3337,7 +3353,7 @@ TEST_F(DriverTest, TestGatewayMainQueueReadAdmissionUsesComposedHighLowWaterBack
             std::string::npos);
 
   const auto pressure_pos = source.find("long gateway_command_pressure_count()");
-  const auto pressure_end = source.find("\nlong gateway_main_queue_pending_count", pressure_pos);
+  const auto pressure_end = source.find("\nint64_t gateway_main_queue_pending_count", pressure_pos);
   ASSERT_NE(pressure_pos, std::string::npos);
   ASSERT_NE(pressure_end, std::string::npos);
   ASSERT_EQ(source.substr(pressure_pos, pressure_end - pressure_pos)

@@ -371,7 +371,7 @@ int gateway_drain_owner_main_tasks_now(int budget) {
       .dispatched;
 }
 
-std::chrono::nanoseconds gateway_deferred_main_drain_wall_budget(long backlog) {
+std::chrono::nanoseconds gateway_deferred_main_drain_wall_budget(int64_t backlog) {
   return backlog >= kGatewayDeferredMainDrainBacklogThreshold
              ? kGatewayDeferredMainDrainBacklogWallBudget
              : kGatewayDeferredMainDrainBaseWallBudget;
@@ -407,7 +407,7 @@ void gateway_drain_owner_main_tasks_later() {
     g_gateway_main_drain_event = nullptr;
     g_gateway_main_drain_scheduled = false;
     g_gateway_runtime_counters.main_drain_deferred_executed.fetch_add(1, std::memory_order_relaxed);
-    auto backlog_before = std::max<long>(0, vm_owner_main_queue_total_depth());
+    auto backlog_before = std::max<int64_t>(0, vm_owner_main_queue_total_depth());
     auto wall_budget = gateway_deferred_main_drain_wall_budget(backlog_before);
     if (backlog_before >= kGatewayDeferredMainDrainBacklogThreshold) {
       g_gateway_runtime_counters.main_drain_deferred_backlog_boosted.fetch_add(
@@ -438,7 +438,7 @@ void gateway_drain_owner_main_tasks_later() {
           1, std::memory_order_relaxed);
     }
     auto remaining = static_cast<uint64_t>(
-        std::max<long>(0, drain_result.remaining_main_tasks));
+        std::max<int64_t>(0, drain_result.remaining_main_tasks));
     g_gateway_runtime_counters.main_drain_deferred_remaining_total.fetch_add(
         remaining, std::memory_order_relaxed);
     g_gateway_runtime_counters.main_drain_deferred_remaining_samples.fetch_add(
@@ -489,7 +489,7 @@ void gateway_service_admitted_receive_tasks() {
         1, std::memory_order_relaxed);
   }
   auto remaining = static_cast<uint64_t>(
-      std::max<long>(0, drain_result.remaining_main_tasks));
+      std::max<int64_t>(0, drain_result.remaining_main_tasks));
   g_gateway_runtime_counters.read_batch_drain_remaining_total.fetch_add(
       remaining, std::memory_order_relaxed);
   g_gateway_runtime_counters.read_batch_drain_remaining_samples.fetch_add(
@@ -557,7 +557,7 @@ bool gateway_apply_receive(object_t *user, svalue_t *data_sv) {
         restore_command_giver();
       }, nullptr, VM_OWNER_MAIN_TASK_IO_ADAPTER) != 0) {
     g_gateway_runtime_counters.receive_tasks_enqueued.fetch_add(1, std::memory_order_relaxed);
-    auto main_queue_depth = std::max<long>(0, vm_owner_main_queue_total_depth());
+    auto main_queue_depth = std::max<int64_t>(0, vm_owner_main_queue_total_depth());
     gateway_record_latency(g_gateway_runtime_counters.receive_main_queue_depth_total,
                            g_gateway_runtime_counters.receive_main_queue_depth_max,
                            g_gateway_runtime_counters.receive_main_queue_depth_samples,
@@ -2280,8 +2280,8 @@ long gateway_command_pressure_count() {
          gateway_read_dispatch_pending_count();
 }
 
-long gateway_main_queue_pending_count() {
-  return std::max<long>(0, vm_owner_main_queue_total_depth());
+int64_t gateway_main_queue_pending_count() {
+  return std::max<int64_t>(0, vm_owner_main_queue_total_depth());
 }
 
 mapping_t *gateway_status_internal() {
