@@ -5970,7 +5970,10 @@ mapping_t *vm_owner_runtime_status() {
 #ifdef DEBUGMALLOC_EXTENSIONS
 void vm_owner_mark_runtime_refs() {
   std::unordered_set<const VMFrozenValue *> seen;
-  owner_scheduler_state.mark_debug_refs(seen);
+  {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    owner_scheduler_state.mark_debug_refs(seen);
+  }
   owner_trace_store.mark_debug_refs(seen);
   owner_future_store.mark_debug_refs(seen);
 }

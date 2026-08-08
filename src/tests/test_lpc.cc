@@ -4370,6 +4370,34 @@ TEST_F(DriverTest, TestOwnerStatusMappingsBuildAfterRuntimeSnapshotLockScope) {
       "#ifdef DEBUGMALLOC_EXTENSIONS");
 }
 
+TEST_F(DriverTest, TestOwnerDebugReferenceMarkUsesCoordinatorLockBoundary) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  const auto start = owner_source.find("void vm_owner_mark_runtime_refs()");
+  const auto end = owner_source.find("#endif", start);
+
+  ASSERT_NE(start, std::string::npos);
+  ASSERT_NE(end, std::string::npos);
+  ASSERT_GT(end, start);
+  const auto body = owner_source.substr(start, end - start);
+  const auto lock_pos =
+      body.find("std::lock_guard<std::mutex> lock(owner_runtime_mutex);");
+  const auto scheduler_pos =
+      body.find("owner_scheduler_state.mark_debug_refs(seen);");
+  const auto lock_scope_end = body.find("\n  }\n", scheduler_pos);
+  const auto trace_pos = body.find("owner_trace_store.mark_debug_refs(seen);");
+  const auto future_pos = body.find("owner_future_store.mark_debug_refs(seen);");
+
+  ASSERT_NE(lock_pos, std::string::npos);
+  ASSERT_NE(scheduler_pos, std::string::npos);
+  ASSERT_NE(lock_scope_end, std::string::npos);
+  ASSERT_NE(trace_pos, std::string::npos);
+  ASSERT_NE(future_pos, std::string::npos);
+  EXPECT_LT(lock_pos, scheduler_pos);
+  EXPECT_LT(scheduler_pos, lock_scope_end);
+  EXPECT_LT(lock_scope_end, trace_pos);
+  EXPECT_LT(trace_pos, future_pos);
+}
+
 TEST_F(DriverTest, TestGatewayFutureCompletionExposesMainThreadCpuCounter) {
   const auto gateway_header = read_source_file_for_test("../src/packages/gateway/gateway.h");
   const auto gateway_source =
