@@ -5213,9 +5213,9 @@ uint64_t vm_owner_enqueue_compute_result_fields(const char *owner_id, uint64_t w
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     queued = enqueue_owner_task_locked(task, normalized_owner, &notify_owner_thread);
-    if (!queued) {
-      complete_owner_future_for_task_locked(worker_task_id, "failed", "", "owner scheduler backpressure");
-    }
+  }
+  if (!queued) {
+    complete_owner_future_for_task_locked(worker_task_id, "failed", "", "owner scheduler backpressure");
   }
   if (notify_owner_thread) {
     owner_runtime_cv.notify_one();

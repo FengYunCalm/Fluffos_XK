@@ -4602,6 +4602,53 @@ TEST_F(DriverTest, TestOwnerRejectedSubmissionsCompleteAfterCoordinatorUnlock) {
       "uint64_t vm_owner_record_task_trace(", "if (!queued)");
 }
 
+TEST_F(DriverTest, TestOwnerComputeResultBackpressureCompletesAfterCoordinatorUnlock) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  const auto start = owner_source.find(
+      "uint64_t vm_owner_enqueue_compute_result_fields(");
+  const auto end = owner_source.find("mapping_t *vm_owner_message_trace(", start);
+
+  ASSERT_NE(start, std::string::npos);
+  ASSERT_NE(end, std::string::npos);
+  ASSERT_GT(end, start);
+  const auto body = owner_source.substr(start, end - start);
+  const auto lock_pos =
+      body.find("std::lock_guard<std::mutex> lock(owner_runtime_mutex);");
+  ASSERT_NE(lock_pos, std::string::npos);
+  const auto lock_scope_start = body.rfind('{', lock_pos);
+  ASSERT_NE(lock_scope_start, std::string::npos);
+
+  size_t depth = 0;
+  size_t lock_scope_end = std::string::npos;
+  for (size_t i = lock_scope_start; i < body.size(); i++) {
+    if (body[i] == '{') {
+      depth++;
+    } else if (body[i] == '}') {
+      ASSERT_GT(depth, 0u);
+      depth--;
+      if (depth == 0) {
+        lock_scope_end = i + 1;
+        break;
+      }
+    }
+  }
+  ASSERT_NE(lock_scope_end, std::string::npos);
+
+  const auto locked_body =
+      body.substr(lock_scope_start, lock_scope_end - lock_scope_start);
+  const auto after_lock = body.substr(lock_scope_end);
+  EXPECT_NE(locked_body.find("enqueue_owner_task_locked("),
+            std::string::npos);
+  EXPECT_EQ(locked_body.find("complete_owner_future_for_task_locked("),
+            std::string::npos);
+  const auto guard_pos = after_lock.find("if (!queued)");
+  const auto completion_pos =
+      after_lock.find("complete_owner_future_for_task_locked(");
+  ASSERT_NE(guard_pos, std::string::npos);
+  ASSERT_NE(completion_pos, std::string::npos);
+  EXPECT_LT(guard_pos, completion_pos);
+}
+
 TEST_F(DriverTest, TestOwnerStatusMappingsBuildAfterRuntimeSnapshotLockScope) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   ASSERT_NE(owner_source.find("OwnerStatusSnapshot owner_status_snapshot_locked()"),
@@ -9652,6 +9699,14 @@ TEST_F(DriverTest, TestOwnerSubmissionBackpressureClosesRegisteredFutures) {
   ASSERT_GT(ordinary_future_id, 0u);
   free_mapping(ordinary_submission);
 
+  constexpr uint64_t worker_task_id = 987654322u;
+  const auto compute_future_id = vm_owner_register_compute_future(
+      owner, worker_task_id, "bench", "submission-backpressure-compute");
+  ASSERT_GT(compute_future_id, 0u);
+  ASSERT_EQ(vm_owner_enqueue_compute_result(
+                owner, worker_task_id, "bench", "completed", "bench", ""),
+            0u);
+
   auto assert_failed_and_take = [&](uint64_t future_id) {
     auto* failed = vm_owner_future_poll(future_id);
     EXPECT_EQ(mapping_number(failed, "success"), 1);
@@ -9667,6 +9722,7 @@ TEST_F(DriverTest, TestOwnerSubmissionBackpressureClosesRegisteredFutures) {
   assert_failed_and_take(string_submission.future_id);
   assert_failed_and_take(lpc_future_id);
   assert_failed_and_take(ordinary_future_id);
+  assert_failed_and_take(compute_future_id);
   ASSERT_EQ(projector_runs.load(std::memory_order_relaxed), 0);
 
   auto* purged = vm_owner_purge_mailbox(owner);
