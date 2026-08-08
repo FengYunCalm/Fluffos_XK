@@ -89,18 +89,21 @@ bool OwnerFutureStore::has_pending_for_task(uint64_t target_task_id) const {
 std::optional<OwnerFutureCompletion> OwnerFutureStore::complete(uint64_t future_id, const char *state,
                                                                 const char *result_key, const char *error,
                                                                 std::shared_ptr<VMFrozenValue> result) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   auto it = futures_.find(future_id);
   if (it == futures_.end() || it->second.state != "pending") {
     return std::nullopt;
   }
-  return complete_record(it->second, state, result_key, error, std::move(result));
+  auto completion = complete_record(it->second, state, result_key, error, std::move(result));
+  lock.unlock();
+  completion.target_status = target_status(completion.record);
+  return completion;
 }
 
 std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_for_task(uint64_t target_task_id, const char *state,
                                                                          const char *result_key, const char *error,
                                                                          std::shared_ptr<VMFrozenValue> result) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   auto range = future_ids_by_task_.equal_range(target_task_id);
   for (auto index_it = range.first; index_it != range.second;) {
     auto current_index = index_it++;
@@ -110,7 +113,10 @@ std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_for_task(uint64_
       continue;
     }
     if (future_it->second.state == "pending") {
-      return complete_record(future_it->second, state, result_key, error, std::move(result));
+      auto completion = complete_record(future_it->second, state, result_key, error, std::move(result));
+      lock.unlock();
+      completion.target_status = target_status(completion.record);
+      return completion;
     }
   }
   return std::nullopt;
@@ -118,7 +124,7 @@ std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_for_task(uint64_
 
 std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_string_for_task(
     uint64_t target_task_id, const char *result_key, std::string result) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   auto range = future_ids_by_task_.equal_range(target_task_id);
   for (auto index_it = range.first; index_it != range.second;) {
     auto current_index = index_it++;
@@ -144,8 +150,9 @@ std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_string_for_task(
 
     OwnerFutureCompletion completion;
     completion.record = record;
-    completion.target_status = target_status(record);
     completion.completed_with_frozen_result = true;
+    lock.unlock();
+    completion.target_status = target_status(completion.record);
     return completion;
   }
   return std::nullopt;
@@ -153,7 +160,7 @@ std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_string_for_task(
 
 OwnerFutureTerminalResult OwnerFutureStore::fail_terminal(uint64_t future_id, const char *reason, bool cancelled,
                                                           bool timed_out) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   OwnerFutureTerminalResult result;
   auto it = futures_.find(future_id);
   if (it == futures_.end()) {
@@ -174,8 +181,9 @@ OwnerFutureTerminalResult OwnerFutureStore::fail_terminal(uint64_t future_id, co
     failed_.fetch_add(1, std::memory_order_relaxed);
     result.changed = true;
   }
-  result.target_status = target_status(future);
   result.record = future;
+  lock.unlock();
+  result.target_status = target_status(result.record);
   return result;
 }
 
@@ -243,7 +251,6 @@ OwnerFutureCompletion OwnerFutureStore::complete_record(OwnerFutureRecord &recor
 
   OwnerFutureCompletion completion;
   completion.record = record;
-  completion.target_status = target_status(record);
   completion.completed_with_frozen_result = completed_with_frozen_result;
   return completion;
 }

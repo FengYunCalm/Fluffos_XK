@@ -523,6 +523,52 @@ TEST_F(DriverTest, TestOwnerFuturePendingCountUsesTransitionCounter) {
   EXPECT_EQ(count_body.find("for ("), std::string::npos);
 }
 
+TEST_F(DriverTest, TestOwnerFutureStoreResolvesTargetsAfterTerminalLockScope) {
+  const auto source =
+      read_source_file_for_test("../src/vm/internal/owner_future_store.cc");
+  auto assert_resolved_after_unlock = [&](const char* start_marker,
+                                          const char* end_marker,
+                                          const char* resolution) {
+    const auto start = source.find(start_marker);
+    const auto end = source.find(end_marker, start);
+    ASSERT_NE(start, std::string::npos) << start_marker;
+    ASSERT_NE(end, std::string::npos) << end_marker;
+    const auto body = source.substr(start, end - start);
+    const auto lock_pos =
+        body.find("std::unique_lock<std::mutex> lock(mutex_);");
+    const auto unlock_pos = body.find("lock.unlock();", lock_pos);
+    const auto resolution_pos = body.find(resolution);
+    ASSERT_NE(lock_pos, std::string::npos) << start_marker;
+    ASSERT_NE(unlock_pos, std::string::npos) << start_marker;
+    ASSERT_NE(resolution_pos, std::string::npos) << start_marker;
+    EXPECT_LT(lock_pos, unlock_pos) << start_marker;
+    EXPECT_LT(unlock_pos, resolution_pos) << start_marker;
+  };
+
+  assert_resolved_after_unlock(
+      "std::optional<OwnerFutureCompletion> OwnerFutureStore::complete(",
+      "std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_for_task(",
+      "completion.target_status = target_status(completion.record);");
+  assert_resolved_after_unlock(
+      "std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_for_task(",
+      "std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_string_for_task(",
+      "completion.target_status = target_status(completion.record);");
+  assert_resolved_after_unlock(
+      "std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_string_for_task(",
+      "OwnerFutureTerminalResult OwnerFutureStore::fail_terminal(",
+      "completion.target_status = target_status(completion.record);");
+  assert_resolved_after_unlock(
+      "OwnerFutureTerminalResult OwnerFutureStore::fail_terminal(",
+      "long OwnerFutureStore::pending_count()",
+      "result.target_status = target_status(result.record);");
+
+  const auto helper_start = source.find(
+      "OwnerFutureCompletion OwnerFutureStore::complete_record(");
+  ASSERT_NE(helper_start, std::string::npos);
+  const auto helper_body = source.substr(helper_start);
+  EXPECT_EQ(helper_body.find("target_status(record)"), std::string::npos);
+}
+
 TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   const auto gateway_status_source =
       read_source_file_for_test("../src/packages/gateway/gateway.cc");
