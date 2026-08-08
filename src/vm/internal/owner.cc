@@ -4689,12 +4689,12 @@ mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     auto requested_limit = limit <= 0 ? 0 : static_cast<size_t>(limit);
     drained_tasks = owner_scheduler_state.drain_owner_mailbox(normalized_owner_id, requested_limit);
-    for (auto &task : drained_tasks) {
-      append_owner_task_trace(task, "drained");
-      record_owner_mailbox_task_drained(task);
-    }
-    total_drained.fetch_add(drained_tasks.size(), std::memory_order_relaxed);
   }
+  for (auto &task : drained_tasks) {
+    append_owner_task_trace(task, "drained");
+    record_owner_mailbox_task_drained(task);
+  }
+  total_drained.fetch_add(drained_tasks.size(), std::memory_order_relaxed);
 
   auto requested = drained_tasks.size();
   auto *tasks = allocate_array(static_cast<int>(requested));

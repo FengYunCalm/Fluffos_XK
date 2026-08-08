@@ -4838,6 +4838,47 @@ TEST_F(DriverTest, TestOwnerDrainMailboxSnapshotsRemainingDepthUnderRuntimeLock)
             std::string::npos);
 }
 
+TEST_F(DriverTest, TestOwnerDrainProcessesDetachedTasksAfterRuntimeUnlock) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  const auto start = owner_source.find("mapping_t *vm_owner_drain_mailbox(");
+  const auto end = owner_source.find("mapping_t *vm_owner_purge_mailbox(", start);
+
+  ASSERT_NE(start, std::string::npos);
+  ASSERT_NE(end, std::string::npos);
+  ASSERT_GT(end, start);
+  const auto body = owner_source.substr(start, end - start);
+  const auto tasks_pos =
+      body.find("std::vector<OwnerMailboxTask> drained_tasks;");
+  const auto lock_pos = body.find(
+      "std::lock_guard<std::mutex> lock(owner_runtime_mutex);", tasks_pos);
+  const auto detach_pos = body.find(
+      "drained_tasks = owner_scheduler_state.drain_owner_mailbox(", lock_pos);
+  const auto lock_scope_end = body.find("\n  }\n", detach_pos);
+  const auto trace_pos =
+      body.find("append_owner_task_trace(task, \"drained\");", detach_pos);
+  const auto record_pos =
+      body.find("record_owner_mailbox_task_drained(task);", detach_pos);
+  const auto total_pos = body.find(
+      "total_drained.fetch_add(drained_tasks.size(), std::memory_order_relaxed);",
+      detach_pos);
+  const auto array_pos = body.find("auto *tasks = allocate_array", detach_pos);
+
+  ASSERT_NE(tasks_pos, std::string::npos);
+  ASSERT_NE(lock_pos, std::string::npos);
+  ASSERT_NE(detach_pos, std::string::npos);
+  ASSERT_NE(lock_scope_end, std::string::npos);
+  ASSERT_NE(trace_pos, std::string::npos);
+  ASSERT_NE(record_pos, std::string::npos);
+  ASSERT_NE(total_pos, std::string::npos);
+  ASSERT_NE(array_pos, std::string::npos);
+  EXPECT_LT(lock_pos, detach_pos);
+  EXPECT_LT(detach_pos, lock_scope_end);
+  EXPECT_LT(lock_scope_end, trace_pos);
+  EXPECT_LT(lock_scope_end, record_pos);
+  EXPECT_LT(lock_scope_end, total_pos);
+  EXPECT_LT(total_pos, array_pos);
+}
+
 TEST_F(DriverTest, TestOwnerPurgeProcessesDetachedTasksAfterRuntimeUnlock) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   const auto start = owner_source.find("mapping_t *vm_owner_purge_mailbox(");
