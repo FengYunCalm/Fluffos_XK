@@ -1,12 +1,18 @@
 #include "vm/internal/owner_future_store.h"
 
 #include <chrono>
+#include <cstring>
 
 namespace {
 uint64_t owner_future_now_ns() {
   return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                    std::chrono::steady_clock::now().time_since_epoch())
                                    .count());
+}
+
+bool owner_future_terminal_state_valid(const char *state) {
+  return !state || state[0] == '\0' || std::strcmp(state, "completed") == 0 ||
+         std::strcmp(state, "failed") == 0;
 }
 }  // namespace
 
@@ -89,6 +95,9 @@ bool OwnerFutureStore::has_pending_for_task(uint64_t target_task_id) const {
 std::optional<OwnerFutureCompletion> OwnerFutureStore::complete(uint64_t future_id, const char *state,
                                                                 const char *result_key, const char *error,
                                                                 std::shared_ptr<VMFrozenValue> result) {
+  if (!owner_future_terminal_state_valid(state)) {
+    return std::nullopt;
+  }
   std::unique_lock<std::mutex> lock(mutex_);
   auto it = futures_.find(future_id);
   if (it == futures_.end() || it->second.state != "pending") {
@@ -103,6 +112,9 @@ std::optional<OwnerFutureCompletion> OwnerFutureStore::complete(uint64_t future_
 std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_for_task(uint64_t target_task_id, const char *state,
                                                                          const char *result_key, const char *error,
                                                                          std::shared_ptr<VMFrozenValue> result) {
+  if (!owner_future_terminal_state_valid(state)) {
+    return std::nullopt;
+  }
   std::unique_lock<std::mutex> lock(mutex_);
   auto range = future_ids_by_task_.equal_range(target_task_id);
   for (auto index_it = range.first; index_it != range.second;) {

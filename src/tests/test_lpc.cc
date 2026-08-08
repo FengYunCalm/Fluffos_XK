@@ -155,6 +155,30 @@ TEST(OwnerFutureStoreTest, PendingCountTracksRecordTransitions) {
   ASSERT_EQ(store.pending_count(), 0);
 }
 
+TEST(OwnerFutureStoreTest, RejectsNonTerminalCompletionStateWithoutCounterDrift) {
+  OwnerFutureStore direct_store;
+  direct_store.insert(owner_future_store_test_record(9, 909));
+  EXPECT_FALSE(direct_store.complete(9, "pending", "result", "").has_value());
+  EXPECT_EQ(direct_store.state(9), OwnerFutureState::kPending);
+  EXPECT_EQ(direct_store.pending_count(), 1);
+  EXPECT_EQ(direct_store.completed_count(), 0u);
+  EXPECT_EQ(direct_store.failed_count(), 0u);
+  EXPECT_FALSE(direct_store.take(9).consumed);
+  ASSERT_TRUE(direct_store.complete(9, "completed", "result", "").has_value());
+  EXPECT_EQ(direct_store.pending_count(), 0);
+  EXPECT_EQ(direct_store.completed_count(), 1u);
+  EXPECT_TRUE(direct_store.take(9).consumed);
+
+  OwnerFutureStore task_store;
+  task_store.insert(owner_future_store_test_record(10, 1010));
+  EXPECT_FALSE(
+      task_store.complete_for_task(1010, "cancelled", "", "invalid state").has_value());
+  EXPECT_EQ(task_store.state(10), OwnerFutureState::kPending);
+  EXPECT_EQ(task_store.pending_count(), 1);
+  EXPECT_EQ(task_store.completed_count(), 0u);
+  EXPECT_EQ(task_store.failed_count(), 0u);
+}
+
 TEST(OwnerSchedulerStateTest, RemovesOneQueuedTaskWithoutDroppingNeighbors) {
   OwnerSchedulerState state;
   const auto runnable = [](const OwnerMailboxTask &task) {
