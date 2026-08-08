@@ -4201,6 +4201,21 @@ TEST_F(DriverTest, TestOwnerAsyncLpcAndCompletionExposeWorkerThreadCpuCounters) 
             std::string::npos);
 }
 
+TEST_F(DriverTest, TestOwnerRuntimeMetricMappingsUseLpcIntegerWidth) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  const auto status_start =
+      owner_source.find("void add_owner_runtime_v2_status_fields(mapping_t *map)");
+  const auto status_end = owner_source.find(
+      "std::shared_ptr<VMFrozenValue> frozen_compute_result_mapping", status_start);
+
+  ASSERT_NE(status_start, std::string::npos);
+  ASSERT_NE(status_end, std::string::npos);
+  ASSERT_GT(status_end, status_start);
+  const auto status_body =
+      owner_source.substr(status_start, status_end - status_start);
+  ASSERT_EQ(status_body.find("static_cast<long>"), std::string::npos);
+}
+
 TEST_F(DriverTest, TestGatewayFutureCompletionExposesMainThreadCpuCounter) {
   const auto gateway_header = read_source_file_for_test("../src/packages/gateway/gateway.h");
   const auto gateway_source =

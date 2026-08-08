@@ -462,7 +462,7 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   auto metrics = owner_runtime_metrics.snapshot();
   auto fairness = owner_scheduler_state.fairness_snapshot(owner_task_executor_runnable, owner_task_executor_safe,
                                                           owner_task_requires_main_drain);
-  auto normal_path_main_fallbacks = static_cast<long>(metrics.owner_normal_path_main_fallback_count);
+  auto normal_path_main_fallbacks = static_cast<LPC_INT>(metrics.owner_normal_path_main_fallback_count);
   add_mapping_pair(map, "owner_runtime_split_ready", 1);
   add_mapping_string(map, "owner_runtime_split_model", "runtime_v4_modules_with_owner_runtime_coordinator");
   add_mapping_pair(map, "owner_runtime_v4_hardening_ready", 1);
@@ -555,46 +555,46 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "executor_callback_allowlist_count", owner_executor_callback_allowlist_count());
   add_mapping_string(map, "owner_executor_admission_policy", kOwnerTaskAdmissionPolicyV2);
   add_mapping_pair(map, "owner_executor_admission_accepted",
-                   static_cast<long>(metrics.owner_executor_admission_accepted));
+                   static_cast<LPC_INT>(metrics.owner_executor_admission_accepted));
   add_mapping_pair(map, "owner_executor_admission_rejected",
-                   static_cast<long>(metrics.owner_executor_admission_rejected));
+                   static_cast<LPC_INT>(metrics.owner_executor_admission_rejected));
   add_mapping_pair(map, "owner_executor_admission_dropped",
-                   static_cast<long>(metrics.owner_executor_admission_dropped));
+                   static_cast<LPC_INT>(metrics.owner_executor_admission_dropped));
   add_mapping_pair(map, "owner_executor_payload_policy_v2_ready", 1);
   add_mapping_pair(map, "owner_executor_trace_schema_v2_ready", 1);
   add_mapping_string(map, "owner_executor_trace_schema", kOwnerExecutorTraceSchemaV2);
   add_mapping_pair(map, "owner_executor_metrics_v2_ready", 1);
   add_mapping_pair(map, "owner_async_stage_timing_ready", 1);
   add_mapping_pair(map, "owner_async_queue_wait_samples",
-                   static_cast<long>(metrics.owner_async_queue_wait_samples));
+                   static_cast<LPC_INT>(metrics.owner_async_queue_wait_samples));
   add_mapping_pair(map, "owner_async_queue_wait_total_us",
-                   static_cast<long>(metrics.owner_async_queue_wait_ns_total / 1000));
+                   static_cast<LPC_INT>(metrics.owner_async_queue_wait_ns_total / 1000));
   add_mapping_pair(map, "owner_async_queue_wait_max_us",
-                   static_cast<long>(metrics.owner_async_queue_wait_ns_max / 1000));
+                   static_cast<LPC_INT>(metrics.owner_async_queue_wait_ns_max / 1000));
   add_mapping_pair(map, "owner_async_lpc_execute_samples",
-                   static_cast<long>(metrics.owner_async_lpc_execute_samples));
+                   static_cast<LPC_INT>(metrics.owner_async_lpc_execute_samples));
   add_mapping_pair(map, "owner_async_lpc_execute_total_us",
-                   static_cast<long>(metrics.owner_async_lpc_execute_ns_total / 1000));
+                   static_cast<LPC_INT>(metrics.owner_async_lpc_execute_ns_total / 1000));
   add_mapping_pair(map, "owner_async_lpc_execute_max_us",
-                   static_cast<long>(metrics.owner_async_lpc_execute_ns_max / 1000));
+                   static_cast<LPC_INT>(metrics.owner_async_lpc_execute_ns_max / 1000));
   add_mapping_pair(
       map, "owner_async_lpc_execute_thread_cpu_total_us",
-      static_cast<long>(metrics.owner_async_lpc_execute_thread_cpu_ns_total / 1000));
+      static_cast<LPC_INT>(metrics.owner_async_lpc_execute_thread_cpu_ns_total / 1000));
   add_mapping_pair(
       map, "owner_async_lpc_execute_thread_cpu_unavailable",
-      static_cast<long>(metrics.owner_async_lpc_execute_thread_cpu_unavailable));
+      static_cast<LPC_INT>(metrics.owner_async_lpc_execute_thread_cpu_unavailable));
   add_mapping_pair(map, "owner_async_result_completion_samples",
-                   static_cast<long>(metrics.owner_async_result_completion_samples));
+                   static_cast<LPC_INT>(metrics.owner_async_result_completion_samples));
   add_mapping_pair(map, "owner_async_result_completion_total_us",
-                   static_cast<long>(metrics.owner_async_result_completion_ns_total / 1000));
+                   static_cast<LPC_INT>(metrics.owner_async_result_completion_ns_total / 1000));
   add_mapping_pair(map, "owner_async_result_completion_max_us",
-                   static_cast<long>(metrics.owner_async_result_completion_ns_max / 1000));
+                   static_cast<LPC_INT>(metrics.owner_async_result_completion_ns_max / 1000));
   add_mapping_pair(
       map, "owner_async_result_completion_thread_cpu_total_us",
-      static_cast<long>(metrics.owner_async_result_completion_thread_cpu_ns_total / 1000));
+      static_cast<LPC_INT>(metrics.owner_async_result_completion_thread_cpu_ns_total / 1000));
   add_mapping_pair(
       map, "owner_async_result_completion_thread_cpu_unavailable",
-      static_cast<long>(metrics.owner_async_result_completion_thread_cpu_unavailable));
+      static_cast<LPC_INT>(metrics.owner_async_result_completion_thread_cpu_unavailable));
   add_mapping_pair(map, "owner_executor_queue_depth_metrics_ready", 1);
   add_mapping_pair(map, "owner_executor_queue_depth", owner_mailbox_total_depth());
   add_mapping_pair(map, "owner_executor_runnable_queue_depth", owner_executor_runnable_queue_depth());
@@ -602,41 +602,44 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "owner_executor_main_required_queue_depth", owner_main_required_queue_depth());
   add_mapping_pair(map, "owner_executor_future_timeout_cancel_ready", 1);
   add_mapping_pair(map, "owner_executor_future_terminal_take_ready", 1);
-  add_mapping_pair(map, "owner_executor_future_timeout", static_cast<long>(metrics.owner_executor_future_timeout));
-  add_mapping_pair(map, "owner_executor_future_cancelled", static_cast<long>(metrics.owner_executor_future_cancelled));
+  add_mapping_pair(map, "owner_executor_future_timeout", static_cast<LPC_INT>(metrics.owner_executor_future_timeout));
+  add_mapping_pair(map, "owner_executor_future_cancelled",
+                   static_cast<LPC_INT>(metrics.owner_executor_future_cancelled));
   add_mapping_pair(
       map, "executor_callback_cancelled_before_dispatch",
-      static_cast<long>(
+      static_cast<LPC_INT>(
           metrics.owner_executor_callback_cancelled_before_dispatch));
   add_mapping_pair(
       map, "owner_message_cancelled_before_dispatch",
-      static_cast<long>(metrics.owner_message_cancelled_before_dispatch));
+      static_cast<LPC_INT>(metrics.owner_message_cancelled_before_dispatch));
   add_mapping_pair(
       map, "owner_other_task_cancelled_before_dispatch",
-      static_cast<long>(metrics.owner_other_task_cancelled_before_dispatch));
+      static_cast<LPC_INT>(metrics.owner_other_task_cancelled_before_dispatch));
   add_mapping_pair(map, "owner_executor_backpressure_rejected",
-                   static_cast<long>(metrics.owner_executor_backpressure_rejected));
+                   static_cast<LPC_INT>(metrics.owner_executor_backpressure_rejected));
   add_owner_scheduler_backpressure_fields(map, fairness);
-  add_mapping_pair(map, "owner_executor_stale_drop", static_cast<long>(metrics.owner_executor_stale_drop));
-  add_mapping_pair(map, "owner_executor_destructed_drop", static_cast<long>(metrics.owner_executor_destructed_drop));
+  add_mapping_pair(map, "owner_executor_stale_drop", static_cast<LPC_INT>(metrics.owner_executor_stale_drop));
+  add_mapping_pair(map, "owner_executor_destructed_drop", static_cast<LPC_INT>(metrics.owner_executor_destructed_drop));
   add_mapping_pair(map, "owner_executor_epoch_mismatch_drop",
-                   static_cast<long>(metrics.owner_executor_epoch_mismatch_drop));
+                   static_cast<LPC_INT>(metrics.owner_executor_epoch_mismatch_drop));
   add_mapping_pair(map, "owner_executor_context_cleanup_leaks",
-                   static_cast<long>(metrics.owner_thread_context_leak_detected));
+                   static_cast<LPC_INT>(metrics.owner_thread_context_leak_detected));
   add_mapping_pair(map, "owner_executor_future_pending_backlog", owner_pending_future_count());
   add_mapping_pair(map, "owner_executor_socket_release_trace_ready", 1);
   add_mapping_pair(map, "registered_owner_task_domains_ready", 1);
-  add_mapping_pair(map, "registered_owner_task_domain_count", static_cast<long>(owner_lpc_task_descriptors().size()));
+  add_mapping_pair(map, "registered_owner_task_domain_count",
+                   static_cast<LPC_INT>(owner_lpc_task_descriptors().size()));
   add_mapping_pair(map, "owner_service_shard_registry_ready", 1);
   add_mapping_string(map, "owner_service_shard_registry_schema", kOwnerServiceShardRegistrySchemaV1);
   add_mapping_pair(map, "owner_service_shard_domain_count",
-                   static_cast<long>(owner_service_shard_descriptors().size()));
+                   static_cast<LPC_INT>(owner_service_shard_descriptors().size()));
   add_mapping_string(map, "owner_service_shard_domains", owner_service_shard_domain_list().c_str());
   add_mapping_pair(map, "owner_service_registry_lpc_domain_alignment_ready",
                    owner_service_registry_matches_lpc_domains() ? 1 : 0);
   add_mapping_pair(map, "owner_tick_group_scheduler_ready", 1);
   add_mapping_string(map, "owner_tick_group_scheduler_schema", kOwnerTickGroupSchedulerSchemaV1);
-  add_mapping_pair(map, "owner_tick_group_count", static_cast<long>(owner_tick_group_descriptors().size()));
+  add_mapping_pair(map, "owner_tick_group_count",
+                   static_cast<LPC_INT>(owner_tick_group_descriptors().size()));
   add_mapping_string(map, "owner_tick_groups", owner_tick_group_name_list().c_str());
   add_mapping_pair(map, "owner_scheduler_tuning_config_ready", 1);
   add_mapping_string(map, "owner_scheduler_tuning_config_schema", kOwnerSchedulerTuningConfigSchemaV1);
@@ -649,10 +652,12 @@ void add_owner_runtime_v2_status_fields(mapping_t *map) {
   add_mapping_pair(map, "normal_path_main_fallback_ready", normal_path_main_fallbacks == 0 ? 1 : 0);
   add_mapping_pair(map, "main_fallback_policy_ready", 1);
   add_mapping_string(map, "main_fallback_classification", "explicit_policy");
-  add_mapping_pair(map, "explicit_fallback_count", static_cast<long>(metrics.owner_explicit_main_fallback_count));
-  add_mapping_pair(map, "off_mode_main_fallback_count", static_cast<long>(metrics.owner_off_mode_main_fallback_count));
-  add_mapping_pair(map, "main_io_adapter_count", static_cast<long>(metrics.owner_main_io_adapter_count));
-  add_mapping_pair(map, "main_cleanup_adapter_count", static_cast<long>(metrics.owner_main_cleanup_adapter_count));
+  add_mapping_pair(map, "explicit_fallback_count", static_cast<LPC_INT>(metrics.owner_explicit_main_fallback_count));
+  add_mapping_pair(map, "off_mode_main_fallback_count",
+                   static_cast<LPC_INT>(metrics.owner_off_mode_main_fallback_count));
+  add_mapping_pair(map, "main_io_adapter_count", static_cast<LPC_INT>(metrics.owner_main_io_adapter_count));
+  add_mapping_pair(map, "main_cleanup_adapter_count",
+                   static_cast<LPC_INT>(metrics.owner_main_cleanup_adapter_count));
   add_mapping_pair(map, "session_fifo_contract_ready", 1);
   add_mapping_pair(map, "gateway_io_adapter_only_ready", 1);
   add_mapping_string(map, "gateway_io_boundary", "main_thread_io_adapter");
