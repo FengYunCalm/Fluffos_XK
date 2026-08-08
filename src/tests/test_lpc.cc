@@ -4879,6 +4879,64 @@ TEST_F(DriverTest, TestOwnerDrainProcessesDetachedTasksAfterRuntimeUnlock) {
   EXPECT_LT(total_pos, array_pos);
 }
 
+TEST_F(DriverTest,
+       TestOwnerQueuedFutureCancellationProcessesRemovedTaskAfterRuntimeUnlock) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  const auto start =
+      owner_source.find("mapping_t *vm_owner_future_cancel_queued_task(");
+  const auto end =
+      owner_source.find("mapping_t *vm_owner_future_timeout(", start);
+
+  ASSERT_NE(start, std::string::npos);
+  ASSERT_NE(end, std::string::npos);
+  ASSERT_GT(end, start);
+  const auto body = owner_source.substr(start, end - start);
+  const auto terminal_pos =
+      body.find("mark_owner_future_failed_terminal(");
+  const auto lock_pos = body.find(
+      "std::lock_guard<std::mutex> lock(owner_runtime_mutex);");
+  const auto detach_pos =
+      body.find("owner_scheduler_state.remove_owner_task(", lock_pos);
+  const auto lock_scope_end = body.find("\n    }\n", detach_pos);
+  const auto kind_pos =
+      body.find("queued_task_kind = removed.task_kind;", detach_pos);
+  const auto trace_pos = body.find("append_owner_task_trace(", detach_pos);
+  const auto record_pos =
+      body.find("record_owner_mailbox_task_drained(removed);", detach_pos);
+  const auto total_pos = body.find(
+      "total_drained.fetch_add(1, std::memory_order_relaxed);", detach_pos);
+  const auto cleanup_pos = body.find(
+      "schedule_owner_executor_callback_cleanup_on_main(removed);", detach_pos);
+  const auto release_pos =
+      body.find("release_owner_task_target(&removed);", detach_pos);
+
+  ASSERT_NE(terminal_pos, std::string::npos);
+  ASSERT_NE(lock_pos, std::string::npos);
+  ASSERT_NE(detach_pos, std::string::npos);
+  ASSERT_NE(lock_scope_end, std::string::npos);
+  ASSERT_NE(kind_pos, std::string::npos);
+  ASSERT_NE(trace_pos, std::string::npos);
+  ASSERT_NE(record_pos, std::string::npos);
+  ASSERT_NE(total_pos, std::string::npos);
+  ASSERT_NE(cleanup_pos, std::string::npos);
+  ASSERT_NE(release_pos, std::string::npos);
+  EXPECT_LT(terminal_pos, lock_pos);
+  EXPECT_LT(lock_pos, detach_pos);
+  EXPECT_LT(detach_pos, lock_scope_end);
+  EXPECT_LT(lock_scope_end, kind_pos);
+  EXPECT_LT(kind_pos, trace_pos);
+  EXPECT_LT(lock_scope_end, trace_pos);
+  EXPECT_LT(lock_scope_end, record_pos);
+  EXPECT_LT(lock_scope_end, total_pos);
+  EXPECT_LT(lock_scope_end, cleanup_pos);
+  EXPECT_LT(trace_pos, cleanup_pos);
+  EXPECT_LT(cleanup_pos, release_pos);
+  EXPECT_LT(record_pos, release_pos);
+  EXPECT_LT(total_pos, release_pos);
+  EXPECT_EQ(body.find("enqueue_owner_executor_callback_cleanup_locked(removed);"),
+            std::string::npos);
+}
+
 TEST_F(DriverTest, TestOwnerPurgeProcessesDetachedTasksAfterRuntimeUnlock) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   const auto start = owner_source.find("mapping_t *vm_owner_purge_mailbox(");

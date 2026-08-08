@@ -5361,32 +5361,30 @@ mapping_t *vm_owner_future_cancel_queued_task(uint64_t future_id,
       std::lock_guard<std::mutex> lock(owner_runtime_mutex);
       queued_task_removed = owner_scheduler_state.remove_owner_task(
           record->target_task_id, &removed);
-      if (queued_task_removed) {
-        queued_task_kind = removed.task_kind;
-        if (queued_task_kind == "executor_callback") {
-          append_owner_task_trace(
-              removed, "executor_callback_cancelled_before_dispatch");
-          owner_executor_callback_cancelled_before_dispatch.fetch_add(
-              1, std::memory_order_relaxed);
-          owner_executor_callback_dropped.fetch_add(
-              1, std::memory_order_relaxed);
-          enqueue_owner_executor_callback_cleanup_locked(removed);
-        } else if (queued_task_kind == "owner_message") {
-          append_owner_task_trace(
-              removed, "owner_message_cancelled_before_dispatch");
-          owner_message_cancelled_before_dispatch.fetch_add(
-              1, std::memory_order_relaxed);
-        } else {
-          append_owner_task_trace(
-              removed, "queued_task_cancelled_before_dispatch");
-          owner_other_task_cancelled_before_dispatch.fetch_add(
-              1, std::memory_order_relaxed);
-        }
-        record_owner_mailbox_task_drained(removed);
-        total_drained.fetch_add(1, std::memory_order_relaxed);
-      }
     }
     if (queued_task_removed) {
+      queued_task_kind = removed.task_kind;
+      if (queued_task_kind == "executor_callback") {
+        append_owner_task_trace(
+            removed, "executor_callback_cancelled_before_dispatch");
+        owner_executor_callback_cancelled_before_dispatch.fetch_add(
+            1, std::memory_order_relaxed);
+        owner_executor_callback_dropped.fetch_add(
+            1, std::memory_order_relaxed);
+        schedule_owner_executor_callback_cleanup_on_main(removed);
+      } else if (queued_task_kind == "owner_message") {
+        append_owner_task_trace(
+            removed, "owner_message_cancelled_before_dispatch");
+        owner_message_cancelled_before_dispatch.fetch_add(
+            1, std::memory_order_relaxed);
+      } else {
+        append_owner_task_trace(
+            removed, "queued_task_cancelled_before_dispatch");
+        owner_other_task_cancelled_before_dispatch.fetch_add(
+            1, std::memory_order_relaxed);
+      }
+      record_owner_mailbox_task_drained(removed);
+      total_drained.fetch_add(1, std::memory_order_relaxed);
       release_owner_task_target(&removed);
     }
   }
