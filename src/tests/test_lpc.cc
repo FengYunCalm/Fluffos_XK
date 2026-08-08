@@ -4649,6 +4649,60 @@ TEST_F(DriverTest, TestOwnerComputeResultBackpressureCompletesAfterCoordinatorUn
   EXPECT_LT(guard_pos, completion_pos);
 }
 
+TEST_F(DriverTest, TestOwnerTerminalCompletionPathsAvoidCoordinatorLock) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  auto assert_function_has_no_coordinator_lock =
+      [&](const char* start_marker, const char* end_marker,
+          const char* completion_call) {
+        const auto start = owner_source.find(start_marker);
+        const auto end = owner_source.find(end_marker, start);
+
+        ASSERT_NE(start, std::string::npos) << start_marker;
+        ASSERT_NE(end, std::string::npos) << end_marker;
+        ASSERT_GT(end, start) << start_marker;
+        const auto body = owner_source.substr(start, end - start);
+        EXPECT_NE(body.find(completion_call), std::string::npos)
+            << start_marker;
+        EXPECT_EQ(body.find("owner_runtime_mutex"), std::string::npos)
+            << start_marker;
+      };
+
+  assert_function_has_no_coordinator_lock(
+      "void dispatch_owner_message_in_current_context(",
+      "void complete_owner_compute_result_task_locked(",
+      "complete_owner_message_task_locked(task);");
+  assert_function_has_no_coordinator_lock(
+      "  void complete_owner_message_task(const OwnerMailboxTask &task) {",
+      "  void complete_owner_compute_result_task(",
+      "complete_owner_message_task_locked(task);");
+  assert_function_has_no_coordinator_lock(
+      "  void complete_owner_compute_result_task(const OwnerMailboxTask &task) {",
+      "  void run_task(OwnerMailboxTask &task) {",
+      "complete_owner_compute_result_task_locked(task);");
+
+  const auto drain_start =
+      owner_source.find("mapping_t *vm_owner_drain_mailbox(");
+  const auto drain_end =
+      owner_source.find("mapping_t *vm_owner_purge_mailbox(", drain_start);
+  ASSERT_NE(drain_start, std::string::npos);
+  ASSERT_NE(drain_end, std::string::npos);
+  ASSERT_GT(drain_end, drain_start);
+  const auto drain_body =
+      owner_source.substr(drain_start, drain_end - drain_start);
+  const auto compute_start = drain_body.find(
+      "} else if (task.task_type == \"compute_result\") {");
+  const auto compute_end = drain_body.find(
+      "} else if (task.task_type == \"lpc_task\") {", compute_start);
+  ASSERT_NE(compute_start, std::string::npos);
+  ASSERT_NE(compute_end, std::string::npos);
+  ASSERT_GT(compute_end, compute_start);
+  const auto compute_branch =
+      drain_body.substr(compute_start, compute_end - compute_start);
+  EXPECT_NE(compute_branch.find("complete_owner_compute_result_task_locked(task);"),
+            std::string::npos);
+  EXPECT_EQ(compute_branch.find("owner_runtime_mutex"), std::string::npos);
+}
+
 TEST_F(DriverTest, TestOwnerStatusMappingsBuildAfterRuntimeSnapshotLockScope) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   ASSERT_NE(owner_source.find("OwnerStatusSnapshot owner_status_snapshot_locked()"),

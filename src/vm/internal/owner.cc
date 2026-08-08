@@ -2650,7 +2650,6 @@ void dispatch_owner_message_in_current_context(const OwnerMailboxTask &task) {
                          owner_async_queue_wait_samples, dispatch_started_ns - task.enqueued_at_ns);
   }
   if (!task.has_target_handle) {
-    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     complete_owner_message_task_locked(task);
     return;
   }
@@ -3383,12 +3382,10 @@ class OwnerExecutorRuntimeImpl final : public OwnerExecutorRuntime {
       dispatch_owner_message_in_current_context(task);
       return;
     }
-    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     complete_owner_message_task_locked(task);
   }
 
   void complete_owner_compute_result_task(const OwnerMailboxTask &task) {
-    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     complete_owner_compute_result_task_locked(task);
   }
 
@@ -4712,7 +4709,6 @@ mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
         dispatch_owner_message_in_current_context(task);
       }
     } else if (task.task_type == "compute_result") {
-      std::lock_guard<std::mutex> lock(owner_runtime_mutex);
       complete_owner_compute_result_task_locked(task);
     } else if (task.task_type == "lpc_task") {
       complete_owner_future_for_task_threadsafe(task.task_id, "failed", "", "owner lpc task requires owner thread");
