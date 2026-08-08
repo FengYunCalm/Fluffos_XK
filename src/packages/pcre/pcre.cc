@@ -62,6 +62,12 @@
 // store reg->error & reg->erroffset before error(..)
 
 #include <thirdparty/scope_guard/scope_guard.hpp>
+
+#include <cstddef>
+#include <cstring>
+#include <limits>
+#include <vector>
+
 #include "base/package_api.h"
 
 #include "pcre.h"
@@ -81,6 +87,82 @@ static array_t *pcre_match(array_t *v, const char *pattern, int flag, int pcre_f
 static array_t *pcre_assoc(svalue_t *str, array_t *pat, array_t *tok, svalue_t *def, int pcre_flags);
 static char *pcre_get_replace(pcre_t *run, array_t *replacements);
 static array_t *pcre_get_substrings(pcre_t *run, bool include_names);
+
+namespace {
+
+struct pcre_replace_segment_t {
+  int start;
+  int end;
+  size_t replacement_length;
+  const char *replacement;
+};
+
+static bool pcre_capture_participated(const pcre_t *run, int group) {
+  int const ovec_index = group * 2;
+  return ovec_index >= 0 && ovec_index + 1 < run->ovecsize && run->ovector[ovec_index] >= 0 &&
+         run->ovector[ovec_index + 1] >= run->ovector[ovec_index] &&
+         static_cast<size_t>(run->ovector[ovec_index + 1]) <= run->s_length;
+}
+
+static int pcre_subject_length(const pcre_t *run) {
+  if (run->s_length > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    error("PCRE subject is too large.\n");
+  }
+  return static_cast<int>(run->s_length);
+}
+
+static size_t pcre_advance_after_empty_match(const char *subject, size_t subject_length, int offset) {
+  if (offset < 0 || static_cast<size_t>(offset) >= subject_length) {
+    return subject_length;
+  }
+
+  // PCRE is compiled in UTF-8 mode. Advance by one complete code point so a
+  // zero-length match cannot be retried at the same byte offset.
+  size_t next = static_cast<size_t>(offset) + 1;
+  while (next < subject_length && (static_cast<unsigned char>(subject[next]) & 0xc0) == 0x80) {
+    ++next;
+  }
+  return next;
+}
+
+static std::vector<pcre_replace_segment_t> pcre_build_replace_segments(const pcre_t *run,
+                                                                         array_t *replacements,
+                                                                         size_t *result_size) {
+  std::vector<pcre_replace_segment_t> segments;
+  size_t size = run->s_length;
+  int previous_end = run->ovector[0];
+
+  for (int group = 1; group < run->rc; ++group) {
+    if (!pcre_capture_participated(run, group)) {
+      continue;
+    }
+
+    int const start = run->ovector[group * 2];
+    int const end = run->ovector[group * 2 + 1];
+    if (start < previous_end) {
+      continue;  // Nested capture: the outer segment owns this range.
+    }
+
+    size_t const old_length = static_cast<size_t>(end - start);
+    size_t const replacement_length = SVALUE_STRLEN(&replacements->item[group - 1]);
+    if (size < old_length) {
+      error("Invalid PCRE capture range.\n");
+    }
+    size -= old_length;
+    if (replacement_length > std::numeric_limits<size_t>::max() - size) {
+      error("PCRE replacement result is too large.\n");
+    }
+    size += replacement_length;
+    previous_end = end;
+    segments.push_back({start, end, replacement_length, replacements->item[group - 1].u.string});
+  }
+
+  *result_size = size;
+  return segments;
+}
+
+}  // namespace
+
 // Caching functions
 static int pcre_cache_pattern(struct pcre_cache_t *table, pcre *cpat, const char *pattern, int compile_flags);
 static pcre *pcre_get_cached_pattern(struct pcre_cache_t *table, const char *pattern, int compile_flags);
@@ -244,6 +326,7 @@ void f_pcre_replace() {
   }
 
   run = (pcre_t *)DCALLOC(1, sizeof(pcre_t), TAG_TEMPORARY, "f_pcre_replace: run");
+  DEFER { pcre_free_memory(run); };
 
   run->ovector = nullptr;
   run->ovecsize = 0;
@@ -251,10 +334,15 @@ void f_pcre_replace() {
   run->subject = (sp - 2)->u.string;
   replacements = sp->u.arr;
 
+  for (int i = 0; i < replacements->size; ++i) {
+    if (replacements->item[i].type != T_STRING) {
+      error("Non-string found in PCRE replacement array.\n");
+    }
+  }
+
   run->s_length = SVALUE_STRLEN(sp - 2);
   run->compile_flags = compute_compile_options(pcre_flags);
   run->exec_flags = compute_exec_options(pcre_flags);
-  DEFER { pcre_free_memory(run); };
 
   if (pcre_magic(run) < 0) {
     error("PCRE compilation failed at offset %d: %s\n", run->erroffset, run->error);
@@ -428,7 +516,8 @@ static int pcre_local_exec(pcre_t *p) {
   pcre_fullinfo(p->re, nullptr, PCRE_INFO_NAMEENTRYSIZE, &p->name_entry_size);
   pcre_fullinfo(p->re, nullptr, PCRE_INFO_NAMETABLE, &p->name_table);
 
-  p->rc = pcre_exec(p->re, nullptr, p->subject, p->s_length, 0, p->exec_flags, p->ovector, capture_count);
+  p->rc = pcre_exec(p->re, nullptr, p->subject, pcre_subject_length(p), 0, p->exec_flags,
+                    p->ovector, capture_count);
 
   return p->rc;
 }
@@ -438,7 +527,9 @@ static int pcre_magic(pcre_t *p) {
 
   if (p->re == nullptr) {
     pcre_local_compile(p);
-    pcre_cache_pattern(&pcre_cache, p->re, p->pattern, p->compile_flags);
+    if (p->re != nullptr) {
+      pcre_cache_pattern(&pcre_cache, p->re, p->pattern, p->compile_flags);
+    }
   }
 
   if (p->re == nullptr) {
@@ -475,7 +566,9 @@ auto pcre_match_all(const char *subject, size_t subject_len, const char *pattern
 
   if (run->re == nullptr) {
     pcre_local_compile(run);
-    pcre_cache_pattern(&pcre_cache, run->re, run->pattern, run->compile_flags);
+    if (run->re != nullptr) {
+      pcre_cache_pattern(&pcre_cache, run->re, run->pattern, run->compile_flags);
+    }
   }
 
   if (run->re == nullptr) {
@@ -497,18 +590,37 @@ auto pcre_match_all(const char *subject, size_t subject_len, const char *pattern
 
   std::vector<std::vector<svalue_t>> matches;
 
-  int rc = 0;
+  int const subject_length = pcre_subject_length(run);
   int offset = 0;
-  while (offset < run->s_length && (rc = pcre_exec(run->re, nullptr, run->subject, run->s_length,
-                                                   offset, run->exec_flags, run->ovector, run->ovecsize)) >= 0) {
+  int exec_options = run->exec_flags;
+  bool retry_after_empty_match = false;
+  while (offset <= subject_length) {
+    int const rc = pcre_exec(run->re, nullptr, run->subject, subject_length, offset, exec_options,
+                             run->ovector, run->ovecsize);
+    if (rc < 0) {
+      if (rc != PCRE_ERROR_NOMATCH || !retry_after_empty_match || offset >= subject_length) {
+        break;
+      }
+      offset = static_cast<int>(pcre_advance_after_empty_match(run->subject, run->s_length, offset));
+      exec_options = run->exec_flags;
+      retry_after_empty_match = false;
+      continue;
+    }
+
     std::vector<svalue_t> match;
     for (int i = 0; i < rc; ++i) {
-      unsigned int start, length;
-      length = run->ovector[2 * i + 1] - run->ovector[2 * i];
-      start = run->ovector[2 * i];
+      int const start_offset = run->ovector[2 * i];
+      int const end_offset = run->ovector[2 * i + 1];
+      size_t const length = pcre_capture_participated(run, i)
+                                ? static_cast<size_t>(end_offset - start_offset)
+                                : 0;
+      char const *start = length == 0 ? "" : run->subject + start_offset;
 
-      char *match_str = new_string(length, "pcre get substrings");
-      snprintf(match_str, length + 1, "%.*s", length, run->subject + start);
+      char *match_str = new_string(static_cast<unsigned int>(length), "pcre get substrings");
+      if (length > 0) {
+        memcpy(match_str, start, length);
+      }
+      match_str[length] = '\0';
       svalue_t const item = {
           .type = T_STRING,
           .subtype = STRING_MALLOC,
@@ -517,7 +629,20 @@ auto pcre_match_all(const char *subject, size_t subject_len, const char *pattern
       match.push_back(item);
     }
     matches.push_back(match);
-    offset = run->ovector[1];
+    int const match_start = run->ovector[0];
+    int const match_end = run->ovector[1];
+    if (match_end > match_start) {
+      offset = match_end;
+      exec_options = run->exec_flags;
+      retry_after_empty_match = false;
+    } else {
+      if (match_end >= subject_length) {
+        break;
+      }
+      offset = match_end;
+      exec_options = run->exec_flags | PCRE_NOTEMPTY_ATSTART | PCRE_ANCHORED;
+      retry_after_empty_match = true;
+    }
   }
 
   return matches;
@@ -840,13 +965,20 @@ static array_t *pcre_get_substrings(pcre_t *run, bool include_names) {
 
   if (run->rc != 1) {
     for (i = 1; i <= base_size; i++) {
-      unsigned int start, length;
-      /* Allocate enough for the match */
-      length = run->ovector[2 * i + 1] - run->ovector[2 * i];
-      start = run->ovector[2 * i];
-      char *match = new_string(length, "pcre get substrings");
-
-      sprintf(match, "%.*s", length, run->subject + start);
+      size_t length = 0;
+      int start = 0;
+      if (pcre_capture_participated(run, static_cast<int>(i))) {
+        start = run->ovector[2 * i];
+        length = static_cast<size_t>(run->ovector[2 * i + 1] - start);
+      }
+      if (length > std::numeric_limits<unsigned int>::max()) {
+        error("PCRE capture is too large.\n");
+      }
+      char *match = new_string(static_cast<unsigned int>(length), "pcre get substrings");
+      if (length > 0) {
+        memcpy(match, run->subject + start, length);
+      }
+      match[length] = '\0';
       ret->item[i - 1].type = T_STRING;
       ret->item[i - 1].subtype = STRING_MALLOC;
       ret->item[i - 1].u.string = match;
@@ -896,72 +1028,53 @@ static array_t *pcre_get_substrings(pcre_t *run, bool include_names) {
 }
 
 static char *pcre_get_replace(pcre_t *run, array_t *replacements) {
-  const auto max_string_length = CONFIG_INT(__MAX_STRING_LENGTH__);
+  size_t ret_sz = 0;
+  auto const segments = pcre_build_replace_segments(run, replacements, &ret_sz);
+  auto const configured_max = CONFIG_INT(__MAX_STRING_LENGTH__);
+  size_t const max_string_length = configured_max > 0 ? static_cast<size_t>(configured_max) : 0;
 
-  unsigned int ret_pos = 0, i;
-  size_t ret_sz;
-  char *ret;
-
-  /* Set size of return string to subject length */
-  ret_sz = run->s_length;
-
-  /* Subtract total size of all substrings */
-  int prev = run->ovector[2];
-  for (i = 1; i <= (run->rc - 1); i++) {
-    // printf("%d %d %d\n", ret_sz, run->ovector[2*i],run->ovector[2*i+1] );
-    if (run->ovector[2 * i] >= prev) {
-      ret_sz -= (size_t)(run->ovector[2 * i + 1] - run->ovector[2 * i]);
-      prev = run->ovector[2 * i + 1];
-      /* Add total size of all replacements */
-      ret_sz += SVALUE_STRLEN(&replacements->item[i - 1]);
-    }
+  if (ret_sz > max_string_length || ret_sz > std::numeric_limits<unsigned int>::max()) {
+    error("Maximum string length exceeded in PCRE replacement.\n");
   }
 
-  /* Allocate space for the return string */
-  ret = new_string((ret_sz), "pcre get replace");
-  // printf("ret_sz:%d\n", ret_sz);
+  char *ret = new_string(static_cast<unsigned int>(ret_sz), "pcre get replace");
+  size_t ret_pos = 0;
+  size_t subject_pos = 0;
+  size_t const match_start = static_cast<size_t>(run->ovector[0]);
+  int const match_end = run->ovector[1];
 
-  /* Copy start of subject up until first match */
-  if (run->rc > 1) {
-    strncpy(ret, run->subject, run->ovector[2]);
-    ret_pos = run->ovector[2];
-  } else {
-    strncpy(ret, run->subject, ret_sz);
+  if (match_start > 0) {
+    memcpy(ret, run->subject, match_start);
+    ret_pos = match_start;
+    subject_pos = match_start;
   }
 
-  for (i = 1; i <= (run->rc - 1); i++) {
-    unsigned int end, len_nxt;
-    const char *rep;
-    size_t rep_sz;
-
-    end = run->ovector[2 * i + 1];
-
-    if (i == (run->rc - 1)) {
-      len_nxt = run->s_length - end;
-    } else {
-      len_nxt = run->ovector[2 * i + 2] - end;
+  for (auto const &segment : segments) {
+    size_t const prefix_length = static_cast<size_t>(segment.start) - subject_pos;
+    if (prefix_length > 0) {
+      memcpy(ret + ret_pos, run->subject + subject_pos, prefix_length);
+      ret_pos += prefix_length;
     }
-
-    if (len_nxt > max_string_length) {
-      continue;  // nested ()s
+    if (segment.replacement_length > 0) {
+      memcpy(ret + ret_pos, segment.replacement, segment.replacement_length);
+      ret_pos += segment.replacement_length;
     }
-
-    rep = replacements->item[i - 1].u.string;
-    rep_sz = SVALUE_STRLEN(&replacements->item[i - 1]);
-
-    /* Copy first substring into return variable */
-    strncpy(ret + ret_pos, rep, rep_sz);
-
-    /* increment position in return variable by replacement size */
-    ret_pos += rep_sz;
-
-    strncpy(ret + ret_pos, run->subject + end, len_nxt);
-
-    ret_pos += len_nxt;
+    subject_pos = static_cast<size_t>(segment.end);
   }
 
-  *(ret + ret_sz) = '\0';
+  size_t const matched_tail_length = static_cast<size_t>(match_end) - subject_pos;
+  if (matched_tail_length > 0) {
+    memcpy(ret + ret_pos, run->subject + subject_pos, matched_tail_length);
+    ret_pos += matched_tail_length;
+  }
 
+  size_t const suffix_length = run->s_length - static_cast<size_t>(match_end);
+  if (suffix_length > 0) {
+    memcpy(ret + ret_pos, run->subject + match_end, suffix_length);
+    ret_pos += suffix_length;
+  }
+
+  ret[ret_pos] = '\0';
   return ret;
 }
 
@@ -977,6 +1090,10 @@ static void pcre_free_memory(pcre_t *p) {
 static int pcre_cache_pattern(struct pcre_cache_t *table, pcre *cpat,
                               const char *pattern, int compile_flags)  // must be shared string
 {
+  if (cpat == nullptr) {
+    return -1;
+  }
+
   const auto *shared_pattern = make_shared_string(pattern);
   unsigned int const bucket = (HASH(BLOCK(shared_pattern)) ^ compile_flags) % PCRE_CACHE_SIZE;
   size_t sz;

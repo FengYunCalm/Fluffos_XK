@@ -19,6 +19,13 @@ void do_tests() {
   return ;
 #endif
 
+  // Invalid patterns must raise a catchable LPC error, not crash in the cache.
+  ASSERT(catch(pcre_match("abc", "(")));
+  ASSERT(catch(pcre_match_all("abc", "(")));
+  ASSERT(catch(pcre_extract("abc", "(")));
+  ASSERT(catch(pcre_replace("abc", "(", ({"x"}))));
+  ASSERT(catch(pcre_replace("abc", "(a)", ({1}))));
+
   ASSERT_EQ(1, pcre_match("123", "^[0-9]+$")); // or other pattern
   ASSERT(same_array(
     pcre_assoc("testhahatest", ({ "haha", "te" }), ({ 2, 3 }), 4),
@@ -163,9 +170,39 @@ TEXT;
   ASSERT_EQ("c", optional_named[2]);
   ASSERT_EQ(([ ]), optional_named[3]);
 
+  // Unmatched capture groups are represented by empty strings.
+  ASSERT_EQ(({
+    ({"ac", "a", "", "c"})
+  }), pcre_match_all("ac", "(a)(b)?(c)"));
+
   int flag_i = 1 << 16; // PCRE_I
   ASSERT_EQ("xbc", pcre_replace("abc", "(A)", ({"x"}), flag_i));
   ASSERT_EQ("a!bc", pcre_replace_callback("abc", "(A)", (: $1 + "!" :), flag_i));
+
+  // Nested captures overlap; the outer capture is replaced and the inner one is skipped.
+  ASSERT_EQ("X", pcre_replace("ab", "(a(b))", ({"X", "Y"})));
+  ASSERT_EQ("AC", pcre_replace("ac", "(a)(b)?(c)", ({"A", "B", "C"})));
+
+  // Empty matches must advance instead of repeatedly matching the same offset.
+  ASSERT_EQ(({
+    ({""}),
+    ({""})
+  }), pcre_match_all("ab", "(?=.)"));
+  ASSERT_EQ(({
+    ({""}),
+    ({""})
+  }), pcre_match_all("\u00E9x", "(?=.)"));
+  ASSERT_EQ(({
+    ({""}),
+    ({"a"}),
+    ({""})
+  }), pcre_match_all("a", "(?:|a)"));
+  ASSERT_EQ(({
+    ({""})
+  }), pcre_match_all("ab", "$"));
+  ASSERT_EQ(({
+    ({""})
+  }), pcre_match_all("", "^$"));
 
   // pcre_match with flags: case-insensitive and anchored.
   ASSERT_EQ(1, pcre_match("abc", "ABC", flag_i));
