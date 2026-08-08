@@ -4446,6 +4446,86 @@ TEST_F(DriverTest, TestOwnerDrainMailboxSnapshotsRemainingDepthUnderRuntimeLock)
             std::string::npos);
 }
 
+TEST_F(DriverTest, TestOwnerPurgeProcessesDetachedTasksAfterRuntimeUnlock) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  const auto start = owner_source.find("mapping_t *vm_owner_purge_mailbox(");
+  const auto end = owner_source.find("mapping_t *vm_owner_schedule(", start);
+
+  ASSERT_NE(start, std::string::npos);
+  ASSERT_NE(end, std::string::npos);
+  ASSERT_GT(end, start);
+  const auto body = owner_source.substr(start, end - start);
+  const auto tasks_pos =
+      body.find("std::vector<OwnerMailboxTask> purged_tasks;");
+  const auto lock_pos = body.find(
+      "std::lock_guard<std::mutex> lock(owner_runtime_mutex);", tasks_pos);
+  const auto detach_pos = body.find(
+      "purged_tasks = owner_scheduler_state.remove_owner_mailbox(", lock_pos);
+  const auto lock_scope_end = body.find("\n  }\n", detach_pos);
+  const auto terminal_pos =
+      body.find("complete_owner_future_for_task_locked(", lock_scope_end);
+  const auto release_pos =
+      body.find("release_owner_task_target(&task);", lock_scope_end);
+  const auto mapping_pos = body.find("auto *map = allocate_mapping", lock_scope_end);
+
+  ASSERT_NE(tasks_pos, std::string::npos);
+  ASSERT_NE(lock_pos, std::string::npos);
+  ASSERT_NE(detach_pos, std::string::npos);
+  ASSERT_NE(lock_scope_end, std::string::npos);
+  ASSERT_NE(terminal_pos, std::string::npos);
+  ASSERT_NE(release_pos, std::string::npos);
+  ASSERT_NE(mapping_pos, std::string::npos);
+  EXPECT_LT(lock_pos, detach_pos);
+  EXPECT_LT(detach_pos, lock_scope_end);
+  EXPECT_LT(lock_scope_end, terminal_pos);
+  EXPECT_LT(lock_scope_end, release_pos);
+  EXPECT_LT(lock_scope_end, mapping_pos);
+  EXPECT_NE(body.find("schedule_owner_executor_callback_cleanup_on_main(task);"),
+            std::string::npos);
+  EXPECT_EQ(body.find("enqueue_owner_executor_callback_cleanup_locked(task);"),
+            std::string::npos);
+}
+
+TEST_F(DriverTest, TestOwnerScheduleProcessesDetachedTasksAfterRuntimeUnlock) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  const auto start = owner_source.find("mapping_t *vm_owner_schedule(");
+  const auto end = owner_source.find("mapping_t *vm_owner_mailbox_status(", start);
+
+  ASSERT_NE(start, std::string::npos);
+  ASSERT_NE(end, std::string::npos);
+  ASSERT_GT(end, start);
+  const auto body = owner_source.substr(start, end - start);
+  const auto tasks_pos =
+      body.find("std::vector<OwnerMailboxTask> scheduled_tasks;");
+  const auto lock_pos = body.find(
+      "std::lock_guard<std::mutex> lock(owner_runtime_mutex);", tasks_pos);
+  const auto detach_pos =
+      body.find("pop_next_schedulable_task(&task, false)", lock_pos);
+  const auto lock_scope_end = body.find("\n  }\n", detach_pos);
+  const auto array_pos = body.find("auto *tasks = allocate_array", lock_scope_end);
+  const auto process_pos =
+      body.find("for (auto &task : scheduled_tasks)", lock_scope_end);
+  const auto release_pos =
+      body.find("release_owner_task_target(&task);", lock_scope_end);
+
+  ASSERT_NE(tasks_pos, std::string::npos);
+  ASSERT_NE(lock_pos, std::string::npos);
+  ASSERT_NE(detach_pos, std::string::npos);
+  ASSERT_NE(lock_scope_end, std::string::npos);
+  ASSERT_NE(array_pos, std::string::npos);
+  ASSERT_NE(process_pos, std::string::npos);
+  ASSERT_NE(release_pos, std::string::npos);
+  EXPECT_LT(lock_pos, detach_pos);
+  EXPECT_LT(detach_pos, lock_scope_end);
+  EXPECT_LT(lock_scope_end, array_pos);
+  EXPECT_LT(lock_scope_end, process_pos);
+  EXPECT_LT(lock_scope_end, release_pos);
+  EXPECT_NE(body.find("schedule_owner_executor_callback_cleanup_on_main(task);"),
+            std::string::npos);
+  EXPECT_EQ(body.find("enqueue_owner_executor_callback_cleanup_locked(task);"),
+            std::string::npos);
+}
+
 TEST_F(DriverTest, TestGatewayFutureCompletionExposesMainThreadCpuCounter) {
   const auto gateway_header = read_source_file_for_test("../src/packages/gateway/gateway.h");
   const auto gateway_source =

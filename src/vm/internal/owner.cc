@@ -4756,9 +4756,16 @@ mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
 }
 
 mapping_t *vm_owner_purge_mailbox(const char *owner_id) {
-  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
   std::string normalized_owner_id = normalize_owner_id(owner_id);
-  auto purged_tasks = owner_scheduler_state.remove_owner_mailbox(normalized_owner_id);
+  std::vector<OwnerMailboxTask> purged_tasks;
+  long remaining;
+  long queue_depth;
+  {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    purged_tasks = owner_scheduler_state.remove_owner_mailbox(normalized_owner_id);
+    remaining = owner_mailbox_depth(normalized_owner_id);
+    queue_depth = owner_mailbox_total_depth();
+  }
   auto purged = static_cast<long>(purged_tasks.size());
   for (const auto &task : purged_tasks) {
     append_owner_task_trace(task, "purged");
@@ -4775,7 +4782,7 @@ mapping_t *vm_owner_purge_mailbox(const char *owner_id) {
         complete_owner_future_for_task_locked(
             task.future_target_task_id, "failed", "", "purged");
       }
-      enqueue_owner_executor_callback_cleanup_locked(task);
+      schedule_owner_executor_callback_cleanup_on_main(task);
     }
     record_owner_mailbox_task_drained(task);
     release_owner_task_target(&task);
@@ -4786,24 +4793,37 @@ mapping_t *vm_owner_purge_mailbox(const char *owner_id) {
   add_mapping_pair(map, "success", 1);
   add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
   add_mapping_pair(map, "purged", purged);
-  add_mapping_pair(map, "remaining", owner_mailbox_depth(normalized_owner_id));
-  add_mapping_pair(map, "queue_depth", owner_mailbox_total_depth());
+  add_mapping_pair(map, "remaining", remaining);
+  add_mapping_pair(map, "queue_depth", queue_depth);
   add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "total_drained", static_cast<long>(total_drained.load(std::memory_order_relaxed)));
   return map;
 }
 
 mapping_t *vm_owner_schedule(int limit) {
-  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-  auto requested = limit <= 0 ? static_cast<size_t>(owner_mailbox_total_depth()) : static_cast<size_t>(limit);
-  auto *tasks = allocate_array(static_cast<int>(requested));
-  size_t dispatched = 0;
-
-  while (dispatched < requested) {
-    OwnerMailboxTask task;
-    if (!pop_next_schedulable_task(&task, false)) {
-      break;
+  std::vector<OwnerMailboxTask> scheduled_tasks;
+  long remaining;
+  long active_owners;
+  {
+    std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+    auto requested = limit <= 0 ? static_cast<size_t>(owner_mailbox_total_depth())
+                                : static_cast<size_t>(limit);
+    scheduled_tasks.reserve(requested);
+    while (scheduled_tasks.size() < requested) {
+      OwnerMailboxTask task;
+      if (!pop_next_schedulable_task(&task, false)) {
+        break;
+      }
+      scheduled_tasks.push_back(std::move(task));
     }
+    remaining = owner_mailbox_total_depth();
+    active_owners = owner_mailbox_active_owners();
+  }
+
+  auto dispatched = scheduled_tasks.size();
+  auto *tasks = allocate_array(static_cast<int>(dispatched));
+  size_t task_index = 0;
+  for (auto &task : scheduled_tasks) {
     append_owner_task_trace(task, "dispatched");
     if (task.task_type == "owner_message") {
       if (task.has_target_handle) {
@@ -4824,15 +4844,15 @@ mapping_t *vm_owner_schedule(int limit) {
         complete_owner_future_for_task_locked(
             task.future_target_task_id, "failed", "", "main schedule rejected");
       }
-      enqueue_owner_executor_callback_cleanup_locked(task);
+      schedule_owner_executor_callback_cleanup_on_main(task);
     }
     record_owner_mailbox_task_drained(task);
     auto *task_map = owner_mailbox_task_mapping(task);
-    tasks->item[dispatched].type = T_MAPPING;
-    tasks->item[dispatched].subtype = 0;
-    tasks->item[dispatched].u.map = task_map;
+    tasks->item[task_index].type = T_MAPPING;
+    tasks->item[task_index].subtype = 0;
+    tasks->item[task_index].u.map = task_map;
     release_owner_task_target(&task);
-    dispatched++;
+    task_index++;
   }
 
   tasks->size = static_cast<int>(dispatched);
@@ -4841,8 +4861,8 @@ mapping_t *vm_owner_schedule(int limit) {
   auto *map = allocate_mapping(7);
   add_mapping_pair(map, "success", 1);
   add_mapping_pair(map, "dispatched", static_cast<long>(dispatched));
-  add_mapping_pair(map, "remaining", owner_mailbox_total_depth());
-  add_mapping_pair(map, "active_owners", owner_mailbox_active_owners());
+  add_mapping_pair(map, "remaining", remaining);
+  add_mapping_pair(map, "active_owners", active_owners);
   add_mapping_pair(map, "total_enqueued", static_cast<long>(total_enqueued.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "total_drained", static_cast<long>(total_drained.load(std::memory_order_relaxed)));
   add_mapping_array(map, "tasks", tasks);
