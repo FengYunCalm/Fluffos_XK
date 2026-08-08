@@ -3700,7 +3700,6 @@ uint64_t vm_owner_enqueue_task_epoch(const char *owner_id, const char *task_type
 
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    append_owner_task_trace(task, "queued");
     queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
   }
   if (notify_owner_thread) {
@@ -3738,7 +3737,6 @@ uint64_t vm_owner_enqueue_command_frame_restore(object_t *target) {
 
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    append_owner_task_trace(task, "queued");
     queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
   }
   if (!queued) {
@@ -3988,7 +3986,6 @@ uint64_t vm_owner_enqueue_test_main_required_message(const char *owner_id, const
 
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    append_owner_task_trace(task, "queued");
     queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
   }
   if (notify_owner_thread) {
@@ -4016,7 +4013,6 @@ mapping_t *vm_owner_lpc_probe(object_t *target, const char *owner_id, const char
 
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    append_owner_task_trace(task, "queued");
     queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
   }
   if (notify_owner_thread) {
@@ -4058,7 +4054,6 @@ mapping_t *vm_owner_lpc_canary(object_t *target, const char *owner_id, const cha
 
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    append_owner_task_trace(task, "queued");
     queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
   }
   if (!queued) {
@@ -4154,7 +4149,6 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     owner_future_store.insert(std::move(future));
-    append_owner_task_trace(task, "queued");
     queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
   }
   if (!queued) {
@@ -4273,7 +4267,6 @@ mapping_t *vm_owner_ordinary_lpc_task(object_t *target, const char *owner_id, co
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     owner_future_store.insert(std::move(future));
-    append_owner_task_trace(task, "queued");
     queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
   }
   if (!queued) {

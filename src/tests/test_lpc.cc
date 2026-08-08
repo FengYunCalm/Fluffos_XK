@@ -4536,6 +4536,59 @@ TEST_F(DriverTest, TestOwnerMessageSubmissionLimitsCoordinatorLockToRegistration
             std::string::npos);
 }
 
+TEST_F(DriverTest, TestOwnerQueueTraceRecordsQueuedAfterSuccessfulAdmissionOnly) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  const auto helper_start = owner_source.find("bool enqueue_owner_task_locked(");
+  const auto helper_end = owner_source.find("void finish_active_main_owner_task(",
+                                            helper_start);
+
+  ASSERT_NE(helper_start, std::string::npos);
+  ASSERT_NE(helper_end, std::string::npos);
+  ASSERT_GT(helper_end, helper_start);
+  const auto helper_body =
+      owner_source.substr(helper_start, helper_end - helper_start);
+  EXPECT_NE(helper_body.find("append_owner_task_trace(task, \"queued\");"),
+            std::string::npos);
+
+  auto expect_helper_is_single_queued_trace_writer =
+      [&](const char *start_marker, const char *end_marker) {
+        const auto start = owner_source.find(start_marker);
+        const auto end = owner_source.find(end_marker, start);
+
+        ASSERT_NE(start, std::string::npos) << start_marker;
+        ASSERT_NE(end, std::string::npos) << end_marker;
+        ASSERT_GT(end, start) << start_marker;
+        const auto body = owner_source.substr(start, end - start);
+        EXPECT_NE(body.find("enqueue_owner_task_locked("), std::string::npos)
+            << start_marker;
+        EXPECT_EQ(body.find("append_owner_task_trace(task, \"queued\");"),
+                  std::string::npos)
+            << start_marker;
+      };
+
+  expect_helper_is_single_queued_trace_writer(
+      "uint64_t vm_owner_enqueue_task_epoch(",
+      "uint64_t vm_owner_enqueue_command_frame_restore(");
+  expect_helper_is_single_queued_trace_writer(
+      "uint64_t vm_owner_enqueue_command_frame_restore(",
+      "bool vm_owner_executor_available()");
+  expect_helper_is_single_queued_trace_writer(
+      "uint64_t vm_owner_enqueue_test_main_required_message(",
+      "mapping_t *vm_owner_lpc_probe(");
+  expect_helper_is_single_queued_trace_writer(
+      "mapping_t *vm_owner_lpc_probe(",
+      "mapping_t *vm_owner_lpc_canary(");
+  expect_helper_is_single_queued_trace_writer(
+      "mapping_t *vm_owner_lpc_canary(",
+      "mapping_t *vm_owner_lpc_task(");
+  expect_helper_is_single_queued_trace_writer(
+      "mapping_t *vm_owner_lpc_task(",
+      "mapping_t *vm_owner_ordinary_lpc_task(");
+  expect_helper_is_single_queued_trace_writer(
+      "mapping_t *vm_owner_ordinary_lpc_task(",
+      "uint64_t vm_owner_record_task_trace(");
+}
+
 TEST_F(DriverTest, TestOwnerRejectedSubmissionsCompleteAfterCoordinatorUnlock) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   auto assert_completion_after_lock = [&](const char* start_marker,
@@ -9718,6 +9771,12 @@ TEST_F(DriverTest, TestOwnerSchedulerBackpressureRejectsOverLimit) {
     EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER);
     return value && value->type == T_NUMBER ? value->u.number : 0;
   };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr);
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING);
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
 
   auto* before = vm_owner_runtime_status();
   auto max_depth = mapping_number(before, "owner_scheduler_max_owner_queue_depth");
@@ -9732,6 +9791,26 @@ TEST_F(DriverTest, TestOwnerSchedulerBackpressureRejectsOverLimit) {
 
   auto rejected = vm_owner_enqueue_task(owner, "executor_probe", "backpressure-over-limit");
   ASSERT_EQ(rejected, 0u);
+
+  auto* trace = vm_owner_task_trace(8);
+  auto* events = find_string_in_mapping(trace, "events");
+  ASSERT_NE(events, nullptr);
+  ASSERT_EQ(events->type, T_ARRAY);
+  int rejected_queued = 0;
+  int rejected_backpressure = 0;
+  for (int i = 0; i < events->u.arr->size; ++i) {
+    auto* event = events->u.arr->item[i].u.map;
+    if (std::string(mapping_string(event, "task_key")) !=
+        "backpressure-over-limit") {
+      continue;
+    }
+    const auto state = std::string(mapping_string(event, "state"));
+    rejected_queued += state == "queued" ? 1 : 0;
+    rejected_backpressure += state == "backpressure_rejected" ? 1 : 0;
+  }
+  EXPECT_EQ(rejected_queued, 0);
+  EXPECT_EQ(rejected_backpressure, 1);
+  free_mapping(trace);
 
   auto* mailbox = vm_owner_mailbox_status(owner);
   ASSERT_EQ(mapping_number(mailbox, "owner_queue_depth"), max_depth);
