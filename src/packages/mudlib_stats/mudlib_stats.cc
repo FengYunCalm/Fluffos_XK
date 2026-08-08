@@ -9,7 +9,10 @@
 
 #include "base/package_api.h"
 
-#include <sys/param.h>
+#include <cstdio>
+#include <fstream>
+#include <limits>
+#include <string>
 
 #include "packages/mudlib_stats/mudlib_stats.h"
 
@@ -67,9 +70,10 @@ static mudlib_stats_t *master_author = nullptr;
 static mudlib_stats_t *find_stat_entry(const char * /*name*/, mudlib_stats_t * /*list*/);
 static mudlib_stats_t *add_stat_entry(const char * /*str*/, mudlib_stats_t ** /*list*/);
 static void init_author_for_ob(object_t * /*ob*/);
-static const char *author_for_file(const char * /*file*/);
+static bool author_for_file(const char * /*file*/, std::string * /*name*/);
 static void init_domain_for_ob(object_t * /*ob*/);
-static const char *domain_for_file(const char * /*file*/);
+static bool domain_for_file(const char * /*file*/, std::string * /*name*/);
+static bool stat_file_path(const char * /*file*/, std::string * /*path*/);
 static void save_stat_list(const char * /*file*/, mudlib_stats_t * /*list*/);
 static void restore_stat_list(const char * /*file*/, mudlib_stats_t ** /*list*/);
 static mapping_t *get_info(mudlib_stats_t * /*dl*/);
@@ -219,18 +223,21 @@ void add_errors(statgroup_t *st, int errors) {
 
 void add_errors_for_file(const char *file, int errors) {
   mudlib_stats_t *entry;
-  const char *name;
+  std::string domain_name;
+  std::string author_name;
 
-  name = domain_for_file(file);
-  if (name && domains) {
-    entry = find_stat_entry(name, domains);
+  if (!file) {
+    return;
+  }
+
+  if (domain_for_file(file, &domain_name) && domains) {
+    entry = find_stat_entry(domain_name.c_str(), domains);
     if (entry) {
       entry->errors += errors;
     }
   }
-  name = author_for_file(file);
-  if (name && authors) {
-    entry = find_stat_entry(name, authors);
+  if (author_for_file(file, &author_name) && authors) {
+    entry = find_stat_entry(author_name.c_str(), authors);
     if (entry) {
       entry->errors += errors;
     }
@@ -333,17 +340,20 @@ mudlib_stats_t *set_master_author(const char *str) {
   return author;
 }
 
-static const char *author_for_file(const char *file) {
+static bool author_for_file(const char *file, std::string *name) {
   svalue_t *ret;
-  static char buff[50];
+
+  if (!file || !name) {
+    return false;
+  }
 
   copy_and_push_string(file);
   ret = safe_apply_master_ob(APPLY_AUTHOR_FILE, 1);
-  if (ret == nullptr || ret == (svalue_t *)-1 || ret->type != T_STRING) {
-    return nullptr;
+  if (ret == nullptr || ret == (svalue_t *)-1 || ret->type != T_STRING || ret->u.string == nullptr) {
+    return false;
   }
-  strcpy(buff, ret->u.string);
-  return buff;
+  name->assign(ret->u.string);
+  return true;
 }
 
 /*************************
@@ -420,91 +430,134 @@ mudlib_stats_t *set_backbone_domain(const char *str) {
  * Argument is a file name, which we want to get the domain of.
  * Ask the master object.
  */
-static const char *domain_for_file(const char *file) {
+static bool domain_for_file(const char *file, std::string *name) {
   svalue_t *ret;
-  static char buff[512];
+
+  if (!file || !name) {
+    return false;
+  }
 
   share_and_push_string(file);
   ret = safe_apply_master_ob(APPLY_DOMAIN_FILE, 1);
-  if (ret == nullptr || ret == (svalue_t *)-1 || ret->type != T_STRING) {
-    return nullptr;
+  if (ret == nullptr || ret == (svalue_t *)-1 || ret->type != T_STRING || ret->u.string == nullptr) {
+    return false;
   }
-  strcpy(buff, ret->u.string);
-  return buff;
+  name->assign(ret->u.string);
+  return true;
 }
 
 /************************************
  * save and restore stats to a file *
  ************************************/
 
+/* Keep the historical mudlib-relative path semantics without a fixed buffer. */
+static bool stat_file_path(const char *file, std::string *path) {
+  if (!file || !path) {
+    return false;
+  }
+
+  if (strchr(file, '/')) {
+    path->assign(file);
+  } else {
+    const char *log_dir = CONFIG_STR(__LOG_DIR__);
+    if (!log_dir) {
+      return false;
+    }
+    path->assign(log_dir);
+    path->push_back('/');
+    path->append(file);
+  }
+
+  if (!path->empty() && (*path)[0] == '/') {
+    path->erase(0, 1);
+  }
+  return !path->empty();
+}
+
 static void save_stat_list(const char *file, mudlib_stats_t *list) {
   FILE *f;
-  char fname_buf[MAXPATHLEN];
-  char *fname = fname_buf;
+  std::string path;
 
-  if (file) {
-    if (strchr(file, '/')) {
-      if (file[0] == '/') {
-        file++;
-      }
-      f = fopen(file, "w");
-    } else {
-      sprintf(fname, "%s/%s", CONFIG_STR(__LOG_DIR__), file);
-      if (fname[0] == '/') {
-        fname++;
-      }
-      f = fopen(fname, "w");
-    }
-  } else {
-    debug_message("*Warning: call to save_stat_list with null filename\n");
+  if (!file) {
+    debug_message("*Warning: call to save_stat_list with null filename.\n");
     return;
   }
+  if (!stat_file_path(file, &path)) {
+    debug_message("*Warning: unable to resolve stat file %s for writing.\n", file);
+    return;
+  }
+  f = fopen(path.c_str(), "w");
   if (!f) {
-    debug_message("*Error: unable to open stat file %s for writing.\n", file);
+    debug_message("*Error: unable to open stat file %s for writing.\n", path.c_str());
     return;
   }
   while (list) {
-    fprintf(f, "%s %d %d\n", list->name, list->moves, list->heart_beats);
+    if (fprintf(f, "%s %d %d\n", list->name, list->moves, list->heart_beats) < 0) {
+      debug_message("*Error: unable to write stat file %s.\n", path.c_str());
+      break;
+    }
     list = list->next;
   }
-  fclose(f);
+  if (fclose(f) != 0) {
+    debug_message("*Error: unable to close stat file %s after writing.\n", path.c_str());
+  }
 }
 
 static void restore_stat_list(const char *file, mudlib_stats_t **list) {
-  FILE *f;
-  char fname_buf[MAXPATHLEN];
-  char *fname = fname_buf;
+  std::string path;
   mudlib_stats_t *entry;
+  std::string name;
+  int moves;
+  int heart_beats;
 
-  if (file) {
-    if (strchr(file, '/')) {
-      if (file[0] == '/') {
-        file++;
-      }
-      f = fopen(file, "r");
-    } else {
-      sprintf(fname, "%s/%s", CONFIG_STR(__LOG_DIR__), file);
-      if (fname[0] == '/') {
-        fname++;
-      }
-      f = fopen(fname, "r");
-    }
-  } else {
-    debug_message("*Warning: call to save_stat_list with null filename\n");
+  if (!file) {
+    debug_message("*Warning: call to restore_stat_list with null filename.\n");
     return;
   }
-  if (!f) {
-    debug_message("*Warning: unable to open stat file %s for reading.\n", file);
+  if (!list) {
+    debug_message("*Warning: call to restore_stat_list with null list.\n");
     return;
   }
-  while (fscanf(f, "%s", fname) != EOF) {
-    entry = add_stat_entry(fname, list);
-    if (fscanf(f, "%d %d\n", &entry->moves, &entry->heart_beats) != 2) {
-      debug_message("*Warning: invalid stat entry in %s.\n", file);
+  if (!stat_file_path(file, &path)) {
+    debug_message("*Warning: unable to resolve stat file %s for reading.\n", file);
+    return;
+  }
+  std::ifstream f(path);
+  if (!f.is_open()) {
+    debug_message("*Warning: unable to open stat file %s for reading.\n", path.c_str());
+    return;
+  }
+
+  const int configured_max = CONFIG_INT(__MAX_STRING_LENGTH__);
+  size_t max_name_length = configured_max > 0 ? static_cast<size_t>(configured_max) : 0;
+  const size_t max_stream_length =
+      static_cast<size_t>(std::numeric_limits<std::streamsize>::max());
+  if (max_stream_length < 2) {
+    debug_message("*Warning: stream size is too small to read stat names.\n");
+    return;
+  }
+  if (max_name_length > max_stream_length - 2) {
+    max_name_length = max_stream_length - 2;
+  }
+  const auto name_read_width = static_cast<std::streamsize>(max_name_length + 2);
+
+  while (f) {
+    f.width(name_read_width);
+    if (!(f >> name)) {
       break;
     }
+    if (name.size() > max_name_length) {
+      debug_message("*Warning: stat name exceeds maximum string length in %s.\n", path.c_str());
+      break;
+    }
+    if (!(f >> moves >> heart_beats)) {
+      debug_message("*Warning: invalid stat entry in %s.\n", path.c_str());
+      break;
+    }
+    entry = add_stat_entry(name.c_str(), list);
+    entry->moves = moves;
+    entry->heart_beats = heart_beats;
   }
-  fclose(f);
 }
 
 void save_stat_files() {
