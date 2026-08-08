@@ -2547,8 +2547,9 @@ static int check_one_relation(parse_state_t *state, int direct_first, parser_err
  * with each object that matched the second OBJ.
  */
 static void check_object_relations(parse_state_t *state) {
-  int i, direct = -1, indirect = -1;
-  int use_indirect;
+  int i;
+  match_t *direct_match = nullptr;
+  match_t *indirect_match = nullptr;
   bitvec_t *dir_objs, *indir_objs;
   int j, k, l, m, n, ret;
   int found_direct = -1, found_indirect = -1;
@@ -2562,16 +2563,20 @@ static void check_object_relations(parse_state_t *state) {
   err.error_type = 0;
   for (i = 0; i < state->num_matches; i++) {
     if (matches[i].token & OBJ_A_TOKEN) {
-      if (direct < 0) {
-        direct = i;
+      if (!direct_match) {
+        direct_match = &matches[i];
       } else {
-        indirect = i;
+        indirect_match = &matches[i];
       }
     } else if (matches[i].token == ERROR_TOKEN) {
       return;
     }
   }
-  if (matches[indirect].ordinal) {
+  if (!direct_match || !indirect_match) {
+    error("Parser object match state is incomplete.\n");
+    return;
+  }
+  if (indirect_match->ordinal) {
     /* if the indirect object is used with ordinal number, choose only
      * that single indirect object. Imagine how it would be confusing if
      * you enter "get apple from the second cask" and the REAL second
@@ -2579,9 +2584,9 @@ static void check_object_relations(parse_state_t *state) {
      * error message.
      */
     int ord;
-    bitvec_t *bv = &matches[indirect].val.obs;
+    bitvec_t *bv = &indirect_match->val.obs;
 
-    ord = matches[indirect].ordinal;
+    ord = indirect_match->ordinal;
     if (ord > 0) {
       i = 0;
     }
@@ -2592,8 +2597,12 @@ static void check_object_relations(parse_state_t *state) {
           if (bv->b[i] & j) {
             /* found some object, decrement counter */
             if (!--ord) {
+              int const object_index = BPI * i + k;
               bitvec_zero(bv);
-              bitvec_set(bv, use_indirect = BPI * i + k);
+              if (object_index < 0 || object_index >= MAX_NUM_OBJECTS) {
+                error("Parser object match index is out of range.\n");
+              }
+              bitvec_set(bv, object_index);
               break;
             }
           }
@@ -2603,7 +2612,7 @@ static void check_object_relations(parse_state_t *state) {
     }
     if (ord) {
       /* there's less indirect objs than specified --> error */
-      matches[indirect].token = ERROR_TOKEN;
+      indirect_match->token = ERROR_TOKEN;
       if (state->num_errors++ == 0) {
         free_parser_error(&current_error_info);
         current_error_info.error_type = ERR_ORDINAL;
@@ -2626,13 +2635,13 @@ static void check_object_relations(parse_state_t *state) {
       return;
     }
   }
-  dir_objs = &matches[direct].val.obs;
-  indir_objs = &matches[indirect].val.obs;
+  dir_objs = &direct_match->val.obs;
+  indir_objs = &indirect_match->val.obs;
 
-  direct_unique = !(matches[direct].token & PLURAL_MODIFIER);
-  indirect_unique = !(matches[indirect].token & PLURAL_MODIFIER);
+  direct_unique = !(direct_match->token & PLURAL_MODIFIER);
+  indirect_unique = !(indirect_match->token & PLURAL_MODIFIER);
 
-  if (!(direct_ordinal = matches[direct].ordinal)) {
+  if (!(direct_ordinal = direct_match->ordinal)) {
     direct_ordinal = -1;
   }
 
@@ -2668,12 +2677,12 @@ static void check_object_relations(parse_state_t *state) {
                   /* from now on, direct and indirect object are OK */
                   if (indirect_unique && found_indirect >= 0) {
                     if (found_indirect != indirect_object) {
-                      matches[indirect].token = ERROR_TOKEN;
+                      indirect_match->token = ERROR_TOKEN;
                       if (state->num_errors++ == 0) {
                         free_parser_error(&current_error_info);
 
                         current_error_info.error_type = ERR_AMBIG;
-                        bitvec_copy(&current_error_info.err.obs, &matches[indirect].val.obs);
+                        bitvec_copy(&current_error_info.err.obs, &indirect_match->val.obs);
                       }
                       free_parser_error(&err);
                       return;
@@ -2685,12 +2694,12 @@ static void check_object_relations(parse_state_t *state) {
 
                   if (direct_ordinal <= 0 && direct_unique && found_direct >= 0) {
                     if (found_direct != direct_object) {
-                      matches[indirect].token = ERROR_TOKEN;
+                      indirect_match->token = ERROR_TOKEN;
                       if (state->num_errors++ == 0) {
                         free_parser_error(&current_error_info);
 
                         current_error_info.error_type = ERR_AMBIG;
-                        bitvec_copy(&current_error_info.err.obs, &matches[direct].val.obs);
+                        bitvec_copy(&current_error_info.err.obs, &direct_match->val.obs);
                       }
                       free_parser_error(&err);
                       return;
@@ -2718,7 +2727,7 @@ static void check_object_relations(parse_state_t *state) {
             }
           /* end of processing of direct object */
           if (found_direct &&
-              (!direct_ordinal || (direct_unique && (matches[direct].token & CHOOSE_MODIFIER)))) {
+              (!direct_ordinal || (direct_unique && (direct_match->token & CHOOSE_MODIFIER)))) {
             finished = 1;
             break;
           }
@@ -2728,27 +2737,27 @@ static void check_object_relations(parse_state_t *state) {
   bitvec_copy(dir_objs, &directs);
   bitvec_copy(indir_objs, &indirects);
   if (direct_unique) {
-    matches[direct].val.number = found_direct;
+    direct_match->val.number = found_direct;
   } else {
-    matches[direct].val.number = 0;
+    direct_match->val.number = 0;
   }
   if (indirect_unique) {
-    matches[indirect].val.number = found_indirect;
+    indirect_match->val.number = found_indirect;
   } else {
-    matches[indirect].val.number = 0;
+    indirect_match->val.number = 0;
   }
 
-  if (matches[indirect].val.number > MAX_NUM_OBJECTS) {
+  if (indirect_match->val.number > MAX_NUM_OBJECTS) {
     abort();
   }
 
   if (found_direct < 0) {
     if (use_cached_parallel_error(state, &err) || use_last_parallel_error(state)) {
-      matches[direct].token = ERROR_TOKEN;
+      direct_match->token = ERROR_TOKEN;
     }
   } else if (found_indirect < 0) {
     if (use_cached_parallel_error(state, &err) || use_last_parallel_error(state)) {
-      matches[indirect].token = ERROR_TOKEN;
+      indirect_match->token = ERROR_TOKEN;
     }
   }
   free_parser_error(&err);
@@ -2759,6 +2768,10 @@ static void we_are_finished(parse_state_t *state) {
   char *p;
   int which, mtch;
   int tryy, args;
+  if (!parse_vn) {
+    error("Parser rule state is incomplete.\n");
+  }
+  const int rule_weight = parse_vn->weight;
 
   DEBUG_INC;
   DEBUG_P(("we_are_finished"));
@@ -2768,7 +2781,7 @@ static void we_are_finished(parse_state_t *state) {
   }
 
   /* ignore it if we already have somethign better */
-  if (best_match >= parse_vn->weight) {
+  if (best_match >= rule_weight) {
     DEBUG_P(("Have a better match; aborting ..."));
     DEBUG_DEC;
     return;
@@ -2778,7 +2791,7 @@ static void we_are_finished(parse_state_t *state) {
       DEBUG_DEC;
       return;
     }
-    if (state->num_errors == best_num_errors && parse_vn->weight < best_error_match) {
+    if (state->num_errors == best_num_errors && rule_weight < best_error_match) {
       DEBUG_DEC;
       return;
     }
@@ -2817,10 +2830,7 @@ static void we_are_finished(parse_state_t *state) {
     check_object_relations(state);
   }
   if (state->num_errors) {
-    int weight;
-    if (parse_vn) {
-      weight = parse_vn->weight;
-    }
+    int weight = rule_weight;
 
     if (current_error_info.error_type == ERR_THERE_IS_NO) {
       /* ERR_THERE_IS_NO is basically a STR in place of an OBJ,
@@ -2841,7 +2851,7 @@ static void we_are_finished(parse_state_t *state) {
     best_num_errors = state->num_errors;
     best_error_match = weight;
   } else {
-    best_match = parse_vn->weight;
+    best_match = rule_weight;
     if (best_result) {
       free_parse_result(best_result);
     }
@@ -3323,8 +3333,9 @@ void f_parse_sentence() {
   if (!current_object->pinfo)
     error("/%s is not known by the parser.  Call parse_init() first.\n", current_object->obname);
 
-  // if (pi)
-  //  error("Illegal to call parse_sentence() recursively.\n");
+  if (pi) {
+    error("Illegal to call parse_sentence() recursively.\n");
+  }
 
   /* may not be done in case of an error, or in case of tail recursion.
    * if we are called tail recursively, we don't need this any more.
