@@ -5070,6 +5070,67 @@ TEST_F(DriverTest, TestOwnerScheduleProcessesDetachedTasksAfterRuntimeUnlock) {
             std::string::npos);
 }
 
+TEST_F(DriverTest,
+       TestOwnerMainDrainAppendsDetachedTaskTracesAfterRuntimeUnlock) {
+  const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
+  auto expect_no_trace_under_runtime_lock =
+      [&](const char *start_marker, const char *end_marker) {
+        const auto start = owner_source.find(start_marker);
+        const auto end = owner_source.find(end_marker, start);
+
+        ASSERT_NE(start, std::string::npos) << start_marker;
+        ASSERT_NE(end, std::string::npos) << end_marker;
+        ASSERT_GT(end, start) << start_marker;
+        const auto body = owner_source.substr(start, end - start);
+        ASSERT_NE(body.find("append_owner_task_trace("), std::string::npos)
+            << start_marker;
+
+        constexpr const char *lock_marker =
+            "std::lock_guard<std::mutex> lock(owner_runtime_mutex);";
+        size_t search_pos = 0;
+        int lock_count = 0;
+        while (true) {
+          const auto lock_pos = body.find(lock_marker, search_pos);
+          if (lock_pos == std::string::npos) {
+            break;
+          }
+          const auto lock_scope_start = body.rfind('{', lock_pos);
+          ASSERT_NE(lock_scope_start, std::string::npos) << start_marker;
+
+          size_t depth = 0;
+          size_t lock_scope_end = std::string::npos;
+          for (size_t i = lock_scope_start; i < body.size(); ++i) {
+            if (body[i] == '{') {
+              ++depth;
+            } else if (body[i] == '}') {
+              ASSERT_GT(depth, 0u) << start_marker;
+              --depth;
+              if (depth == 0) {
+                lock_scope_end = i + 1;
+                break;
+              }
+            }
+          }
+          ASSERT_NE(lock_scope_end, std::string::npos) << start_marker;
+          const auto locked_body = body.substr(
+              lock_scope_start, lock_scope_end - lock_scope_start);
+          EXPECT_EQ(locked_body.find("append_owner_task_trace("),
+                    std::string::npos)
+              << start_marker;
+          search_pos = lock_scope_end;
+          ++lock_count;
+        }
+        EXPECT_GT(lock_count, 0) << start_marker;
+      };
+
+  expect_no_trace_under_runtime_lock(
+      "int drain_owner_executor_callback_cleanups(",
+      "void record_owner_mailbox_task_drained(");
+  expect_no_trace_under_runtime_lock(
+      "VMOwnerMainDrainResult vm_owner_drain_main_tasks_with_budget(",
+      "int vm_owner_drain_main_tasks(");
+}
+
 TEST_F(DriverTest, TestOwnerMailboxStatusBuildsMappingAfterRuntimeUnlock) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   const auto start = owner_source.find("mapping_t *vm_owner_mailbox_status(");

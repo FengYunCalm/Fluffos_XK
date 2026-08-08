@@ -2173,10 +2173,10 @@ int drain_owner_executor_callback_cleanups(int limit, uint64_t started_at_ns = 0
       }
       cleanup = std::move(owner_executor_callback_main_cleanups.front());
       owner_executor_callback_main_cleanups.pop_front();
-      append_owner_task_trace(cleanup.task_id, cleanup.sequence, cleanup.owner_id, cleanup.owner_epoch,
-                              cleanup.task_type, cleanup.task_key,
-                              "executor_callback_main_cleanup_dispatched");
     }
+    append_owner_task_trace(cleanup.task_id, cleanup.sequence, cleanup.owner_id, cleanup.owner_epoch,
+                            cleanup.task_type, cleanup.task_key,
+                            "executor_callback_main_cleanup_dispatched");
     if (cleanup.callback) {
       cleanup.callback();
     }
@@ -4512,17 +4512,14 @@ VMOwnerMainDrainResult vm_owner_drain_main_tasks_with_budget(
       const char *callback_stale_state = target && (target->flags & O_DESTRUCTED)
                                              ? "main_executor_callback_destructed"
                                              : "main_executor_callback_stale";
-      {
-        std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-        append_owner_task_trace(task, target && (target->flags & O_DESTRUCTED) ? "main_destructed" : "main_stale");
-        if (is_executor_callback) {
-          append_owner_task_trace(task, callback_stale_state);
-        }
-        if (target && (target->flags & O_DESTRUCTED)) {
-          owner_main_destructed.fetch_add(1, std::memory_order_relaxed);
-        } else {
-          owner_main_stale.fetch_add(1, std::memory_order_relaxed);
-        }
+      append_owner_task_trace(task, target && (target->flags & O_DESTRUCTED) ? "main_destructed" : "main_stale");
+      if (is_executor_callback) {
+        append_owner_task_trace(task, callback_stale_state);
+      }
+      if (target && (target->flags & O_DESTRUCTED)) {
+        owner_main_destructed.fetch_add(1, std::memory_order_relaxed);
+      } else {
+        owner_main_stale.fetch_add(1, std::memory_order_relaxed);
       }
       if (is_executor_callback) {
         auto target_status = task.has_target_handle ? vm_object_handle_resolve_status(task.target_handle).status
@@ -4543,18 +4540,12 @@ VMOwnerMainDrainResult vm_owner_drain_main_tasks_with_budget(
         }
       }
     } else {
-      {
-        std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-        append_owner_task_trace(task, "main_dispatched");
-      }
+      append_owner_task_trace(task, "main_dispatched");
       VMOwnerScope owner_scope(vm_context(), task.owner_id.c_str(), task.owner_epoch);
       if (task.task_type == "owner_message" && task.has_target_handle) {
         dispatch_owner_main_message(task);
       } else if (is_executor_callback) {
-        {
-          std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-          append_owner_task_trace(task, "main_executor_callback_dispatched");
-        }
+        append_owner_task_trace(task, "main_executor_callback_dispatched");
         owner_executor_callback_dispatched.fetch_add(1, std::memory_order_relaxed);
         OwnerProgramPin program_pin(target->prog, "owner main callback adapter");
         VMExecutionState execution;
@@ -4562,10 +4553,7 @@ VMOwnerMainDrainResult vm_owner_drain_main_tasks_with_budget(
         execution.current_prog = target->prog;
         VMExecutionScope execution_scope(vm_context(), execution);
         task.callback();
-        {
-          std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-          append_owner_task_trace(task, "main_executor_callback_completed");
-        }
+        append_owner_task_trace(task, "main_executor_callback_completed");
       } else {
         task.callback();
       }
