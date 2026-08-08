@@ -1109,9 +1109,9 @@ static void preprocess() {
           fprintf(yyout, "%s\n", yyp - 1);
         }
       } else {
-        char buff[200];
-        sprintf(buff, "Unrecognised %c directive : %s\n", ppchar, yyp);
-        yyerror(buff);
+        fprintf(stderr, "%s:%d: Unrecognised %c directive : %s\n\n", current_file,
+                current_line, ppchar, yyp);
+        exit(1);
       }
     } else if (c == '/') {
       if ((c = *++yyp2) == '*') {
