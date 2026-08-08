@@ -4528,6 +4528,24 @@ TEST_F(DriverTest, TestObjectStoreShardMappingsUseLpcIntegerWidth) {
             std::string::npos);
 }
 
+TEST_F(DriverTest, TestObjectStoreGlobalStatusMappingUsesLpcIntegerWidth) {
+  const auto object_store_source =
+      read_source_file_for_test("../src/vm/internal/object_store.cc");
+  const auto status_start =
+      object_store_source.find("mapping_t *vm_object_store_status()");
+  const auto status_end = object_store_source.find(
+      "mapping_t *vm_object_store_owner_status(", status_start);
+
+  ASSERT_NE(status_start, std::string::npos);
+  ASSERT_NE(status_end, std::string::npos);
+  ASSERT_GT(status_end, status_start);
+  const auto status_body =
+      object_store_source.substr(status_start, status_end - status_start);
+  EXPECT_EQ(status_body.find("static_cast<long>"), std::string::npos);
+  EXPECT_NE(status_body.find("static_cast<LPC_INT>"),
+            std::string::npos);
+}
+
 TEST_F(DriverTest, TestOwnerDiagnosticMappingsUseLpcIntegerWidth) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   auto assert_mapping_uses_lpc_width = [&](const char* start_marker,

@@ -1932,29 +1932,29 @@ mapping_t *vm_object_store_status() {
                      "owner_shard_canonical_with_global_compat_mirror");
   add_mapping_string(map, "global_record_write_model", "compatibility_mirror");
   add_mapping_pair(map, "global_record_canonical_write", 0);
-  add_mapping_pair(map, "registered_objects", static_cast<long>(object_records.size()));
-  add_mapping_pair(map, "global_record_total", static_cast<long>(owner_local_bridge.global_records));
-  add_mapping_pair(map, "global_live_record_total", static_cast<long>(owner_local_bridge.global_live_records));
+  add_mapping_pair(map, "registered_objects", static_cast<LPC_INT>(object_records.size()));
+  add_mapping_pair(map, "global_record_total", static_cast<LPC_INT>(owner_local_bridge.global_records));
+  add_mapping_pair(map, "global_live_record_total", static_cast<LPC_INT>(owner_local_bridge.global_live_records));
   add_mapping_pair(map, "global_destructed_record_total",
-                   static_cast<long>(owner_local_bridge.global_destructed_records));
-  add_mapping_pair(map, "owner_local_record_total", static_cast<long>(owner_local_bridge.live_records));
-  add_mapping_pair(map, "owner_local_object_ref_total", static_cast<long>(owner_local_bridge.object_refs));
+                   static_cast<LPC_INT>(owner_local_bridge.global_destructed_records));
+  add_mapping_pair(map, "owner_local_record_total", static_cast<LPC_INT>(owner_local_bridge.live_records));
+  add_mapping_pair(map, "owner_local_object_ref_total", static_cast<LPC_INT>(owner_local_bridge.object_refs));
   add_mapping_pair(map, "owner_local_object_ref_index_total",
-                   static_cast<long>(owner_local_bridge.object_ref_indexes));
+                   static_cast<LPC_INT>(owner_local_bridge.object_ref_indexes));
   add_mapping_pair(map, "owner_local_destructed_record_total",
-                   static_cast<long>(owner_local_bridge.destructed_records));
+                   static_cast<LPC_INT>(owner_local_bridge.destructed_records));
   add_mapping_pair(map, "owner_local_path_index_total",
-                   static_cast<long>(owner_local_bridge.live_path_index_entries));
+                   static_cast<LPC_INT>(owner_local_bridge.live_path_index_entries));
   add_mapping_pair(map, "owner_local_destructed_path_index_total",
-                   static_cast<long>(owner_local_bridge.destructed_path_index_entries));
+                   static_cast<LPC_INT>(owner_local_bridge.destructed_path_index_entries));
   add_mapping_pair(map, "owner_local_orphan_record_total",
-                   static_cast<long>(owner_local_bridge.orphan_records));
+                   static_cast<LPC_INT>(owner_local_bridge.orphan_records));
   add_mapping_pair(map, "owner_local_to_global_mismatch_record_total",
-                   static_cast<long>(owner_local_bridge.owner_local_to_global_mismatch_records));
+                   static_cast<LPC_INT>(owner_local_bridge.owner_local_to_global_mismatch_records));
   add_mapping_pair(map, "global_to_owner_local_record_mismatch_record_total",
-                   static_cast<long>(owner_local_bridge.global_to_owner_local_record_mismatch_records));
+                   static_cast<LPC_INT>(owner_local_bridge.global_to_owner_local_record_mismatch_records));
   add_mapping_pair(map, "global_to_owner_local_mismatch_record_total",
-                   static_cast<long>(owner_local_bridge.global_to_owner_local_mismatch_records));
+                   static_cast<LPC_INT>(owner_local_bridge.global_to_owner_local_mismatch_records));
   add_mapping_pair(map, "owner_local_record_index_ready",
                    owner_local_bridge.owner_local_record_index_ready ? 1 : 0);
   add_mapping_pair(map, "owner_local_canonical_record_ready",
@@ -1989,7 +1989,7 @@ mapping_t *vm_object_store_status() {
                      owner_local_store_complete ? "" : kGlobalRecordBridgeSource);
   add_owner_local_lifecycle_contract(map, owner_local_store_complete,
                                      owner_local_bridge.owner_local_canonical_record_ready);
-  add_mapping_pair(map, "owner_shards", static_cast<long>(owner_shards.size()));
+  add_mapping_pair(map, "owner_shards", static_cast<LPC_INT>(owner_shards.size()));
   add_mapping_string(map, "default_owner_id", vm_owner_default_id());
   add_mapping_pair(map, "migration_count",
                    static_cast<LPC_INT>(next_migration_id.load(std::memory_order_relaxed) - 1));
