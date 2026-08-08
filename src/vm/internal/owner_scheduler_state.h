@@ -97,10 +97,10 @@ using OwnerMailboxPredicate = bool (*)(const OwnerMailboxTask &task);
 
 struct OwnerSchedulerPopResult {
   bool found{false};
-  long skipped_non_runnable{0};
+  int64_t skipped_non_runnable{0};
   int owner_claims{0};
   bool claim_conflict{false};
-  long active_owner_count{0};
+  int64_t active_owner_count{0};
 };
 
 struct OwnerSchedulerReleaseResult {
@@ -109,42 +109,42 @@ struct OwnerSchedulerReleaseResult {
 };
 
 struct OwnerQueueFairnessSnapshot {
-  long mailbox_owner_count{0};
-  long executor_ready_owner_count{0};
-  long executor_claim_blocked_owner_count{0};
-  long executor_runnable_owner_count{0};
-  long executor_runnable_claim_blocked_owner_count{0};
-  long main_required_only_owner_count{0};
-  long mixed_backlog_owner_count{0};
-  long max_owner_backlog{0};
-  long max_executor_runnable_backlog{0};
-  long max_executor_safe_backlog{0};
-  long max_main_required_backlog{0};
-  long main_queue_owner_count{0};
-  long main_ready_owner_count{0};
-  long main_claim_blocked_owner_count{0};
-  long max_owner_main_queue_depth{0};
+  int64_t mailbox_owner_count{0};
+  int64_t executor_ready_owner_count{0};
+  int64_t executor_claim_blocked_owner_count{0};
+  int64_t executor_runnable_owner_count{0};
+  int64_t executor_runnable_claim_blocked_owner_count{0};
+  int64_t main_required_only_owner_count{0};
+  int64_t mixed_backlog_owner_count{0};
+  int64_t max_owner_backlog{0};
+  int64_t max_executor_runnable_backlog{0};
+  int64_t max_executor_safe_backlog{0};
+  int64_t max_main_required_backlog{0};
+  int64_t main_queue_owner_count{0};
+  int64_t main_ready_owner_count{0};
+  int64_t main_claim_blocked_owner_count{0};
+  int64_t max_owner_main_queue_depth{0};
 };
 
-long owner_mailbox_queue_depth_if(const std::deque<OwnerMailboxTask> &queue, OwnerMailboxPredicate predicate);
+int64_t owner_mailbox_queue_depth_if(const std::deque<OwnerMailboxTask> &queue, OwnerMailboxPredicate predicate);
 bool owner_mailbox_queue_has_task(const std::deque<OwnerMailboxTask> &queue, OwnerMailboxPredicate predicate);
 
 class OwnerSchedulerState {
  public:
-  long mailbox_depth(const std::string &owner_id) const;
-  long mailbox_total_depth() const;
-  long main_queue_total_depth() const;
-  long main_queue_depth(const std::string &owner_id) const;
-  long mailbox_active_owners() const;
-  long active_owner_count() const;
-  long active_main_owner_count() const;
-  long active_claim_count() const;
+  int64_t mailbox_depth(const std::string &owner_id) const;
+  int64_t mailbox_total_depth() const;
+  int64_t main_queue_total_depth() const;
+  int64_t main_queue_depth(const std::string &owner_id) const;
+  int64_t mailbox_active_owners() const;
+  int64_t active_owner_count() const;
+  int64_t active_main_owner_count() const;
+  int64_t active_claim_count() const;
   bool schedulable_empty() const;
 
-  long mailbox_depth_if(const std::string &owner_id, OwnerMailboxPredicate predicate) const;
-  long mailbox_total_depth_if(OwnerMailboxPredicate predicate) const;
-  long runnable_owner_count(OwnerMailboxPredicate runnable) const;
-  long main_runnable_owner_count() const;
+  int64_t mailbox_depth_if(const std::string &owner_id, OwnerMailboxPredicate predicate) const;
+  int64_t mailbox_total_depth_if(OwnerMailboxPredicate predicate) const;
+  int64_t runnable_owner_count(OwnerMailboxPredicate runnable) const;
+  int64_t main_runnable_owner_count() const;
   bool owner_has_thread_task(const std::string &owner_id, OwnerMailboxPredicate runnable) const;
   OwnerQueueFairnessSnapshot fairness_snapshot(OwnerMailboxPredicate runnable, OwnerMailboxPredicate safe,
                                                OwnerMailboxPredicate main_required) const;
@@ -155,7 +155,7 @@ class OwnerSchedulerState {
   bool enqueue_main_task(OwnerMainTask task);
 
   OwnerSchedulerReleaseResult release_active_owner(const std::string &owner_id, OwnerMailboxPredicate runnable);
-  long release_all_active_owners(OwnerMailboxPredicate runnable);
+  int64_t release_all_active_owners(OwnerMailboxPredicate runnable);
   bool release_active_main_owner(const std::string &owner_id);
   OwnerSchedulerPopResult pop_next_schedulable_task(OwnerMailboxTask *out, bool claim_owner,
                                                     OwnerMailboxPredicate runnable);

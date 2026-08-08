@@ -4546,6 +4546,95 @@ TEST_F(DriverTest, TestObjectStoreGlobalStatusMappingUsesLpcIntegerWidth) {
             std::string::npos);
 }
 
+TEST_F(DriverTest, TestOwnerSchedulerCountsUseFixedIntegerWidth) {
+  const auto scheduler_header = read_source_file_for_test(
+      "../src/vm/internal/owner_scheduler_state.h");
+  const auto scheduler_source = read_source_file_for_test(
+      "../src/vm/internal/owner_scheduler_state.cc");
+  const auto trace_header = read_source_file_for_test(
+      "../src/vm/internal/owner_trace_store.h");
+  const auto owner_header = read_source_file_for_test("../src/vm/owner.h");
+  const auto owner_source = read_source_file_for_test(
+      "../src/vm/internal/owner.cc");
+
+  EXPECT_EQ(scheduler_header.find("long "), std::string::npos);
+  EXPECT_NE(scheduler_header.find("int64_t mailbox_depth("),
+            std::string::npos);
+  EXPECT_EQ(scheduler_source.find("static_cast<long>"),
+            std::string::npos);
+  EXPECT_EQ(scheduler_source.find("long OwnerSchedulerState::"),
+            std::string::npos);
+  EXPECT_NE(scheduler_source.find("int64_t OwnerSchedulerState::"),
+            std::string::npos);
+
+  const auto trace_start = trace_header.find("struct OwnerExecutorTrace {");
+  const auto trace_end = trace_header.find(
+      "template <typename Trace>", trace_start);
+  ASSERT_NE(trace_start, std::string::npos);
+  ASSERT_NE(trace_end, std::string::npos);
+  ASSERT_GT(trace_end, trace_start);
+  const auto trace_body =
+      trace_header.substr(trace_start, trace_end - trace_start);
+  EXPECT_EQ(trace_body.find("long "), std::string::npos);
+  EXPECT_NE(trace_body.find("int64_t backlog"), std::string::npos);
+
+  const auto drain_result_start =
+      owner_header.find("struct VMOwnerMainDrainResult {");
+  const auto drain_result_end = owner_header.find(
+      "using VMOwnerFutureTerminalNotifier", drain_result_start);
+  ASSERT_NE(drain_result_start, std::string::npos);
+  ASSERT_NE(drain_result_end, std::string::npos);
+  ASSERT_GT(drain_result_end, drain_result_start);
+  const auto drain_result_body = owner_header.substr(
+      drain_result_start, drain_result_end - drain_result_start);
+  EXPECT_EQ(drain_result_body.find("long remaining_"),
+            std::string::npos);
+  EXPECT_NE(drain_result_body.find("int64_t remaining_main_tasks"),
+            std::string::npos);
+  EXPECT_EQ(owner_header.find("long vm_owner_main_queue_total_depth()"),
+            std::string::npos);
+  EXPECT_NE(owner_header.find("int64_t vm_owner_main_queue_total_depth()"),
+            std::string::npos);
+
+  const char* scheduler_count_functions[] = {
+      "owner_mailbox_depth",
+      "owner_mailbox_total_depth",
+      "owner_main_queue_total_depth",
+      "owner_main_queue_depth",
+      "owner_mailbox_active_owners",
+      "owner_executor_runnable_queue_depth",
+      "owner_executor_safe_queue_depth",
+      "owner_main_required_queue_depth",
+      "owner_runnable_owner_count",
+      "owner_main_runnable_owner_count",
+  };
+  for (const auto* function_name : scheduler_count_functions) {
+    EXPECT_EQ(owner_source.find(std::string("long ") + function_name + "("),
+              std::string::npos)
+        << function_name;
+    EXPECT_NE(owner_source.find(std::string("int64_t ") + function_name + "("),
+              std::string::npos)
+        << function_name;
+  }
+  EXPECT_EQ(owner_source.find("long vm_owner_main_queue_total_depth()"),
+            std::string::npos);
+  EXPECT_NE(owner_source.find("int64_t vm_owner_main_queue_total_depth()"),
+            std::string::npos);
+
+  const auto drain_start = owner_source.find(
+      "VMOwnerMainDrainResult vm_owner_drain_main_tasks_with_budget(");
+  const auto drain_end = owner_source.find(
+      "int vm_owner_drain_main_tasks(int limit)", drain_start);
+  ASSERT_NE(drain_start, std::string::npos);
+  ASSERT_NE(drain_end, std::string::npos);
+  ASSERT_GT(drain_end, drain_start);
+  const auto drain_body =
+      owner_source.substr(drain_start, drain_end - drain_start);
+  EXPECT_EQ(drain_body.find("static_cast<long>"), std::string::npos);
+  EXPECT_NE(drain_body.find("static_cast<int64_t>"),
+            std::string::npos);
+}
+
 TEST_F(DriverTest, TestOwnerDiagnosticMappingsUseLpcIntegerWidth) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
   auto assert_mapping_uses_lpc_width = [&](const char* start_marker,
@@ -5065,7 +5154,7 @@ TEST_F(DriverTest, TestOwnerDebugReferenceMarkUsesCoordinatorLockBoundary) {
 
 TEST_F(DriverTest, TestOwnerMainQueueDepthGetterUsesRuntimeLock) {
   const auto owner_source = read_source_file_for_test("../src/vm/internal/owner.cc");
-  const auto start = owner_source.find("long vm_owner_main_queue_total_depth()");
+  const auto start = owner_source.find("int64_t vm_owner_main_queue_total_depth()");
   const auto end = owner_source.find("uint64_t vm_owner_enqueue_executor_task", start);
 
   ASSERT_NE(start, std::string::npos);
@@ -5370,7 +5459,7 @@ TEST_F(DriverTest, TestOwnerMailboxStatusBuildsMappingAfterRuntimeUnlock) {
   ASSERT_NE(end, std::string::npos);
   ASSERT_GT(end, start);
   const auto body = owner_source.substr(start, end - start);
-  const auto snapshot_pos = body.find("long owner_queue_depth;");
+  const auto snapshot_pos = body.find("int64_t owner_queue_depth;");
   const auto lock_pos = body.find(
       "std::lock_guard<std::mutex> lock(owner_runtime_mutex);", snapshot_pos);
   const auto lock_scope_end = body.find("\n  }\n", lock_pos);

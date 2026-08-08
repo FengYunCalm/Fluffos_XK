@@ -104,13 +104,13 @@ struct OwnerCommitTrace {
 struct OwnerExecutorTrace {
   uint64_t trace_id{0};
   uint64_t sequence{0};
-  long backlog{0};
-  long runnable_backlog{0};
-  long safe_backlog{0};
-  long main_required_backlog{0};
-  long runnable_owners{0};
-  long claimed_owners{0};
-  long active_claims{0};
+  int64_t backlog{0};
+  int64_t runnable_backlog{0};
+  int64_t safe_backlog{0};
+  int64_t main_required_backlog{0};
+  int64_t runnable_owners{0};
+  int64_t claimed_owners{0};
+  int64_t active_claims{0};
   std::string owner_id;
   std::string event;
 };

@@ -57,8 +57,8 @@ struct VMOwnerStringTaskSubmission {
 
 struct VMOwnerMainDrainResult {
   int dispatched{0};
-  long remaining_main_tasks{0};
-  long remaining_cleanup_tasks{0};
+  int64_t remaining_main_tasks{0};
+  int64_t remaining_cleanup_tasks{0};
   uint64_t elapsed_ns{0};
   uint64_t max_main_task_elapsed_ns{0};
   int main_tasks_exceeding_wall_budget{0};
@@ -126,7 +126,7 @@ uint64_t vm_owner_enqueue_main_task(object_t *target, const char *task_type, con
                                     std::function<void()> drop_callback = nullptr,
                                     VMOwnerMainTaskPolicy policy = VM_OWNER_MAIN_TASK_EXPLICIT_FALLBACK);
 bool vm_owner_executor_available();
-long vm_owner_main_queue_total_depth();
+int64_t vm_owner_main_queue_total_depth();
 uint64_t vm_owner_enqueue_executor_task(object_t *target, const char *task_type, const char *task_key,
                                         std::function<void()> callback,
                                         std::function<void()> drop_callback = nullptr);

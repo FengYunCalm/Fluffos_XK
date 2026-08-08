@@ -39,8 +39,8 @@
 namespace {
 constexpr const char *kDefaultOwnerId = "legacy/main";
 constexpr int kOwnerExecutorTaskBudget = 32;
-constexpr long kOwnerSchedulerMaxOwnerQueueDepth = 4096;
-constexpr long kOwnerSchedulerBackpressureHighWatermark = kOwnerSchedulerMaxOwnerQueueDepth * 8 / 10;
+constexpr int64_t kOwnerSchedulerMaxOwnerQueueDepth = 4096;
+constexpr int64_t kOwnerSchedulerBackpressureHighWatermark = kOwnerSchedulerMaxOwnerQueueDepth * 8 / 10;
 constexpr const char *kOwnerExecutorContractVersion = "owner_executor_v2";
 constexpr const char *kOwnerRuntimeBenchmarkSchemaV1 = "owner_runtime_bench_v1";
 constexpr const char *kOwnerRuntimeStressEntry = "tools/owner-runtime-v4-stress.sh";
@@ -265,8 +265,8 @@ OwnerRuntimeMetrics &owner_runtime_metrics = owner_runtime_metrics_instance();
 OWNER_RUNTIME_METRIC_FIELDS(OWNER_RUNTIME_METRIC_ALIAS)
 #undef OWNER_RUNTIME_METRIC_ALIAS
 std::string owner_executor_last_budget_yield_owner;
-long owner_executor_last_budget_yield_backlog{0};
-long owner_executor_last_budget_yield_safe_backlog{0};
+int64_t owner_executor_last_budget_yield_backlog{0};
+int64_t owner_executor_last_budget_yield_safe_backlog{0};
 
 struct OwnerExecutorCallbackCleanup {
   uint64_t task_id;
@@ -425,23 +425,23 @@ void record_owner_access_policy_counter(const char *policy_mode) {
   }
 }
 
-long owner_mailbox_depth(const std::string &owner_id) {
+int64_t owner_mailbox_depth(const std::string &owner_id) {
   return owner_scheduler_state.mailbox_depth(owner_id);
 }
 
-long owner_mailbox_total_depth() {
+int64_t owner_mailbox_total_depth() {
   return owner_scheduler_state.mailbox_total_depth();
 }
 
-long owner_main_queue_total_depth() {
+int64_t owner_main_queue_total_depth() {
   return owner_scheduler_state.main_queue_total_depth();
 }
 
-long owner_main_queue_depth(const std::string &owner_id) {
+int64_t owner_main_queue_depth(const std::string &owner_id) {
   return owner_scheduler_state.main_queue_depth(owner_id);
 }
 
-long owner_mailbox_active_owners() {
+int64_t owner_mailbox_active_owners() {
   return owner_scheduler_state.mailbox_active_owners();
 }
 
@@ -449,11 +449,11 @@ long owner_pending_future_count() {
   return owner_future_store.pending_count();
 }
 
-long owner_executor_runnable_queue_depth();
-long owner_executor_safe_queue_depth();
-long owner_main_required_queue_depth();
-long owner_runnable_owner_count();
-long owner_main_runnable_owner_count();
+int64_t owner_executor_runnable_queue_depth();
+int64_t owner_executor_safe_queue_depth();
+int64_t owner_main_required_queue_depth();
+int64_t owner_runnable_owner_count();
+int64_t owner_main_runnable_owner_count();
 long owner_executor_callback_allowlist_count();
 bool owner_task_executor_runnable(const OwnerMailboxTask &task);
 bool owner_task_executor_safe(const OwnerMailboxTask &task);
@@ -464,21 +464,21 @@ struct OwnerStatusSnapshot {
   bool threads_enabled{false};
   size_t thread_count{0};
   bool thread_stopping{false};
-  long queue_depth{0};
-  long executor_runnable_queue_depth{0};
-  long executor_safe_queue_depth{0};
-  long main_required_queue_depth{0};
-  long runnable_owner_count{0};
-  long main_queue_depth{0};
-  long main_runnable_owner_count{0};
-  long active_owner_count{0};
-  long active_main_owner_count{0};
-  long active_claim_count{0};
+  int64_t queue_depth{0};
+  int64_t executor_runnable_queue_depth{0};
+  int64_t executor_safe_queue_depth{0};
+  int64_t main_required_queue_depth{0};
+  int64_t runnable_owner_count{0};
+  int64_t main_queue_depth{0};
+  int64_t main_runnable_owner_count{0};
+  int64_t active_owner_count{0};
+  int64_t active_main_owner_count{0};
+  int64_t active_claim_count{0};
   size_t callback_main_cleanup_backlog{0};
   size_t deferred_target_release_count{0};
   std::string last_budget_yield_owner;
-  long last_budget_yield_backlog{0};
-  long last_budget_yield_safe_backlog{0};
+  int64_t last_budget_yield_backlog{0};
+  int64_t last_budget_yield_safe_backlog{0};
   long pending_futures{0};
   OwnerQueueFairnessSnapshot fairness;
 };
@@ -2199,10 +2199,10 @@ void record_owner_mailbox_task_drained(const OwnerMailboxTask &task) {
   }
 }
 
-long owner_executor_runnable_queue_depth(const std::string &owner_id);
-long owner_executor_safe_queue_depth(const std::string &owner_id);
-long owner_main_required_queue_depth(const std::string &owner_id);
-long owner_runnable_owner_count();
+int64_t owner_executor_runnable_queue_depth(const std::string &owner_id);
+int64_t owner_executor_safe_queue_depth(const std::string &owner_id);
+int64_t owner_main_required_queue_depth(const std::string &owner_id);
+int64_t owner_runnable_owner_count();
 
 mapping_t *owner_access_trace_mapping(const OwnerAccessTrace &trace) {
   auto policy_mode = owner_access_policy_mode(trace.operation.c_str(), trace.cross_owner);
@@ -2756,15 +2756,15 @@ bool owner_task_executor_safe(const OwnerMailboxTask &task) {
   return owner_executor_task_descriptor(task).executor_safe != 0;
 }
 
-long owner_executor_runnable_queue_depth(const std::string &owner_id) {
+int64_t owner_executor_runnable_queue_depth(const std::string &owner_id) {
   return owner_scheduler_state.mailbox_depth_if(owner_id, owner_task_executor_runnable);
 }
 
-long owner_executor_safe_queue_depth(const std::string &owner_id) {
+int64_t owner_executor_safe_queue_depth(const std::string &owner_id) {
   return owner_scheduler_state.mailbox_depth_if(owner_id, owner_task_executor_safe);
 }
 
-long owner_main_required_queue_depth(const std::string &owner_id) {
+int64_t owner_main_required_queue_depth(const std::string &owner_id) {
   return owner_scheduler_state.mailbox_depth_if(owner_id, owner_task_requires_main_drain);
 }
 
@@ -2776,23 +2776,23 @@ void record_owner_executor_budget_yield_locked(const std::string &owner_id) {
   append_owner_executor_trace_locked(owner_id, "budget_yield");
 }
 
-long owner_executor_runnable_queue_depth() {
+int64_t owner_executor_runnable_queue_depth() {
   return owner_scheduler_state.mailbox_total_depth_if(owner_task_executor_runnable);
 }
 
-long owner_executor_safe_queue_depth() {
+int64_t owner_executor_safe_queue_depth() {
   return owner_scheduler_state.mailbox_total_depth_if(owner_task_executor_safe);
 }
 
-long owner_main_required_queue_depth() {
+int64_t owner_main_required_queue_depth() {
   return owner_scheduler_state.mailbox_total_depth_if(owner_task_requires_main_drain);
 }
 
-long owner_runnable_owner_count() {
+int64_t owner_runnable_owner_count() {
   return owner_scheduler_state.runnable_owner_count(owner_task_executor_runnable);
 }
 
-long owner_main_runnable_owner_count() {
+int64_t owner_main_runnable_owner_count() {
   return owner_scheduler_state.main_runnable_owner_count();
 }
 
@@ -3757,7 +3757,7 @@ bool vm_owner_executor_available() {
   return !owner_threads.empty();
 }
 
-long vm_owner_main_queue_total_depth() {
+int64_t vm_owner_main_queue_total_depth() {
   std::lock_guard<std::mutex> lock(owner_runtime_mutex);
   return owner_main_queue_total_depth();
 }
@@ -4479,7 +4479,7 @@ VMOwnerMainDrainResult vm_owner_drain_main_tasks_with_budget(
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     if (owner_main_draining) {
       result.remaining_main_tasks = owner_main_queue_total_depth();
-      result.remaining_cleanup_tasks = static_cast<long>(
+      result.remaining_cleanup_tasks = static_cast<int64_t>(
           owner_executor_callback_main_cleanups.size());
       return result;
     }
@@ -4618,7 +4618,7 @@ VMOwnerMainDrainResult vm_owner_drain_main_tasks_with_budget(
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     result.remaining_main_tasks = owner_main_queue_total_depth();
-    result.remaining_cleanup_tasks = static_cast<long>(
+    result.remaining_cleanup_tasks = static_cast<int64_t>(
         owner_executor_callback_main_cleanups.size());
     auto remaining = result.remaining_main_tasks + result.remaining_cleanup_tasks;
     result.task_budget_yielded = remaining > 0 && dispatched >= budget;
@@ -4747,7 +4747,7 @@ mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
     release_owner_task_target(&task);
   }
 
-  long remaining;
+  int64_t remaining;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     remaining = owner_mailbox_depth(normalized_owner_id);
@@ -4768,8 +4768,8 @@ mapping_t *vm_owner_drain_mailbox(const char *owner_id, int limit) {
 mapping_t *vm_owner_purge_mailbox(const char *owner_id) {
   std::string normalized_owner_id = normalize_owner_id(owner_id);
   std::vector<OwnerMailboxTask> purged_tasks;
-  long remaining;
-  long queue_depth;
+  int64_t remaining;
+  int64_t queue_depth;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     purged_tasks = owner_scheduler_state.remove_owner_mailbox(normalized_owner_id);
@@ -4812,8 +4812,8 @@ mapping_t *vm_owner_purge_mailbox(const char *owner_id) {
 
 mapping_t *vm_owner_schedule(int limit) {
   std::vector<OwnerMailboxTask> scheduled_tasks;
-  long remaining;
-  long active_owners;
+  int64_t remaining;
+  int64_t active_owners;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     auto requested = limit <= 0 ? static_cast<size_t>(owner_mailbox_total_depth())
@@ -4882,18 +4882,18 @@ mapping_t *vm_owner_schedule(int limit) {
 
 mapping_t *vm_owner_mailbox_status(const char *owner_id) {
   std::string normalized_owner_id = normalize_owner_id(owner_id);
-  long owner_queue_depth;
-  long owner_executor_runnable_depth;
-  long owner_executor_safe_depth;
-  long owner_main_required_depth;
-  long owner_main_queue_depth_value;
-  long queue_depth;
-  long executor_runnable_depth;
-  long executor_safe_depth;
-  long main_required_depth;
-  long main_queue_depth_value;
-  long active_owners;
-  long main_active_owners;
+  int64_t owner_queue_depth;
+  int64_t owner_executor_runnable_depth;
+  int64_t owner_executor_safe_depth;
+  int64_t owner_main_required_depth;
+  int64_t owner_main_queue_depth_value;
+  int64_t queue_depth;
+  int64_t executor_runnable_depth;
+  int64_t executor_safe_depth;
+  int64_t main_required_depth;
+  int64_t main_queue_depth_value;
+  int64_t active_owners;
+  int64_t main_active_owners;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     owner_queue_depth = owner_mailbox_depth(normalized_owner_id);
