@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <gtest/gtest-spi.h>
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
 #include <event2/event.h>
@@ -530,7 +531,7 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
             std::string::npos);
   auto mapping_number = [](mapping_t* map, const char* key) -> long {
     svalue_t* value = find_string_in_mapping(map, key);
-    EXPECT_NE(value, nullptr) << key;
+    EXPECT_NE(value, &const0u) << key;
     EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER) << key;
     return value && value->type == T_NUMBER ? value->u.number : 0;
   };
@@ -543,6 +544,9 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
 
   mapping_t* status = gateway_status_internal();
   ASSERT_NE(status, nullptr);
+  EXPECT_NONFATAL_FAILURE(
+      { (void)mapping_number(status, "__missing_gateway_status_field_probe__"); },
+      "__missing_gateway_status_field_probe__");
   ASSERT_EQ(mapping_number(status, "gateway_external_bind_allowed"), 0);
   ASSERT_GE(mapping_number(status, "gateway_external_bind_rejected"), 0);
   ASSERT_EQ(mapping_number(status, "gateway_event_priority_levels"), 2);
@@ -879,6 +883,52 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
   ASSERT_GE(mapping_number(status, "gateway_output_execute_avg_us"), 0);
   ASSERT_GE(mapping_number(status, "gateway_output_execute_max_us"), 0);
   ASSERT_STREQ(mapping_string(status, "gateway_io_boundary"), "main_thread_io_adapter");
+  free_mapping(status);
+}
+
+TEST_F(DriverTest, TestGatewayStatusDerivesRoomProjectionThreadCpuAverages) {
+  struct AtomicCounterRestore {
+    std::atomic<uint64_t> &counter;
+    uint64_t original;
+    ~AtomicCounterRestore() {
+      counter.store(original, std::memory_order_relaxed);
+    }
+  };
+
+  auto &worker_total =
+      g_gateway_runtime_counters.room_output_projection_worker_thread_cpu_ns_total;
+  auto &worker_samples =
+      g_gateway_runtime_counters.room_output_projection_worker_thread_cpu_samples;
+  auto &inline_total =
+      g_gateway_runtime_counters.room_output_projection_inline_thread_cpu_ns_total;
+  auto &inline_samples =
+      g_gateway_runtime_counters.room_output_projection_inline_thread_cpu_samples;
+  AtomicCounterRestore worker_total_restore{
+      worker_total, worker_total.load(std::memory_order_relaxed)};
+  AtomicCounterRestore worker_samples_restore{
+      worker_samples, worker_samples.load(std::memory_order_relaxed)};
+  AtomicCounterRestore inline_total_restore{
+      inline_total, inline_total.load(std::memory_order_relaxed)};
+  AtomicCounterRestore inline_samples_restore{
+      inline_samples, inline_samples.load(std::memory_order_relaxed)};
+
+  worker_total.store(12000, std::memory_order_relaxed);
+  worker_samples.store(3, std::memory_order_relaxed);
+  inline_total.store(25000, std::memory_order_relaxed);
+  inline_samples.store(5, std::memory_order_relaxed);
+
+  auto *status = gateway_status_internal();
+  ASSERT_NE(status, nullptr);
+  auto *worker_avg = find_string_in_mapping(
+      status, "gateway_room_output_projection_worker_thread_cpu_avg_us");
+  auto *inline_avg = find_string_in_mapping(
+      status, "gateway_room_output_projection_inline_thread_cpu_avg_us");
+  ASSERT_NE(worker_avg, &const0u);
+  ASSERT_NE(inline_avg, &const0u);
+  ASSERT_EQ(worker_avg->type, T_NUMBER);
+  ASSERT_EQ(inline_avg->type, T_NUMBER);
+  EXPECT_EQ(worker_avg->u.number, 4);
+  EXPECT_EQ(inline_avg->u.number, 5);
   free_mapping(status);
 }
 

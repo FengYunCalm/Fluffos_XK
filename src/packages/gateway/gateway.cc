@@ -3162,6 +3162,13 @@ mapping_t *gateway_status_internal() {
       g_gateway_runtime_counters
           .room_output_projection_worker_thread_cpu_samples);
   add_mapping_pair(
+      map, "gateway_room_output_projection_worker_thread_cpu_avg_us",
+      gateway_avg_us(
+          g_gateway_runtime_counters
+              .room_output_projection_worker_thread_cpu_ns_total,
+          g_gateway_runtime_counters
+              .room_output_projection_worker_thread_cpu_samples));
+  add_mapping_pair(
       map, "gateway_room_output_projection_worker_thread_cpu_unavailable",
       static_cast<long>(
           g_gateway_runtime_counters
@@ -3175,6 +3182,13 @@ mapping_t *gateway_status_internal() {
           .room_output_projection_inline_thread_cpu_ns_max,
       g_gateway_runtime_counters
           .room_output_projection_inline_thread_cpu_samples);
+  add_mapping_pair(
+      map, "gateway_room_output_projection_inline_thread_cpu_avg_us",
+      gateway_avg_us(
+          g_gateway_runtime_counters
+              .room_output_projection_inline_thread_cpu_ns_total,
+          g_gateway_runtime_counters
+              .room_output_projection_inline_thread_cpu_samples));
   add_mapping_pair(
       map, "gateway_room_output_projection_inline_thread_cpu_unavailable",
       static_cast<long>(
