@@ -44,6 +44,13 @@ stack protector (`-fstack-protector-strong` for Release,
 `-fno-omit-frame-pointer` and disable FORTIFY/stack-protector to avoid
 interference.
 
+## Runbooks
+
+- Release/approval/drill: `docs/runbooks/release.md`
+- Rollback and incident handling: `docs/runbooks/rollback.md`
+- Gateway trust boundary and deployment checks: `docs/runbooks/gateway-security.md`
+- 300-player capacity acceptance (external-required): `docs/runbooks/capacity-300-player-pair.md`
+
 ## Notes
 
 - Use prerelease mode when the build is not yet final.
