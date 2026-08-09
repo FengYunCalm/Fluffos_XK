@@ -1,0 +1,155 @@
+# Third-party dependency manifest
+#
+# Machine-readable inventory of every vendored dependency in src/thirdparty
+# plus external downloads used by release builds. Every entry records the
+# upstream source, version, license, and review status so upgrades can be
+# audited. Fields marked `unknown` must be filled in before the dependency is
+# upgraded or released.
+#
+# Review cadence: quarterly; bump `last_reviewed` when reviewed.
+
+schema: fluffos.third_party.manifest.v1
+last_reviewed: 2026-08-09
+
+vendored:
+  - name: argparse
+    path: src/thirdparty/argparse
+    version: unknown
+    upstream: https://github.com/p-ranav/argparse
+    license: MIT
+    checksum: unknown
+    patches: none
+    notes: Single-header library under include/argparse/.
+
+  - name: backward-cpp
+    path: src/thirdparty/backward-cpp
+    version: unknown
+    upstream: https://github.com/bombela/backward-cpp
+    license: MIT
+    checksum: unknown
+    patches: none
+    notes: Used for crash stack traces.
+
+  - name: crypt
+    path: src/thirdparty/crypt
+    version: unknown
+    upstream: https://github.com/openssl/openssl (crypt module lineage)
+    license: BSD-3-Clause
+    checksum: unknown
+    patches: none
+    notes: Legacy DES/MD5 crypt implementations (ENABLE_LEGACY_DES_CRYPT).
+
+  - name: ghc-filesystem
+    path: src/thirdparty/filesystem
+    version: unknown (v1.5.x lineage)
+    upstream: https://github.com/gulrak/filesystem
+    license: MIT
+    checksum: unknown
+    patches: none
+
+  - name: fmt
+    path: src/thirdparty/fmt
+    version: 10.1.0
+    upstream: https://github.com/fmtlib/fmt
+    license: MIT
+    checksum: unknown
+    patches: none
+    notes: FMT_VERSION 100100.
+
+  - name: nlohmann-json
+    path: src/thirdparty/json
+    version: 3.11.2
+    upstream: https://github.com/nlohmann/json
+    license: MIT
+    checksum: unknown
+    patches: none
+    notes: Version banner in json.hpp.
+
+  - name: libevent
+    path: src/thirdparty/libevent
+    version: unknown (2.1.x lineage)
+    upstream: https://github.com/libevent/libevent
+    license: BSD-3-Clause
+    checksum: unknown
+    patches: none
+
+  - name: libtelnet
+    path: src/thirdparty/libtelnet
+    version: 0.30.0
+    upstream: https://github.com/seanmiddleditch/libtelnet
+    license: Public Domain (UNLICENSE)
+    checksum: unknown
+    patches: none
+
+  - name: libwebsockets
+    path: src/thirdparty/libwebsockets
+    version: 4.2.1
+    upstream: https://github.com/warmcat/libwebsockets
+    license: MIT
+    checksum: unknown
+    patches: multiple local build tweaks (LWS_WITH_* cache vars in src/CMakeLists.txt)
+    notes: Version banner in libwebsockets.h.
+
+  - name: scope-guard
+    path: src/thirdparty/scope_guard
+    version: unknown
+    upstream: https://github.com/ricab/scope_guard
+    license: MIT
+    checksum: unknown
+    patches: none
+    notes: Header-only.
+
+  - name: utf8-decoder-dfa
+    path: src/thirdparty/utf8_decoder_dfa
+    version: unknown
+    upstream: https://github.com/nelhage/utf8_decoder_dfa
+    license: MIT
+    checksum: unknown
+    patches: none
+
+  - name: utfcpp
+    path: src/thirdparty/utfcpp
+    version: 3.2
+    upstream: https://github.com/nemtrif/utfcpp
+    license: Boost Software License 1.0
+    checksum: unknown
+    patches: none
+    notes: project() version 3.2.
+
+  - name: widecharwidth
+    path: src/thirdparty/widecharwidth
+    version: unknown
+    upstream: https://github.com/ridiculousfish/widecharwidth
+    license: MIT
+    checksum: unknown
+    patches: none
+    notes: Header-only width tables.
+
+external_downloads:
+  - name: jemalloc
+    version: 5.3.0
+    url: https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2
+    sha256: 2db82d1e7119df3e71b7640219b6dfe84789bc0537983c3b7ac4f7189aecfeaa
+    license: BSD-2-Clause
+    used_by: .github/workflows/release.yml (Linux static build)
+    verification: sha256 must be checked before extraction; failure aborts the build
+
+toolchain:
+  - name: alpine-base-image
+    version: 3.18
+    digest: unknown
+    license: MIT (Docker base image licensing per component)
+    used_by: .github/workflows/release.yml (Linux static build), Dockerfile
+    notes: Pin to an immutable digest before next release.
+
+  - name: github-actions
+    note: Pin action major versions + commit digests; record review date per action.
+    entries:
+      - actions/checkout@v4
+      - actions/upload-artifact@v4
+      - actions/download-artifact@v4
+      - docker/setup-buildx-action@v3
+      - docker/login-action@v3
+      - docker/metadata-action@v5
+      - docker/build-push-action@v5
+      - actions/github-script@v7

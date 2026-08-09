@@ -1,0 +1,328 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.4",
+  "serialNumber": "urn:uuid:2026-08-10-fluffos-sbom",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-08-10T00:00:00Z",
+    "tools": [
+      {
+        "vendor": "FluffOS",
+        "name": "sbom-generate.py"
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "argparse",
+      "version": "unknown",
+      "purl": null,
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/p-ranav/argparse"
+        }
+      ],
+      "supplier": {
+        "name": "https://github.com/p-ranav/argparse"
+      }
+    },
+    {
+      "type": "library",
+      "name": "backward-cpp",
+      "version": "unknown",
+      "purl": null,
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/bombela/backward-cpp"
+        }
+      ],
+      "supplier": {
+        "name": "https://github.com/bombela/backward-cpp"
+      }
+    },
+    {
+      "type": "library",
+      "name": "crypt",
+      "version": "unknown",
+      "purl": null,
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-3-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/openssl/openssl (crypt module lineage)"
+        }
+      ],
+      "supplier": {
+        "name": "https://github.com/openssl/openssl (crypt module lineage)"
+      }
+    },
+    {
+      "type": "library",
+      "name": "ghc-filesystem",
+      "version": "unknown (v1.5.x lineage)",
+      "purl": null,
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/gulrak/filesystem"
+        }
+      ],
+      "supplier": {
+        "name": "https://github.com/gulrak/filesystem"
+      }
+    },
+    {
+      "type": "library",
+      "name": "fmt",
+      "version": "10.1.0",
+      "purl": null,
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/fmtlib/fmt"
+        }
+      ],
+      "supplier": {
+        "name": "https://github.com/fmtlib/fmt"
+      }
+    },
+    {
+      "type": "library",
+      "name": "nlohmann-json",
+      "version": "3.11.2",
+      "purl": null,
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/nlohmann/json"
+        }
+      ],
+      "supplier": {
+        "name": "https://github.com/nlohmann/json"
+      }
+    },
+    {
+      "type": "library",
+      "name": "libevent",
+      "version": "unknown (2.1.x lineage)",
+      "purl": null,
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-3-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/libevent/libevent"
+        }
+      ],
+      "supplier": {
+        "name": "https://github.com/libevent/libevent"
+      }
+    },
+    {
+      "type": "library",
+      "name": "libtelnet",
+      "version": "0.30.0",
+      "purl": null,
+      "licenses": [
+        {
+          "license": {
+            "name": "Public Domain (UNLICENSE)"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/seanmiddleditch/libtelnet"
+        }
+      ],
+      "supplier": {
+        "name": "https://github.com/seanmiddleditch/libtelnet"
+      }
+    },
+    {
+      "type": "library",
+      "name": "libwebsockets",
+      "version": "4.2.1",
+      "purl": null,
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/warmcat/libwebsockets"
+        }
+      ],
+      "supplier": {
+        "name": "https://github.com/warmcat/libwebsockets"
+      }
+    },
+    {
+      "type": "library",
+      "name": "scope-guard",
+      "version": "unknown",
+      "purl": null,
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/ricab/scope_guard"
+        }
+      ],
+      "supplier": {
+        "name": "https://github.com/ricab/scope_guard"
+      }
+    },
+    {
+      "type": "library",
+      "name": "utf8-decoder-dfa",
+      "version": "unknown",
+      "purl": null,
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/nelhage/utf8_decoder_dfa"
+        }
+      ],
+      "supplier": {
+        "name": "https://github.com/nelhage/utf8_decoder_dfa"
+      }
+    },
+    {
+      "type": "library",
+      "name": "utfcpp",
+      "version": 3.2,
+      "purl": null,
+      "licenses": [
+        {
+          "license": {
+            "name": "Boost Software License 1.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/nemtrif/utfcpp"
+        }
+      ],
+      "supplier": {
+        "name": "https://github.com/nemtrif/utfcpp"
+      }
+    },
+    {
+      "type": "library",
+      "name": "widecharwidth",
+      "version": "unknown",
+      "purl": null,
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/ridiculousfish/widecharwidth"
+        }
+      ],
+      "supplier": {
+        "name": "https://github.com/ridiculousfish/widecharwidth"
+      }
+    },
+    {
+      "type": "library",
+      "name": "jemalloc",
+      "version": "5.3.0",
+      "purl": null,
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-2-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "2db82d1e7119df3e71b7640219b6dfe84789bc0537983c3b7ac4f7189aecfeaa"
+        }
+      ]
+    }
+  ]
+}

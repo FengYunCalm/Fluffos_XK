@@ -126,9 +126,11 @@ jobs:
               pcre-dev bison git musl-dev libelf-static elfutils-dev \
               zstd-static bzip2-static xz-static tar
 
-            # Build jemalloc
+            # Build jemalloc (checksum-verified download; see third_party/manifest.yaml)
             cd /tmp
-            wget -q -O - https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2 | tar -xj
+            wget -q -O jemalloc.tar.bz2 https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2
+            echo "2db82d1e7119df3e71b7640219b6dfe84789bc0537983c3b7ac4f7189aecfeaa  jemalloc.tar.bz2" | sha256sum -c -
+            tar -xjf jemalloc.tar.bz2
             cd jemalloc-5.3.0
             ./configure --prefix=/usr && make -j$(nproc) && make install
 
