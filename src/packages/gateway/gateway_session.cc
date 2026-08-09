@@ -2719,17 +2719,27 @@ int gateway_flush_master_output_fifos(int master_fd, size_t budget) {
   if (master_fd < 0 || budget == 0) {
     return 0;
   }
+  g_gateway_runtime_counters.master_output_scan_runs.fetch_add(1, std::memory_order_relaxed);
   std::vector<GatewaySession *> sessions;
   sessions.reserve(std::min(budget, g_gateway_sessions.size()));
+  size_t scanned = 0;
+  size_t ready_hits = 0;
   for (const auto &entry : g_gateway_sessions) {
+    scanned++;
     if (entry.second && entry.second->master_fd == master_fd &&
         !entry.second->output_fifo.empty() &&
         entry.second->output_fifo.front().ready) {
+      ready_hits++;
       sessions.push_back(entry.second.get());
       if (sessions.size() >= budget) {
         break;
       }
     }
+  }
+  g_gateway_runtime_counters.master_output_scan_entries.fetch_add(scanned, std::memory_order_relaxed);
+  g_gateway_runtime_counters.master_output_scan_ready_hits.fetch_add(ready_hits, std::memory_order_relaxed);
+  if (ready_hits > sessions.size()) {
+    g_gateway_runtime_counters.master_output_flush_continuations.fetch_add(1, std::memory_order_relaxed);
   }
   int flushed = 0;
   for (auto *sess : sessions) {

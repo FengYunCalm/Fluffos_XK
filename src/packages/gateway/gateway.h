@@ -173,6 +173,12 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> main_drain_deferred_wall_samples{0};
   std::atomic<uint64_t> main_drain_deferred_wall_budget_yields{0};
   std::atomic<uint64_t> main_drain_deferred_task_budget_yields{0};
+  // Master output scan accounting (T13 baseline): registry size, entries
+  // scanned, ready hits and flush continuation counts per scan run.
+  std::atomic<uint64_t> master_output_scan_runs{0};
+  std::atomic<uint64_t> master_output_scan_entries{0};
+  std::atomic<uint64_t> master_output_scan_ready_hits{0};
+  std::atomic<uint64_t> master_output_flush_continuations{0};
   std::atomic<uint64_t> main_drain_deferred_remaining_total{0};
   std::atomic<uint64_t> main_drain_deferred_remaining_max{0};
   std::atomic<uint64_t> main_drain_deferred_remaining_samples{0};

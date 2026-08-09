@@ -2800,6 +2800,22 @@ mapping_t *gateway_status_internal() {
       static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_task_budget_yields.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
+      map, "gateway_master_output_scan_runs",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_scan_runs.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_output_scan_entries",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_scan_entries.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_output_scan_ready_hits",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_scan_ready_hits.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_output_flush_continuations",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_flush_continuations.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
       map, "gateway_main_drain_deferred_remaining_samples",
       static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_remaining_samples.load(
           std::memory_order_relaxed)));
