@@ -2614,7 +2614,10 @@ void dispatch_owner_main_message(const OwnerMainTask &task) {
     return;
   }
 
-  auto *target = target_status.object;
+  // Acquire an owning reference: the object-store lock is released after
+  // resolve, so the raw pointer must not be used without a reference.
+  VMObjectRefGuard target_guard(vm_object_handle_acquire(task.target_handle));
+  auto *target = target_guard.get();
   if (!target || (target->flags & O_DESTRUCTED) ||
       !vm_owner_epoch_matches(target, task.owner_id.c_str(), task.owner_epoch)) {
     complete_owner_main_message_task_threadsafe(task, "failed", "", "stale target");
@@ -2660,7 +2663,10 @@ void dispatch_owner_message_in_current_context(const OwnerMailboxTask &task) {
     return;
   }
 
-  auto *target = target_status.object;
+  // Acquire an owning reference: the object-store lock is released after
+  // resolve, so the raw pointer must not be used without a reference.
+  VMObjectRefGuard target_guard(vm_object_handle_acquire(task.target_handle));
+  auto *target = target_guard.get();
   if (!target || (target->flags & O_DESTRUCTED) ||
       !vm_owner_epoch_matches(target, task.owner_id.c_str(), task.owner_epoch)) {
     complete_owner_message_task_threadsafe(task, "failed", "", "stale target");

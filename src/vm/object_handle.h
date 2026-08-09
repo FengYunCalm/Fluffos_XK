@@ -76,6 +76,43 @@ mapping_t *vm_object_handle_status_with_intent(object_t *object, const char *per
 VMObjectHandleResolveResult vm_object_handle_resolve_status(const VMObjectHandle &handle);
 const char *vm_object_handle_resolve_status_name(VMObjectHandleResolveStatus status);
 object_t *vm_object_handle_resolve(const VMObjectHandle &handle);
+// Resolve a handle and, on kCurrent, acquire an owning reference to the
+// target object. The caller is responsible for releasing the reference via
+// VMObjectRefGuard (or free_object). This is the safe API for paths that
+// must use the object pointer outside the object-store lock domain.
+object_t *vm_object_handle_acquire(const VMObjectHandle &handle);
+// RAII wrapper that releases the acquired reference on destruction.
+class VMObjectRefGuard {
+ public:
+  VMObjectRefGuard() = default;
+  explicit VMObjectRefGuard(object_t *obj) : object_(obj) {}
+  ~VMObjectRefGuard() { release(); }
+  VMObjectRefGuard(const VMObjectRefGuard &) = delete;
+  VMObjectRefGuard &operator=(const VMObjectRefGuard &) = delete;
+  VMObjectRefGuard(VMObjectRefGuard &&other) noexcept : object_(other.object_) {
+    other.object_ = nullptr;
+  }
+  VMObjectRefGuard &operator=(VMObjectRefGuard &&other) noexcept {
+    if (this != &other) {
+      release();
+      object_ = other.object_;
+      other.object_ = nullptr;
+    }
+    return *this;
+  }
+  object_t *get() const { return object_; }
+  object_t *release() {
+    auto *obj = object_;
+    object_ = nullptr;
+    if (obj) {
+      free_object(&obj, "VMObjectRefGuard");
+    }
+    return obj;
+  }
+
+ private:
+  object_t *object_{nullptr};
+};
 bool vm_object_handle_is_current(const VMObjectHandle &handle);
 void vm_object_store_register(object_t *object);
 void vm_object_store_update_owner(object_t *object);

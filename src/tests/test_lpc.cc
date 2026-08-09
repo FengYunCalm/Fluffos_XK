@@ -23393,3 +23393,45 @@ TEST(OwnerExecutorTest, ReleasesOwnerClaimWhenTaskExecutionThrowsUnknownExceptio
   EXPECT_EQ(runtime.releases, 1);
 }
 }  // namespace
+
+TEST_F(DriverTest, TestVmObjectHandleAcquireKeepsReferenceAcrossDestruct) {
+  object_t* obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+
+  vm_owner_set_id(obj, "owner/test/handle/acquire");
+  auto handle = vm_object_handle(obj);
+  ASSERT_TRUE(handle.valid);
+
+  // Acquire takes an owning reference; after destruct the pointer must still
+  // be valid (referenced) so the guard can free it safely.
+  object_t* acquired = vm_object_handle_acquire(handle);
+  ASSERT_EQ(acquired, obj);
+
+  destruct_object(obj);
+  // The object is destructed but the guard's reference keeps memory alive.
+  ASSERT_TRUE((acquired->flags & O_DESTRUCTED) != 0);
+
+  VMObjectRefGuard guard(acquired);
+  ASSERT_EQ(guard.get(), acquired);
+  // Moving transfers ownership without double-free.
+  VMObjectRefGuard moved(std::move(guard));
+  ASSERT_EQ(guard.get(), nullptr);
+  ASSERT_EQ(moved.get(), acquired);
+  moved.release();
+}
+
+TEST_F(DriverTest, TestVmObjectHandleAcquireRejectsStaleHandle) {
+  object_t* obj = load_object_for_test("single/void");
+  ASSERT_NE(obj, nullptr);
+
+  vm_owner_set_id(obj, "owner/test/handle/acquire-stale");
+  auto handle = vm_object_handle(obj);
+
+  vm_owner_clear_id(obj);
+  vm_owner_set_id(obj, "owner/test/handle/acquire-stale");
+  // Epoch changed: acquire must return nullptr and must not add a reference.
+  ASSERT_EQ(vm_object_handle_acquire(handle), nullptr);
+
+  vm_owner_clear_id(obj);
+  destruct_object(obj);
+}

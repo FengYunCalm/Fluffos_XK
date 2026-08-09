@@ -1513,6 +1513,15 @@ object_t *vm_object_handle_resolve(const VMObjectHandle &handle) {
   return result.status == VMObjectHandleResolveStatus::kCurrent ? result.object : nullptr;
 }
 
+object_t *vm_object_handle_acquire(const VMObjectHandle &handle) {
+  auto result = vm_object_handle_resolve_status(handle);
+  if (result.status != VMObjectHandleResolveStatus::kCurrent || !result.object) {
+    return nullptr;
+  }
+  add_ref(result.object, "vm_object_handle_acquire");
+  return result.object;
+}
+
 VMObjectHandleResolveResult vm_object_handle_resolve_status(const VMObjectHandle &handle) {
   VMObjectHandleResolveResult result;
   if (!handle.valid) {
