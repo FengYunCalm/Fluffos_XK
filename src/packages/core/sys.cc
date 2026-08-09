@@ -2,6 +2,8 @@
 
 #include "net/tls.h"
 
+#include <iterator>
+
 #ifdef F_SYS_NETWORK_PORTS
 void f_sys_network_ports() {
   array_t *info;
@@ -51,12 +53,16 @@ void f_sys_network_ports() {
 #ifdef F_SYS_RELOAD_TLS
 void f_sys_reload_tls() {
   auto port_index_display = sp->u.number;
-  auto port_index = port_index_display - 1;
 
   DEFER { pop_stack(); };
-  if (port_index < 0 || port_index > sizeof(external_port)) {
+  // Validate the 1-based display index *before* converting to a zero-based
+  // array index: subtracting 1 from INT64_MIN would be signed overflow, and
+  // comparing against sizeof() (bytes, not elements) allowed out-of-bounds
+  // indexes such as 6 to reach external_port[5].
+  if (port_index_display < 1 || port_index_display > static_cast<LPC_INT>(std::size(external_port))) {
     error("Invalid port index: %" LPC_INT_FMTSTR_P "\n", port_index_display);
   }
+  auto port_index = static_cast<size_t>(port_index_display - 1);
   auto *port = &external_port[port_index];
   if (port->kind == PORT_TYPE_UNDEFINED) {
     error("Invalid port index: %" LPC_INT_FMTSTR_P "\n", port_index_display);
