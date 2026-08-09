@@ -3,10 +3,8 @@ name: CI
 on:
   push:
     branches: [master]
-    paths-ignore: ['docs/**']
   pull_request:
     branches: [master]
-    paths-ignore: ['docs/**']
 
 env:
   CTEST_OUTPUT_ON_FAILURE: 1
@@ -15,6 +13,28 @@ env:
   BUILD_TYPES: '["Debug", "RelWithDebInfo"]'
 
 jobs:
+  docs-check:
+    name: Docs Evidence & Links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install PyYAML
+        run: pip install --break-system-packages pyyaml
+
+      - name: Check doc links and commit SHAs
+        run: python3 tools/docs/check-docs.py
+
+      - name: Check evidence reports (if any)
+        run: |
+          if [ -d build/reports ]; then
+            python3 tools/docs/check-evidence.py --reports-dir build/reports
+          else
+            echo "no reports dir; evidence check skipped (run benchmarks to produce reports)"
+          fi
+
   build-and-test:
     name: ${{ matrix.platform }} (${{ matrix.compiler || 'default' }}${{ matrix.sanitizer && '+sanitizer' || '' }}, ${{ matrix.build }})
     runs-on: ${{ matrix.os }}
