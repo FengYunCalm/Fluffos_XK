@@ -26,6 +26,8 @@
 #include "packages/core/outbuf.h"
 #include "vm/owner.h"
 
+#include <string>
+
 /*
  * These match routines in the LIMA mudlib.  [The fact that this file was
  * written by an author of the LIMA mudlib is just a coincidence.  Honest.]
@@ -239,20 +241,24 @@ void parser_mark(parse_info_t *pinfo) {
 /* Usage:  DEBUG_P(("foo: %s:%i", str, i)); */
 static void debug_parse(const char *fmt, ...) {
   va_list args;
-  char buf[2048];
-  char *p = buf;
-  int n = debug_parse_depth - 1;
-
-  while (n--) {
-    *p++ = ' ';
-    *p++ = ' ';
-  }
+  va_list copy;
+  size_t const indentation =
+      debug_parse_depth > 1 ? static_cast<size_t>(debug_parse_depth - 1) * 2 : 0;
+  std::string message(indentation, ' ');
 
   va_start(args, fmt);
-  vsprintf(p, fmt, args);
+  va_copy(copy, args);
+  int const formatted_length = vsnprintf(nullptr, 0, fmt, copy);
+  va_end(copy);
+  if (formatted_length < 0) {
+    va_end(args);
+    return;
+  }
+  message.resize(indentation + static_cast<size_t>(formatted_length));
+  vsnprintf(message.data() + indentation, static_cast<size_t>(formatted_length) + 1, fmt, args);
   va_end(args);
 
-  tell_object(command_giver, buf, strlen(buf));
+  tell_object(command_giver, message.data(), message.size());
   tell_object(command_giver, "\n", 1);
 }
 #endif
