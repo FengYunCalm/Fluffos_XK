@@ -25,6 +25,25 @@ This fork uses workflow-driven tagged releases for runtime binaries and containe
 
 The release workflow creates the tag, builds platform assets, uploads them to the GitHub Release, and publishes container images.
 
+## Reproducible builds
+
+Named CMake presets distinguish the three binary classes (see `CMakePresets.json`):
+
+- `dev-debug` — developer native build (`-march=native`, LTO off, Debug)
+- `portable-release` — portable release (`-march=native` off, LTO on)
+- `asan` / `ubsan` / `tsan` — sanitizer profiles (Debug, LTO off, native off)
+
+Release binaries must never be built with the developer-native profile. Every
+release build records its full configure command in the CI log; the
+`fluffos.evidence.manifest.v1` report schema pins `build_config_hash`,
+`compiler` and `platform` so a binary's configuration can be replayed.
+
+Security flags on non-sanitizer builds include `-D_FORTIFY_SOURCE=2` and
+stack protector (`-fstack-protector-strong` for Release,
+`-fstack-protector-all` for Debug); sanitizer builds add
+`-fno-omit-frame-pointer` and disable FORTIFY/stack-protector to avoid
+interference.
+
 ## Notes
 
 - Use prerelease mode when the build is not yet final.
