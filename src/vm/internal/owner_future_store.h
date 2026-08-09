@@ -61,9 +61,17 @@ enum class OwnerFutureState {
 
 class OwnerFutureStore {
  public:
-  void insert(OwnerFutureRecord record);
-  std::optional<OwnerFutureRecord> poll(uint64_t future_id) const;
-  OwnerFutureState state(uint64_t future_id) const;
+  // Terminal records without payload are reaped after this age. Records that
+  // still carry a frozen/native payload are never auto-reaped (no silent
+  // drop); only a consumer take() removes them.
+  static constexpr uint64_t kTerminalTtlNs = 300ULL * 1000 * 1000 * 1000;  // 300s
+  // Hard cap on terminal (completed/failed) records kept for take().
+  // Submissions beyond this cap are rejected with future_store_capacity.
+  static constexpr size_t kMaxTerminalRecords = 4096;
+
+  bool insert(OwnerFutureRecord record);
+  std::optional<OwnerFutureRecord> poll(uint64_t future_id);
+  OwnerFutureState state(uint64_t future_id);
   OwnerFutureTakeResult take(uint64_t future_id);
   bool has_pending_for_task(uint64_t target_task_id) const;
   std::optional<OwnerFutureCompletion> complete(uint64_t future_id, const char *state, const char *result_key,
@@ -76,10 +84,20 @@ class OwnerFutureStore {
       uint64_t target_task_id, const char *result_key, std::string result);
   OwnerFutureTerminalResult fail_terminal(uint64_t future_id, const char *reason, bool cancelled, bool timed_out);
 
+  // Reap expired payload-free terminal records (TTL-based). Safe to call
+  // anytime; also invoked lazily from insert/poll/state.
+  void reap_expired_terminal();
+
   int64_t pending_count() const;
   int64_t size() const;
   uint64_t completed_count() const;
   uint64_t failed_count() const;
+  // Number of terminal records currently retained (awaiting take).
+  size_t terminal_record_count() const;
+  // Age of the oldest retained terminal record, in ns (0 when none).
+  uint64_t oldest_terminal_age_ns() const;
+  uint64_t reaped_terminal_count() const;
+  uint64_t capacity_reject_count() const;
 
 #ifdef DEBUGMALLOC_EXTENSIONS
   void mark_debug_refs(std::unordered_set<const VMFrozenValue *> &seen) const;
@@ -91,6 +109,9 @@ class OwnerFutureStore {
   void erase_task_index_entry(uint64_t target_task_id, uint64_t future_id);
   OwnerFutureCompletion complete_record(OwnerFutureRecord &record, const char *state, const char *result_key,
                                         const char *error, std::shared_ptr<VMFrozenValue> result);
+  // Requires mutex_ held. Removes terminal records that are past TTL and carry
+  // no payload (never silently drops payload-bearing records).
+  void reap_expired_terminal_locked();
 
   mutable std::mutex mutex_;
   std::unordered_map<uint64_t, OwnerFutureRecord> futures_;
@@ -98,4 +119,6 @@ class OwnerFutureStore {
   std::atomic<int64_t> pending_{0};
   std::atomic<uint64_t> completed_{0};
   std::atomic<uint64_t> failed_{0};
+  std::atomic<uint64_t> reaped_terminal_{0};
+  std::atomic<uint64_t> capacity_rejects_{0};
 };

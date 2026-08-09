@@ -95,6 +95,64 @@ OwnerFutureRecord owner_future_store_test_record(uint64_t future_id, uint64_t ta
 }
 }  // namespace
 
+TEST(OwnerFutureStoreTest, TtlReapsPayloadFreeTerminalRecords) {
+  OwnerFutureStore store;
+  auto record = owner_future_store_test_record(1, 101);
+  store.insert(record);
+  ASSERT_TRUE(store.complete_for_task(101, "completed", "result", "").has_value());
+  // Record is terminal with no payload: age it beyond TTL.
+  {
+    auto aged = owner_future_store_test_record(1, 101);
+    aged.state = "completed";
+    aged.terminal_at_ns = 1;  // far in the past
+    store.take(1);            // consume existing terminal record
+    store.insert(aged);
+  }
+  store.reap_expired_terminal();
+  ASSERT_EQ(store.poll(1), std::nullopt);
+  ASSERT_GE(store.reaped_terminal_count(), 1u);
+  ASSERT_EQ(store.size(), 0);
+}
+
+TEST(OwnerFutureStoreTest, TtlKeepsPayloadBearingTerminalRecords) {
+  OwnerFutureStore store;
+  auto record = owner_future_store_test_record(1, 101);
+  store.insert(record);
+  auto completion = store.complete_for_task(101, "completed", "result", "");
+  ASSERT_TRUE(completion.has_value());
+  // Give the completed record a payload: TTL must never silently drop it.
+  {
+    auto payload = owner_future_store_test_record(1, 101);
+    payload.state = "completed";
+    payload.terminal_at_ns = 1;
+    payload.result = std::make_shared<VMFrozenValue>();
+    store.take(1);
+    store.insert(payload);
+  }
+  store.reap_expired_terminal();
+  ASSERT_TRUE(store.poll(1).has_value());
+  ASSERT_EQ(store.reaped_terminal_count(), 0u);
+}
+
+TEST(OwnerFutureStoreTest, CapacityRejectsNewPendingBeyondTerminalCap) {
+  OwnerFutureStore store;
+  const auto cap = OwnerFutureStore::kMaxTerminalRecords;
+  // Fill the store with payload-bearing terminal records (never auto-reaped).
+  for (size_t i = 0; i < cap; i++) {
+    auto record = owner_future_store_test_record(i + 1, i + 1);
+    record.state = "completed";
+    record.terminal_at_ns = 1;
+    record.result = std::make_shared<VMFrozenValue>();
+    ASSERT_TRUE(store.insert(record));
+  }
+  ASSERT_EQ(store.terminal_record_count(), cap);
+  // One more pending submission must be rejected.
+  auto rejected = owner_future_store_test_record(cap + 1, cap + 1);
+  ASSERT_FALSE(store.insert(rejected));
+  ASSERT_EQ(store.capacity_reject_count(), 1u);
+  ASSERT_EQ(store.poll(cap + 1), std::nullopt);
+}
+
 TEST(OwnerFutureStoreTest, KeepsTaskLookupUntilTerminalTake) {
   OwnerFutureStore store;
   store.insert(owner_future_store_test_record(1, 101));

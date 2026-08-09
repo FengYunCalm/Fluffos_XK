@@ -679,6 +679,14 @@ void add_owner_runtime_v2_status_fields(mapping_t *map,
                    static_cast<LPC_INT>(metrics.owner_thread_context_leak_detected));
   add_mapping_pair(map, "owner_executor_future_pending_backlog",
                    status.pending_futures);
+  add_mapping_pair(map, "owner_future_terminal_records",
+                   static_cast<LPC_INT>(owner_future_store.terminal_record_count()));
+  add_mapping_pair(map, "owner_future_oldest_terminal_age_ns",
+                   static_cast<LPC_INT>(owner_future_store.oldest_terminal_age_ns()));
+  add_mapping_pair(map, "owner_future_reaped_terminal",
+                   static_cast<LPC_INT>(owner_future_store.reaped_terminal_count()));
+  add_mapping_pair(map, "owner_future_capacity_rejects",
+                   static_cast<LPC_INT>(owner_future_store.capacity_reject_count()));
   add_mapping_pair(map, "owner_executor_socket_release_trace_ready", 1);
   add_mapping_pair(map, "registered_owner_task_domains_ready", 1);
   add_mapping_pair(map, "registered_owner_task_domain_count",
@@ -3938,8 +3946,7 @@ VMOwnerStringTaskSubmission vm_owner_submit_frozen_string_task(
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     if (!owner_threads.empty() && !owner_thread_stopping) {
-      owner_future_store.insert(std::move(future));
-      future_registered = true;
+      future_registered = owner_future_store.insert(std::move(future));
       auto admission = admit_owner_executor_callback_task_locked(task);
       if (admission.accepted) {
         append_owner_task_trace(task, "executor_callback_queued");
@@ -4178,9 +4185,10 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
   future.state = "pending";
   future.created_at_ms = owner_now_ms();
 
+  bool future_registered = false;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    owner_future_store.insert(std::move(future));
+    future_registered = owner_future_store.insert(std::move(future));
     queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
   }
   if (!queued) {
@@ -4296,9 +4304,10 @@ mapping_t *vm_owner_ordinary_lpc_task(object_t *target, const char *owner_id, co
   future.state = "pending";
   future.created_at_ms = owner_now_ms();
 
+  bool future_registered = false;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    owner_future_store.insert(std::move(future));
+    future_registered = owner_future_store.insert(std::move(future));
     queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
   }
   if (!queued) {
@@ -5120,10 +5129,11 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
 
   bool notify_owner_thread = false;
   bool enqueued_owner_task = false;
+  bool future_registered = false;
   std::string submission_error;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    owner_future_store.insert(std::move(future));
+    future_registered = owner_future_store.insert(std::move(future));
     owner_trace_store.append_message(std::move(trace));
     if (target_handle) {
       if (admission_target.status == VMObjectHandleResolveStatus::kCurrent && admission_target.object) {
@@ -5214,7 +5224,9 @@ uint64_t vm_owner_register_compute_future(const char *owner_id, uint64_t worker_
   future.state = "pending";
   future.created_at_ms = owner_now_ms();
 
-  owner_future_store.insert(std::move(future));
+  if (!owner_future_store.insert(std::move(future))) {
+    return 0;
+  }
   return future_id;
 }
 

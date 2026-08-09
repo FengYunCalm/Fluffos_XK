@@ -16,9 +16,25 @@ bool owner_future_terminal_state_valid(const char *state) {
 }
 }  // namespace
 
-void OwnerFutureStore::insert(OwnerFutureRecord record) {
+bool OwnerFutureStore::insert(OwnerFutureRecord record) {
   std::lock_guard<std::mutex> lock(mutex_);
+  reap_expired_terminal_locked();
   auto future_id = record.future_id;
+  if (record.state == "pending") {
+    // Hard cap on retained terminal records: reject new submissions instead of
+    // growing without bound. Payload-bearing terminal records are never
+    // auto-reaped, so the cap is the only bound for them.
+    size_t terminal_records = 0;
+    for (const auto &entry : futures_) {
+      if (entry.second.state != "pending") {
+        terminal_records++;
+      }
+    }
+    if (terminal_records >= kMaxTerminalRecords) {
+      capacity_rejects_.fetch_add(1, std::memory_order_relaxed);
+      return false;
+    }
+  }
   auto existing = futures_.find(future_id);
   const auto replaced_pending =
       existing != futures_.end() && existing->second.state == "pending";
@@ -34,10 +50,12 @@ void OwnerFutureStore::insert(OwnerFutureRecord record) {
   } else if (!inserted_pending && replaced_pending) {
     pending_.fetch_sub(1, std::memory_order_relaxed);
   }
+  return true;
 }
 
-std::optional<OwnerFutureRecord> OwnerFutureStore::poll(uint64_t future_id) const {
+std::optional<OwnerFutureRecord> OwnerFutureStore::poll(uint64_t future_id) {
   std::lock_guard<std::mutex> lock(mutex_);
+  reap_expired_terminal_locked();
   auto it = futures_.find(future_id);
   if (it == futures_.end()) {
     return std::nullopt;
@@ -45,8 +63,9 @@ std::optional<OwnerFutureRecord> OwnerFutureStore::poll(uint64_t future_id) cons
   return it->second;
 }
 
-OwnerFutureState OwnerFutureStore::state(uint64_t future_id) const {
+OwnerFutureState OwnerFutureStore::state(uint64_t future_id) {
   std::lock_guard<std::mutex> lock(mutex_);
+  reap_expired_terminal_locked();
   auto it = futures_.find(future_id);
   if (it == futures_.end()) {
     return OwnerFutureState::kUnknown;
@@ -214,6 +233,67 @@ uint64_t OwnerFutureStore::completed_count() const {
 
 uint64_t OwnerFutureStore::failed_count() const {
   return failed_.load(std::memory_order_relaxed);
+}
+
+size_t OwnerFutureStore::terminal_record_count() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  size_t count = 0;
+  for (const auto &entry : futures_) {
+    if (entry.second.state != "pending") {
+      count++;
+    }
+  }
+  return count;
+}
+
+uint64_t OwnerFutureStore::oldest_terminal_age_ns() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto now = owner_future_now_ns();
+  uint64_t oldest = 0;
+  for (const auto &entry : futures_) {
+    if (entry.second.state != "pending" && entry.second.terminal_at_ns > 0) {
+      auto age = now > entry.second.terminal_at_ns ? now - entry.second.terminal_at_ns : 0;
+      if (age > oldest) {
+        oldest = age;
+      }
+    }
+  }
+  return oldest;
+}
+
+uint64_t OwnerFutureStore::reaped_terminal_count() const {
+  return reaped_terminal_.load(std::memory_order_relaxed);
+}
+
+uint64_t OwnerFutureStore::capacity_reject_count() const {
+  return capacity_rejects_.load(std::memory_order_relaxed);
+}
+
+void OwnerFutureStore::reap_expired_terminal() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  reap_expired_terminal_locked();
+}
+
+void OwnerFutureStore::reap_expired_terminal_locked() {
+  if (futures_.empty()) {
+    return;
+  }
+  auto now = owner_future_now_ns();
+  for (auto it = futures_.begin(); it != futures_.end();) {
+    auto &record = it->second;
+    const bool terminal = record.state != "pending";
+    // Never silently drop payload-bearing terminal records: only TTL-reap
+    // records that carry no result payload at all.
+    const bool has_payload = record.result != nullptr || record.native_string_result != nullptr;
+    if (terminal && !has_payload && record.terminal_at_ns > 0 &&
+        now - record.terminal_at_ns >= kTerminalTtlNs) {
+      erase_task_index_entry(record.target_task_id, record.future_id);
+      it = futures_.erase(it);
+      reaped_terminal_.fetch_add(1, std::memory_order_relaxed);
+    } else {
+      ++it;
+    }
+  }
 }
 
 #ifdef DEBUGMALLOC_EXTENSIONS
