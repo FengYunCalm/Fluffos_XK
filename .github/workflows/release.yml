@@ -53,55 +53,15 @@ jobs:
             INCREMENT=$((LAST_INCREMENT + 1))
           fi
 
-          # Generate new version
+          # Generate new version (candidate only; tag is created only after all gates pass)
           VERSION="v${DATE_VERSION}.${INCREMENT}"
 
           echo "Generated version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-  create-release:
-    name: Create Release
-    needs: generate-version
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      release_id: ${{ steps.create_release.outputs.id }}
-      version: ${{ needs.generate-version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Create Git Tag
-        run: |
-          VERSION="${{ needs.generate-version.outputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$VERSION" -m "Release $VERSION"
-          git push origin "$VERSION"
-
-      - name: Create Release
-        id: create_release
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const version = '${{ needs.generate-version.outputs.version }}';
-            const release = await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: version,
-              name: `FluffOS ${version}`,
-              generate_release_notes: true,
-              prerelease: ${{ inputs.prerelease }},
-              draft: false
-            });
-            core.setOutput('upload_url', release.data.upload_url);
-            core.setOutput('id', release.data.id);
-            return release.data.id;
-
   build-binaries:
     name: Build ${{ matrix.platform }} Binary
-    needs: create-release
+    needs: generate-version
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -129,7 +89,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.create-release.outputs.version }}
+          ref: ${{ github.sha }}
 
       - name: Install Dependencies (Windows)
         if: matrix.platform == 'windows'
@@ -178,11 +138,18 @@ jobs:
             cmake .. ${{ env.CMAKE_COMMON_FLAGS }} -DSTATIC=ON
             make -j$(nproc) install
 
-            # Run tests
-            make test || true
+            # Run tests. Failure must fail the job: no "|| true" here.
+            ctest --output-on-failure -j$(nproc)
 
-            # Verify static linking
-            ldd bin/driver || echo "✓ Binary is statically linked"
+            # Verify static linking with an explicit assertion instead of
+            # "ldd ... || echo": a dynamically linked driver is a failure.
+            if ldd bin/driver 2>&1 | grep -q "not a dynamic executable"; then
+              echo "PASS: bin/driver is statically linked"
+            else
+              echo "FAIL: bin/driver has dynamic dependencies:"
+              ldd bin/driver
+              exit 1
+            fi
           '
 
       - name: Run Tests (Windows)
@@ -194,33 +161,37 @@ jobs:
       - name: Package (Windows)
         if: matrix.platform == 'windows'
         run: |
-          ASSET_NAME="fluffos-${{ needs.create-release.outputs.version }}-${{ matrix.asset_suffix }}"
+          ASSET_NAME="fluffos-${{ needs.generate-version.outputs.version }}-${{ matrix.asset_suffix }}"
           cd build/bin && zip -r "../../${ASSET_NAME}" .
 
       - name: Package (Linux)
         if: matrix.platform == 'linux'
         run: |
-          ASSET_NAME="fluffos-${{ needs.create-release.outputs.version }}-${{ matrix.asset_suffix }}"
+          ASSET_NAME="fluffos-${{ needs.generate-version.outputs.version }}-${{ matrix.asset_suffix }}"
           cd build/bin && tar czf "../../${ASSET_NAME}" .
 
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute asset checksums
+        run: |
+          ASSET_NAME="fluffos-${{ needs.generate-version.outputs.version }}-${{ matrix.asset_suffix }}"
+          sha256sum "${ASSET_NAME}" > "${ASSET_NAME}.sha256"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./fluffos-${{ needs.create-release.outputs.version }}-${{ matrix.asset_suffix }}
-          asset_name: fluffos-${{ needs.create-release.outputs.version }}-${{ matrix.asset_suffix }}
-          asset_content_type: ${{ matrix.asset_type }}
+          name: release-asset-${{ matrix.platform }}
+          path: |
+            fluffos-${{ needs.generate-version.outputs.version }}-${{ matrix.asset_suffix }}
+            fluffos-${{ needs.generate-version.outputs.version }}-${{ matrix.asset_suffix }}.sha256
+          if-no-files-found: error
 
   build-docker:
     name: Build and Push Docker Image
-    needs: create-release
+    needs: [generate-version, build-binaries]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.create-release.outputs.version }}
+          ref: ${{ github.sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -238,10 +209,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}},value=${{ needs.create-release.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.create-release.outputs.version }}
-            type=semver,pattern={{major}},value=${{ needs.create-release.outputs.version }}
-            type=raw,value=${{ needs.create-release.outputs.version }},enable=true
+            type=semver,pattern={{version}},value=${{ needs.generate-version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.generate-version.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.generate-version.outputs.version }}
+            type=raw,value=${{ needs.generate-version.outputs.version }},enable=true
             type=raw,value=latest,enable=${{ !inputs.prerelease }}
 
       - name: Build and push Docker image
@@ -254,6 +225,86 @@ jobs:
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  create-release:
+    name: Create Release (tag-last)
+    needs: [build-binaries, build-docker]
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      release_id: ${{ steps.create_release.outputs.id }}
+      version: ${{ needs.generate-version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # All build, test and scan gates have passed by this point; only now
+      # may a tag and release be created (artifact-first, gate-first, tag-last).
+      - name: Create Git Tag
+        run: |
+          VERSION="${{ needs.generate-version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION"
+
+      - name: Create Draft Release
+        id: create_release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = '${{ needs.generate-version.outputs.version }}';
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: version,
+              name: `FluffOS ${version}`,
+              generate_release_notes: true,
+              prerelease: ${{ inputs.prerelease }},
+              draft: true
+            });
+            core.setOutput('upload_url', release.data.upload_url);
+            core.setOutput('id', release.data.id);
+            return release.data.id;
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: assets/
+          merge-multiple: true
+
+      - name: Verify asset checksums
+        run: |
+          cd assets
+          for f in *.sha256; do
+            sha256sum -c "$f"
+          done
+          # Every asset must have a checksum and every checksum must match an asset.
+          for f in fluffos-*; do
+            if [[ "$f" == *.sha256 ]]; then continue; fi
+            grep -q "$(basename "$f")" *.sha256 || { echo "FAIL: no checksum for $f"; exit 1; }
+          done
+
+      - name: Upload Release Assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./assets/fluffos-${{ needs.generate-version.outputs.version }}-windows-x86_64.zip
+          asset_name: fluffos-${{ needs.generate-version.outputs.version }}-windows-x86_64.zip
+          asset_content_type: application/zip
+
+      - name: Upload Release Assets (Linux)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./assets/fluffos-${{ needs.generate-version.outputs.version }}-linux-x86_64-static.tar.gz
+          asset_name: fluffos-${{ needs.generate-version.outputs.version }}-linux-x86_64-static.tar.gz
+          asset_content_type: application/gzip
 
   finalize-release:
     name: Finalize Release
@@ -365,9 +416,11 @@ jobs:
         run: |
           VERSION="${{ needs.create-release.outputs.version }}"
           cat << EOF
-          ✅ Release ${VERSION} created successfully!
+          ✅ Draft release ${VERSION} created after all gates passed!
           📦 Windows binary: fluffos-${VERSION}-windows-x86_64.zip
           📦 Linux static binary: fluffos-${VERSION}-linux-x86_64-static.tar.gz
           🐳 Docker image: ghcr.io/${{ github.repository }}:${VERSION}
-          🔗 View release: https://github.com/${{ github.repository }}/releases/tag/${VERSION}
+          🔗 View draft release: https://github.com/${{ github.repository }}/releases/tag/${VERSION}
+          ⚠️ The release is intentionally DRAFT. Review assets and click "Publish
+             release" only after manual approval per the release policy.
           EOF
