@@ -3,7 +3,7 @@
 #include "vm/internal/apply.h"
 
 #include <algorithm>  // for std::min
-#include <cstdio>     // for sprintf
+#include <fmt/format.h>
 
 #include "base/internal/tracing.h"
 #include "vm/context.h"
@@ -87,12 +87,12 @@ void check_co_args2(unsigned short *types, int num_arg, const char *name, const 
     }
 
     if ((sp - argc)->type != exptype) {
-      char buf[1024];
       if ((sp - argc)->type == T_NUMBER && !(sp - argc)->u.number) {
         continue;
       }
-      sprintf(buf, "Bad argument %d in call to %s() in %s\nExpected: %s Got %s.\n", i, name,
-              ob_name, type_name(exptype), type_name((sp - argc)->type));
+      auto message = fmt::format(
+          FMT_STRING("Bad argument {} in call to {}() in {}\nExpected: {} Got {}.\n"), i,
+          name, ob_name, type_name(exptype), type_name((sp - argc)->type));
       if (CONFIG_INT(__RC_CALL_OTHER_WARN__)) {
         if (current_prog) {
           const char *file;
@@ -100,13 +100,13 @@ void check_co_args2(unsigned short *types, int num_arg, const char *name, const 
           get_line_number_info(&file, &line);
           int prsave = pragmas;
           pragmas &= ~PRAGMA_ERROR_CONTEXT;
-          smart_log(file, line, buf, 1);
+          smart_log(file, line, message.c_str(), 1);
           pragmas = prsave;
         } else {
-          smart_log("driver", 0, buf, 1);
+          smart_log("driver", 0, message.c_str(), 1);
         }
       } else {
-        error(buf);
+        error("%s", message.c_str());
       }
     }
   } while (i < num_arg);
@@ -116,10 +116,10 @@ void check_co_args2(unsigned short *types, int num_arg, const char *name, const 
 void check_co_args(int num_arg, const program_t *prog, function_t *fun, int findex) {
   if (CONFIG_INT(__RC_CALL_OTHER_TYPE_CHECK__)) {
     if (num_arg != fun->num_arg) {
-      char buf[1024];
       // if(!current_prog) what do i need this for again?
       // current_prog = master_ob->prog;
-      sprintf(buf, "Wrong number of arguments to %s in %s.\n", fun->funcname, prog->filename);
+      auto message = fmt::format(FMT_STRING("Wrong number of arguments to {} in {}.\n"),
+                                 fun->funcname, prog->filename);
       if (CONFIG_INT(__RC_CALL_OTHER_WARN__)) {
         if (current_prog) {
           const char *file;
@@ -127,13 +127,13 @@ void check_co_args(int num_arg, const program_t *prog, function_t *fun, int find
           int prsave = pragmas;
           pragmas &= ~PRAGMA_ERROR_CONTEXT;
           get_line_number_info(&file, &line);
-          smart_log(file, line, buf, 1);
+          smart_log(file, line, message.c_str(), 1);
           pragmas = prsave;
         } else {
-          smart_log("driver", 0, buf, 1);
+          smart_log("driver", 0, message.c_str(), 1);
         }
       } else {
-        error(buf);
+        error("%s", message.c_str());
       }
     }
     int num_arg_check = std::min((unsigned char)num_arg, fun->num_arg);

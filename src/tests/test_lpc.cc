@@ -5806,6 +5806,15 @@ TEST_F(DriverTest, TestCompileDumpProgHandlesLongFunctionNames) {
   deallocate_program(program);
 }
 
+TEST_F(DriverTest, TestCallOtherDiagnosticsAvoidFixedMessageBuffers) {
+  const auto source = read_source_file_for_test("../src/vm/internal/apply.cc");
+
+  ASSERT_EQ(source.find("char buf[1024]"), std::string::npos);
+  ASSERT_EQ(source.find("sprintf(buf"), std::string::npos);
+  ASSERT_NE(source.find("auto message = fmt::format("), std::string::npos);
+  ASSERT_NE(source.find("error(\"%s\", message.c_str())"), std::string::npos);
+}
+
 TEST_F(DriverTest, TestVmContextTracksTopLevelState) {
   ASSERT_EQ(vm_context().event_loop, g_event_base);
   ASSERT_EQ(vm_context().current_gametick, current_gametick());
