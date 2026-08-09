@@ -1071,7 +1071,7 @@ static char *pluralize(const char *str) {
    * They can have 'the' so don't remove that
    */
   if (str[0] == 'a' || str[0] == 'A') {
-    if (str[1] == ' ') {
+    if (sz > 1 && str[1] == ' ') {
       plen = sz - 2;
       pre = reinterpret_cast<char *>(DMALLOC(plen + 1, TAG_TEMPORARY, "pluralize: pre"));
       strncpy(pre, str + 2, plen);
