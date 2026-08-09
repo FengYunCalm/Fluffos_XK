@@ -5815,6 +5815,30 @@ TEST_F(DriverTest, TestCallOtherDiagnosticsAvoidFixedMessageBuffers) {
   ASSERT_NE(source.find("error(\"%s\", message.c_str())"), std::string::npos);
 }
 
+TEST_F(DriverTest, TestCompressFilePathsUseOwnedDynamicStorage) {
+  const auto source = read_source_file_for_test("../src/packages/compress/compress.cc");
+
+  ASSERT_EQ(source.find("char outname[1024]"), std::string::npos);
+  ASSERT_EQ(source.find("strcpy(outname"), std::string::npos);
+  ASSERT_EQ(source.find("FREE_MSTR(output_file)"), std::string::npos);
+  ASSERT_EQ(source.find("input_file + len - strlen(GZ_EXTENSION)"), std::string::npos);
+
+  const auto first_input_owner = source.find("std::string input_path(input_file)");
+  ASSERT_NE(first_input_owner, std::string::npos);
+  ASSERT_NE(source.find("std::string input_path(input_file)", first_input_owner + 1),
+            std::string::npos);
+
+  const auto first_output_owner = source.find("std::string output_path(real_output_file)");
+  ASSERT_NE(first_output_owner, std::string::npos);
+  ASSERT_NE(source.find("std::string output_path(real_output_file)", first_output_owner + 1),
+            std::string::npos);
+
+  const auto first_suffix_guard = source.find("input_path.size() >= kGzExtensionLength");
+  ASSERT_NE(first_suffix_guard, std::string::npos);
+  ASSERT_NE(source.find("input_path.size() >= kGzExtensionLength", first_suffix_guard + 1),
+            std::string::npos);
+}
+
 TEST_F(DriverTest, TestVmContextTracksTopLevelState) {
   ASSERT_EQ(vm_context().event_loop, g_event_base);
   ASSERT_EQ(vm_context().current_gametick, current_gametick());
