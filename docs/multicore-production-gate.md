@@ -1,10 +1,14 @@
 # FluffOS_XK 多核化生产验收门禁
 
+## 证据新鲜度边界（2026-08-09 审计）
+
+本节中的 10 用户 30 分钟 audit 压测、XiaKeXing mudlib final audit 和 `socket_release` handshake 结论均为 **2026-06 历史证据**（`historical`），产生于旧 checkout；当前 checkout（`24bd5f4f`，2026-08-09）只验证了 CTest 392/392、ASan CTest 392/392 与短时 runtime smoke。`docs/reports/multicore-mudlib-audit-2026-06-25.md` 在当前 checkout **不存在**（链接漂移，已修正）。在重新运行对应压测/audit 并产出 `fluffos.evidence.manifest.v1` 报告前，历史结论不能单独作为当前 release 的 ready 依据；机器可读 `production_gate_ready` 字段只能由当前证据门禁脚本验证后置位。真实 300-player Pair 属 `external-required`，未完成。
+
 ## 当前结论
 
 当前 driver 侧多核化执行面已经通过 production gate：owner-local lifecycle、OwnerExecutor callback task boundary、heartbeat、callout、async/file/db、DNS、socket read/write/close callback、gateway command execute 和 `socket_release` owner-safe release/acquire handshake 都已经具备生产合同。生产正常路径要求 `normal_path_main_fallback_count=0`；`off`、owner executor 不可用和 rollback/failure 场景只能作为显式兼容 fallback，不计入正常业务热路径。
 
-10 用户 30 分钟 `audit` 压测已经满足当前压力验收口径；真实 XiaKeXing mudlib final audit 已完成 delayed callback payload 收口并证明未分类 cross-owner hotspot 为 0；`socket_release` 已改为同步 release/acquire owner epoch guard handshake。因此机器可读合同可以报告 `production_gate_ready=1`，且 `production_gate_blocker=""`。
+> **证据边界**：下面“10 用户 30 分钟 audit 压测已满足”“final audit 已收口”“`production_gate_ready=1`”的表述依据的是 2026-06 历史证据（见上方“证据新鲜度边界”）；当前 checkout 尚未重新产生等效当前证据，机器可读 ready 字段应按 `tools/docs/check-evidence.py` 的当前证据要求重新验证后才可作为 release 门禁。
 
 ## 机器可读状态
 
@@ -85,7 +89,7 @@ python3 tools/loadtest/xkx_gateway_loadtest.py --host <gateway-host> --port <gat
 
 ## 当前阻塞项
 
-真实 XiaKeXing mudlib final audit 已在仓内报告 `docs/reports/multicore-mudlib-audit-2026-06-25.md` 收口：generic callback dispatch 已归类到 timer/heartbeat owner callback helper，network/command/daemon message wrapper 已归类到 session output facade，原有 delayed callback 裸 `object` payload 已改为 key/path/snapshot 并有静态合同覆盖。`socket_release` owner-safe release/acquire handshake 已由 driver 合同收口。
+真实 XiaKeXing mudlib final audit 已在仓内报告 `docs/reports/multicore-mudlib-audit-2026-06-25.md` 收口（**注意：该报告路径在当前 checkout 已不存在，属历史证据；`external-required` 重跑前不得作为当前 ready 依据**）：generic callback dispatch 已归类到 timer/heartbeat owner callback helper，network/command/daemon message wrapper 已归类到 session output facade，原有 delayed callback 裸 `object` payload 已改为 key/path/snapshot 并有静态合同覆盖。`socket_release` owner-safe release/acquire handshake 已由 driver 合同收口。
 
 当前无剩余 blocker。`socket_release` 仍保持 efun 同步返回语义；release 时捕获目标 owner epoch，acquire 时校验同一 owner epoch，成功、拒绝、stale 和 owner mismatch 都记录 `socket_release` task trace。
 
