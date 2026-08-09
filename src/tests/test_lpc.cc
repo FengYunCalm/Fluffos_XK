@@ -23493,3 +23493,35 @@ TEST_F(DriverTest, TestVmObjectHandleAcquireRejectsStaleHandle) {
   vm_owner_clear_id(obj);
   destruct_object(obj);
 }
+
+// T15: table-driven extreme-value coverage for gateway session ids.
+TEST_F(DriverTest, TestGatewaySessionIdBoundaryTableDriven) {
+  struct Case {
+    const char *input;
+    size_t len;
+    bool expected;
+  };
+  const Case cases[] = {
+      {nullptr, 0, false},
+      {"", 0, false},
+      {"a", 1, true},
+      {"0123456789abcdef0123456789abcdef", 32, true},
+      {"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 64, true},
+      // 128 bytes is the documented maximum.
+      {"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 128, true},
+      // 129 bytes: exceeds the max session id length.
+      {"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefx", 129, false},
+      // Control characters and space are rejected.
+      {"a b", 3, false},
+      {"a\x01b", 3, false},
+      {"a\x7fb", 3, false},
+      // DEL and high bytes are rejected (0x21..0x7e only).
+      {"a\x80" "b", 3, false},
+  };
+  for (const auto &c : cases) {
+    EXPECT_EQ(gateway_session_id_is_valid(c.input, c.len), c.expected)
+        << "input=" << (c.input ? c.input : "(null)") << " len=" << c.len;
+  }
+}

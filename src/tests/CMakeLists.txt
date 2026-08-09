@@ -18,6 +18,12 @@ endif()
 
 add_executable(owner_runtime_bench owner_runtime_bench.cc)
 target_link_libraries(owner_runtime_bench PRIVATE ${FLUFFOS_LINK})
+
+# Gateway frame parser fuzz target (T15). Built standalone; with clang +
+# -DENABLE_ASAN it doubles as a libFuzzer target (LLVMFuzzerTestOneInput).
+add_executable(gateway_fuzz gateway_fuzz.cc)
+target_link_libraries(gateway_fuzz PRIVATE ${FLUFFOS_LINK})
+target_compile_definitions(gateway_fuzz PRIVATE -DTESTSUITE_DIR="${CMAKE_SOURCE_DIR}/testsuite")
 target_compile_definitions(owner_runtime_bench PRIVATE -DTESTSUITE_DIR="${CMAKE_SOURCE_DIR}/testsuite")
 
 add_executable(lpc_vm_bench lpc_vm_bench.cc)
