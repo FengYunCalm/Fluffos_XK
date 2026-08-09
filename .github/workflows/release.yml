@@ -177,6 +177,16 @@ jobs:
           ASSET_NAME="fluffos-${{ needs.generate-version.outputs.version }}-${{ matrix.asset_suffix }}"
           sha256sum "${ASSET_NAME}" > "${ASSET_NAME}.sha256"
 
+      - name: Verify no test private keys in package
+        if: matrix.platform == 'linux'
+        run: |
+          ASSET_NAME="fluffos-${{ needs.generate-version.outputs.version }}-${{ matrix.asset_suffix }}"
+          if tar tzf "${ASSET_NAME}" | grep -E '\.(pem|key)$' ; then
+            echo "FAIL: release asset contains private-key fixture files"
+            exit 1
+          fi
+          echo "PASS: no key fixtures in release asset"
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
