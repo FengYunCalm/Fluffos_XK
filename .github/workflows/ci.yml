@@ -54,15 +54,15 @@ jobs:
             build: RelWithDebInfo
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev
 
-          # Ubuntu - Clang with Sanitizer
+          # Ubuntu - Clang with Sanitizer (ASan)
           - platform: Ubuntu
             os: ubuntu-24.04
             compiler: clang
             cc: clang
             cxx: clang++
             build: Debug
-            sanitizer: true
-            cmake_flags: -DENABLE_SANITIZER=ON
+            sanitizer: asan
+            cmake_flags: -DENABLE_ASAN=ON -DENABLE_LTO=OFF -DMARCH_NATIVE=OFF
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev libdw-dev libbz2-dev
           - platform: Ubuntu
             os: ubuntu-24.04
@@ -70,8 +70,31 @@ jobs:
             cc: clang
             cxx: clang++
             build: RelWithDebInfo
-            sanitizer: true
-            cmake_flags: -DENABLE_SANITIZER=ON
+            sanitizer: asan
+            cmake_flags: -DENABLE_ASAN=ON -DENABLE_LTO=OFF -DMARCH_NATIVE=OFF
+            packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev libdw-dev libbz2-dev
+
+          # Ubuntu - Clang with UBSan
+          - platform: Ubuntu
+            os: ubuntu-24.04
+            compiler: clang
+            cc: clang
+            cxx: clang++
+            build: Debug
+            sanitizer: ubsan
+            cmake_flags: -DENABLE_UBSAN=ON -DENABLE_LTO=OFF -DMARCH_NATIVE=OFF
+            packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev libdw-dev libbz2-dev
+
+          # Ubuntu - Clang with TSan (smaller test set; TSan is incompatible
+          # with the full parallel CTest load, see sanitizer test step)
+          - platform: Ubuntu
+            os: ubuntu-24.04
+            compiler: clang
+            cc: clang
+            cxx: clang++
+            build: Debug
+            sanitizer: tsan
+            cmake_flags: -DENABLE_TSAN=ON -DENABLE_LTO=OFF -DMARCH_NATIVE=OFF
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev libdw-dev libbz2-dev
 
           # macOS
@@ -165,6 +188,21 @@ jobs:
 
       - name: Run Unit Tests
         run: cd build && make test
+
+      - name: Run Sanitizer Targeted Tests (TSan)
+        if: matrix.sanitizer == 'tsan'
+        run: |
+          cd build
+          # TSan is incompatible with the full parallel test load; run the
+          # owner/future/gateway/object-store concurrency-focused subset.
+          ctest --output-on-failure -R 'Owner|Future|Gateway|Context|Object|Socket'
+
+      - name: Run Sanitizer Targeted Tests (ASan/UBSan)
+        if: matrix.sanitizer == 'asan' || matrix.sanitizer == 'ubsan'
+        run: |
+          cd build
+          # Sanitizers may expose issues in the full suite; run everything.
+          ctest --output-on-failure
 
       - name: Run LPC Modern Runtime Gate
         if: matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer

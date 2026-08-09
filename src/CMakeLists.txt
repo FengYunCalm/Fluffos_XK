@@ -2,7 +2,10 @@
 option(MARCH_NATIVE "use march=native for GCC" ON)
 option(STATIC "Build static version of driver" OFF)
 option(USE_JEMALLOC "Build driver with jemalloc support" ON)
-option(ENABLE_SANITIZER "Build driver with sanitizer support" OFF)
+option(ENABLE_SANITIZER "Build driver with sanitizer support (deprecated: use ENABLE_ASAN/ENABLE_UBSAN/ENABLE_TSAN)" OFF)
+option(ENABLE_ASAN "Build driver with AddressSanitizer" OFF)
+option(ENABLE_UBSAN "Build driver with UndefinedBehaviorSanitizer" OFF)
+option(ENABLE_TSAN "Build driver with ThreadSanitizer" OFF)
 option(ENABLE_LTO "Enable interprocedural optimization/LTO on supported release builds" ON)
 option(ENABLE_OWNER_THREAD_VM "Enable thread-local VM state required by owner executor threads" ON)
 # Packages
@@ -79,14 +82,40 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL
   )
   list(APPEND CMAKE_REQUIRED_DEFINITIONS "-D_GNU_SOURCE")
 
-  # Sanitizer support
+  # Sanitizer support: keep ENABLE_SANITIZER as the ASan-compatible legacy
+  # switch (maps to ENABLE_ASAN), and add dedicated per-sanitizer options.
+  # Combinations are mutually exclusive: ASan/UBSan may combine, TSan cannot
+  # be combined with either (toolchain incompatibility and duplicate runtime).
   if (ENABLE_SANITIZER)
-    add_compile_options("-fsanitize=address")
-    #add_compile_options("-fsanitize=undefined")
-    add_compile_options("-fno-common")
+    set(ENABLE_ASAN ON)
+  endif ()
 
+  set(_SAN_COUNT 0)
+  if (ENABLE_ASAN)
+    math(EXPR _SAN_COUNT "${_SAN_COUNT} + 1")
+  endif ()
+  if (ENABLE_TSAN)
+    math(EXPR _SAN_COUNT "${_SAN_COUNT} + 1")
+  endif ()
+  if (_SAN_COUNT GREATER 1)
+    message(FATAL_ERROR "ENABLE_ASAN and ENABLE_TSAN are mutually exclusive")
+  endif ()
+
+  if (ENABLE_ASAN)
+    add_compile_options("-fsanitize=address" "-fno-omit-frame-pointer")
     add_link_options("-fsanitize=address")
-    #add_link_options("-fsanitize=undefined")
+  endif ()
+  if (ENABLE_UBSAN)
+    add_compile_options("-fsanitize=undefined" "-fno-sanitize-recover=all" "-fno-omit-frame-pointer")
+    add_link_options("-fsanitize=undefined")
+  endif ()
+  if (ENABLE_TSAN)
+    add_compile_options("-fsanitize=thread" "-fno-omit-frame-pointer")
+    add_link_options("-fsanitize=thread")
+  endif ()
+
+  if (ENABLE_ASAN OR ENABLE_UBSAN OR ENABLE_TSAN)
+    add_compile_options("-fno-common")
   else ()
     add_compile_options(
       "-D_FORTIFY_SOURCE=2"
@@ -99,7 +128,7 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL
   endif ()
 
   if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-    if (NOT ENABLE_SANITIZER)
+    if (NOT (ENABLE_ASAN OR ENABLE_UBSAN OR ENABLE_TSAN))
       add_compile_options(
         "-fstack-protector-strong"
         "-Wstack-protector"
@@ -109,7 +138,7 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL
       endif () # WIN32
     endif ()
   else ()
-    if (NOT ENABLE_SANITIZER)
+    if (NOT (ENABLE_ASAN OR ENABLE_UBSAN OR ENABLE_TSAN))
       add_compile_options(
         "-fstack-protector-all"
         "-Wstack-protector"
@@ -482,9 +511,9 @@ if (CYGWIN)
   set(USE_JEMALLOC OFF)
   message(STATUS "JEMALLOC is not supported on CYGWIN.")
 endif ()
-if(ENABLE_SANITIZER)
+if(ENABLE_SANITIZER OR ENABLE_ASAN OR ENABLE_UBSAN OR ENABLE_TSAN)
   set(USE_JEMALLOC OFF)
-  message(STATUS "AddressSanitizer doesn't work with JEMALLOC, force disabling!")
+  message(STATUS "Sanitizer doesn't work with JEMALLOC, force disabling!")
 endif()
 
 if (USE_JEMALLOC)
