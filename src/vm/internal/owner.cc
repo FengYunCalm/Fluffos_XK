@@ -3361,6 +3361,13 @@ class OwnerExecutorRuntimeImpl final : public OwnerExecutorRuntime {
     finish_active_owner_task(owner_id);
   }
 
+  void record_owner_exception(const std::string &owner_id, const char *what) override {
+    owner_executor_owner_exceptions.fetch_add(1, std::memory_order_relaxed);
+    append_owner_executor_trace_locked(owner_id, "owner_exception");
+    debug_message("OwnerExecutor: exception escaped run_claimed_owner for owner '%s': %s\n",
+                  owner_id.c_str(), what ? what : "<null>");
+  }
+
  private:
   VMContext owner_context_;
   std::optional<VMContextThreadScope> context_scope_;
@@ -3426,7 +3433,26 @@ class OwnerExecutorRuntimeImpl final : public OwnerExecutorRuntime {
       if (owner_task_executor_safe(task)) {
         owner_executor_safe_task_dispatched.fetch_add(1, std::memory_order_relaxed);
       }
-      dispatch_task(task);
+      try {
+        dispatch_task(task);
+      } catch (const std::bad_alloc &) {
+        // A task must never take the worker down mid-claim: classify, trace,
+        // and let the common cleanup path release the target reference.
+        owner_executor_task_bad_alloc.fetch_add(1, std::memory_order_relaxed);
+        append_owner_task_trace_threadsafe(task, "task_exception_bad_alloc");
+      } catch (const std::exception &e) {
+        owner_executor_task_exceptions.fetch_add(1, std::memory_order_relaxed);
+        append_owner_task_trace_threadsafe(task, "task_exception_std");
+        debug_message("OwnerExecutor: task %llu (%s) threw std::exception: %s\n",
+                      static_cast<unsigned long long>(task.task_id),
+                      owner_executor_dispatch_kind_name(owner_executor_task_descriptor(task).dispatch_kind), e.what());
+      } catch (...) {
+        owner_executor_task_unknown_exceptions.fetch_add(1, std::memory_order_relaxed);
+        append_owner_task_trace_threadsafe(task, "task_exception_unknown");
+        debug_message("OwnerExecutor: task %llu (%s) threw unknown exception\n",
+                      static_cast<unsigned long long>(task.task_id),
+                      owner_executor_dispatch_kind_name(owner_executor_task_descriptor(task).dispatch_kind));
+      }
       total_drained.fetch_add(1, std::memory_order_relaxed);
       owner_thread_dispatched.fetch_add(1, std::memory_order_relaxed);
     }
@@ -5729,6 +5755,14 @@ mapping_t *vm_owner_thread_status() {
                    static_cast<LPC_INT>(owner_executor_max_owner_parallel.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_same_owner_claim_conflicts",
                    static_cast<LPC_INT>(owner_executor_same_owner_claim_conflicts.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_owner_exceptions",
+                   static_cast<LPC_INT>(owner_executor_owner_exceptions.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_task_exceptions",
+                   static_cast<LPC_INT>(owner_executor_task_exceptions.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_task_bad_alloc",
+                   static_cast<LPC_INT>(owner_executor_task_bad_alloc.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_task_unknown_exceptions",
+                   static_cast<LPC_INT>(owner_executor_task_unknown_exceptions.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_active_claims", status.active_claim_count);
   add_mapping_pair(map, "ordinary_lpc_default_closed", 1);
   add_mapping_pair(map, "ordinary_lpc_activation_policy_ready", 1);
@@ -5991,6 +6025,14 @@ mapping_t *vm_owner_runtime_status() {
                    static_cast<LPC_INT>(owner_executor_max_owner_parallel.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_same_owner_claim_conflicts",
                    static_cast<LPC_INT>(owner_executor_same_owner_claim_conflicts.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_owner_exceptions",
+                   static_cast<LPC_INT>(owner_executor_owner_exceptions.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_task_exceptions",
+                   static_cast<LPC_INT>(owner_executor_task_exceptions.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_task_bad_alloc",
+                   static_cast<LPC_INT>(owner_executor_task_bad_alloc.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_task_unknown_exceptions",
+                   static_cast<LPC_INT>(owner_executor_task_unknown_exceptions.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_active_claims", status.active_claim_count);
   add_mapping_pair(map, "ordinary_lpc_default_closed", 1);
   add_mapping_pair(map, "ordinary_lpc_activation_policy_ready", 1);

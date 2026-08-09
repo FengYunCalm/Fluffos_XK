@@ -36,6 +36,7 @@
 
 #include "compiler/internal/compiler.h"
 #include "compiler/internal/lpc_modern_profile.h"
+#include "vm/internal/owner_executor.h"
 #include "packages/core/call_out.h"
 #include "packages/core/dns.h"
 #include "packages/core/file.h"
@@ -23336,3 +23337,59 @@ TEST_F(DriverTest, TestGatewaySessionExecLogonKeepsSessionLookupWorking) {
   destruct_object(ob);
   free_object(&ob, "TestGatewaySessionExecLogonKeepsSessionLookupWorking");
 }
+
+namespace {
+// Fault-injection runtime: claims one owner, then throws from task
+// execution to prove the executor releases the claim and classifies
+// the exception instead of dying.
+class ThrowingOwnerExecutorRuntime : public OwnerExecutorRuntime {
+ public:
+  std::string claimed;
+  int releases = 0;
+  int exceptions = 0;
+  bool throw_std = true;
+
+  void bind_context() override {}
+  std::string claim_next_owner() override {
+    if (!claimed.empty()) {
+      return "";
+    }
+    claimed = "owner/test/executor-exception";
+    return claimed;
+  }
+  void run_claimed_owner(const std::string &owner_id) override {
+    (void)owner_id;
+    if (throw_std) {
+      throw std::runtime_error("injected task failure");
+    }
+    throw 42;  // non-std exception path
+  }
+  void release_owner_after_task(const std::string &owner_id) override {
+    EXPECT_EQ(owner_id, claimed);
+    releases++;
+  }
+  void record_owner_exception(const std::string &owner_id, const char *what) override {
+    EXPECT_EQ(owner_id, claimed);
+    EXPECT_NE(what, nullptr);
+    exceptions++;
+  }
+};
+
+TEST(OwnerExecutorTest, ReleasesOwnerClaimWhenTaskExecutionThrowsStdException) {
+  ThrowingOwnerExecutorRuntime runtime;
+  runtime.throw_std = true;
+  OwnerExecutor executor(runtime);
+  executor.run();
+  EXPECT_EQ(runtime.exceptions, 1);
+  EXPECT_EQ(runtime.releases, 1);
+}
+
+TEST(OwnerExecutorTest, ReleasesOwnerClaimWhenTaskExecutionThrowsUnknownException) {
+  ThrowingOwnerExecutorRuntime runtime;
+  runtime.throw_std = false;
+  OwnerExecutor executor(runtime);
+  executor.run();
+  EXPECT_EQ(runtime.exceptions, 1);
+  EXPECT_EQ(runtime.releases, 1);
+}
+}  // namespace
