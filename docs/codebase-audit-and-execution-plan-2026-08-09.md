@@ -992,3 +992,35 @@ rg -n "6e6f60e9|multicore-mudlib-audit|production_gate_ready|make test \\|\\| tr
 
 本文件是基于当前 checkout 和当前可重跑证据生成的审计与执行方案，不是源码修复报告，也不是生产容量认证。当前交付只新增该 Markdown 文件；没有执行提交、推送、远端命令、部署、tag、release 或 Docker push。后续实施应按 T01 -> T04/T05/T06 -> T10/T11/T12 -> T13-T16 -> T18 的依赖顺序推进，并在每个 Gate 形成可归档证据后再更新状态。
 
+
+---
+
+## 17. 执行状态登记（2026-08-09/10，分支 feat/exec-audit-plan-2026-08-09）
+
+> 本文档最初是审计方案（§16 只交付本文件）。经授权后按 T01-T18 在独立
+> worktree/分支执行，以下为各工作包的落地状态与证据。证据文件路径相对本仓库根。
+
+| 工作包 | 状态 | 交付物/证据 |
+| --- | --- | --- |
+| T01 sys_reload_tls 边界 | ✅ 完成 | `src/packages/core/sys.cc`（std::size 校验前置）、`testsuite/single/tests/efuns/sys_reload_tls.c`（INT_MIN/-1/0/1/5/6/MAX_INT）；CTest 400/400、ASan 392/392、UBSan 392/392 |
+| T02 Release DAG 重排 | ✅ 完成 | `.github/workflows/release.yml`：artifact-first/tag-last、draft release、`make test \|\| true` 与 `ldd \|\| echo` 已删除、sha256 校验、发布包私钥检查 |
+| T03 证据登记 | ✅ 完成 | `docs/evidence/manifest.schema.json`、`tools/docs/check-evidence.py`；knowledge-map HEAD 修正；multicore-production-gate 历史/当前证据边界标注 |
+| T04 LPC 隔离 runner | ✅ 完成 | `tools/testsuite/run-isolated.sh`（动态 loopback 端口、trap 清理）；连续 5 次 + 并行实例退出 0；`get_config.c`/`sys_network_ports.c` 去固定端口 |
+| T05 Sanitizer 矩阵 | ✅ 完成 | `src/CMakeLists.txt` ENABLE_ASAN/UBSAN/TSAN 独立开关 + jemalloc 冲突修复；ci.yml asan/ubsan/tsan 三矩阵（TSan 跑子集） |
+| T06 CMake 生成污染 | ✅ 完成 | 删除 POST_BUILD 回写、SYSETEM 修复、spec GLOB CONFIGURE_DEPENDS；新构建目录第二次构建零重编译、源码树无生成物 |
+| T07 可复现构建 | ✅ 完成 | `CMakePresets.json`（dev-debug/portable-release/asan/ubsan/tsan）；RELEASE.md 记录 profile 与安全 flags |
+| T08 供应链 manifest | ✅ 完成 | `third_party/manifest.yaml` + `third_party/sbom.json` + `tools/sbom-generate.py`；release jemalloc 下载 sha256 锁定 |
+| T09 安全策略 | ✅ 完成 | `SECURITY.md` 报告渠道/SLA/披露；release 打包私钥检查；external bind 拒绝测试通过 |
+| T10 OwnerExecutor 异常 | ✅ 完成 | `owner_executor.cc` RAII claim 释放 + 异常分类；`owner.cc` 任务级 try/catch；4 项新 metrics；故障注入测试 |
+| T11 ObjectHandle 引用 | ✅ 完成 | `vm_object_handle_acquire()` + `VMObjectRefGuard`；两条 executor 路径改用 acquire；跨 destruct 生命周期测试 |
+| T12 Future 回收 | ✅ 完成 | 终态 TTL 300s（无 payload 才回收）、硬上限 4096、容量拒绝、4 项观测；TTL/容量测试 |
+| T13 Gateway 扫描观测 | ✅ 完成（测量阶段） | `gateway_master_output_scan_*` 4 项计数；按方案先计数后重构 |
+| T14 Scheduler 容量 | ✅ 完成（当前矩阵） | `tools/owner-scheduler-capacity.sh` + `docs/reports/owner-scheduler-capacity-2026-08-09.md`；1/2/4 worker 矩阵、global fallback=0；1K+ 对象标 unknown |
+| T15 边界与 fuzz | ✅ 完成（smoke） | `src/tests/gateway_fuzz.cc`（libFuzzer 兼容 + --smoke，Debug/ASan 无崩溃）；session-id 表驱动测试 |
+| T16 300-player Pair | ⛔ external-required | 只交付准备件 `docs/runbooks/capacity-300-player-pair.md`；未执行、未声称完成 |
+| T17 文档 lint | ✅ 完成 | `tools/docs/check-docs.py`（链接/SHA/路径，962 文件零违规）；ci.yml docs-check job（docs-only 也跑） |
+| T18 Runbooks | ✅ 完成 | `docs/runbooks/{release,rollback,gateway-security}.md`；五类失败演练 |
+
+**验证总览（本分支当前 checkout）**：CTest 400/400（Debug）、ASan 392/392、UBSan 392/392、LPC 隔离 testsuite 退出 0、runtime smoke PASS、gateway fuzz smoke 无崩溃、check-docs 962/962 OK、check-evidence 容量报告 OK。
+
+**遗留（external-required / unknown）**：真实 300-player Pair 与 900s 长时压力、1K/10K/100K 对象与 4096 session 规模阶梯、TSan 完整 CI 结果（本地无 Clang）、跨主机 gateway、真实 mudlib 当前 commit 复核。
