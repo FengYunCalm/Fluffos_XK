@@ -76,8 +76,8 @@ class OwnerFutureStore {
       uint64_t target_task_id, const char *result_key, std::string result);
   OwnerFutureTerminalResult fail_terminal(uint64_t future_id, const char *reason, bool cancelled, bool timed_out);
 
-  long pending_count() const;
-  long size() const;
+  int64_t pending_count() const;
+  int64_t size() const;
   uint64_t completed_count() const;
   uint64_t failed_count() const;
 
@@ -95,7 +95,7 @@ class OwnerFutureStore {
   mutable std::mutex mutex_;
   std::unordered_map<uint64_t, OwnerFutureRecord> futures_;
   std::unordered_multimap<uint64_t, uint64_t> future_ids_by_task_;
-  std::atomic<long> pending_{0};
+  std::atomic<int64_t> pending_{0};
   std::atomic<uint64_t> completed_{0};
   std::atomic<uint64_t> failed_{0};
 };

@@ -550,16 +550,50 @@ TEST_F(DriverTest, TestOwnerFuturePendingCountUsesTransitionCounter) {
       read_source_file_for_test("../src/vm/internal/owner_future_store.h");
   const auto source =
       read_source_file_for_test("../src/vm/internal/owner_future_store.cc");
-  const auto count_start = source.find("long OwnerFutureStore::pending_count()");
-  const auto count_end = source.find("long OwnerFutureStore::size()", count_start);
+  const auto count_start =
+      source.find("int64_t OwnerFutureStore::pending_count()");
+  const auto count_end =
+      source.find("int64_t OwnerFutureStore::size()", count_start);
 
   ASSERT_NE(count_start, std::string::npos);
   ASSERT_NE(count_end, std::string::npos);
   const auto count_body = source.substr(count_start, count_end - count_start);
-  EXPECT_NE(header.find("std::atomic<long> pending_"), std::string::npos);
+  EXPECT_NE(header.find("std::atomic<int64_t> pending_"), std::string::npos);
   EXPECT_NE(count_body.find("pending_.load(std::memory_order_relaxed)"),
             std::string::npos);
   EXPECT_EQ(count_body.find("for ("), std::string::npos);
+}
+
+TEST_F(DriverTest, TestOwnerFutureCountChainUsesFixedWidthTypes) {
+  const auto header =
+      read_source_file_for_test("../src/vm/internal/owner_future_store.h");
+  const auto source =
+      read_source_file_for_test("../src/vm/internal/owner_future_store.cc");
+  const auto owner = read_source_file_for_test("../src/vm/internal/owner.cc");
+
+  EXPECT_NE(header.find("int64_t pending_count() const;"), std::string::npos);
+  EXPECT_EQ(header.find("long pending_count() const;"), std::string::npos);
+  EXPECT_NE(header.find("int64_t size() const;"), std::string::npos);
+  EXPECT_EQ(header.find("long size() const;"), std::string::npos);
+  EXPECT_NE(header.find("std::atomic<int64_t> pending_{0};"),
+            std::string::npos);
+  EXPECT_EQ(header.find("std::atomic<long> pending_{0};"), std::string::npos);
+
+  EXPECT_NE(source.find("int64_t OwnerFutureStore::pending_count() const"),
+            std::string::npos);
+  EXPECT_NE(source.find("int64_t OwnerFutureStore::size() const"),
+            std::string::npos);
+  EXPECT_NE(source.find("static_cast<int64_t>(futures_.size())"),
+            std::string::npos);
+  EXPECT_EQ(source.find("static_cast<long>(futures_.size())"),
+            std::string::npos);
+
+  EXPECT_NE(owner.find("int64_t owner_pending_future_count()"),
+            std::string::npos);
+  EXPECT_EQ(owner.find("long owner_pending_future_count()"),
+            std::string::npos);
+  EXPECT_NE(owner.find("int64_t pending_futures{0};"), std::string::npos);
+  EXPECT_EQ(owner.find("long pending_futures{0};"), std::string::npos);
 }
 
 TEST_F(DriverTest, TestOwnerFutureStoreResolvesTargetsAfterTerminalLockScope) {
@@ -598,7 +632,7 @@ TEST_F(DriverTest, TestOwnerFutureStoreResolvesTargetsAfterTerminalLockScope) {
       "completion.target_status = target_status(completion.record);");
   assert_resolved_after_unlock(
       "OwnerFutureTerminalResult OwnerFutureStore::fail_terminal(",
-      "long OwnerFutureStore::pending_count()",
+      "int64_t OwnerFutureStore::pending_count()",
       "result.target_status = target_status(result.record);");
 
   const auto helper_start = source.find(

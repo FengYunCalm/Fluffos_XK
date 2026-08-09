@@ -445,7 +445,7 @@ int64_t owner_mailbox_active_owners() {
   return owner_scheduler_state.mailbox_active_owners();
 }
 
-long owner_pending_future_count() {
+int64_t owner_pending_future_count() {
   return owner_future_store.pending_count();
 }
 
@@ -479,7 +479,7 @@ struct OwnerStatusSnapshot {
   std::string last_budget_yield_owner;
   int64_t last_budget_yield_backlog{0};
   int64_t last_budget_yield_safe_backlog{0};
-  long pending_futures{0};
+  int64_t pending_futures{0};
   OwnerQueueFairnessSnapshot fairness;
 };
 

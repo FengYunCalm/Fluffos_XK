@@ -199,13 +199,13 @@ OwnerFutureTerminalResult OwnerFutureStore::fail_terminal(uint64_t future_id, co
   return result;
 }
 
-long OwnerFutureStore::pending_count() const {
+int64_t OwnerFutureStore::pending_count() const {
   return pending_.load(std::memory_order_relaxed);
 }
 
-long OwnerFutureStore::size() const {
+int64_t OwnerFutureStore::size() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return static_cast<long>(futures_.size());
+  return static_cast<int64_t>(futures_.size());
 }
 
 uint64_t OwnerFutureStore::completed_count() const {
