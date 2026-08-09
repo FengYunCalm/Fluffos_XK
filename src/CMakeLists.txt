@@ -265,8 +265,8 @@ set(EVENT__DISABLE_TESTS ON CACHE BOOL "" FORCE)
 set(EVENT__DISABLE_REGRESS ON CACHE BOOL "" FORCE)
 set(EVENT__DISABLE_SAMPLES ON CACHE BOOL "" FORCE)
 set(EVENT__DISABLE_MM_REPLACEMENT ON CACHE BOOL "" FORCE)
-include_directories(SYSETEM ${CMAKE_CURRENT_BINARY_DIR}/thirdparty/libevent/include)
-include_directories(SYSETEM thirdparty/libevent/include)
+include_directories(SYSTEM ${CMAKE_CURRENT_BINARY_DIR}/thirdparty/libevent/include)
+include_directories(SYSTEM thirdparty/libevent/include)
 add_subdirectory(thirdparty/libevent EXCLUDE_FROM_ALL)
 
 add_subdirectory(thirdparty/crypt EXCLUDE_FROM_ALL)
@@ -349,7 +349,7 @@ add_custom_command(
   COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_packages_genfiles.sh" "${CMAKE_CURRENT_SOURCE_DIR}/../" "${CMAKE_CXX_COMPILER}" "-I${CMAKE_CURRENT_BINARY_DIR}" "-I${CMAKE_CURRENT_SOURCE_DIR}"
   DEPENDS "tools/build_packages_genfiles.sh" "base/internal/options_incl.h"
 )
-file(GLOB ALL_SPEC_FILES files "packages/*/*.spec")
+file(GLOB ALL_SPEC_FILES CONFIGURE_DEPENDS files "packages/*/*.spec")
 foreach (file ${ALL_SPEC_FILES})
   add_custom_command(OUTPUT "packages.fullspec"
           DEPENDS "${file}" APPEND)
@@ -646,13 +646,8 @@ if (NOT WIN32)
     RUNTIME DESTINATION bin)
 endif ()
 
-# Update generated grammar files
-if (${BISON_FOUND})
-  add_custom_command(TARGET "driver" POST_BUILD
-          COMMAND "${CMAKE_COMMAND}" -E copy "${BISON_Grammar_OUTPUT_SOURCE}" ${CMAKE_CURRENT_SOURCE_DIR}/compiler/internal/
-          COMMAND "${CMAKE_COMMAND}" -E copy "${BISON_Grammar_OUTPUT_HEADER}" ${CMAKE_CURRENT_SOURCE_DIR}/compiler/internal/
-          COMMENT "Copying to output directory")
-endif()
+# Generated grammar files live in the build tree only; they must never be
+# copied back into the source tree (builds must not modify tracked sources).
 
 find_package(GTest)
 if(${GTEST_FOUND})
