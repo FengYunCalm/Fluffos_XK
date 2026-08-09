@@ -68,8 +68,8 @@ size_t g_gateway_detached_output_fifo_wire_bytes = 0;
 std::atomic<uint64_t> g_gateway_next_output_reservation_id{1};
 std::atomic<uint64_t> g_gateway_next_message_event_wave_id{1};
 std::atomic<uint64_t> g_gateway_projected_wire_full_validation_count{0};
-std::atomic<long> g_gateway_command_input_pending_sessions{0};
-std::atomic<long> g_gateway_command_task_pending_sessions{0};
+std::atomic<LPC_INT> g_gateway_command_input_pending_sessions{0};
+std::atomic<LPC_INT> g_gateway_command_task_pending_sessions{0};
 enum class GatewayFutureOutputKind : uint8_t {
   kMapping = 0,
   kProtocolPayload,
@@ -1812,7 +1812,7 @@ bool gateway_mark_command_task_pending(GatewaySession *sess) {
   return true;
 }
 
-void gateway_decrement_pending_counter(std::atomic<long> &counter) {
+void gateway_decrement_pending_counter(std::atomic<LPC_INT> &counter) {
   auto pending = counter.load(std::memory_order_acquire);
   while (pending > 0 &&
          !counter.compare_exchange_weak(
@@ -2618,15 +2618,15 @@ LPC_INT gateway_session_fifo_pending_reservations_total() {
   return pending;
 }
 
-long gateway_session_command_input_pending_count() {
+LPC_INT gateway_session_command_input_pending_count() {
   return g_gateway_command_input_pending_sessions.load(std::memory_order_acquire);
 }
 
-long gateway_session_command_task_pending_count() {
+LPC_INT gateway_session_command_task_pending_count() {
   return g_gateway_command_task_pending_sessions.load(std::memory_order_acquire);
 }
 
-long gateway_session_command_pending_count() {
+LPC_INT gateway_session_command_pending_count() {
   return gateway_session_command_input_pending_count() +
          gateway_session_command_task_pending_count();
 }

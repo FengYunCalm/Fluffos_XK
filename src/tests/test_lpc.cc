@@ -3099,16 +3099,17 @@ TEST_F(DriverTest, TestGatewayReadBatchDrainsAdmittedTasksBeforeDeferredRemainde
 TEST_F(DriverTest, TestGatewayCommandPendingCountUsesAtomicSessionLifecycle) {
   const auto source =
       read_source_file_for_test("../src/packages/gateway/gateway_session.cc");
-  const auto count_pos = source.find("long gateway_session_command_pending_count()");
+  const auto count_pos =
+      source.find("LPC_INT gateway_session_command_pending_count()");
   const auto count_end = source.find("\nuint64_t gateway_session_fifo_enqueued_total", count_pos);
   const auto unbind_pos = source.find("void gateway_unbind_session_object");
   const auto unbind_end = source.find("\nvoid gateway_cleanup_master_sessions", unbind_pos);
   const auto cleanup_pos = source.find("void cleanup_gateway_sessions()");
   const auto cleanup_end = source.find("\nvoid f_gateway_session_send", cleanup_pos);
 
-  ASSERT_NE(source.find("std::atomic<long> g_gateway_command_input_pending_sessions{0}"),
+  ASSERT_NE(source.find("std::atomic<LPC_INT> g_gateway_command_input_pending_sessions{0}"),
             std::string::npos);
-  ASSERT_NE(source.find("std::atomic<long> g_gateway_command_task_pending_sessions{0}"),
+  ASSERT_NE(source.find("std::atomic<LPC_INT> g_gateway_command_task_pending_sessions{0}"),
             std::string::npos);
   ASSERT_NE(source.find("void gateway_release_command_input_pending(GatewaySession *sess)"),
             std::string::npos);
@@ -3145,6 +3146,71 @@ TEST_F(DriverTest, TestGatewayCommandPendingCountUsesAtomicSessionLifecycle) {
             std::string::npos);
   ASSERT_NE(cleanup_source.find(
                 "g_gateway_command_task_pending_sessions.store(0, std::memory_order_release);"),
+            std::string::npos);
+}
+
+TEST_F(DriverTest, TestGatewayLivePressureCountsUseLpcIntegerWidth) {
+  const auto header =
+      read_source_file_for_test("../src/packages/gateway/gateway.h");
+  const auto source =
+      read_source_file_for_test("../src/packages/gateway/gateway.cc");
+  const auto session_source =
+      read_source_file_for_test("../src/packages/gateway/gateway_session.cc");
+
+  for (const auto *signature : {
+           "LPC_INT gateway_session_command_input_pending_count();",
+           "LPC_INT gateway_session_command_task_pending_count();",
+           "LPC_INT gateway_session_command_pending_count();",
+           "LPC_INT gateway_read_dispatch_pending_count();",
+           "LPC_INT gateway_buffered_input_pending_count();",
+           "LPC_INT gateway_command_pressure_count();",
+       }) {
+    EXPECT_NE(header.find(signature), std::string::npos) << signature;
+  }
+  EXPECT_EQ(header.find("long gateway_session_command_input_pending_count();"),
+            std::string::npos);
+  EXPECT_EQ(header.find("long gateway_read_dispatch_pending_count();"),
+            std::string::npos);
+  EXPECT_EQ(header.find("long gateway_command_pressure_count();"),
+            std::string::npos);
+
+  EXPECT_NE(session_source.find(
+                "std::atomic<LPC_INT> g_gateway_command_input_pending_sessions{0}"),
+            std::string::npos);
+  EXPECT_NE(session_source.find(
+                "std::atomic<LPC_INT> g_gateway_command_task_pending_sessions{0}"),
+            std::string::npos);
+  EXPECT_NE(session_source.find(
+                "void gateway_decrement_pending_counter(std::atomic<LPC_INT> &counter)"),
+            std::string::npos);
+  for (const auto *signature : {
+           "LPC_INT gateway_session_command_input_pending_count()",
+           "LPC_INT gateway_session_command_task_pending_count()",
+           "LPC_INT gateway_session_command_pending_count()",
+       }) {
+    EXPECT_NE(session_source.find(signature), std::string::npos) << signature;
+  }
+  EXPECT_EQ(session_source.find("std::atomic<long> g_gateway_command_input_pending_sessions"),
+            std::string::npos);
+  EXPECT_EQ(session_source.find("long gateway_session_command_pending_count()"),
+            std::string::npos);
+
+  EXPECT_NE(source.find("std::atomic<LPC_INT> g_gateway_read_dispatch_pending_masters{0}"),
+            std::string::npos);
+  EXPECT_NE(source.find("LPC_INT gateway_main_queue_read_paused_count()"),
+            std::string::npos);
+  EXPECT_NE(source.find("LPC_INT gateway_read_dispatch_pending_count()"),
+            std::string::npos);
+  EXPECT_NE(source.find("LPC_INT gateway_buffered_input_pending_count()"),
+            std::string::npos);
+  EXPECT_NE(source.find("LPC_INT gateway_command_pressure_count()"),
+            std::string::npos);
+  EXPECT_NE(source.find("LPC_INT pending = 0;"), std::string::npos);
+  EXPECT_EQ(source.find("std::atomic<long> g_gateway_read_dispatch_pending_masters"),
+            std::string::npos);
+  EXPECT_EQ(source.find("long gateway_buffered_input_pending_count()"),
+            std::string::npos);
+  EXPECT_EQ(source.find("long gateway_command_pressure_count()"),
             std::string::npos);
 }
 
@@ -3364,7 +3430,7 @@ TEST_F(DriverTest, TestGatewayMainQueueReadAdmissionUsesComposedHighLowWaterBack
   ASSERT_EQ(source.find("std::max<long>(0, drain_result.remaining_main_tasks)"),
             std::string::npos);
   ASSERT_NE(spec.find("int gateway_main_queue_pending();"), std::string::npos);
-  ASSERT_NE(source.find("long gateway_buffered_input_pending_count()"),
+  ASSERT_NE(source.find("LPC_INT gateway_buffered_input_pending_count()"),
             std::string::npos);
   ASSERT_NE(spec.find("int gateway_buffered_input_pending();"),
             std::string::npos);
@@ -3386,7 +3452,8 @@ TEST_F(DriverTest, TestGatewayMainQueueReadAdmissionUsesComposedHighLowWaterBack
                 .find("gateway_buffered_input_pending_count()"),
             std::string::npos);
 
-  const auto pressure_pos = source.find("long gateway_command_pressure_count()");
+  const auto pressure_pos =
+      source.find("LPC_INT gateway_command_pressure_count()");
   const auto pressure_end = source.find("\nint64_t gateway_main_queue_pending_count", pressure_pos);
   ASSERT_NE(pressure_pos, std::string::npos);
   ASSERT_NE(pressure_end, std::string::npos);

@@ -91,7 +91,7 @@ constexpr int kGatewayIngressUnownedFd = std::numeric_limits<int>::min();
 evconnlistener *g_gateway_listener = nullptr;
 event *g_gateway_heartbeat_timer = nullptr;
 std::unordered_map<int, std::unique_ptr<GatewayMaster>> g_gateway_masters;
-std::atomic<long> g_gateway_read_dispatch_pending_masters{0};
+std::atomic<LPC_INT> g_gateway_read_dispatch_pending_masters{0};
 int g_gateway_next_fd = 1;
 int g_gateway_listen_port = 0;
 time_t g_gateway_started_at = 0;
@@ -1639,8 +1639,8 @@ bool gateway_resume_main_queue_read(GatewayMaster *master) {
   return true;
 }
 
-long gateway_main_queue_read_paused_count() {
-  long paused = 0;
+LPC_INT gateway_main_queue_read_paused_count() {
+  LPC_INT paused = 0;
   for (const auto &entry : g_gateway_masters) {
     if (gateway_has_read_pause_reason(entry.second.get(), GATEWAY_READ_PAUSE_MAIN_QUEUE)) {
       paused++;
@@ -2261,12 +2261,12 @@ void gateway_check_heartbeat_timeouts() {
   }
 }
 
-long gateway_read_dispatch_pending_count() {
+LPC_INT gateway_read_dispatch_pending_count() {
   return g_gateway_read_dispatch_pending_masters.load(std::memory_order_acquire);
 }
 
-long gateway_buffered_input_pending_count() {
-  long pending = 0;
+LPC_INT gateway_buffered_input_pending_count() {
+  LPC_INT pending = 0;
   for (const auto &entry : g_gateway_masters) {
     if (gateway_master_has_buffered_input(entry.second.get())) {
       pending++;
@@ -2275,7 +2275,7 @@ long gateway_buffered_input_pending_count() {
   return pending;
 }
 
-long gateway_command_pressure_count() {
+LPC_INT gateway_command_pressure_count() {
   return gateway_session_command_pending_count() +
          gateway_read_dispatch_pending_count();
 }
