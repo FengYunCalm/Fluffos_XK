@@ -367,8 +367,12 @@ jobs:
             build/reports/object_store_bench_smoke.json
           if-no-files-found: ignore
 
-      - name: Run LPC Testsuite
-        run: cd testsuite && ../build/bin/driver etc/config.test -ftest
+      - name: Run LPC Testsuite (isolated runner, port 0)
+        run: |
+          # R2-F11: the CI consumes the isolated runner: the driver binds
+          # port 0 (OS-assigned ports, no probe/close/rebind window) and the
+          # runner asserts four distinct loopback ports + LPC assertions.
+          tools/testsuite/run-isolated.sh --driver build/bin/driver --mode audit
 
   fuzz:
     name: Fuzz (libFuzzer gateway_fuzz, clang)

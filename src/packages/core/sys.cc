@@ -9,8 +9,10 @@ void f_sys_network_ports() {
   array_t *info;
   int i = 0, p = 0;
 
+  // R2-F11: port 0 (OS-assigned) is a legal configuration; presence is
+  // determined by the port kind, not the port value.
   for (i = 0; i < 5; i++) {
-    if (external_port[i].port) {
+    if (external_port[i].kind != PORT_TYPE_UNDEFINED) {
       p++;
     }
   }
@@ -19,7 +21,7 @@ void f_sys_network_ports() {
   p = 0;
 
   for (i = 0; i < 5; i++) {
-    if (!external_port[i].port) {
+    if (external_port[i].kind == PORT_TYPE_UNDEFINED) {
       continue;
     }
     array_t *pInfo = allocate_empty_array(4);
