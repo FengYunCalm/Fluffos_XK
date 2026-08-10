@@ -1,8 +1,10 @@
 # FluffOS_XK 代码库深度审计与可执行改进方案
 
-> 审计日期：2026-08-09（Asia/Shanghai）  
-> 审计基线：`master` / `24bd5f4f5126963966d1d91787f327f4cc84a5e7`（`parser: bound debug output formatting`）  
-> 工作区：`/home/mechrevo/projects/fluffos-src`  
+> 审计日期：2026-08-09（Asia/Shanghai）
+>
+> 审计基线：`master` / `24bd5f4f5126963966d1d91787f327f4cc84a5e7`（`parser: bound debug output formatting`）
+>
+> 工作区：`/home/mechrevo/projects/fluffos-src`
 > 审计性质：只读代码库学习、结构审计、定向构建与测试；本次交付只新增本文件，不修改源码，不提交、不推送、不部署。
 
 ## 1. 先给结论
@@ -1019,7 +1021,7 @@ rg -n "6e6f60e9|multicore-mudlib-audit|production_gate_ready|make test \\|\\| tr
 | T15 边界与 fuzz | ✅ 完成（smoke） | `src/tests/gateway_fuzz.cc`（libFuzzer 兼容 + --smoke，Debug/ASan 无崩溃）；session-id 表驱动测试 |
 | T16 300-player Pair | ⛔ external-required | 只交付准备件 `docs/runbooks/capacity-300-player-pair.md`；未执行、未声称完成 |
 | T17 文档 lint | ✅ 完成 | `tools/docs/check-docs.py`（链接/SHA/路径，962 文件零违规）；ci.yml docs-check job（docs-only 也跑） |
-| T18 Runbooks | ✅ 完成 | `docs/runbooks/{release,rollback,gateway-security}.md`；五类失败演练 |
+| T18 Runbooks | ✅ 完成 | `docs/runbooks/release.md`、`docs/runbooks/rollback.md`、`docs/runbooks/gateway-security.md`；五类失败演练 |
 
 **验证总览（本分支当前 checkout）**：CTest 400/400（Debug）、ASan 392/392、UBSan 392/392、LPC 隔离 testsuite 退出 0、runtime smoke PASS、gateway fuzz smoke 无崩溃、check-docs 962/962 OK、check-evidence 容量报告 OK。
 

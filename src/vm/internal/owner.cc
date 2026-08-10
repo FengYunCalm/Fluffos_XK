@@ -479,6 +479,7 @@ struct OwnerStatusSnapshot {
   std::string last_budget_yield_owner;
   int64_t last_budget_yield_backlog{0};
   int64_t last_budget_yield_safe_backlog{0};
+  uint64_t executor_budget_yields{0};
   int64_t pending_futures{0};
   OwnerQueueFairnessSnapshot fairness;
 };
@@ -503,6 +504,9 @@ OwnerStatusSnapshot owner_status_snapshot_locked() {
   status.last_budget_yield_owner = owner_executor_last_budget_yield_owner;
   status.last_budget_yield_backlog = owner_executor_last_budget_yield_backlog;
   status.last_budget_yield_safe_backlog = owner_executor_last_budget_yield_safe_backlog;
+  // Read the yield counter under the same lock so callers that need the
+  // counter and the recorded owner/backlog observe one consistent snapshot.
+  status.executor_budget_yields = owner_executor_budget_yields.load(std::memory_order_relaxed);
   status.fairness = owner_scheduler_state.fairness_snapshot(
       owner_task_executor_runnable, owner_task_executor_safe,
       owner_task_requires_main_drain);
@@ -3543,6 +3547,16 @@ void owner_thread_loop() {
 }
 }  // namespace
 
+// C++ regression hook: reset budget-yield observation fields under the
+// runtime lock so tests can assert on a known baseline. Not part of the
+// LPC/runtime API.
+void vm_owner_test_support_reset_budget_yield_observations() {
+  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+  owner_executor_last_budget_yield_owner.clear();
+  owner_executor_last_budget_yield_backlog = 0;
+  owner_executor_last_budget_yield_safe_backlog = 0;
+}
+
 void vm_owner_set_future_terminal_notifier(VMOwnerFutureTerminalNotifier notifier) {
   owner_future_terminal_notifier.store(notifier, std::memory_order_release);
 }
@@ -5748,7 +5762,7 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_pair(map, "max_owner_threads", 4);
   add_mapping_pair(map, "executor_task_budget", kOwnerExecutorTaskBudget);
   add_mapping_pair(map, "executor_budget_yields",
-                   static_cast<LPC_INT>(owner_executor_budget_yields.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(status.executor_budget_yields));
   add_mapping_string(map, "executor_last_budget_yield_owner",
                      status.last_budget_yield_owner.c_str());
   add_mapping_pair(map, "executor_last_budget_yield_backlog",
@@ -5892,7 +5906,7 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_pair(map, "futures_completed", static_cast<LPC_INT>(owner_future_store.completed_count()));
   add_mapping_pair(map, "futures_failed", static_cast<LPC_INT>(owner_future_store.failed_count()));
   add_mapping_pair(map, "executor_budget_yields",
-                   static_cast<LPC_INT>(owner_executor_budget_yields.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(status.executor_budget_yields));
   add_mapping_string(map, "executor_last_budget_yield_owner",
                      status.last_budget_yield_owner.c_str());
   add_mapping_pair(map, "executor_last_budget_yield_backlog",

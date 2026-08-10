@@ -4,17 +4,21 @@
 #include <cstring>
 
 namespace {
-uint64_t owner_future_now_ns() {
-  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                   std::chrono::steady_clock::now().time_since_epoch())
-                                   .count());
-}
-
 bool owner_future_terminal_state_valid(const char *state) {
   return !state || state[0] == '\0' || std::strcmp(state, "completed") == 0 ||
          std::strcmp(state, "failed") == 0;
 }
 }  // namespace
+
+uint64_t OwnerFutureStore::default_clock() {
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   std::chrono::steady_clock::now().time_since_epoch())
+                                   .count());
+}
+
+void OwnerFutureStore::set_clock_for_test(ClockFn clock) {
+  clock_ = std::move(clock);
+}
 
 bool OwnerFutureStore::insert(OwnerFutureRecord record) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -172,7 +176,7 @@ std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_string_for_task(
     record.state = "completed";
     record.result_key = normalize_text(result_key, "native_string");
     record.error.clear();
-    record.terminal_at_ns = owner_future_now_ns();
+    record.terminal_at_ns = now_ns();
     record.result.reset();
     record.native_string_result =
         std::make_shared<const std::string>(std::move(result));
@@ -207,7 +211,7 @@ OwnerFutureTerminalResult OwnerFutureStore::fail_terminal(uint64_t future_id, co
     future.cancelled = cancelled;
     future.timed_out = timed_out;
     future.terminal_cleanup_required = false;
-    future.terminal_at_ns = owner_future_now_ns();
+    future.terminal_at_ns = now_ns();
     pending_.fetch_sub(1, std::memory_order_relaxed);
     failed_.fetch_add(1, std::memory_order_relaxed);
     result.changed = true;
@@ -248,7 +252,7 @@ size_t OwnerFutureStore::terminal_record_count() const {
 
 uint64_t OwnerFutureStore::oldest_terminal_age_ns() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  auto now = owner_future_now_ns();
+  auto now = now_ns();
   uint64_t oldest = 0;
   for (const auto &entry : futures_) {
     if (entry.second.state != "pending" && entry.second.terminal_at_ns > 0) {
@@ -278,7 +282,7 @@ void OwnerFutureStore::reap_expired_terminal_locked() {
   if (futures_.empty()) {
     return;
   }
-  auto now = owner_future_now_ns();
+  auto now = now_ns();
   for (auto it = futures_.begin(); it != futures_.end();) {
     auto &record = it->second;
     const bool terminal = record.state != "pending";
@@ -330,7 +334,7 @@ OwnerFutureCompletion OwnerFutureStore::complete_record(OwnerFutureRecord &recor
   record.state = normalize_text(state, "completed");
   record.result_key = normalize_text(result_key, "");
   record.error = normalize_text(error, "");
-  record.terminal_at_ns = owner_future_now_ns();
+  record.terminal_at_ns = now_ns();
   auto completed_with_frozen_result = record.state == "completed" && result != nullptr;
   record.result = std::move(result);
   record.native_string_result.reset();

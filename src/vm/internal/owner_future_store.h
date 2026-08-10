@@ -61,6 +61,13 @@ enum class OwnerFutureState {
 
 class OwnerFutureStore {
  public:
+  using ClockFn = std::function<uint64_t()>;
+
+  // Test hook: replace the monotonic clock source. Defaults to
+  // steady_clock-based ns. Tests install a fake clock to advance across
+  // TTL boundaries deterministically.
+  void set_clock_for_test(ClockFn clock);
+
   // Terminal records without payload are reaped after this age. Records that
   // still carry a frozen/native payload are never auto-reaped (no silent
   // drop); only a consumer take() removes them.
@@ -121,4 +128,9 @@ class OwnerFutureStore {
   std::atomic<uint64_t> failed_{0};
   std::atomic<uint64_t> reaped_terminal_{0};
   std::atomic<uint64_t> capacity_rejects_{0};
+  ClockFn clock_{default_clock};
+
+ private:
+  static uint64_t default_clock();
+  uint64_t now_ns() const { return clock_ ? clock_() : default_clock(); }
 };

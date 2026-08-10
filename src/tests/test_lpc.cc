@@ -61,6 +61,7 @@
 #include "vm/worker.h"
 
 extern uint64_t vm_owner_enqueue_test_main_required_message(const char* owner_id, const char* task_key);
+extern void vm_owner_test_support_reset_budget_yield_observations();
 extern uint64_t vm_owner_enqueue_command_frame_restore(object_t* target);
 extern bool vm_object_store_test_support_remove_live_object_ref_for_bridge_readiness(const char* owner_id,
                                                                                     uint64_t object_id);
@@ -97,25 +98,59 @@ OwnerFutureRecord owner_future_store_test_record(uint64_t future_id, uint64_t ta
 
 TEST(OwnerFutureStoreTest, TtlReapsPayloadFreeTerminalRecords) {
   OwnerFutureStore store;
+  // Fake monotonic clock: TTL boundaries must be deterministic and must not
+  // depend on the CI process uptime.
+  uint64_t fake_now_ns = 1'000'000'000ULL;  // 1s
+  store.set_clock_for_test([&fake_now_ns]() { return fake_now_ns; });
+
   auto record = owner_future_store_test_record(1, 101);
   store.insert(record);
   ASSERT_TRUE(store.complete_for_task(101, "completed", "result", "").has_value());
-  // Record is terminal with no payload: age it beyond TTL.
+  // Record is terminal with no payload: age it beyond TTL via the fake clock.
+  const uint64_t aged_at_ns = fake_now_ns;  // terminalized at fake now
   {
     auto aged = owner_future_store_test_record(1, 101);
     aged.state = "completed";
-    aged.terminal_at_ns = 1;  // far in the past
-    store.take(1);            // consume existing terminal record
+    aged.terminal_at_ns = aged_at_ns;
+    store.take(1);  // consume existing terminal record
     store.insert(aged);
   }
+
+  // Boundary TTL-1: record must still be retained.
+  fake_now_ns = aged_at_ns + OwnerFutureStore::kTerminalTtlNs - 1;
+  store.reap_expired_terminal();
+  ASSERT_TRUE(store.poll(1).has_value());
+  ASSERT_EQ(store.reaped_terminal_count(), 0u);
+
+  // Boundary TTL: record must be reaped at exactly the TTL boundary.
+  fake_now_ns = aged_at_ns + OwnerFutureStore::kTerminalTtlNs;
   store.reap_expired_terminal();
   ASSERT_EQ(store.poll(1), std::nullopt);
   ASSERT_GE(store.reaped_terminal_count(), 1u);
+  ASSERT_EQ(store.size(), 0);
+
+  // Boundary TTL+1 on a fresh record: same deterministic reap.
+  auto record2 = owner_future_store_test_record(2, 202);
+  store.insert(record2);
+  ASSERT_TRUE(store.complete_for_task(202, "completed", "result", "").has_value());
+  const uint64_t record2_terminal_at_ns = fake_now_ns;
+  {
+    auto aged = owner_future_store_test_record(2, 202);
+    aged.state = "completed";
+    aged.terminal_at_ns = record2_terminal_at_ns;
+    store.take(2);
+    store.insert(aged);
+  }
+  fake_now_ns = record2_terminal_at_ns + OwnerFutureStore::kTerminalTtlNs + 1;
+  store.reap_expired_terminal();
+  ASSERT_EQ(store.poll(2), std::nullopt);
   ASSERT_EQ(store.size(), 0);
 }
 
 TEST(OwnerFutureStoreTest, TtlKeepsPayloadBearingTerminalRecords) {
   OwnerFutureStore store;
+  uint64_t fake_now_ns = 1'000'000'000ULL;
+  store.set_clock_for_test([&fake_now_ns]() { return fake_now_ns; });
   auto record = owner_future_store_test_record(1, 101);
   store.insert(record);
   auto completion = store.complete_for_task(101, "completed", "result", "");
@@ -124,11 +159,12 @@ TEST(OwnerFutureStoreTest, TtlKeepsPayloadBearingTerminalRecords) {
   {
     auto payload = owner_future_store_test_record(1, 101);
     payload.state = "completed";
-    payload.terminal_at_ns = 1;
+    payload.terminal_at_ns = fake_now_ns;
     payload.result = std::make_shared<VMFrozenValue>();
     store.take(1);
     store.insert(payload);
   }
+  fake_now_ns += OwnerFutureStore::kTerminalTtlNs + 1;
   store.reap_expired_terminal();
   ASSERT_TRUE(store.poll(1).has_value());
   ASSERT_EQ(store.reaped_terminal_count(), 0u);
@@ -722,9 +758,10 @@ TEST_F(DriverTest, TestGatewayStatusReportsSessionFifoContract) {
 
   mapping_t* status = gateway_status_internal();
   ASSERT_NE(status, nullptr);
-  EXPECT_NONFATAL_FAILURE(
-      { (void)mapping_number(status, "__missing_gateway_status_field_probe__"); },
-      "__missing_gateway_status_field_probe__");
+  // Missing-field probe without gtest failure-capture macros: the lookup
+  // itself must return the not-found sentinel, independent of
+  // platform/debug runtime differences in EXPECT_NONFATAL_FAILURE.
+  ASSERT_EQ(find_string_in_mapping(status, "__missing_gateway_status_field_probe__"), &const0u);
   ASSERT_EQ(mapping_number(status, "gateway_external_bind_allowed"), 0);
   ASSERT_GE(mapping_number(status, "gateway_external_bind_rejected"), 0);
   ASSERT_EQ(mapping_number(status, "gateway_event_priority_levels"), 2);
@@ -12111,6 +12148,9 @@ TEST_F(DriverTest, TestVmOwnerExecutorBudgetYieldsAndRequeuesSameOwnerBacklog) {
   const char* owner = "owner/test/executor/budget-yield";
 
   vm_owner_thread_stop();
+  // Reset the global yield-observation baseline under the runtime lock so
+  // the test does not inherit observations from earlier tests.
+  vm_owner_test_support_reset_budget_yield_observations();
   test_set_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "5");
   struct ProbeDelayGuard {
     ~ProbeDelayGuard() { test_unset_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS"); }
@@ -12168,7 +12208,11 @@ TEST_F(DriverTest, TestVmOwnerExecutorBudgetYieldsAndRequeuesSameOwnerBacklog) {
     auto safe_depth = mapping_number(mailbox, "owner_executor_safe_queue_depth");
     free_mapping(mailbox);
     if (budget_yields >= before_budget_yields + 1 && probe_done >= before_probe + budget &&
+        !last_yield_owner.empty() && last_yield_backlog > 0 && last_yield_safe_backlog > 0 &&
         owner_depth > 0 && safe_depth > 0) {
+      // All yield-observation fields (counter, owner, backlog) must come
+      // from the same snapshot; assert them together instead of capturing
+      // a failure after the fact.
       ASSERT_EQ(last_yield_owner, owner);
       ASSERT_GT(last_yield_backlog, 0);
       ASSERT_GT(last_yield_safe_backlog, 0);
@@ -23516,7 +23560,8 @@ TEST_F(DriverTest, TestGatewaySessionIdBoundaryTableDriven) {
       // Control characters and space are rejected.
       {"a b", 3, false},
       {"a\x01b", 3, false},
-      {"a\x7fb", 3, false},
+      // Adjacent literals: \x7f must not swallow the following 'b' byte.
+      {"a\x7f" "b", 3, false},
       // DEL and high bytes are rejected (0x21..0x7e only).
       {"a\x80" "b", 3, false},
   };
