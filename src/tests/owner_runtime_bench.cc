@@ -356,6 +356,23 @@ void run_same_owner_bench(Report &report) {
   report.add("scheduler_enqueue_api_latency_p99_us", percentile(enqueue_samples, 0.99));
   report.add("same_owner_claim_conflicts", mapping_number(after, "executor_same_owner_claim_conflicts"));
   free_mapping(after);
+
+  // R2-F07: cleanup contract metrics for the evidence gate. The wrapper
+  // derives cleanup.state from these: queue/backlog zero, deferred refs
+  // zero, future pending zero. A bench that leaves work behind writes
+  // cleanup=failed and the gate refuses the envelope.
+  auto *mailbox_after = vm_owner_mailbox_status(owner);
+  report.add("cleanup_owner_queue_depth",
+             mapping_number(mailbox_after, "owner_queue_depth"));
+  free_mapping(mailbox_after);
+  auto *runtime_after = vm_owner_runtime_status();
+  report.add("cleanup_future_pending_backlog",
+             mapping_number(runtime_after, "owner_executor_future_pending_backlog"));
+  free_mapping(runtime_after);
+  auto *thread_after = vm_owner_thread_status();
+  report.add("cleanup_deferred_target_releases",
+             mapping_number(thread_after, "deferred_target_releases"));
+  free_mapping(thread_after);
 }
 
 void run_different_owner_bench(Report &report) {

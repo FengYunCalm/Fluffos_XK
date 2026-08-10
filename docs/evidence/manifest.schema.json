@@ -36,20 +36,37 @@
     },
     "compiler": {
       "type": "object",
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": { "type": "string" },
-        "version": { "type": "string" }
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
       },
       "description": "Compiler identity and version string."
     },
     "platform": {
       "type": "object",
-      "required": ["os", "arch", "cpu_cores"],
+      "required": [
+        "os",
+        "arch",
+        "cpu_cores"
+      ],
       "properties": {
-        "os": { "type": "string" },
-        "arch": { "type": "string" },
-        "cpu_cores": { "type": "integer" }
+        "os": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "cpu_cores": {
+          "type": "integer"
+        }
       },
       "description": "Runtime platform fingerprint."
     },
@@ -73,19 +90,52 @@
     },
     "cleanup": {
       "type": "object",
-      "required": ["state"],
+      "required": [
+        "state"
+      ],
       "properties": {
         "state": {
-          "enum": ["clean", "partial", "failed", "unknown"],
+          "enum": [
+            "clean",
+            "partial",
+            "failed",
+            "unknown"
+          ],
           "description": "Whether queues/claims/refs returned to baseline after the run."
         },
-        "detail": { "type": "string" }
+        "detail": {
+          "type": "string"
+        }
       }
     },
     "evidence_kind": {
       "type": "string",
-      "enum": ["historical", "current", "external-required", "unknown"],
+      "enum": [
+        "historical",
+        "current",
+        "external-required",
+        "unknown"
+      ],
       "description": "Classification of the evidence. historical: produced on an earlier checkout; current: produced on the current commit; external-required: requires an environment outside this repository."
+    },
+    "tested_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "Actual SHA checked out and built for the run (equals commit_sha for local runs; merge SHA on pull_request CI)."
+    },
+    "source_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "PR head SHA for pull_request runs; equals tested_sha otherwise."
+    },
+    "raw_report": {
+      "type": "string",
+      "description": "File name of the raw benchmark JSON this envelope wraps (same directory as the envelope)."
+    },
+    "raw_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the raw report bound by this envelope."
     }
   },
   "additionalProperties": true

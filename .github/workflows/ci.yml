@@ -39,6 +39,11 @@ jobs:
       - name: PyYAML parse + job-name uniqueness + matrix contract tests
         run: python3 tools/docs/check-workflows.py --self-test
 
+      - name: Evidence gate negative tests
+        run: |
+          python3 -m json.tool docs/evidence/manifest.schema.json >/dev/null
+          python3 tools/docs/test-evidence-gate.py
+
   docs-check:
     name: Docs Evidence & Links
     runs-on: ubuntu-latest
@@ -73,23 +78,31 @@ jobs:
       - name: Install Python deps
         run: pip install --break-system-packages pyyaml jsonschema
 
-      - name: Download benchmark evidence artifacts
+      - name: Download capacity evidence envelope
         uses: actions/download-artifact@v4
         with:
-          path: build/reports/
-          merge-multiple: true
+          name: capacity-evidence-envelope
+          path: build/reports/capacity
 
       - name: Validate evidence reports
+        env:
+          # R2-F07: the gate receives the expected commit identity from the
+          # workflow context - never from prose in the report.
+          EXPECTED_TESTED_SHA: ${{ github.sha }}
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           # The gate must be non-empty: a run that produced no reports fails.
-          if [ ! -d build/reports ] || [ -z "$(find build/reports -name '*.json' | head -1)" ]; then
-            echo "FAIL: no evidence reports found; benchmark job must upload them"
+          if [ ! -d build/reports/capacity ] || [ -z "$(find build/reports/capacity -name '*.json' | head -1)" ]; then
+            echo "FAIL: no evidence envelope reports found; benchmark job must upload them"
             exit 1
           fi
           python3 tools/docs/check-evidence.py \
-            --reports-dir build/reports \
+            --reports-dir build/reports/capacity \
             --schema docs/evidence/manifest.schema.json \
-            --repo .
+            --repo . \
+            --mode gate \
+            --expected-tested-sha "$EXPECTED_TESTED_SHA" \
+            --expected-source-sha "$EXPECTED_SOURCE_SHA"
 
   build-and-test:
     name: ${{ matrix.check_name }}
@@ -319,22 +332,31 @@ jobs:
 
       - name: Generate capacity evidence reports
         if: ${{ matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer }}
+        env:
+          # R2-F07: explicit commit identity. tested_sha is the checkout
+          # HEAD (github.sha, the merge commit on pull_request); source_sha
+          # is the PR head for pull_request runs.
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           tools/owner-scheduler-capacity.sh --build-dir build --report-dir build/reports/capacity
 
-      - name: Upload capacity evidence reports
+      # R2-F07 artifact split: the evidence ENVELOPE goes to a fixed-name
+      # artifact that the Evidence Gate downloads exclusively; raw benchmark
+      # JSON goes to a separate artifact so a raw file can never be mistaken
+      # for an envelope.
+      - name: Upload capacity evidence envelope
         if: ${{ always() && matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer }}
         uses: actions/upload-artifact@v4
         with:
-          name: capacity-evidence
+          name: capacity-evidence-envelope
           path: build/reports/capacity/*.json
           if-no-files-found: error
 
-      - name: Upload LPC Modern Runtime Benchmark Reports
+      - name: Upload LPC Modern Runtime Benchmark Raw Reports
         if: ${{ always() && matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer }}
         uses: actions/upload-artifact@v4
         with:
-          name: lpc-modern-runtime-bench-smoke
+          name: lpc-modern-runtime-bench-raw
           path: |
             build/reports/owner_runtime_bench_smoke.json
             build/reports/lpc_vm_bench_smoke.json
