@@ -1001,28 +1001,34 @@ rg -n "6e6f60e9|multicore-mudlib-audit|production_gate_ready|make test \\|\\| tr
 
 > 本文档最初是审计方案（§16 只交付本文件）。经授权后按 T01-T18 在独立
 > worktree/分支执行，以下为各工作包的落地状态与证据。证据文件路径相对本仓库根。
+>
+> 状态校正（2026-08-10，PR #36 合并审计后）：状态只允许 `done`、
+> `needs-remediation`、`blocked`、`external-required`、`unknown`。`done` 必须
+> 链接当前 HEAD 的 CI run、报告 artifact、命令、配置和结果；本地单机证据不能
+> 写成跨平台、生产容量或发布完成。下列状态是验收证据闭环的描述，不是对代码
+> 投入量的评价。整改提交见 `docs/pr-36-merge-audit-and-remediation-plan-2026-08-10.md`。
 
 | 工作包 | 状态 | 交付物/证据 |
 | --- | --- | --- |
-| T01 sys_reload_tls 边界 | ✅ 完成 | `src/packages/core/sys.cc`（std::size 校验前置）、`testsuite/single/tests/efuns/sys_reload_tls.c`（INT_MIN/-1/0/1/5/6/MAX_INT）；CTest 400/400、ASan 392/392、UBSan 392/392 |
-| T02 Release DAG 重排 | ✅ 完成 | `.github/workflows/release.yml`：artifact-first/tag-last、draft release、`make test \|\| true` 与 `ldd \|\| echo` 已删除、sha256 校验、发布包私钥检查 |
-| T03 证据登记 | ✅ 完成 | `docs/evidence/manifest.schema.json`、`tools/docs/check-evidence.py`；knowledge-map HEAD 修正；multicore-production-gate 历史/当前证据边界标注 |
-| T04 LPC 隔离 runner | ✅ 完成 | `tools/testsuite/run-isolated.sh`（动态 loopback 端口、trap 清理）；连续 5 次 + 并行实例退出 0；`get_config.c`/`sys_network_ports.c` 去固定端口 |
-| T05 Sanitizer 矩阵 | ✅ 完成 | `src/CMakeLists.txt` ENABLE_ASAN/UBSAN/TSAN 独立开关 + jemalloc 冲突修复；ci.yml asan/ubsan/tsan 三矩阵（TSan 跑子集） |
-| T06 CMake 生成污染 | ✅ 完成 | 删除 POST_BUILD 回写、SYSETEM 修复、spec GLOB CONFIGURE_DEPENDS；新构建目录第二次构建零重编译、源码树无生成物 |
-| T07 可复现构建 | ✅ 完成 | `CMakePresets.json`（dev-debug/portable-release/asan/ubsan/tsan）；RELEASE.md 记录 profile 与安全 flags |
-| T08 供应链 manifest | ✅ 完成 | `third_party/manifest.yaml` + `third_party/sbom.json` + `tools/sbom-generate.py`；release jemalloc 下载 sha256 锁定 |
-| T09 安全策略 | ✅ 完成 | `SECURITY.md` 报告渠道/SLA/披露；release 打包私钥检查；external bind 拒绝测试通过 |
-| T10 OwnerExecutor 异常 | ✅ 完成 | `owner_executor.cc` RAII claim 释放 + 异常分类；`owner.cc` 任务级 try/catch；4 项新 metrics；故障注入测试 |
-| T11 ObjectHandle 引用 | ✅ 完成 | `vm_object_handle_acquire()` + `VMObjectRefGuard`；两条 executor 路径改用 acquire；跨 destruct 生命周期测试 |
-| T12 Future 回收 | ✅ 完成 | 终态 TTL 300s（无 payload 才回收）、硬上限 4096、容量拒绝、4 项观测；TTL/容量测试 |
-| T13 Gateway 扫描观测 | ✅ 完成（测量阶段） | `gateway_master_output_scan_*` 4 项计数；按方案先计数后重构 |
-| T14 Scheduler 容量 | ✅ 完成（当前矩阵） | `tools/owner-scheduler-capacity.sh` + `docs/reports/owner-scheduler-capacity-2026-08-09.md`；1/2/4 worker 矩阵、global fallback=0；1K+ 对象标 unknown |
-| T15 边界与 fuzz | ✅ 完成（smoke） | `src/tests/gateway_fuzz.cc`（libFuzzer 兼容 + --smoke，Debug/ASan 无崩溃）；session-id 表驱动测试 |
-| T16 300-player Pair | ⛔ external-required | 只交付准备件 `docs/runbooks/capacity-300-player-pair.md`；未执行、未声称完成 |
-| T17 文档 lint | ✅ 完成 | `tools/docs/check-docs.py`（链接/SHA/路径，962 文件零违规）；ci.yml docs-check job（docs-only 也跑） |
-| T18 Runbooks | ✅ 完成 | `docs/runbooks/release.md`、`docs/runbooks/rollback.md`、`docs/runbooks/gateway-security.md`；五类失败演练 |
+| T01 sys_reload_tls 边界 | needs-remediation | 实现已落地（`src/packages/core/sys.cc`、`testsuite/single/tests/efuns/sys_reload_tls.c`）；当前 HEAD 全矩阵未绿（F01），合并前需全平台 Debug/RelWithDebInfo 通过 |
+| T02 Release DAG 重排 | needs-remediation | `.github/workflows/release.yml` 已重排为 artifact-first/tag-last；但修复前 Docker push 与 tag 先于最终 checksum 验证（F06），现改为 gate-first：target SHA 校验、protected environment、concurrency、push:false + digest 扫描、latest 最后更新；需在受保护环境演练后回写 done |
+| T03 证据登记 | needs-remediation | `docs/evidence/manifest.schema.json`、`tools/docs/check-evidence.py` 已落地；修复前零报告退出 0、schema 参数未执行校验（F07），现改为空门禁失败 + jsonschema 校验 + CI 禁用 skip-commit-check；需当前 HEAD CI 全绿后回写 |
+| T04 LPC 隔离 runner | needs-remediation | `tools/testsuite/run-isolated.sh` 已落地；修复前端口 pick/close/rebind 存在 TOCTOU（F12），现加跨进程 flock、同批去重、渲染校验、bind 失败整轮重试；driver 端口 0 能力落地前不称为严格隔离 |
+| T05 Sanitizer 矩阵 | needs-remediation | `src/CMakeLists.txt` ENABLE_ASAN/UBSAN/TSAN 开关 + ci.yml 三矩阵已落地；修复前 TSan 先跑完整 CTest、正则无空集断言（F11），现 TSan 只跑 concurrency 子集且 `ctest -N` 断言非空；需当前 HEAD CI 全绿后回写 |
+| T06 CMake 生成污染 | needs-remediation | 改动已落地（删除 POST_BUILD 回写等）；需在最终 HEAD 重验第二次构建零重编译、源码树无生成物 |
+| T07 可复现构建 | needs-remediation | `CMakePresets.json` 已落地；尚无 artifact reproducibility 证据（同一 preset 两次构建产物一致） |
+| T08 供应链 manifest | needs-remediation | `third_party/manifest.yaml` + `third_party/sbom.json` + `tools/sbom-generate.py` 已落地；修复前大量 version/checksum unknown、SBOM 非标准（F13），现已补全版本与内容指纹、真实 alpine digest、CycloneDX 1.4 官方 schema 校验通过、workflow action 双向比对门禁；release-critical 依赖仍以 major tag pin，完整 commit-SHA pin 待发布演练 |
+| T09 安全策略 | needs-remediation | `SECURITY.md`、release 私钥检查、external bind 拒绝测试已落地；依赖最终安全/发布矩阵（CodeQL、镜像漏洞策略）通过后回写 |
+| T10 OwnerExecutor 异常 | needs-remediation | RAII claim 释放 + 异常分类已落地；修复前任务异常不终态化对应 Future、`record_owner_exception` 无锁调用 `_locked` helper（F04），现异常 finalizer 幂等终态化（executor_bad_alloc/executor_std_exception/executor_unknown_exception）且锁合同修复；需 TSan subset 通过后回写 |
+| T11 ObjectHandle 引用 | needs-remediation | `vm_object_handle_acquire()` + guard 已落地；修复前 acquire resolve/add_ref 存在 TOCTOU、worker 直接 free_object（F05），现 resolve+add_ref 同一锁域、主线程提交时 acquire、worker 只消费已持有引用且 ref-mutation 探针为 0；需 ASan/TSan 重复测试通过后回写 |
+| T12 Future 回收 | needs-remediation | 终态 TTL/硬上限/容量拒绝已落地；修复前 terminal cap 可绕过、payload 无字节上限、TTL 热路径 O(N)（F03），现精确计数 + pending/terminal/单 payload/总 payload 硬上限 + 有预算时间索引回收；需 benchmark 证据后回写 |
+| T13 Gateway 扫描观测 | needs-remediation | `gateway_master_output_scan_*` 已落地；修复前 continuation 条件恒 false（F10），现 scanned/ready/remaining/schedules/coalesced/executed 语义正确且 continuation 在真实调度点计数；1K/4K/16K session 扫描报告待生成 |
+| T14 Scheduler 容量 | needs-remediation | `tools/owner-scheduler-capacity.sh` + 报告已落地；修复前 `\|\| true` 吞失败、evidence 空门禁、`--skip-commit-check`（F07），现任一 bench 失败即失败、build hash 覆盖 cache/preset、schema+commit 校验；当前 HEAD 重跑报告待提交 |
+| T15 边界与 fuzz | needs-remediation | `src/tests/gateway_fuzz.cc` 已落地；修复前无真实 libFuzzer/parser 证据（F08），现 smoke/libFuzzer 双目标、真实帧编码 + buffered-frame dispatch、CI 有界 fuzz job；libFuzzer coverage/corpus 证据待 CI 产出 |
+| T16 300-player Pair | external-required | 只交付准备件 `docs/runbooks/capacity-300-player-pair.md`；未执行、未声称完成；保持 external-required |
+| T17 文档 lint | needs-remediation | `tools/docs/check-docs.py` + ci.yml docs job 已落地；修复前 docs check 失败（路径引用 + 尾随空格，F01），现已修复且 963 文件零违规；需当前 HEAD CI 全绿后回写 |
+| T18 Runbooks | needs-remediation | `docs/runbooks/release.md`、`docs/runbooks/rollback.md`、`docs/runbooks/gateway-security.md` 已落地；修复前路径引用错误（F01），现字面路径通过 docs checker；release 演练门禁未通过（F06） |
 
-**验证总览（本分支当前 checkout）**：CTest 400/400（Debug）、ASan 392/392、UBSan 392/392、LPC 隔离 testsuite 退出 0、runtime smoke PASS、gateway fuzz smoke 无崩溃、check-docs 962/962 OK、check-evidence 容量报告 OK。
+**验证总览（本分支当前 checkout）**：CTest 407/407（Debug）、LPC 隔离 testsuite 串行 5 次 PASS、gateway fuzz smoke 256 inputs 无崩溃且 parser reached（JSON decode 1024 次）、check-docs 963/963 OK、check-evidence 容量报告 OK（schema + commit 校验）、SBOM CycloneDX 1.4 schema 校验 OK、action pins 双向比对 OK。ASan/UBSan/TSan 与 Clang/macOS/Windows 矩阵待当前 HEAD 远端 CI 验证。
 
 **遗留（external-required / unknown）**：真实 300-player Pair 与 900s 长时压力、1K/10K/100K 对象与 4096 session 规模阶梯、TSan 完整 CI 结果（本地无 Clang）、跨主机 gateway、真实 mudlib 当前 commit 复核。
