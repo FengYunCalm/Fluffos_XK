@@ -274,6 +274,177 @@ TEST(OwnerFutureStoreTest, RejectsNonTerminalCompletionStateWithoutCounterDrift)
   EXPECT_EQ(task_store.failed_count(), 0u);
 }
 
+// F03: terminal cap must hold even when many pending records transition to
+// terminal concurrently; a breach is a deterministic failed terminalization,
+// never a count overflow or a silent payload drop.
+TEST(OwnerFutureStoreTest, TerminalCapHoldsAcrossPendingToTerminalTransitions) {
+  OwnerFutureStore store;
+  const auto cap = OwnerFutureStore::kMaxTerminalRecords;
+  // Insert cap + 1 pending records, then complete all of them: the terminal
+  // count must never exceed the cap.
+  const uint64_t count = cap + 1;
+  std::vector<uint64_t> future_ids;
+  for (uint64_t i = 0; i < count; i++) {
+    auto record = owner_future_store_test_record(i + 1, i + 1);
+    ASSERT_TRUE(store.insert(record));
+    future_ids.push_back(i + 1);
+  }
+  ASSERT_EQ(store.pending_count(), static_cast<int64_t>(count));
+  ASSERT_EQ(store.terminal_record_count(), 0u);
+
+  uint64_t quota_rejected = 0;
+  for (auto future_id : future_ids) {
+    auto completion =
+        store.complete(future_id, "completed", "result", "");
+    ASSERT_TRUE(completion.has_value());
+    if (completion->quota_rejected) {
+      quota_rejected++;
+    }
+  }
+  // cap transitions succeed; the (cap+1)-th is deterministically rejected.
+  ASSERT_EQ(quota_rejected, 1u);
+  ASSERT_LE(store.terminal_record_count(), cap);
+  ASSERT_GE(store.capacity_reject_count(), 1u);
+  // The rejected future is terminalized as failed and removed: no pending
+  // orphan, no unknown state. The completion result carries the rejection;
+  // a retained record must be terminalized (never pending/unknown).
+  ASSERT_EQ(store.pending_count(), 0);
+  for (auto future_id : future_ids) {
+    const auto state = store.state(future_id);
+    if (state == OwnerFutureState::kUnknown) {
+      continue;  // quota-rejected record was removed after failed terminalization
+    }
+    ASSERT_NE(state, OwnerFutureState::kPending)
+        << "future " << future_id << " must be terminalized or retained";
+  }
+  // Every retained terminal record is consumable via take().
+  size_t consumed = 0;
+  for (auto future_id : future_ids) {
+    auto taken = store.take(future_id);
+    if (taken.consumed) {
+      consumed++;
+    }
+  }
+  ASSERT_EQ(consumed, cap);
+  ASSERT_EQ(store.size(), 0);
+}
+
+// F03: single-payload and aggregate byte caps are hard limits; breach is a
+// deterministic rejection that never leaves the payload behind silently.
+TEST(OwnerFutureStoreTest, PayloadByteCapsRejectDeterministically) {
+  OwnerFutureStore store;
+
+  // Single-payload cap breach via a huge native string result.
+  store.insert(owner_future_store_test_record(1, 101));
+  std::string huge(OwnerFutureStore::kMaxSinglePayloadBytes + 1, 'x');
+  auto single = store.complete_string_for_task(101, "native_string", std::move(huge));
+  ASSERT_TRUE(single.has_value());
+  ASSERT_TRUE(single->quota_rejected);
+  ASSERT_STREQ(single->record.error.c_str(), "future_payload_single_byte_cap");
+  ASSERT_EQ(store.byte_reject_count(), 1u);
+  ASSERT_EQ(store.pending_count(), 0);
+  ASSERT_EQ(store.terminal_record_count(), 0u);
+  ASSERT_EQ(store.size(), 0);
+
+  // Aggregate byte cap: fill retained payloads near the cap, then complete
+  // one more record whose payload would cross the aggregate limit.
+  const uint64_t chunk = 1024 * 1024;  // 1 MiB each
+  const uint64_t chunks_before =
+      (OwnerFutureStore::kMaxTotalPayloadBytes / chunk) - 1;
+  for (uint64_t i = 0; i < chunks_before; i++) {
+    auto record = owner_future_store_test_record(i + 2, i + 1002);
+    ASSERT_TRUE(store.insert(record));
+    std::string payload(chunk, 'y');
+    auto completion = store.complete_string_for_task(i + 1002, "native_string", std::move(payload));
+    ASSERT_TRUE(completion.has_value());
+    ASSERT_FALSE(completion->quota_rejected);
+  }
+  ASSERT_GT(store.terminal_payload_bytes(), 0);
+  ASSERT_EQ(store.peak_terminal_payload_bytes(), store.terminal_payload_bytes());
+
+  // One more chunk would exceed kMaxTotalPayloadBytes (aggregate).
+  auto record = owner_future_store_test_record(9999, 19999);
+  ASSERT_TRUE(store.insert(record));
+  std::string crossing(chunk * 2, 'z');
+  auto rejected =
+      store.complete_string_for_task(19999, "native_string", std::move(crossing));
+  ASSERT_TRUE(rejected.has_value());
+  ASSERT_TRUE(rejected->quota_rejected);
+  ASSERT_STREQ(rejected->record.error.c_str(), "future_payload_total_byte_cap");
+  ASSERT_GE(store.byte_reject_count(), 2u);
+
+  // Counters settle exactly: every retained record is consumable and the
+  // payload accounting returns to zero after take().
+  const auto terminal_before = store.terminal_record_count();
+  for (uint64_t i = 0; i < chunks_before; i++) {
+    ASSERT_TRUE(store.take(i + 2).consumed);
+  }
+  ASSERT_EQ(store.size(), 0);
+  ASSERT_EQ(store.terminal_record_count(), 0u);
+  ASSERT_EQ(store.terminal_payload_bytes(), 0);
+  ASSERT_GT(store.peak_terminal_payload_bytes(), 0);
+  (void)terminal_before;
+}
+
+// F03: TTL reaping is bounded and only removes expired payload-free records;
+// counters and the time index stay consistent across reap/take/overwrite.
+TEST(OwnerFutureStoreTest, TtlReapCountersSettleAfterMixedOperations) {
+  OwnerFutureStore store;
+  uint64_t fake_now_ns = 1'000'000'000ULL;
+  store.set_clock_for_test([&fake_now_ns]() { return fake_now_ns; });
+
+  // Three payload-free terminal records at three ages.
+  for (uint64_t i = 0; i < 3; i++) {
+    auto record = owner_future_store_test_record(i + 1, i + 101);
+    ASSERT_TRUE(store.insert(record));
+    ASSERT_TRUE(
+        store.complete_for_task(i + 101, "completed", "result", "").has_value());
+  }
+  ASSERT_EQ(store.terminal_record_count(), 3u);
+  fake_now_ns += OwnerFutureStore::kTerminalTtlNs + 1;
+  store.reap_expired_terminal();
+  ASSERT_EQ(store.terminal_record_count(), 0u);
+  ASSERT_EQ(store.size(), 0);
+  ASSERT_EQ(store.reaped_terminal_count(), 3u);
+  ASSERT_EQ(store.oldest_terminal_age_ns(), 0u);
+
+  // Mixed: one expired, one fresh, one payload-bearing (never reaped).
+  auto expired = owner_future_store_test_record(10, 110);
+  ASSERT_TRUE(store.insert(expired));
+  ASSERT_TRUE(store.complete_for_task(110, "completed", "result", "").has_value());
+  auto payload = owner_future_store_test_record(12, 112);
+  ASSERT_TRUE(store.insert(payload));
+  ASSERT_TRUE(store.complete_for_task(112, "completed", "result", "").has_value());
+  {
+    auto with_payload = owner_future_store_test_record(12, 112);
+    with_payload.state = "completed";
+    with_payload.terminal_at_ns = fake_now_ns;
+    with_payload.result = std::make_shared<VMFrozenValue>();
+    store.take(12);
+    store.insert(with_payload);
+  }
+  // Advance past TTL, then create a fresh payload-free record.
+  fake_now_ns += OwnerFutureStore::kTerminalTtlNs + 1;
+  auto fresh = owner_future_store_test_record(11, 111);
+  ASSERT_TRUE(store.insert(fresh));
+  ASSERT_TRUE(store.complete_for_task(111, "completed", "result", "").has_value());
+  store.reap_expired_terminal();
+  // Expired payload-free reaped; fresh stays; payload-bearing stays.
+  ASSERT_EQ(store.terminal_record_count(), 2u);
+  ASSERT_NE(store.poll(11), std::nullopt);
+  ASSERT_NE(store.poll(12), std::nullopt);
+  ASSERT_EQ(store.poll(10), std::nullopt);
+  // The time index only contains reaping candidates (payload-free), so the
+  // fresh record is the oldest reclaimable entry with age ~0.
+  ASSERT_EQ(store.oldest_terminal_age_ns(), 0u);
+  // Consume the rest and verify exact counter return to zero.
+  ASSERT_TRUE(store.take(11).consumed);
+  ASSERT_TRUE(store.take(12).consumed);
+  ASSERT_EQ(store.size(), 0);
+  ASSERT_EQ(store.terminal_record_count(), 0u);
+  ASSERT_EQ(store.terminal_payload_bytes(), 0);
+}
+
 TEST(OwnerTraceStoreTest, AssignsTraceIdToUnsequencedTaskTrace) {
   OwnerTraceStore store;
   OwnerTaskTrace trace;
@@ -12396,6 +12567,102 @@ TEST_F(DriverTest, TestVmOwnerExecutorDoesNotYieldWhenExactBudgetDrainsBacklog) 
   vm_owner_thread_stop();
 }
 
+// F04: when a task throws inside the worker, the pending future for that
+// task must be terminalized as failed (idempotent, stable error code) and
+// the worker must survive to drain the rest of the mailbox.
+TEST_F(DriverTest, TestVmOwnerExecutorExceptionTerminalizesPendingFuture) {
+  const char* owner = "owner/test/executor/exception-future";
+
+  vm_owner_thread_stop();
+  object_t* probe = load_object_for_test("single/void");
+  ASSERT_NE(probe, nullptr);
+  vm_owner_set_id(probe, owner);
+  struct ProbeGuard {
+    object_t* probe;
+    ~ProbeGuard() {
+      vm_owner_clear_id(probe);
+      destruct_object(probe);
+    }
+  } probe_guard{probe};
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, &const0u) << key;
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER) << key;
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr) << key;
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING) << key;
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  auto* before = vm_owner_thread_status();
+  auto before_std = mapping_number(before, "executor_task_exceptions");
+  auto before_unknown = mapping_number(before, "executor_task_unknown_exceptions");
+  free_mapping(before);
+
+  vm_owner_thread_start(1);
+
+  // The worker callback blocks on a gate so the test can register the
+  // pending future for the exact internal task id before the task throws.
+  std::atomic<int> callback_started{0};
+  std::atomic<int> release_callback{0};
+  std::atomic<int> throw_mode{0};  // 0=std, 1=unknown
+  const auto callback_task_id = vm_owner_enqueue_executor_task(
+      probe, "room_output_projection", "exception-callback",
+      [&] {
+        callback_started.store(1, std::memory_order_release);
+        while (release_callback.load(std::memory_order_acquire) == 0) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (throw_mode.load(std::memory_order_relaxed) == 1) {
+          throw 42;  // unknown exception
+        }
+        throw std::runtime_error("injected executor failure");
+      },
+      nullptr);
+  ASSERT_GT(callback_task_id, 0u);
+  for (int i = 0; i < 200 && callback_started.load(std::memory_order_acquire) == 0; i++) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  ASSERT_EQ(callback_started.load(std::memory_order_acquire), 1);
+
+  // Register a pending future for the exact internal task id; the task is
+  // already inside the worker, so the finalizer must find and terminalize it.
+  const auto future_id =
+      vm_owner_register_compute_future(owner, callback_task_id, "bench", "exception/future");
+  ASSERT_GT(future_id, 0u);
+  ASSERT_EQ(vm_owner_future_state(future_id), VM_OWNER_FUTURE_PENDING);
+
+  // Release the gate: the callback throws, the worker catch block must
+  // terminalize the pending future with the stable error code.
+  release_callback.store(1, std::memory_order_release);
+  for (int i = 0; i < 200; i++) {
+    auto state = vm_owner_future_state(future_id);
+    if (state != VM_OWNER_FUTURE_PENDING) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  ASSERT_EQ(vm_owner_future_state(future_id), VM_OWNER_FUTURE_FAILED);
+  auto* polled = vm_owner_future_poll(future_id);
+  ASSERT_STREQ(mapping_string(polled, "error"), "executor_std_exception");
+  free_mapping(polled);
+  auto* taken = vm_owner_future_take(future_id);
+  ASSERT_EQ(mapping_number(taken, "consumed"), 1);
+  free_mapping(taken);
+
+  // Worker must survive and the unknown-exception counter must not move.
+  auto* after_std = vm_owner_thread_status();
+  ASSERT_GE(mapping_number(after_std, "executor_task_exceptions"), before_std + 1);
+  ASSERT_EQ(mapping_number(after_std, "executor_task_unknown_exceptions"), before_unknown);
+  free_mapping(after_std);
+
+  vm_owner_thread_stop();
+}
+
 TEST_F(DriverTest, TestVmOwnerExecutorRunsDifferentOwnersInParallel) {
   const char* owner_a = "owner/test/executor/parallel-a";
   const char* owner_b = "owner/test/executor/parallel-b";
@@ -13346,6 +13613,119 @@ TEST_F(DriverTest, TestVmOwnerLpcTaskRejectsTargetOwnerMismatchAtSubmit) {
   ASSERT_EQ(mapping_number(after_other_queue, "owner_queue_depth"), before_other_depth);
   free_mapping(after_other_queue);
 
+  destruct_object(probe);
+}
+
+// F02: When the future store is at terminal capacity, every submission path
+// must reject atomically: no enqueue, no trace/message index, no accepted
+// future with ID 0, and a stable rejected result.
+TEST_F(DriverTest, TestOwnerSubmissionRejectsAtomicallyWhenFutureStoreFull) {
+  const char* owner = "owner/test/future/capacity-reject";
+
+  vm_owner_thread_stop();
+  object_t* probe = load_object_for_test("single/void");
+  ASSERT_NE(probe, nullptr);
+  vm_owner_set_id(probe, owner);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, &const0u) << key;
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER) << key;
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, nullptr) << key;
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING) << key;
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+
+  // Fill the future store to the terminal cap with payload-bearing records
+  // (payload-bearing terminal records are never auto-reaped).
+  const auto cap = OwnerFutureStore::kMaxTerminalRecords;
+  const uint64_t fill_base = 900000;
+  std::vector<uint64_t> fill_ids;
+  fill_ids.reserve(cap);
+  {
+    auto& store = owner_future_store_instance();
+    for (size_t i = 0; i < cap; i++) {
+      auto record = owner_future_store_test_record(fill_base + i, fill_base + i);
+      record.state = "completed";
+      record.terminal_at_ns = 1;
+      record.result = std::make_shared<VMFrozenValue>();
+      if (store.insert(std::move(record))) {
+        fill_ids.push_back(fill_base + i);
+      }
+    }
+    ASSERT_EQ(store.terminal_record_count(), cap);
+  }
+
+  auto free_fill_records = [&]() {
+    auto& store = owner_future_store_instance();
+    for (auto future_id : fill_ids) {
+      store.take(future_id);
+    }
+    fill_ids.clear();
+  };
+
+  const auto before_frozen = owner_future_store_instance().size();
+
+  // Path 1: frozen-string callback submission.
+  std::atomic<int> projector_runs{0};
+  const auto string_submission = vm_owner_submit_frozen_string_task(
+      probe, "room_output_projection", "capacity-reject-string",
+      [&projector_runs](std::string* output) {
+        projector_runs.fetch_add(1, std::memory_order_relaxed);
+        *output = "must-not-run";
+        return true;
+      });
+  ASSERT_FALSE(string_submission.queued);
+  ASSERT_EQ(string_submission.task_id, 0u);
+  ASSERT_EQ(string_submission.future_id, 0u);
+  ASSERT_EQ(projector_runs.load(std::memory_order_relaxed), 0);
+
+  // Path 2: LPC task submission.
+  auto* lpc_submission = vm_owner_lpc_task(probe, owner, "owner_task_readonly");
+  ASSERT_EQ(mapping_number(lpc_submission, "success"), 0);
+  ASSERT_EQ(mapping_number(lpc_submission, "future_id"), 0);
+  ASSERT_EQ(mapping_number(lpc_submission, "task_id"), 0);
+  ASSERT_STREQ(mapping_string(lpc_submission, "state"), "rejected");
+  ASSERT_STREQ(mapping_string(lpc_submission, "error"), "future_store_capacity");
+  free_mapping(lpc_submission);
+
+  // Path 3: ordinary LPC submission.
+  auto* ordinary_submission =
+      vm_owner_ordinary_lpc_task(probe, owner, "owner_task_player", 1);
+  ASSERT_EQ(mapping_number(ordinary_submission, "success"), 0);
+  ASSERT_EQ(mapping_number(ordinary_submission, "future_id"), 0);
+  ASSERT_EQ(mapping_number(ordinary_submission, "task_id"), 0);
+  ASSERT_STREQ(mapping_string(ordinary_submission, "state"), "rejected");
+  ASSERT_STREQ(mapping_string(ordinary_submission, "error"), "future_store_capacity");
+  free_mapping(ordinary_submission);
+
+  // Path 4: owner message submission (handle-less path).
+  auto* message_submission =
+      vm_owner_submit_message("owner/test/future/source", owner, "message", "capacity/reject");
+  ASSERT_EQ(mapping_number(message_submission, "success"), 0);
+  ASSERT_EQ(mapping_number(message_submission, "message_id"), 0);
+  ASSERT_EQ(mapping_number(message_submission, "target_task_id"), 0);
+  ASSERT_STREQ(mapping_string(message_submission, "state"), "rejected");
+  ASSERT_STREQ(mapping_string(message_submission, "error"), "future_store_capacity");
+  free_mapping(message_submission);
+
+  // No task may have been enqueued for any rejected path.
+  auto* mailbox = vm_owner_mailbox_status(owner);
+  ASSERT_EQ(mapping_number(mailbox, "owner_queue_depth"), 0);
+  free_mapping(mailbox);
+  // No message index may remain for the rejected message.
+  auto* owner_status = vm_object_store_owner_status(owner);
+  ASSERT_EQ(mapping_number(owner_status, "pending_messages"), 0);
+  free_mapping(owner_status);
+  // The store must not have grown on any rejected path.
+  ASSERT_EQ(owner_future_store_instance().size(), before_frozen);
+
+  free_fill_records();
+  ASSERT_EQ(owner_future_store_instance().terminal_record_count(), 0u);
   destruct_object(probe);
 }
 

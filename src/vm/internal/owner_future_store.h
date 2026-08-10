@@ -5,6 +5,8 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -37,6 +39,10 @@ struct OwnerFutureCompletion {
   OwnerFutureRecord record;
   VMObjectHandleResolveStatus target_status{VMObjectHandleResolveStatus::kCurrent};
   bool completed_with_frozen_result{false};
+  // True when the pending->terminal transition was rejected by a record or
+  // byte quota; the record is terminalized as failed and removed so no cap
+  // is ever breached and no payload is silently dropped.
+  bool quota_rejected{false};
 };
 
 struct OwnerFutureTerminalResult {
@@ -75,6 +81,15 @@ class OwnerFutureStore {
   // Hard cap on terminal (completed/failed) records kept for take().
   // Submissions beyond this cap are rejected with future_store_capacity.
   static constexpr size_t kMaxTerminalRecords = 4096;
+  // Hard cap on concurrently pending (in-flight) records.
+  static constexpr size_t kMaxPendingRecords = 65536;
+  // Per-payload byte cap (frozen value estimate or native string size).
+  static constexpr size_t kMaxSinglePayloadBytes = 8 * 1024 * 1024;  // 8 MiB
+  // Aggregate byte cap across all retained terminal payloads.
+  static constexpr size_t kMaxTotalPayloadBytes = 64 * 1024 * 1024;  // 64 MiB
+  // Per-call scan budget for lazy TTL reaping: poll/state/insert never scan
+  // more than this many time-index entries, keeping hot paths O(budget).
+  static constexpr size_t kReapScanBudget = 64;
 
   bool insert(OwnerFutureRecord record);
   std::optional<OwnerFutureRecord> poll(uint64_t future_id);
@@ -92,19 +107,26 @@ class OwnerFutureStore {
   OwnerFutureTerminalResult fail_terminal(uint64_t future_id, const char *reason, bool cancelled, bool timed_out);
 
   // Reap expired payload-free terminal records (TTL-based). Safe to call
-  // anytime; also invoked lazily from insert/poll/state.
+  // anytime; also invoked lazily from insert/poll/state with a bounded scan.
   void reap_expired_terminal();
 
   int64_t pending_count() const;
   int64_t size() const;
   uint64_t completed_count() const;
   uint64_t failed_count() const;
-  // Number of terminal records currently retained (awaiting take).
+  // Number of terminal records currently retained (awaiting take). O(1).
   size_t terminal_record_count() const;
-  // Age of the oldest retained terminal record, in ns (0 when none).
+  // Age of the oldest retained terminal record, in ns (0 when none). O(1).
   uint64_t oldest_terminal_age_ns() const;
+  // Retained terminal payload bytes (frozen estimate + native strings).
+  int64_t terminal_payload_bytes() const;
+  // High-water mark of retained terminal payload bytes.
+  int64_t peak_terminal_payload_bytes() const;
   uint64_t reaped_terminal_count() const;
+  // Rejections due to the terminal record cap (future_store_capacity).
   uint64_t capacity_reject_count() const;
+  // Rejections due to single/aggregate payload byte caps.
+  uint64_t byte_reject_count() const;
 
 #ifdef DEBUGMALLOC_EXTENSIONS
   void mark_debug_refs(std::unordered_set<const VMFrozenValue *> &seen) const;
@@ -117,17 +139,40 @@ class OwnerFutureStore {
   OwnerFutureCompletion complete_record(OwnerFutureRecord &record, const char *state, const char *result_key,
                                         const char *error, std::shared_ptr<VMFrozenValue> result);
   // Requires mutex_ held. Removes terminal records that are past TTL and carry
-  // no payload (never silently drops payload-bearing records).
+  // no payload (never silently drops payload-bearing records). Scans at most
+  // kReapScanBudget time-index entries.
   void reap_expired_terminal_locked();
+  // Requires mutex_ held. Maintains counters and the TTL time index for a
+  // record that just became terminal (or was inserted as terminal).
+  void index_terminal_record_locked(const OwnerFutureRecord &record);
+  // Requires mutex_ held. Undoes counters and the TTL time index for a
+  // terminal record being removed/replaced.
+  void unindex_terminal_record_locked(const OwnerFutureRecord &record);
+  // Requires mutex_ held. Terminates a pending record as failed due to a
+  // quota breach and removes it so no cap is ever exceeded. Returns a copy
+  // of the rejected record for the completion result.
+  OwnerFutureRecord reject_pending_by_quota_locked(uint64_t future_id, const char *reason);
+  // Debug-only invariant check; no-op in release builds.
+  void assert_counts_locked() const;
 
   mutable std::mutex mutex_;
   std::unordered_map<uint64_t, OwnerFutureRecord> futures_;
   std::unordered_multimap<uint64_t, uint64_t> future_ids_by_task_;
+  // TTL time index: terminal_at_ns -> future_id, only for payload-free
+  // terminal records (payload-bearing records are never auto-reaped, so they
+  // are excluded to keep reap scans bounded).
+  std::multimap<uint64_t, uint64_t> terminal_by_time_;
+  std::unordered_map<uint64_t, std::multimap<uint64_t, uint64_t>::iterator> terminal_time_index_;
   std::atomic<int64_t> pending_{0};
   std::atomic<uint64_t> completed_{0};
   std::atomic<uint64_t> failed_{0};
   std::atomic<uint64_t> reaped_terminal_{0};
   std::atomic<uint64_t> capacity_rejects_{0};
+  std::atomic<uint64_t> byte_rejects_{0};
+  // Lock-protected precise counters (kept in sync with futures_).
+  size_t terminal_records_{0};
+  int64_t terminal_payload_bytes_{0};
+  int64_t peak_terminal_payload_bytes_{0};
   ClockFn clock_{default_clock};
 
  private:
