@@ -529,7 +529,8 @@ void run_future_completion_lookup_case(Report &report, int backlog) {
     future.message_type = "bench_future_lookup";
     future.payload_key = "bench/future/lookup/v1";
     future.state = "pending";
-    store.insert(std::move(future));
+    require(store.admit_pending(std::move(future)),
+            "future completion lookup admission failed (lifecycle slot cap)");
   }
 
   auto completion_start = Clock::now();

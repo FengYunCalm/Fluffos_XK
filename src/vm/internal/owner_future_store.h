@@ -40,8 +40,10 @@ struct OwnerFutureCompletion {
   VMObjectHandleResolveStatus target_status{VMObjectHandleResolveStatus::kCurrent};
   bool completed_with_frozen_result{false};
   // True when the pending->terminal transition was rejected by a record or
-  // byte quota; the record is terminalized as failed and removed so no cap
-  // is ever breached and no payload is silently dropped.
+  // byte quota. The record is terminalized as a payload-free FAILED
+  // tombstone that REMAINS queryable via poll/state/take (it occupies the
+  // lifecycle slot reserved at admission); it is never erased here, so a
+  // successful admission can never become unknown through a quota path.
   bool quota_rejected{false};
 };
 
@@ -78,10 +80,17 @@ class OwnerFutureStore {
   // still carry a frozen/native payload are never auto-reaped (no silent
   // drop); only a consumer take() removes them.
   static constexpr uint64_t kTerminalTtlNs = 300ULL * 1000 * 1000 * 1000;  // 300s
-  // Hard cap on terminal (completed/failed) records kept for take().
-  // Submissions beyond this cap are rejected with future_store_capacity.
+  // LIFECYCLE slot cap (R2-F05): pending admission reserves a terminal slot,
+  // so the store holds at most this many records in total (pending +
+  // terminal). pending -> terminal is a state transition inside the reserved
+  // slot; quota-rejected completions keep a payload-free failed tombstone in
+  // the same slot. A successfully admitted future id therefore stays
+  // queryable until take(), TTL reaping or explicit cancellation.
   static constexpr size_t kMaxTerminalRecords = 4096;
-  // Hard cap on concurrently pending (in-flight) records.
+  // Absolute backstop on concurrently pending records. With the reservation
+  // contract above the effective pending bound is min(kMaxPendingRecords,
+  // kMaxTerminalRecords - terminal_records_); this constant protects against
+  // future admission paths that bypass the reservation.
   static constexpr size_t kMaxPendingRecords = 65536;
   // Per-payload byte cap (frozen value estimate or native string size).
   static constexpr size_t kMaxSinglePayloadBytes = 8 * 1024 * 1024;  // 8 MiB
@@ -91,7 +100,14 @@ class OwnerFutureStore {
   // more than this many time-index entries, keeping hot paths O(budget).
   static constexpr size_t kReapScanBudget = 64;
 
-  bool insert(OwnerFutureRecord record);
+  // Production admission: reserves a future terminal slot (lifecycle slot
+  // cap) and enforces the pending backstop. Rejects (returns false) without
+  // side effects when either cap would be exceeded.
+  bool admit_pending(OwnerFutureRecord record);
+  // Restoration of a terminal (completed/failed) record, e.g. by recovery or
+  // tests. Enforces the full record and payload byte caps; rejects (returns
+  // false) instead of breaching them.
+  bool restore_terminal_checked(OwnerFutureRecord record);
   std::optional<OwnerFutureRecord> poll(uint64_t future_id);
   OwnerFutureState state(uint64_t future_id);
   OwnerFutureTakeResult take(uint64_t future_id);
@@ -136,8 +152,14 @@ class OwnerFutureStore {
   static const char *normalize_text(const char *text, const char *fallback);
   static VMObjectHandleResolveStatus target_status(const OwnerFutureRecord &record);
   void erase_task_index_entry(uint64_t target_task_id, uint64_t future_id);
+  // Requires mutex_ held. Single completion path shared by every entry
+  // point (complete, complete_for_task, complete_string_for_task,
+  // fail_terminal, cancellation): enforces quotas, converts pending ->
+  // terminal inside the reserved slot, and keeps a failed tombstone on
+  // rejection. At most one of result/native_string may be non-null.
   OwnerFutureCompletion complete_record(OwnerFutureRecord &record, const char *state, const char *result_key,
-                                        const char *error, std::shared_ptr<VMFrozenValue> result);
+                                        const char *error, std::shared_ptr<VMFrozenValue> result,
+                                        std::shared_ptr<const std::string> native_string);
   // Requires mutex_ held. Removes terminal records that are past TTL and carry
   // no payload (never silently drops payload-bearing records). Scans at most
   // kReapScanBudget time-index entries.
@@ -149,8 +171,9 @@ class OwnerFutureStore {
   // terminal record being removed/replaced.
   void unindex_terminal_record_locked(const OwnerFutureRecord &record);
   // Requires mutex_ held. Terminates a pending record as failed due to a
-  // quota breach and removes it so no cap is ever exceeded. Returns a copy
-  // of the rejected record for the completion result.
+  // quota breach. The record is KEPT as a payload-free failed tombstone in
+  // its reserved lifecycle slot: it remains queryable via poll/state/take
+  // until take(), TTL reaping or cancellation, and its error code is stable.
   OwnerFutureRecord reject_pending_by_quota_locked(uint64_t future_id, const char *reason);
   // Debug-only invariant check; no-op in release builds.
   void assert_counts_locked() const;
@@ -158,11 +181,16 @@ class OwnerFutureStore {
   mutable std::mutex mutex_;
   std::unordered_map<uint64_t, OwnerFutureRecord> futures_;
   std::unordered_multimap<uint64_t, uint64_t> future_ids_by_task_;
-  // TTL time index: terminal_at_ns -> future_id, only for payload-free
-  // terminal records (payload-bearing records are never auto-reaped, so they
-  // are excluded to keep reap scans bounded).
-  std::multimap<uint64_t, uint64_t> terminal_by_time_;
-  std::unordered_map<uint64_t, std::multimap<uint64_t, uint64_t>::iterator> terminal_time_index_;
+  // ALL-terminal time index (terminal_at_ns -> future_id), payload-bearing
+  // records included: backs oldest_terminal_age_ns().
+  std::multimap<uint64_t, uint64_t> terminal_all_by_time_;
+  std::unordered_map<uint64_t, std::multimap<uint64_t, uint64_t>::iterator>
+      terminal_all_time_index_;
+  // Reapable-terminal time index: payload-free records only, so reap scans
+  // stay bounded and payload-bearing records are never auto-dropped.
+  std::multimap<uint64_t, uint64_t> terminal_reapable_by_time_;
+  std::unordered_map<uint64_t, std::multimap<uint64_t, uint64_t>::iterator>
+      terminal_reapable_time_index_;
   std::atomic<int64_t> pending_{0};
   std::atomic<uint64_t> completed_{0};
   std::atomic<uint64_t> failed_{0};

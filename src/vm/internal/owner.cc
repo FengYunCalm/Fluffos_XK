@@ -4027,7 +4027,7 @@ VMOwnerStringTaskSubmission vm_owner_submit_frozen_string_task(
       // leave an orphaned queued task behind.
       auto admission = admit_owner_executor_callback_task_locked(task);
       if (admission.accepted) {
-        future_registered = owner_future_store.insert(std::move(future));
+        future_registered = owner_future_store.admit_pending(std::move(future));
         if (future_registered) {
           append_owner_task_trace(task, "executor_callback_queued");
           queued = enqueue_owner_task_locked(
@@ -4270,7 +4270,7 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
   std::string submission_reason;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    future_registered = owner_future_store.insert(std::move(future));
+    future_registered = owner_future_store.admit_pending(std::move(future));
     if (future_registered) {
       queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
     } else {
@@ -4400,7 +4400,7 @@ mapping_t *vm_owner_ordinary_lpc_task(object_t *target, const char *owner_id, co
   std::string submission_reason;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    future_registered = owner_future_store.insert(std::move(future));
+    future_registered = owner_future_store.admit_pending(std::move(future));
     if (future_registered) {
       queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
     } else {
@@ -5238,7 +5238,7 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
   std::string submission_error;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    future_registered = owner_future_store.insert(std::move(future));
+    future_registered = owner_future_store.admit_pending(std::move(future));
     if (!future_registered) {
       // Future-store capacity rejection: no trace, no enqueue. The message
       // index registered above is revoked after the lock.
@@ -5342,7 +5342,7 @@ uint64_t vm_owner_register_compute_future(const char *owner_id, uint64_t worker_
   future.state = "pending";
   future.created_at_ms = owner_now_ms();
 
-  if (!owner_future_store.insert(std::move(future))) {
+  if (!owner_future_store.admit_pending(std::move(future))) {
     return 0;
   }
   return future_id;
