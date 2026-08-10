@@ -1,6 +1,9 @@
 #ifndef SRC_VM_OBJECT_HANDLE_H_
 #define SRC_VM_OBJECT_HANDLE_H_
 
+#include "vm/context.h"
+
+#include <cassert>
 #include <cstdint>
 #include <string>
 
@@ -81,7 +84,14 @@ object_t *vm_object_handle_resolve(const VMObjectHandle &handle);
 // VMObjectRefGuard (or free_object). This is the safe API for paths that
 // must use the object pointer outside the object-store lock domain.
 object_t *vm_object_handle_acquire(const VMObjectHandle &handle);
+// C++ regression hooks: worker-thread refcount mutation counter.
+uint64_t vm_object_store_test_support_worker_ref_mutation_count();
+void vm_object_store_test_support_reset_worker_ref_mutation_count();
 // RAII wrapper that releases the acquired reference on destruction.
+//
+// Thread contract: this guard calls free_object() directly, so it may only
+// be used on the main VM thread (the worker threads must hand references to
+// the main thread via deferred release). Debug builds assert that contract.
 class VMObjectRefGuard {
  public:
   VMObjectRefGuard() = default;
@@ -105,6 +115,9 @@ class VMObjectRefGuard {
     auto *obj = object_;
     object_ = nullptr;
     if (obj) {
+#ifndef NDEBUG
+      assert(vm_context_is_main_thread());
+#endif
       free_object(&obj, "VMObjectRefGuard");
     }
     return obj;

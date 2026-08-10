@@ -290,6 +290,34 @@ bool &owner_thread_stopping = owner_thread_stopping_flag();
 bool &owner_main_draining = owner_main_draining_flag();
 std::vector<std::thread> &owner_threads = owner_threads_instance();
 
+// Worker-thread reference guard: hands the reference back to the main
+// thread via the deferred release queue instead of free_object() directly.
+// Worker threads must never mutate plain object_t refcounts themselves.
+class OwnerWorkerRefGuard {
+ public:
+  explicit OwnerWorkerRefGuard(object_t *obj) : object_(obj) {}
+  ~OwnerWorkerRefGuard() { release(); }
+  OwnerWorkerRefGuard(const OwnerWorkerRefGuard &) = delete;
+  OwnerWorkerRefGuard &operator=(const OwnerWorkerRefGuard &) = delete;
+  object_t *get() const { return object_; }
+  object_t *release() {
+    auto *obj = object_;
+    object_ = nullptr;
+    if (obj) {
+      if (vm_context_is_main_thread()) {
+        free_object(&obj, "owner worker ref guard");
+      } else {
+        std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+        owner_deferred_target_releases.push_back(obj);
+      }
+    }
+    return obj;
+  }
+
+ private:
+  object_t *object_{nullptr};
+};
+
 uint64_t append_owner_task_trace(uint64_t task_id, uint64_t sequence, const std::string &owner_id,
                                  uint64_t owner_epoch, const std::string &task_type,
                                  const std::string &task_key, const char *state);
@@ -2682,17 +2710,19 @@ void dispatch_owner_message_in_current_context(const OwnerMailboxTask &task) {
     complete_owner_message_task_locked(task);
     return;
   }
+  // Read-only diagnosis for the failure path (does not mutate refcounts).
   auto target_status = vm_object_handle_resolve_status(task.target_handle);
   if (target_status.status != VMObjectHandleResolveStatus::kCurrent) {
     auto error = stale_target_error(target_status.status);
     complete_owner_message_task_threadsafe(task, "failed", "", error.c_str());
     return;
   }
-
-  // Acquire an owning reference: the object-store lock is released after
-  // resolve, so the raw pointer must not be used without a reference.
-  VMObjectRefGuard target_guard(vm_object_handle_acquire(task.target_handle));
-  auto *target = target_guard.get();
+  // The target reference was acquired on the main thread during admission
+  // (one object-store lock domain, no TOCTOU) and handed to the worker via
+  // task.target. The worker only consumes the already-held reference and
+  // never mutates plain object_t refcounts; release happens through
+  // release_owner_task_target() (deferred to the main thread).
+  auto *target = task.target;
   if (!target || (target->flags & O_DESTRUCTED) ||
       !vm_owner_epoch_matches(target, task.owner_id.c_str(), task.owner_epoch)) {
     complete_owner_message_task_threadsafe(task, "failed", "", "stale target");
@@ -5159,6 +5189,10 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
   if (target_handle) {
     task.target_handle = *target_handle;
     task.target_object = target_handle->object_path;
+    // Main-thread admission acquire: resolve + add_ref happen inside one
+    // object-store lock domain (no TOCTOU), and the worker only consumes
+    // this already-held reference. The worker never mutates plain refcounts.
+    task.target = vm_object_handle_acquire(*target_handle);
   }
   auto target_task_id = task.task_id;
   auto target_status = target_handle ? vm_object_handle_resolve_status(*target_handle).status
@@ -5212,7 +5246,9 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
     } else {
       owner_trace_store.append_message(std::move(trace));
       if (target_handle) {
-        if (admission_target.status == VMObjectHandleResolveStatus::kCurrent && admission_target.object) {
+        // task.target was acquired on the main thread under the object-store
+        // lock domain; it is the authoritative current-check (no TOCTOU).
+        if (task.target) {
           enqueued_owner_task = enqueue_owner_task_locked(task, target_owner, &notify_owner_thread);
           if (enqueued_owner_task) {
             owner_trace_store.update_message_route_for_task(target_task_id,
@@ -5244,6 +5280,7 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
     if (future_registered) {
       complete_owner_future_for_task_locked(target_task_id, "failed", "", submission_error.c_str());
     }
+    release_owner_task_target(&task);
   }
   if (notify_owner_thread) {
     owner_runtime_cv.notify_one();

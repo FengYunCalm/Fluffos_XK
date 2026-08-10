@@ -14,7 +14,6 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-
 namespace {
 constexpr size_t kObjectStoreMigrationTraceLimit = 128;
 constexpr const char *kGlobalLiveObjectBridgeSource = "ObjectTable.global_live_object_bridge";
@@ -1487,6 +1486,29 @@ mapping_t *shard_mapping(const VMObjectShard &shard, const OwnerLocalBridgeSumma
 }
 }  // namespace
 
+// F05 regression probe: number of plain object_t refcount mutations
+// (add_ref/free_object) performed on non-main threads. The owner worker
+// contract forbids direct refcount mutation; tests assert this stays 0.
+namespace {
+std::atomic<uint64_t> g_object_ref_worker_mutations{0};
+
+void record_worker_ref_mutation() {
+  if (!vm_context_is_main_thread()) {
+    g_object_ref_worker_mutations.fetch_add(1, std::memory_order_relaxed);
+  }
+}
+}  // namespace
+
+// C++ regression hooks: worker-thread refcount mutation counter. Not part of
+// the LPC/runtime API.
+uint64_t vm_object_store_test_support_worker_ref_mutation_count() {
+  return g_object_ref_worker_mutations.load(std::memory_order_relaxed);
+}
+
+void vm_object_store_test_support_reset_worker_ref_mutation_count() {
+  g_object_ref_worker_mutations.store(0, std::memory_order_relaxed);
+}
+
 VMObjectHandle vm_object_handle_with_intent(object_t *object, const char *permission_intent) {
   VMObjectHandle handle;
   handle.permission_intent = safe_permission_intent(permission_intent);
@@ -1513,16 +1535,10 @@ object_t *vm_object_handle_resolve(const VMObjectHandle &handle) {
   return result.status == VMObjectHandleResolveStatus::kCurrent ? result.object : nullptr;
 }
 
-object_t *vm_object_handle_acquire(const VMObjectHandle &handle) {
-  auto result = vm_object_handle_resolve_status(handle);
-  if (result.status != VMObjectHandleResolveStatus::kCurrent || !result.object) {
-    return nullptr;
-  }
-  add_ref(result.object, "vm_object_handle_acquire");
-  return result.object;
-}
-
-VMObjectHandleResolveResult vm_object_handle_resolve_status(const VMObjectHandle &handle) {
+// Resolve a handle assuming the caller already holds the object-store lock
+// (shared read lock). Keeps resolve + any caller-side acquire in the same
+// lock domain so the object cannot be destructed/freed in between.
+static VMObjectHandleResolveResult resolve_handle_status_locked(const VMObjectHandle &handle) {
   VMObjectHandleResolveResult result;
   if (!handle.valid) {
     result.status = VMObjectHandleResolveStatus::kInvalidHandle;
@@ -1533,23 +1549,16 @@ VMObjectHandleResolveResult vm_object_handle_resolve_status(const VMObjectHandle
     return result;
   }
 
-  {
-    ObjectStoreReadLock lock(object_store_directory_mutex);
-    if (resolve_handle_from_owner_local_shard_locked(handle, result)) {
-      return result;
-    }
-    auto bridge_summary = owner_local_bridge_summary_locked();
-    result.global_record_bridge_retirement_ready = bridge_summary.global_record_bridge_retirement_ready;
-    result.global_live_object_bridge_retirement_ready = bridge_summary.global_live_object_bridge_retirement_ready;
-    if (diagnose_handle_from_owner_local_store_locked(handle, result)) {
-      return result;
-    }
+  if (resolve_handle_from_owner_local_shard_locked(handle, result)) {
+    return result;
   }
-
-  ObjectStoreReadLock lock(object_store_directory_mutex);
   auto bridge_summary = owner_local_bridge_summary_locked();
   result.global_record_bridge_retirement_ready = bridge_summary.global_record_bridge_retirement_ready;
   result.global_live_object_bridge_retirement_ready = bridge_summary.global_live_object_bridge_retirement_ready;
+  if (diagnose_handle_from_owner_local_store_locked(handle, result)) {
+    return result;
+  }
+
   if (result.global_live_object_bridge_retirement_ready) {
     result.global_live_object_fallback_skipped = true;
     result.global_live_object_fallback_reason = "global_live_object_bridge_retirement_ready";
@@ -1637,6 +1646,25 @@ VMObjectHandleResolveResult vm_object_handle_resolve_status(const VMObjectHandle
   result.status = VMObjectHandleResolveStatus::kCurrent;
   result.resolved_via_global_index = true;
   return result;
+}
+
+VMObjectHandleResolveResult vm_object_handle_resolve_status(const VMObjectHandle &handle) {
+  ObjectStoreReadLock lock(object_store_directory_mutex);
+  return resolve_handle_status_locked(handle);
+}
+
+object_t *vm_object_handle_acquire(const VMObjectHandle &handle) {
+  // Resolve and add_ref under the same object-store lock domain: a bare
+  // resolve-status lookup releases the lock before returning, so the object
+  // could be destructed/freed between resolve and add_ref (TOCTOU).
+  ObjectStoreReadLock lock(object_store_directory_mutex);
+  auto result = resolve_handle_status_locked(handle);
+  if (result.status != VMObjectHandleResolveStatus::kCurrent || !result.object) {
+    return nullptr;
+  }
+  record_worker_ref_mutation();
+  add_ref(result.object, "vm_object_handle_acquire");
+  return result.object;
 }
 
 const char *vm_object_handle_resolve_status_name(VMObjectHandleResolveStatus status) {

@@ -15007,6 +15007,60 @@ TEST_F(DriverTest, TestVmObjectHandleReportsCapabilityMetadata) {
   destruct_object(obj);
 }
 
+// F05: worker threads must never mutate plain object_t refcounts. After a
+// handle/message workload with owner threads enabled, the probe counter must
+// stay at zero (main-thread acquire + deferred release only).
+TEST_F(DriverTest, TestVmOwnerWorkerNeverMutatesObjectRefcounts) {
+  const char* owner = "owner/test/worker/ref-probe";
+
+  vm_owner_thread_stop();
+  vm_object_store_test_support_reset_worker_ref_mutation_count();
+
+  object_t* probe = load_object_for_test("single/void");
+  ASSERT_NE(probe, nullptr);
+  vm_owner_set_id(probe, owner);
+  auto handle = vm_object_handle(probe);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = find_string_in_mapping(map, key);
+    EXPECT_NE(value, &const0u) << key;
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER) << key;
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+
+  vm_owner_thread_start(1);
+  // Drive handle + message workloads on the worker: submit messages with a
+  // target handle, let the worker dispatch them, drain everything.
+  for (int i = 0; i < 8; i++) {
+    auto* submitted = vm_owner_submit_object_message(
+        "owner/test/worker/ref-probe-source", handle, "object_method", "ref/probe");
+    ASSERT_EQ(mapping_number(submitted, "success"), 1);
+    free_mapping(submitted);
+  }
+  for (int i = 0; i < 200; i++) {
+    auto* mailbox = vm_owner_mailbox_status(owner);
+    auto depth = mapping_number(mailbox, "owner_queue_depth");
+    free_mapping(mailbox);
+    if (depth == 0) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  vm_owner_thread_stop();
+  free_mapping(vm_owner_purge_mailbox(owner));
+  vm_owner_drain_main_tasks(1);
+
+  // The worker path consumed pre-acquired task.target references only; the
+  // deferred release queue must be empty and the mutation probe must be 0.
+  ASSERT_EQ(vm_object_store_test_support_worker_ref_mutation_count(), 0u);
+  auto* status = vm_owner_thread_status();
+  ASSERT_EQ(mapping_number(status, "deferred_target_releases"), 0);
+  free_mapping(status);
+
+  vm_owner_clear_id(probe);
+  destruct_object(probe);
+}
+
 TEST_F(DriverTest, TestVmObjectHandleReportsBasicResolveFailures) {
   VMObjectHandle invalid_handle;
   auto invalid_status = vm_object_handle_resolve_status(invalid_handle);
