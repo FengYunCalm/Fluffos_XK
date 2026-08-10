@@ -2030,6 +2030,17 @@ void gateway_invoke_master_write_callback_for_test(GatewayMaster *master) {
 
 void gateway_remove_master_for_test(int fd) { gateway_remove_master(fd); }
 
+GatewayMaster *gateway_master_for_test(int fd) {
+  auto it = g_gateway_masters.find(fd);
+  return (it != g_gateway_masters.end()) ? it->second.get() : nullptr;
+}
+
+size_t gateway_master_count_for_test() { return g_gateway_masters.size(); }
+
+int64_t gateway_read_dispatch_pending_for_test() {
+  return g_gateway_read_dispatch_pending_masters.load(std::memory_order_relaxed);
+}
+
 void gateway_reset_ingress_sequence_for_test() {
   g_gateway_ingress_sequence = {};
   g_gateway_runtime_counters.ingress_sequence_duplicates.store(

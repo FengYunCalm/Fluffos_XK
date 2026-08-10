@@ -607,6 +607,13 @@ size_t gateway_write_buffer_limit_for_test();
 GatewayMaster *gateway_register_master_for_test(int fd, bufferevent *bev);
 void gateway_invoke_master_write_callback_for_test(GatewayMaster *master);
 void gateway_remove_master_for_test(int fd);
+// Live-master lookup by fd (nullptr when not registered). Fuzz harnesses
+// must re-resolve by fd after every dispatch: a dispatch may remove the
+// master, and the old raw pointer is freed at that moment.
+GatewayMaster *gateway_master_for_test(int fd);
+size_t gateway_master_count_for_test();
+// Current number of masters marked read-dispatch pending (leak check).
+int64_t gateway_read_dispatch_pending_for_test();
 void gateway_reset_ingress_sequence_for_test();
 int gateway_append_framed_output_for_test(evbuffer *output, const char *data,
                                           size_t len);
