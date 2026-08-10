@@ -18,3 +18,9 @@ __pycache__/
 /testsuite/trace_lpcc.json
 **/Testing/Temporary
 /.internal/
+
+# Pi-XK harness state and local test artifacts
+.pi-xk/
+testsuite/.run-isolated.lock
+testsuite/.run-isolated-*/
+testsuite/.run-isolated.lockdir/
