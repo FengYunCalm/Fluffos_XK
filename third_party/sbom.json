@@ -1,23 +1,28 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.4",
-  "serialNumber": "urn:uuid:2026-08-10-fluffos-sbom",
+  "serialNumber": "urn:uuid:b1429821-6fc7-5be2-ae83-82597df7ad51",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-08-10T00:00:00Z",
+    "timestamp": "2026-08-10T10:11:00Z",
     "tools": [
       {
         "vendor": "FluffOS",
-        "name": "sbom-generate.py"
+        "name": "sbom-generate.py",
+        "version": "2"
       }
-    ]
+    ],
+    "component": {
+      "type": "application",
+      "name": "FluffOS",
+      "version": "XK"
+    }
   },
   "components": [
     {
       "type": "library",
       "name": "argparse",
-      "version": "unknown",
-      "purl": null,
+      "version": "2.9 (p-ranav/argparse, vendored single-header)",
       "licenses": [
         {
           "license": {
@@ -33,13 +38,19 @@
       ],
       "supplier": {
         "name": "https://github.com/p-ranav/argparse"
-      }
+      },
+      "purl": "pkg:github/argparse@2.9 (p-ranav/argparse, vendored single-header)",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "446a310f4c1e5a8d06d7046b00b48278132c7fdca974b52e27ab286509b51038"
+        }
+      ]
     },
     {
       "type": "library",
       "name": "backward-cpp",
-      "version": "unknown",
-      "purl": null,
+      "version": "1.3.0",
       "licenses": [
         {
           "license": {
@@ -55,13 +66,19 @@
       ],
       "supplier": {
         "name": "https://github.com/bombela/backward-cpp"
-      }
+      },
+      "purl": "pkg:github/backward-cpp@1.3.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "569586a3fd9bc3b90069218f2eda2e820eb556a2b4cdf086e901aea00486bfcc"
+        }
+      ]
     },
     {
       "type": "library",
       "name": "crypt",
-      "version": "unknown",
-      "purl": null,
+      "version": "upstream lineage (OpenSSL crypt module, vendored snapshot)",
       "licenses": [
         {
           "license": {
@@ -77,13 +94,19 @@
       ],
       "supplier": {
         "name": "https://github.com/openssl/openssl (crypt module lineage)"
-      }
+      },
+      "purl": "pkg:github/crypt@upstream lineage (OpenSSL crypt module, vendored snapshot)",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "b6b403a1d5e4202b8346616d913508311b044f9ce44428d2cc8eacbb47df01d2"
+        }
+      ]
     },
     {
       "type": "library",
       "name": "ghc-filesystem",
-      "version": "unknown (v1.5.x lineage)",
-      "purl": null,
+      "version": "1.5.12",
       "licenses": [
         {
           "license": {
@@ -99,13 +122,19 @@
       ],
       "supplier": {
         "name": "https://github.com/gulrak/filesystem"
-      }
+      },
+      "purl": "pkg:github/ghc-filesystem@1.5.12",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d9d18c7aeae11a40f16c68a5964f93bd517097c23c863ade6b48f16114955f53"
+        }
+      ]
     },
     {
       "type": "library",
       "name": "fmt",
       "version": "10.1.0",
-      "purl": null,
       "licenses": [
         {
           "license": {
@@ -121,13 +150,19 @@
       ],
       "supplier": {
         "name": "https://github.com/fmtlib/fmt"
-      }
+      },
+      "purl": "pkg:github/fmt@10.1.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "49027b3a00d55c4886095973180426668b0196ad41f517857b800eb95a9968e7"
+        }
+      ]
     },
     {
       "type": "library",
       "name": "nlohmann-json",
       "version": "3.11.2",
-      "purl": null,
       "licenses": [
         {
           "license": {
@@ -143,13 +178,19 @@
       ],
       "supplier": {
         "name": "https://github.com/nlohmann/json"
-      }
+      },
+      "purl": "pkg:github/nlohmann-json@3.11.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "0ab1ca12c58eff340675695609df49b80c2e53096092ec2620ca50afaba1288e"
+        }
+      ]
     },
     {
       "type": "library",
       "name": "libevent",
-      "version": "unknown (2.1.x lineage)",
-      "purl": null,
+      "version": "2.2.1-alpha-dev (vendored snapshot)",
       "licenses": [
         {
           "license": {
@@ -165,13 +206,19 @@
       ],
       "supplier": {
         "name": "https://github.com/libevent/libevent"
-      }
+      },
+      "purl": "pkg:github/libevent@2.2.1-alpha-dev (vendored snapshot)",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1095096f8aa106a0d7e3aa1854f306ac19de152d7196dec7e3984c821bd805ba"
+        }
+      ]
     },
     {
       "type": "library",
       "name": "libtelnet",
       "version": "0.30.0",
-      "purl": null,
       "licenses": [
         {
           "license": {
@@ -187,13 +234,19 @@
       ],
       "supplier": {
         "name": "https://github.com/seanmiddleditch/libtelnet"
-      }
+      },
+      "purl": "pkg:github/libtelnet@0.30.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "97ab7aaf4102d9ac36ff8401de7d1a03f87091bbf74b78c60772dd67a308315c"
+        }
+      ]
     },
     {
       "type": "library",
       "name": "libwebsockets",
       "version": "4.2.1",
-      "purl": null,
       "licenses": [
         {
           "license": {
@@ -209,13 +262,19 @@
       ],
       "supplier": {
         "name": "https://github.com/warmcat/libwebsockets"
-      }
+      },
+      "purl": "pkg:github/libwebsockets@4.2.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "cbcecb4ed1b8bedf5a825049d3f90e7aa871627fdc1741bf68cd5429ad8141d0"
+        }
+      ]
     },
     {
       "type": "library",
       "name": "scope-guard",
-      "version": "unknown",
-      "purl": null,
+      "version": "0.9.0",
       "licenses": [
         {
           "license": {
@@ -231,13 +290,19 @@
       ],
       "supplier": {
         "name": "https://github.com/ricab/scope_guard"
-      }
+      },
+      "purl": "pkg:github/scope-guard@0.9.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "941998359d2650340f255a518dff2b5ebb3c8e8042023258a1c42c78b48aba33"
+        }
+      ]
     },
     {
       "type": "library",
       "name": "utf8-decoder-dfa",
-      "version": "unknown",
-      "purl": null,
+      "version": "bjoern.hoehrmann.de dfa decoder (vendored snapshot)",
       "licenses": [
         {
           "license": {
@@ -253,13 +318,19 @@
       ],
       "supplier": {
         "name": "https://github.com/nelhage/utf8_decoder_dfa"
-      }
+      },
+      "purl": "pkg:github/utf8-decoder-dfa@bjoern.hoehrmann.de dfa decoder (vendored snapshot)",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "976a128e6d73f2ba9a8336e439a8b71b0fed2af619b7f985061064178cbb1585"
+        }
+      ]
     },
     {
       "type": "library",
       "name": "utfcpp",
-      "version": 3.2,
-      "purl": null,
+      "version": "3.2",
       "licenses": [
         {
           "license": {
@@ -275,17 +346,23 @@
       ],
       "supplier": {
         "name": "https://github.com/nemtrif/utfcpp"
-      }
+      },
+      "purl": "pkg:github/utfcpp@3.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1fb6608b37fea1dfb3e7a829e257eca02a06d15efeb689a7cc6d36cfbfbdee4f"
+        }
+      ]
     },
     {
       "type": "library",
       "name": "widecharwidth",
-      "version": "unknown",
-      "purl": null,
+      "version": "public-domain tables (vendored snapshot)",
       "licenses": [
         {
           "license": {
-            "name": "MIT"
+            "name": "MIT / CC0 (public domain)"
           }
         }
       ],
@@ -297,13 +374,19 @@
       ],
       "supplier": {
         "name": "https://github.com/ridiculousfish/widecharwidth"
-      }
+      },
+      "purl": "pkg:github/widecharwidth@public-domain tables (vendored snapshot)",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "2bc0db7d88788db7bca418d11daa6dad2586c5c025b681fa49ec3abf8732f22b"
+        }
+      ]
     },
     {
       "type": "library",
       "name": "jemalloc",
       "version": "5.3.0",
-      "purl": null,
       "licenses": [
         {
           "license": {
@@ -322,7 +405,99 @@
           "alg": "SHA-256",
           "content": "2db82d1e7119df3e71b7640219b6dfe84789bc0537983c3b7ac4f7189aecfeaa"
         }
+      ],
+      "purl": "pkg:generic/jemalloc@5.3.0"
+    },
+    {
+      "type": "operating-system",
+      "name": "alpine-base-image",
+      "version": "3.18",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "fd032399cd767f310a1d1274e81cab9f0fd8a49b3589eba2c3420228cd45b6a7"
+        }
       ]
+    },
+    {
+      "type": "application",
+      "name": "actions/checkout@v4",
+      "version": "pinned-by-workflow"
+    },
+    {
+      "type": "application",
+      "name": "actions/checkout@v7",
+      "version": "pinned-by-workflow"
+    },
+    {
+      "type": "application",
+      "name": "actions/upload-artifact@v4",
+      "version": "pinned-by-workflow"
+    },
+    {
+      "type": "application",
+      "name": "actions/download-artifact@v4",
+      "version": "pinned-by-workflow"
+    },
+    {
+      "type": "application",
+      "name": "actions/upload-release-asset@v1",
+      "version": "pinned-by-workflow"
+    },
+    {
+      "type": "application",
+      "name": "actions/github-script@v7",
+      "version": "pinned-by-workflow"
+    },
+    {
+      "type": "application",
+      "name": "actions/configure-pages@v5",
+      "version": "pinned-by-workflow"
+    },
+    {
+      "type": "application",
+      "name": "actions/deploy-pages@v4",
+      "version": "pinned-by-workflow"
+    },
+    {
+      "type": "application",
+      "name": "actions/upload-pages-artifact@v3",
+      "version": "pinned-by-workflow"
+    },
+    {
+      "type": "application",
+      "name": "actions/setup-node@v4",
+      "version": "pinned-by-workflow"
+    },
+    {
+      "type": "application",
+      "name": "docker/setup-buildx-action@v3",
+      "version": "pinned-by-workflow"
+    },
+    {
+      "type": "application",
+      "name": "docker/metadata-action@v5",
+      "version": "pinned-by-workflow"
+    },
+    {
+      "type": "application",
+      "name": "docker/build-push-action@v5",
+      "version": "pinned-by-workflow"
+    },
+    {
+      "type": "application",
+      "name": "github/codeql-action/init@v4",
+      "version": "pinned-by-workflow"
+    },
+    {
+      "type": "application",
+      "name": "github/codeql-action/analyze@v4",
+      "version": "pinned-by-workflow"
+    },
+    {
+      "type": "application",
+      "name": "msys2/setup-msys2@v2",
+      "version": "pinned-by-workflow"
     }
   ]
 }

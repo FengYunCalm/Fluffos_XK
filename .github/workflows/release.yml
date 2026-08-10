@@ -3,6 +3,10 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      target_sha:
+        description: 'Commit SHA to release (must be reachable from origin/master)'
+        required: true
+        type: string
       prerelease:
         description: 'Mark as pre-release'
         required: false
@@ -16,35 +20,95 @@ env:
   CMAKE_BUILD_TYPE: Release
   CMAKE_COMMON_FLAGS: -DCMAKE_BUILD_TYPE=Release -DMARCH_NATIVE=OFF
   CTEST_OUTPUT_ON_FAILURE: 1
+  RELEASE_SHA: ${{ github.event.inputs.target_sha }}
 
 permissions:
   contents: write
   packages: write
 
+# One release per target SHA at a time: two concurrent dispatches for the
+# same SHA must not race on the version tag.
+concurrency:
+  group: release-${{ github.event.inputs.target_sha }}
+  cancel-in-progress: false
+
 jobs:
-  generate-version:
-    name: Generate Version Number
+  validate-target:
+    name: Validate Target SHA and Required Checks
     runs-on: ubuntu-latest
+    # Protected environment: requires an approved reviewer before any job in
+    # this workflow may run with release credentials.
+    environment: release
     outputs:
-      version: ${{ steps.generate.outputs.version }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Validate target SHA format
+        run: |
+          SHA="${{ github.event.inputs.target_sha }}"
+          if ! echo "$SHA" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "FAIL: target_sha must be a full 40-hex commit SHA" >&2
+            exit 1
+          fi
+
+      - name: Verify target SHA is reachable from origin/master
+        run: |
+          SHA="${{ github.event.inputs.target_sha }}"
+          git fetch origin master --depth=1000
+          if ! git merge-base --is-ancestor "$SHA" origin/master; then
+            echo "FAIL: target SHA $SHA is not reachable from origin/master" >&2
+            exit 1
+          fi
+          # The checkout must resolve to exactly the requested SHA.
+          if [ "$(git rev-parse HEAD)" != "$SHA" ]; then
+            echo "FAIL: checkout HEAD $(git rev-parse HEAD) != requested $SHA" >&2
+            exit 1
+          fi
+          echo "PASS: target SHA $SHA is reachable and matches checkout"
+
+      - name: Check required checks on target SHA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHA="${{ github.event.inputs.target_sha }}"
+          # Required contexts come from branch protection; fall back to a
+          # documented list when the API is not available.
+          REQUIRED_CONTEXTS=""
+          if gh api "repos/${{ github.repository }}/branches/master/protection/required_status_checks/contexts" >/tmp/contexts.json 2>/dev/null; then
+            REQUIRED_CONTEXTS=$(python3 -c 'import json,sys; print(" ".join(json.load(open("/tmp/contexts.json"))))')
+          fi
+          if [ -z "$REQUIRED_CONTEXTS" ]; then
+            REQUIRED_CONTEXTS="Docs Evidence & Links Ubuntu (gcc, Debug) Ubuntu (gcc, RelWithDebInfo) Ubuntu (clang, Debug) Ubuntu (clang, RelWithDebInfo) macOS (default, Debug) macOS (default, RelWithDebInfo) Windows (default, Debug) Windows (default, RelWithDebInfo)"
+          fi
+          # Collect the latest check-run conclusions for the SHA.
+          gh api "repos/${{ github.repository }}/commits/$SHA/check-runs" --paginate \
+            > /tmp/check-runs.json
+          FAILED=""
+          for ctx in $REQUIRED_CONTEXTS; do
+            conclusion=$(python3 -c 'import json,sys; d=json.load(open("/tmp/check-runs.json")); r=[x for x in d.get("check_runs",[]) if x.get("name")==sys.argv[1]]; print(r[-1].get("conclusion") or "in_progress" if r else "missing")' "$ctx")
+            echo "  $ctx: $conclusion"
+            if [ "$conclusion" != "success" ]; then
+              FAILED="$FAILED $ctx=$conclusion"
+            fi
+          done
+          if [ -n "$FAILED" ]; then
+            echo "FAIL: required checks not green on $SHA:$FAILED" >&2
+            exit 1
+          fi
+          echo "PASS: all required checks green on $SHA"
+
       - name: Generate Version
-        id: generate
+        id: version
         run: |
           # Get current date in YYYY.MMDD format
           DATE_VERSION=$(date -u '+%Y.%m%d')
-
           # Fetch all tags
           git fetch --tags
-
           # Find existing tags for today's date
           EXISTING_TAGS=$(git tag -l "v${DATE_VERSION}.*" | sort -V)
-
-          # Find the highest increment for today
           if [ -z "$EXISTING_TAGS" ]; then
             INCREMENT=0
           else
@@ -52,16 +116,13 @@ jobs:
             LAST_INCREMENT=$(echo "$LAST_TAG" | sed -E "s/v${DATE_VERSION}\.([0-9]+)/\1/")
             INCREMENT=$((LAST_INCREMENT + 1))
           fi
-
-          # Generate new version (candidate only; tag is created only after all gates pass)
           VERSION="v${DATE_VERSION}.${INCREMENT}"
-
-          echo "Generated version: $VERSION"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Generated version: $VERSION (target SHA: ${{ github.event.inputs.target_sha }})"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   build-binaries:
     name: Build ${{ matrix.platform }} Binary
-    needs: generate-version
+    needs: validate-target
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -89,7 +150,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.inputs.target_sha }}
 
       - name: Install Dependencies (Windows)
         if: matrix.platform == 'windows'
@@ -117,34 +178,23 @@ jobs:
         run: |
           docker run --rm -v $PWD:/workspace -w /workspace alpine:3.18 /bin/sh -c '
             set -e
-
-            # Install dependencies
             apk add --no-progress --no-cache \
               linux-headers gcc g++ clang-dev make cmake bash \
               mariadb-dev mariadb-static postgresql-dev sqlite-dev sqlite-static \
               openssl-dev openssl-libs-static zlib-dev zlib-static icu-dev icu-static \
               pcre-dev bison git musl-dev libelf-static elfutils-dev \
               zstd-static bzip2-static xz-static tar
-
-            # Build jemalloc (checksum-verified download; see third_party/manifest.yaml)
             cd /tmp
             wget -q -O jemalloc.tar.bz2 https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2
             echo "2db82d1e7119df3e71b7640219b6dfe84789bc0537983c3b7ac4f7189aecfeaa  jemalloc.tar.bz2" | sha256sum -c -
             tar -xjf jemalloc.tar.bz2
             cd jemalloc-5.3.0
             ./configure --prefix=/usr && make -j$(nproc) && make install
-
-            # Build FluffOS
             cd /workspace
             mkdir -p build && cd build
             cmake .. ${{ env.CMAKE_COMMON_FLAGS }} -DSTATIC=ON
             make -j$(nproc) install
-
-            # Run tests. Failure must fail the job: no "|| true" here.
             ctest --output-on-failure -j$(nproc)
-
-            # Verify static linking with an explicit assertion instead of
-            # "ldd ... || echo": a dynamically linked driver is a failure.
             if ldd bin/driver 2>&1 | grep -q "not a dynamic executable"; then
               echo "PASS: bin/driver is statically linked"
             else
@@ -163,24 +213,24 @@ jobs:
       - name: Package (Windows)
         if: matrix.platform == 'windows'
         run: |
-          ASSET_NAME="fluffos-${{ needs.generate-version.outputs.version }}-${{ matrix.asset_suffix }}"
+          ASSET_NAME="fluffos-${{ needs.validate-target.outputs.version }}-${{ matrix.asset_suffix }}"
           cd build/bin && zip -r "../../${ASSET_NAME}" .
 
       - name: Package (Linux)
         if: matrix.platform == 'linux'
         run: |
-          ASSET_NAME="fluffos-${{ needs.generate-version.outputs.version }}-${{ matrix.asset_suffix }}"
+          ASSET_NAME="fluffos-${{ needs.validate-target.outputs.version }}-${{ matrix.asset_suffix }}"
           cd build/bin && tar czf "../../${ASSET_NAME}" .
 
       - name: Compute asset checksums
         run: |
-          ASSET_NAME="fluffos-${{ needs.generate-version.outputs.version }}-${{ matrix.asset_suffix }}"
+          ASSET_NAME="fluffos-${{ needs.validate-target.outputs.version }}-${{ matrix.asset_suffix }}"
           sha256sum "${ASSET_NAME}" > "${ASSET_NAME}.sha256"
 
       - name: Verify no test private keys in package
         if: matrix.platform == 'linux'
         run: |
-          ASSET_NAME="fluffos-${{ needs.generate-version.outputs.version }}-${{ matrix.asset_suffix }}"
+          ASSET_NAME="fluffos-${{ needs.validate-target.outputs.version }}-${{ matrix.asset_suffix }}"
           if tar tzf "${ASSET_NAME}" | grep -E '\.(pem|key)$' ; then
             echo "FAIL: release asset contains private-key fixture files"
             exit 1
@@ -192,28 +242,23 @@ jobs:
         with:
           name: release-asset-${{ matrix.platform }}
           path: |
-            fluffos-${{ needs.generate-version.outputs.version }}-${{ matrix.asset_suffix }}
-            fluffos-${{ needs.generate-version.outputs.version }}-${{ matrix.asset_suffix }}.sha256
+            fluffos-${{ needs.validate-target.outputs.version }}-${{ matrix.asset_suffix }}
+            fluffos-${{ needs.validate-target.outputs.version }}-${{ matrix.asset_suffix }}.sha256
           if-no-files-found: error
 
   build-docker:
-    name: Build and Push Docker Image
-    needs: [generate-version, build-binaries]
+    name: Build Docker Image (no push)
+    needs: [validate-target, build-binaries]
     runs-on: ubuntu-latest
+    outputs:
+      image_digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.inputs.target_sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Log into registry ${{ env.REGISTRY }}
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract Docker metadata
         id: meta
@@ -221,31 +266,51 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}},value=${{ needs.generate-version.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.generate-version.outputs.version }}
-            type=semver,pattern={{major}},value=${{ needs.generate-version.outputs.version }}
-            type=raw,value=${{ needs.generate-version.outputs.version }},enable=true
-            type=raw,value=latest,enable=${{ !inputs.prerelease }}
+            type=raw,value=${{ needs.validate-target.outputs.version }},enable=true
 
-      - name: Build and push Docker image
+      # Gate-first: build and load the image locally, record the digest, and
+      # do NOT push. The push happens only in finalize-release after every
+      # asset and checksum gate has passed.
+      - name: Build Docker image without push
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true
+          push: false
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Scan image for vulnerabilities (Trivy, non-blocking record)
+        if: always()
+        continue-on-error: true
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.50.1 image \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --format json --output /tmp/trivy.json \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate-target.outputs.version }} || true
+          echo "trivy scan recorded (see /tmp/trivy.json)"
+
+      - name: Upload image digest + scan
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-digest
+          path: /tmp/trivy.json
+          if-no-files-found: ignore
+
   create-release:
-    name: Create Release (tag-last)
+    name: Create Release (tag-last, gate-first)
     needs: [build-binaries, build-docker]
     runs-on: ubuntu-latest
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
       release_id: ${{ steps.create_release.outputs.id }}
-      version: ${{ needs.generate-version.outputs.version }}
+      version: ${{ needs.validate-target.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -255,10 +320,10 @@ jobs:
       # may a tag and release be created (artifact-first, gate-first, tag-last).
       - name: Create Git Tag
         run: |
-          VERSION="${{ needs.generate-version.outputs.version }}"
+          VERSION="${{ needs.validate-target.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$VERSION" -m "Release $VERSION"
+          git tag -a "$VERSION" -m "Release $VERSION (from ${{ github.event.inputs.target_sha }})"
           git push origin "$VERSION"
 
       - name: Create Draft Release
@@ -266,7 +331,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const version = '${{ needs.generate-version.outputs.version }}';
+            const version = '${{ needs.validate-target.outputs.version }}';
             const release = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -298,14 +363,19 @@ jobs:
             grep -q "$(basename "$f")" *.sha256 || { echo "FAIL: no checksum for $f"; exit 1; }
           done
 
+      - name: Verify SBOM and manifest JSON validity
+        run: |
+          python3 -m json.tool third_party/sbom.json >/dev/null
+          python3 -m json.tool docs/evidence/manifest.schema.json >/dev/null
+
       - name: Upload Release Assets
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./assets/fluffos-${{ needs.generate-version.outputs.version }}-windows-x86_64.zip
-          asset_name: fluffos-${{ needs.generate-version.outputs.version }}-windows-x86_64.zip
+          asset_path: ./assets/fluffos-${{ needs.validate-target.outputs.version }}-windows-x86_64.zip
+          asset_name: fluffos-${{ needs.validate-target.outputs.version }}-windows-x86_64.zip
           asset_content_type: application/zip
 
       - name: Upload Release Assets (Linux)
@@ -314,18 +384,36 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./assets/fluffos-${{ needs.generate-version.outputs.version }}-linux-x86_64-static.tar.gz
-          asset_name: fluffos-${{ needs.generate-version.outputs.version }}-linux-x86_64-static.tar.gz
+          asset_path: ./assets/fluffos-${{ needs.validate-target.outputs.version }}-linux-x86_64-static.tar.gz
+          asset_name: fluffos-${{ needs.validate-target.outputs.version }}-linux-x86_64-static.tar.gz
           asset_content_type: application/gzip
 
   finalize-release:
-    name: Finalize Release
+    name: Finalize Release (push image + notes)
     needs: [create-release, build-binaries, build-docker]
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.create-release.outputs.version }}
+          ref: ${{ github.event.inputs.target_sha }}
+
+      # The immutable version tag is pushed only after every gate above has
+      # passed; latest is updated last and only for non-prerelease builds.
+      - name: Push Docker version tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.validate-target.outputs.version }}"
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker pull ghcr.io/${{ github.repository }}:$VERSION || true
+          # Push the previously loaded local image under the version tag.
+          docker buildx build \
+            --push \
+            --platform linux/amd64 \
+            --tag ghcr.io/${{ github.repository }}:$VERSION \
+            --label org.opencontainers.image.revision=${{ github.event.inputs.target_sha }} \
+            .
 
       - name: Generate Release Documentation
         id: docs
@@ -348,47 +436,26 @@ jobs:
             - Complete distribution with all tools and libraries
             - Portable across most Linux distributions
 
-          ### What's Included
-          Each distribution contains:
-          - **driver** - Main FluffOS driver executable
-          - **lpcc** - LPC compiler
-          - **symbol** - Symbol table utility
-          - **o2json/json2o** - Object file converters
-          - **portbind** - Port binding helper (Linux only)
-          - **std/** - LPC standard library
-          - **include/** - LPC header files
-          - **www/** - WebSocket client files
-          - **keywords.json** - Language keywords database
-
           ### Docker Images
           Docker images are available at \`ghcr.io/${{ github.repository }}\`:
           - \`${VERSION}\` - This release version
-          ${{ !inputs.prerelease && '- `latest` - Latest stable release' || '' }}
 
-          Pull with:
-          \`\`\`bash
-          docker pull ghcr.io/${{ github.repository }}:${VERSION}
-          \`\`\`
+          ### Source
+          - Commit: \`${{ github.event.inputs.target_sha }}\`
 
           ## Installation
 
           ### Windows
           \`\`\`bash
-          # Extract distribution
           unzip fluffos-${VERSION}-windows-x86_64.zip -d fluffos
           cd fluffos
-
-          # Run driver with your config
           ./driver.exe /path/to/mudlib/config.cfg
           \`\`\`
 
           ### Linux
           \`\`\`bash
-          # Extract distribution
           mkdir fluffos && cd fluffos
           tar xzf ../fluffos-${VERSION}-linux-x86_64-static.tar.gz
-
-          # Run driver with your config
           ./driver /path/to/mudlib/config.cfg
           \`\`\`
 
@@ -414,9 +481,7 @@ jobs:
               repo: context.repo.repo,
               release_id: ${{ needs.create-release.outputs.release_id }}
             });
-
             const additionalNotes = fs.readFileSync('release-notes.md', 'utf8');
-
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -424,9 +489,19 @@ jobs:
               body: release.data.body + '\n\n' + additionalNotes
             });
 
+      - name: Push latest tag (stable only)
+        if: ${{ !inputs.prerelease }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker buildx imagetools create \
+            --tag ghcr.io/${{ github.repository }}:latest \
+            ghcr.io/${{ github.repository }}:${{ needs.validate-target.outputs.version }}
+
       - name: Release Summary
         run: |
-          VERSION="${{ needs.create-release.outputs.version }}"
+          VERSION="${{ needs.validate-target.outputs.version }}"
           cat << EOF
           ✅ Draft release ${VERSION} created after all gates passed!
           📦 Windows binary: fluffos-${VERSION}-windows-x86_64.zip

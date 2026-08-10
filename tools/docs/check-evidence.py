@@ -4,14 +4,17 @@
 Checks that every benchmark/smoke/capacity report in the given list (or under
 the reports directory) carries the required metadata fields, that the commit
 SHA matches the current checkout, that timestamps are sane, and that the
-cleanup state is recorded.
+cleanup state is recorded. JSON Schema validation is performed against the
+manifest schema when --schema is provided.
 
 Exit codes:
-  0: all checked reports pass
-  1: at least one report is missing required fields or fails a check
+  0: all checked reports pass and at least one report was checked
+  1: no reports were provided (empty gate is a failure), a report is missing
+     required fields, or a report fails a check
 
 Usage:
   tools/docs/check-evidence.py [--report PATH ...] [--reports-dir DIR] [--schema PATH]
+                               [--repo DIR] [--skip-commit-check]
 """
 
 import argparse
@@ -46,6 +49,34 @@ def current_commit(repo: str) -> str:
         check=False,
     )
     return out.stdout.strip() if out.returncode == 0 else ""
+
+
+def validate_json_schema(report: dict, schema_path: str, path: str) -> list[str]:
+    """Validate a report against a JSON Schema file (draft-07 subset via
+    jsonschema when available; otherwise structural fallback)."""
+    errors: list[str] = []
+    if not schema_path:
+        return errors
+    try:
+        import jsonschema  # type: ignore
+    except ImportError:
+        errors.append(
+            f"{path}: JSON Schema validation requested but 'jsonschema' is not installed"
+        )
+        return errors
+    try:
+        with open(schema_path, encoding="utf-8") as f:
+            schema = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        errors.append(f"{path}: cannot read schema {schema_path}: {e}")
+        return errors
+    try:
+        jsonschema.validate(report, schema)
+    except jsonschema.ValidationError as e:
+        errors.append(f"{path}: schema validation failed: {e.message}")
+    except jsonschema.SchemaError as e:
+        errors.append(f"{path}: schema file is invalid: {e}")
+    return errors
 
 
 def check_report(path: str, expected_commit: str, schema_path: str) -> list[str]:
@@ -94,6 +125,8 @@ def check_report(path: str, expected_commit: str, schema_path: str) -> list[str]
     if isinstance(platform, dict) and ("os" not in platform or "arch" not in platform):
         errors.append(f"{path}: platform must include os and arch")
 
+    errors.extend(validate_json_schema(report, schema_path, path))
+
     if errors:
         return errors
 
@@ -113,10 +146,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", action="append", default=[], help="report JSON path (repeatable)")
     parser.add_argument("--reports-dir", default="", help="scan all *.json under this dir")
-    parser.add_argument("--schema", default="", help="path to manifest.schema.json (optional)")
+    parser.add_argument("--schema", default="", help="path to manifest.schema.json (required for gates)")
     parser.add_argument("--repo", default=".", help="repo root for current commit SHA")
-    parser.add_argument("--skip-commit-check", action="store_true", help="do not compare commit_sha")
+    parser.add_argument("--skip-commit-check", action="store_true",
+                        help="do not compare commit_sha (forbidden for CI gates)")
     args = parser.parse_args()
+
+    if args.skip_commit_check and os.environ.get("CI"):
+        print("FAIL: --skip-commit-check is forbidden in CI: every report must match the PR HEAD",
+              file=sys.stderr)
+        return 1
 
     paths = list(args.report)
     if args.reports_dir:
@@ -126,8 +165,10 @@ def main() -> int:
                     paths.append(os.path.join(root, f))
 
     if not paths:
-        print("no reports to check", file=sys.stderr)
-        return 0
+        # Empty gate: this is a failure, not a pass. A gate that validates
+        # nothing cannot prove anything about the current HEAD.
+        print("FAIL: no reports to check (empty evidence gate)", file=sys.stderr)
+        return 1
 
     expected_commit = "" if args.skip_commit_check else current_commit(args.repo)
 

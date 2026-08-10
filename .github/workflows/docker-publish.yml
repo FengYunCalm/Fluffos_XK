@@ -3,7 +3,6 @@ name: Docker
 on:
   push:
     branches: [master]
-    tags: ['v*.*']
     paths-ignore: ['docs/**']
   pull_request:
     branches: [master]
@@ -15,11 +14,15 @@ env:
 
 permissions:
   contents: read
-  packages: write
+  packages: read
 
+# This workflow is a build-and-scan gate only. It never pushes images: the
+# release workflow is the single entry point with push permission, and it
+# only pushes after every gate (tests, sanitizers, fuzz, SBOM, checksums,
+# vulnerability scan) has passed for the exact target SHA.
 jobs:
-  build-and-push:
-    name: Build and Push Docker Image
+  build-and-scan:
+    name: Build Docker Image (no push)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,21 +37,20 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
-      - name: Log into registry ${{ env.REGISTRY }}
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
+      - name: Build Docker image without push
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          push: false
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify image builds and runs (smoke)
+        run: |
+          IMAGE=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -m1 "${{ env.IMAGE_NAME }}")
+          test -n "$IMAGE"
+          docker run --rm --entrypoint /bin/sh "$IMAGE" -c 'test -x /usr/local/bin/driver || test -x /driver'

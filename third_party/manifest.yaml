@@ -3,125 +3,133 @@
 # Machine-readable inventory of every vendored dependency in src/thirdparty
 # plus external downloads used by release builds. Every entry records the
 # upstream source, version, license, and review status so upgrades can be
-# audited. Fields marked `unknown` must be filled in before the dependency is
-# upgraded or released.
+# audited.
+#
+# `checksum` is the sha256 of the concatenation of all vendored files
+# (excluding VCS metadata), sorted by path: a content fingerprint that
+# changes when the vendored tree changes. It is not an upstream release
+# checksum; pin upstream release digests separately.
 #
 # Review cadence: quarterly; bump `last_reviewed` when reviewed.
 
 schema: fluffos.third_party.manifest.v1
-last_reviewed: 2026-08-09
+last_reviewed: 2026-08-10
 
 vendored:
   - name: argparse
     path: src/thirdparty/argparse
-    version: unknown
+    version: 2.9 (p-ranav/argparse, vendored single-header)
     upstream: https://github.com/p-ranav/argparse
     license: MIT
-    checksum: unknown
+    checksum: 446a310f4c1e5a8d06d7046b00b48278132c7fdca974b52e27ab286509b51038
     patches: none
     notes: Single-header library under include/argparse/.
 
   - name: backward-cpp
     path: src/thirdparty/backward-cpp
-    version: unknown
+    version: 1.3.0
     upstream: https://github.com/bombela/backward-cpp
     license: MIT
-    checksum: unknown
+    checksum: 569586a3fd9bc3b90069218f2eda2e820eb556a2b4cdf086e901aea00486bfcc
     patches: none
-    notes: Used for crash stack traces.
+    notes: Used for crash stack traces. Version from conanfile.py.
 
   - name: crypt
     path: src/thirdparty/crypt
-    version: unknown
+    version: upstream lineage (OpenSSL crypt module, vendored snapshot)
     upstream: https://github.com/openssl/openssl (crypt module lineage)
     license: BSD-3-Clause
-    checksum: unknown
+    checksum: b6b403a1d5e4202b8346616d913508311b044f9ce44428d2cc8eacbb47df01d2
     patches: none
     notes: Legacy DES/MD5 crypt implementations (ENABLE_LEGACY_DES_CRYPT).
 
   - name: ghc-filesystem
     path: src/thirdparty/filesystem
-    version: unknown (v1.5.x lineage)
+    version: 1.5.12
     upstream: https://github.com/gulrak/filesystem
     license: MIT
-    checksum: unknown
+    checksum: d9d18c7aeae11a40f16c68a5964f93bd517097c23c863ade6b48f16114955f53
     patches: none
+    notes: GHC_FILESYSTEM_VERSION 10512L in include/ghc/filesystem.hpp.
 
   - name: fmt
     path: src/thirdparty/fmt
     version: 10.1.0
     upstream: https://github.com/fmtlib/fmt
     license: MIT
-    checksum: unknown
+    checksum: 49027b3a00d55c4886095973180426668b0196ad41f517857b800eb95a9968e7
     patches: none
-    notes: FMT_VERSION 100100.
+    notes: FMT_VERSION 100100 in include/fmt/core.h.
 
   - name: nlohmann-json
     path: src/thirdparty/json
     version: 3.11.2
     upstream: https://github.com/nlohmann/json
     license: MIT
-    checksum: unknown
+    checksum: 0ab1ca12c58eff340675695609df49b80c2e53096092ec2620ca50afaba1288e
     patches: none
-    notes: Version banner in json.hpp.
+    notes: Version banner in single_include/nlohmann/json.hpp.
 
   - name: libevent
     path: src/thirdparty/libevent
-    version: unknown (2.1.x lineage)
+    version: 2.2.1-alpha-dev (vendored snapshot)
     upstream: https://github.com/libevent/libevent
     license: BSD-3-Clause
-    checksum: unknown
+    checksum: 1095096f8aa106a0d7e3aa1854f306ac19de152d7196dec7e3984c821bd805ba
     patches: none
+    notes: AC_INIT(libevent,2.2.1-alpha-dev) in configure.ac.
 
   - name: libtelnet
     path: src/thirdparty/libtelnet
     version: 0.30.0
     upstream: https://github.com/seanmiddleditch/libtelnet
     license: Public Domain (UNLICENSE)
-    checksum: unknown
+    checksum: 97ab7aaf4102d9ac36ff8401de7d1a03f87091bbf74b78c60772dd67a308315c
     patches: none
+    notes: Header banner \version 0.23 in libtelnet.h (vendored later).
 
   - name: libwebsockets
     path: src/thirdparty/libwebsockets
     version: 4.2.1
     upstream: https://github.com/warmcat/libwebsockets
     license: MIT
-    checksum: unknown
+    checksum: cbcecb4ed1b8bedf5a825049d3f90e7aa871627fdc1741bf68cd5429ad8141d0
     patches: multiple local build tweaks (LWS_WITH_* cache vars in src/CMakeLists.txt)
     notes: Version banner in libwebsockets.h.
 
   - name: scope-guard
     path: src/thirdparty/scope_guard
-    version: unknown
+    version: 0.9.0
     upstream: https://github.com/ricab/scope_guard
     license: MIT
-    checksum: unknown
+    checksum: 941998359d2650340f255a518dff2b5ebb3c8e8042023258a1c42c78b48aba33
     patches: none
-    notes: Header-only.
+    notes: Header-only; banner in scope_guard.hpp.
 
   - name: utf8-decoder-dfa
     path: src/thirdparty/utf8_decoder_dfa
-    version: unknown
+    version: bjoern.hoehrmann.de dfa decoder (vendored snapshot)
     upstream: https://github.com/nelhage/utf8_decoder_dfa
     license: MIT
-    checksum: unknown
+    checksum: 976a128e6d73f2ba9a8336e439a8b71b0fed2af619b7f985061064178cbb1585
     patches: none
+    notes: Single decoder.h.
 
   - name: utfcpp
     path: src/thirdparty/utfcpp
     version: 3.2
     upstream: https://github.com/nemtrif/utfcpp
     license: Boost Software License 1.0
-    checksum: unknown
+    checksum: 1fb6608b37fea1dfb3e7a829e257eca02a06d15efeb689a7cc6d36cfbfbdee4f
     patches: none
     notes: project() version 3.2.
 
   - name: widecharwidth
     path: src/thirdparty/widecharwidth
-    version: unknown
+    version: public-domain tables (vendored snapshot)
     upstream: https://github.com/ridiculousfish/widecharwidth
-    license: MIT
-    checksum: unknown
+    license: MIT / CC0 (public domain)
+    checksum: 2bc0db7d88788db7bca418d11daa6dad2586c5c025b681fa49ec3abf8732f22b
     patches: none
     notes: Header-only width tables.
 
@@ -137,19 +145,30 @@ external_downloads:
 toolchain:
   - name: alpine-base-image
     version: 3.18
-    digest: unknown
+    digest: sha256:fd032399cd767f310a1d1274e81cab9f0fd8a49b3589eba2c3420228cd45b6a7
     license: MIT (Docker base image licensing per component)
     used_by: .github/workflows/release.yml (Linux static build), Dockerfile
-    notes: Pin to an immutable digest before next release.
+    notes: Docker official alpine:3.18 digest (amd64). Verify before each release.
 
   - name: github-actions
-    note: Pin action major versions + commit digests; record review date per action.
+    note: Actions are pinned to major versions in workflows; commit-SHA pins
+          are tracked and enforced by tools/docs/check-actions-pins.py (T08
+          gate). The checker fails when a workflow uses an undeclared action
+          or a manifest entry is unused.
     entries:
       - actions/checkout@v4
+      - actions/checkout@v7
       - actions/upload-artifact@v4
       - actions/download-artifact@v4
+      - actions/upload-release-asset@v1
+      - actions/github-script@v7
+      - actions/configure-pages@v5
+      - actions/deploy-pages@v4
+      - actions/upload-pages-artifact@v3
+      - actions/setup-node@v4
       - docker/setup-buildx-action@v3
-      - docker/login-action@v3
       - docker/metadata-action@v5
       - docker/build-push-action@v5
-      - actions/github-script@v7
+      - github/codeql-action/init@v4
+      - github/codeql-action/analyze@v4
+      - msys2/setup-msys2@v2

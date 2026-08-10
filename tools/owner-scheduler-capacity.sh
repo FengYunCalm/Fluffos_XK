@@ -11,7 +11,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-build}"
-REPORT_DIR="${REPORT_DIR:-$ROOT_DIR/build/reports/capacity}"
+export REPORT_DIR="${REPORT_DIR:-$ROOT_DIR/build/reports/capacity}"
 
 case "$BUILD_DIR" in
   /*) ;;
@@ -26,7 +26,17 @@ PLATFORM_OS="$(uname -s)"
 PLATFORM_ARCH="$(uname -m)"
 CPU_CORES="$(nproc)"
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-BUILD_CONFIG_HASH="debug-$(c++ --version | head -1 | md5sum | cut -c1-12)"
+# Build config hash: covers the compiler identity, the CMake cache, and the
+# preset so a changed cache/preset/flags invalidates the evidence.
+BUILD_CONFIG_HASH="$( {
+  c++ --version | head -1
+  if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
+    grep -E '^(CMAKE_BUILD_TYPE|CMAKE_C_COMPILER|CMAKE_CXX_COMPILER|CMAKE_CXX_FLAGS|CMAKE_CXX_FLAGS_DEBUG|CMAKE_CXX_FLAGS_RELWITHDEBINFO|ENABLE_ASAN|ENABLE_UBSAN|ENABLE_TSAN|ENABLE_LTO|MARCH_NATIVE|PACKAGE_DB_SQLITE):' "$BUILD_DIR/CMakeCache.txt" || true
+  fi
+  if [ -f "$ROOT_DIR/CMakePresets.json" ]; then
+    cat "$ROOT_DIR/CMakePresets.json"
+  fi
+} | md5sum | cut -c1-12 )"
 
 cmake --build "$BUILD_DIR" --target owner_runtime_bench lpc_vm_bench object_store_bench -j "$(nproc)" >/dev/null
 
@@ -73,22 +83,26 @@ wrap "$REPORT_DIR/owner_runtime_bench_raw.json" "owner_runtime_bench_capacity" \
   "owner_runtime_bench --json owner_runtime_bench_raw.json"
 
 echo "== lpc vm bench =="
-"$BENCH_BIN/lpc_vm_bench" --json "$REPORT_DIR/lpc_vm_bench_raw.json" >/dev/null 2>&1 || true
-if [ -f "$REPORT_DIR/lpc_vm_bench_raw.json" ]; then
-  wrap "$REPORT_DIR/lpc_vm_bench_raw.json" "lpc_vm_bench_capacity" "lpc_vm_bench --json lpc_vm_bench_raw.json"
+"$BENCH_BIN/lpc_vm_bench" --json "$REPORT_DIR/lpc_vm_bench_raw.json" >/dev/null
+if [ ! -f "$REPORT_DIR/lpc_vm_bench_raw.json" ]; then
+  echo "FAIL: lpc_vm_bench produced no report" >&2
+  exit 1
 fi
+wrap "$REPORT_DIR/lpc_vm_bench_raw.json" "lpc_vm_bench_capacity" "lpc_vm_bench --json lpc_vm_bench_raw.json"
 
 echo "== object store bench =="
-"$BENCH_BIN/object_store_bench" --json "$REPORT_DIR/object_store_bench_raw.json" >/dev/null 2>&1 || true
-if [ -f "$REPORT_DIR/object_store_bench_raw.json" ]; then
-  wrap "$REPORT_DIR/object_store_bench_raw.json" "object_store_bench_capacity" "object_store_bench --json object_store_bench_raw.json"
+"$BENCH_BIN/object_store_bench" --json "$REPORT_DIR/object_store_bench_raw.json" >/dev/null
+if [ ! -f "$REPORT_DIR/object_store_bench_raw.json" ]; then
+  echo "FAIL: object_store_bench produced no report" >&2
+  exit 1
 fi
+wrap "$REPORT_DIR/object_store_bench_raw.json" "object_store_bench_capacity" "object_store_bench --json object_store_bench_raw.json"
 
 echo "== validate evidence =="
 python3 "$ROOT_DIR/tools/docs/check-evidence.py" \
   --report "$REPORT_DIR/owner_runtime_bench_capacity.json" \
   --report "$REPORT_DIR/lpc_vm_bench_capacity.json" \
   --report "$REPORT_DIR/object_store_bench_capacity.json" \
-  --skip-commit-check
+  --schema "$ROOT_DIR/docs/evidence/manifest.schema.json"
 rm -f "$REPORT_DIR"/*_raw.json
 echo "reports in: $REPORT_DIR"
