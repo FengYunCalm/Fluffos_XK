@@ -1,5 +1,12 @@
 # PR #36 合并审计报告与整改执行方案
 
+> **历史快照**：本文档是 2026-08-10 对当时 HEAD（`bc92d6a4`）的审计证据，
+> 记录了 T01-T18 整改的初版问题与方案。后续第二轮回合审计发现首轮整改在
+> 当前 HEAD 上仍未闭合（CI workflow 无法解析、fuzz 生命周期、Future 槽位/
+> 墓碑、ObjectHandle 主线程强制、证据/发布/供应链等），其发现与整改执行
+> 见 **`docs/pr-36-second-round-merge-audit-and-remediation-plan-2026-08-10.md`**；
+> 两项审计结论冲突时以第二轮为准。本文档保留为历史证据，不做覆盖式修改。
+
 > 审计日期：2026-08-10（Asia/Shanghai）
 > 审计对象：[PR #36](https://github.com/FengYunCalm/Fluffos_XK/pull/36)
 > 基线：`master` / `24bd5f4f5126963966d1d91787f327f4cc84a5e7`
