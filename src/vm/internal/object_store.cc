@@ -1654,17 +1654,35 @@ VMObjectHandleResolveResult vm_object_handle_resolve_status(const VMObjectHandle
 }
 
 object_t *vm_object_handle_acquire(const VMObjectHandle &handle) {
+  return vm_object_handle_acquire_status(handle).object;
+}
+
+VMObjectHandleAcquireResult vm_object_handle_acquire_status(const VMObjectHandle &handle) {
+  VMObjectHandleAcquireResult result;
+  // Main-thread admission contract (R2-F06), enforced in ALL builds: plain
+  // object_t refcounts may only be modified on the main VM thread. Workers
+  // consume references that were already held at submission time and hand
+  // them back via the deferred release queue; a worker-nested submission is
+  // stably rejected instead of mutating a refcount off-main. The rejection
+  // is NOT counted as a mutation (the probe counts actual off-main
+  // add_ref/free_object only, so removing this guard fails the probe).
+  if (!vm_context_is_main_thread()) {
+    result.status = VMObjectHandleResolveStatus::kMainThreadAdmissionRequired;
+    return result;
+  }
   // Resolve and add_ref under the same object-store lock domain: a bare
   // resolve-status lookup releases the lock before returning, so the object
   // could be destructed/freed between resolve and add_ref (TOCTOU).
   ObjectStoreReadLock lock(object_store_directory_mutex);
-  auto result = resolve_handle_status_locked(handle);
-  if (result.status != VMObjectHandleResolveStatus::kCurrent || !result.object) {
-    return nullptr;
+  auto resolved = resolve_handle_status_locked(handle);
+  if (resolved.status != VMObjectHandleResolveStatus::kCurrent || !resolved.object) {
+    result.status = resolved.status;
+    return result;
   }
-  record_worker_ref_mutation();
-  add_ref(result.object, "vm_object_handle_acquire");
-  return result.object;
+  add_ref(resolved.object, "vm_object_handle_acquire");
+  result.object = resolved.object;
+  result.status = VMObjectHandleResolveStatus::kCurrent;
+  return result;
 }
 
 const char *vm_object_handle_resolve_status_name(VMObjectHandleResolveStatus status) {
@@ -1695,6 +1713,8 @@ const char *vm_object_handle_resolve_status_name(VMObjectHandleResolveStatus sta
       return "live_owner_mismatch";
     case VMObjectHandleResolveStatus::kLiveOwnerEpochMismatch:
       return "live_owner_epoch_mismatch";
+    case VMObjectHandleResolveStatus::kMainThreadAdmissionRequired:
+      return "main_thread_admission_required";
   }
   return "unknown";
 }

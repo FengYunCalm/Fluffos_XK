@@ -226,6 +226,25 @@ mapping owner_lpc_probe()
   ]);
 }
 
+// R2-F06 worker-nested submission probe: when this method runs ON the owner
+// worker, every object-target submission it attempts must be stably rejected
+// with main_thread_admission_required (no plain refcount mutation off-main).
+mapping owner_nested_submission()
+{
+    mapping result = ([]);
+    object me = this_object();
+    string owner = "owner/test/nested-submission";
+    result["owner_call_async"] =
+        owner_call_async(me, "owner_async_echo", (["payload_key": "nested/v1"]));
+    result["owner_async"] =
+        owner_async(me, (["type": "owner_async", "method": "owner_async_echo"]));
+    result["vm_owner_lpc_task"] =
+        vm_owner_lpc_task(me, owner, "owner_task_readonly");
+    result["vm_owner_ordinary_lpc_task"] =
+        vm_owner_ordinary_lpc_task(me, owner, "owner_task_player", 1);
+    return result;
+}
+
 int owner_lpc_canary()
 {
   return !vm_context_is_main_thread();

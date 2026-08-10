@@ -15325,6 +15325,96 @@ TEST_F(DriverTest, TestVmOwnerWorkerNeverMutatesObjectRefcounts) {
   destruct_object(probe);
 }
 
+// R2-F06: allowlisted LPC running ON the owner worker must not be able to
+// submit object-target tasks. Every nested submission (owner_call_async,
+// owner_async, vm_owner_lpc_task, ordinary LPC) is stably rejected with
+// main_thread_admission_required, and no plain refcount is mutated off-main.
+TEST_F(DriverTest, TestVmOwnerWorkerNestedObjectTargetSubmissionRejected) {
+  const char* owner = "owner/test/nested-submission";
+
+  vm_owner_thread_stop();
+  vm_object_store_test_support_reset_worker_ref_mutation_count();
+
+  object_t* probe = load_object_for_test("single/void");
+  ASSERT_NE(probe, nullptr);
+  vm_owner_set_id(probe, owner);
+
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = map ? find_string_in_mapping(map, key) : nullptr;
+    EXPECT_NE(value, nullptr) << key;
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER) << key;
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = map ? find_string_in_mapping(map, key) : nullptr;
+    EXPECT_NE(value, nullptr) << key;
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING) << key;
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+  auto mapping_mapping = [](mapping_t* map, const char* key) -> mapping_t* {
+    auto* value = map ? find_string_in_mapping(map, key) : nullptr;
+    EXPECT_NE(value, nullptr) << key;
+    EXPECT_EQ(value ? value->type : T_INVALID, T_MAPPING) << key;
+    return value && value->type == T_MAPPING ? value->u.map : nullptr;
+  };
+
+  // Run the nested-submission probe on the worker via the ordinary LPC
+  // route (mapping results accepted; the probe method itself then attempts
+  // owner_call_async / owner_async / vm_owner_lpc_task / ordinary LPC
+  // submissions from the worker).
+  auto* submitted =
+      vm_owner_ordinary_lpc_task(probe, owner, "owner_nested_submission", 1);
+  auto future_id = static_cast<uint64_t>(mapping_number(submitted, "future_id"));
+  ASSERT_EQ(mapping_number(submitted, "success"), 1);
+  ASSERT_GT(future_id, 0u);
+  free_mapping(submitted);
+
+  vm_owner_thread_start(1);
+  for (int i = 0; i < 200; i++) {
+    auto* polled = vm_owner_future_poll(future_id);
+    auto state = std::string(mapping_string(polled, "state"));
+    free_mapping(polled);
+    if (state != "pending") {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  auto* completed = vm_owner_future_poll(future_id);
+  ASSERT_STREQ(mapping_string(completed, "state"), "completed");
+  auto* result = mapping_mapping(completed, "result");
+  ASSERT_NE(result, nullptr);
+  const char* kProbeKeys[] = {"owner_call_async", "owner_async",
+                              "vm_owner_lpc_task",
+                              "vm_owner_ordinary_lpc_task"};
+  for (const char* key : kProbeKeys) {
+    auto* nested = mapping_mapping(result, key);
+    ASSERT_NE(nested, nullptr) << key;
+    EXPECT_EQ(mapping_number(nested, "success"), 0) << key;
+    EXPECT_STREQ(mapping_string(nested, "error"),
+                 "main_thread_admission_required")
+        << key;
+  }
+  free_mapping(completed);
+
+  // The worker never mutated a plain refcount; the deferred release queue
+  // drains to zero after stop + main-task drain.
+  ASSERT_EQ(vm_object_store_test_support_worker_ref_mutation_count(), 0u);
+  vm_owner_thread_stop();
+  free_mapping(vm_owner_purge_mailbox(owner));
+  vm_owner_drain_main_tasks(1);
+  auto* status = vm_owner_thread_status();
+  ASSERT_EQ(mapping_number(status, "deferred_target_releases"), 0);
+  free_mapping(status);
+
+  auto* taken = vm_owner_future_take(future_id);
+  ASSERT_EQ(mapping_number(taken, "consumed"), 1);
+  free_mapping(taken);
+
+  vm_owner_clear_id(probe);
+  destruct_object(probe);
+}
+
 TEST_F(DriverTest, TestVmObjectHandleReportsBasicResolveFailures) {
   VMObjectHandle invalid_handle;
   auto invalid_status = vm_object_handle_resolve_status(invalid_handle);
@@ -24310,7 +24400,19 @@ TEST_F(DriverTest, TestVmObjectHandleAcquireKeepsReferenceAcrossDestruct) {
   VMObjectRefGuard moved(std::move(guard));
   ASSERT_EQ(guard.get(), nullptr);
   ASSERT_EQ(moved.get(), acquired);
-  moved.release();
+  // detach() transfers the pointer without releasing (caller frees it).
+  auto* detached = moved.detach();
+  ASSERT_EQ(detached, acquired);
+  ASSERT_EQ(moved.get(), nullptr);
+  free_object(&detached, "VMObjectRefGuard detach test");
+  // release_ref() drops the reference and never returns the old pointer.
+  object_t* obj2 = load_object_for_test("single/void");
+  ASSERT_NE(obj2, nullptr);
+  VMObjectRefGuard guard2(vm_object_handle_acquire(vm_object_handle(obj2)));
+  ASSERT_NE(guard2.get(), nullptr);
+  guard2.release_ref();
+  ASSERT_EQ(guard2.get(), nullptr);
+  destruct_object(obj2);
 }
 
 TEST_F(DriverTest, TestVmObjectHandleAcquireRejectsStaleHandle) {

@@ -37,12 +37,16 @@ enum class VMObjectHandleResolveStatus {
   kOwnerEpochMismatch,
   kLiveOwnerMismatch,
   kLiveOwnerEpochMismatch,
+  // R2-F06: object-target admission may only run on the main VM thread.
+  // Worker-nested submissions (allowlisted LPC on an owner worker calling
+  // an object-target efun) are stably rejected with this status; the worker
+  // never mutates plain object refcounts.
+  kMainThreadAdmissionRequired,
 };
 
 struct VMObjectHandleResolveResult {
   object_t *object{nullptr};
-  VMObjectHandleResolveStatus status{VMObjectHandleResolveStatus::kInvalidHandle};
-  bool resolved_via_owner_local_store{false};
+  VMObjectHandleResolveStatus status{VMObjectHandleResolveStatus::kInvalidHandle};  bool resolved_via_owner_local_store{false};
   bool owner_local_fast_path_used{false};
   bool diagnosed_via_owner_local_store{false};
   bool diagnosed_via_owner_local_path_index{false};
@@ -79,10 +83,22 @@ mapping_t *vm_object_handle_status_with_intent(object_t *object, const char *per
 VMObjectHandleResolveResult vm_object_handle_resolve_status(const VMObjectHandle &handle);
 const char *vm_object_handle_resolve_status_name(VMObjectHandleResolveStatus status);
 object_t *vm_object_handle_resolve(const VMObjectHandle &handle);
+// Result of a guarded acquire: the object pointer (when the admission was
+// performed on the main thread and the handle resolved current) plus the
+// exact admission status, so callers never guess whether a null pointer
+// means "stale handle" or "wrong thread".
+struct VMObjectHandleAcquireResult {
+  object_t *object{nullptr};
+  VMObjectHandleResolveStatus status{VMObjectHandleResolveStatus::kInvalidHandle};
+};
 // Resolve a handle and, on kCurrent, acquire an owning reference to the
-// target object. The caller is responsible for releasing the reference via
-// VMObjectRefGuard (or free_object). This is the safe API for paths that
-// must use the object pointer outside the object-store lock domain.
+// target object. Main-thread admission contract (R2-F06): this refuses to
+// run off the main VM thread in ALL builds (not just Debug asserts) and
+// returns kMainThreadAdmissionRequired without touching the refcount; the
+// caller is responsible for releasing an acquired reference via
+// VMObjectRefGuard (or free_object) on the main thread.
+VMObjectHandleAcquireResult vm_object_handle_acquire_status(const VMObjectHandle &handle);
+// Thin wrapper returning only the object pointer (nullptr on any rejection).
 object_t *vm_object_handle_acquire(const VMObjectHandle &handle);
 // C++ regression hooks: worker-thread refcount mutation counter.
 uint64_t vm_object_store_test_support_worker_ref_mutation_count();
@@ -96,7 +112,7 @@ class VMObjectRefGuard {
  public:
   VMObjectRefGuard() = default;
   explicit VMObjectRefGuard(object_t *obj) : object_(obj) {}
-  ~VMObjectRefGuard() { release(); }
+  ~VMObjectRefGuard() { release_ref(); }
   VMObjectRefGuard(const VMObjectRefGuard &) = delete;
   VMObjectRefGuard &operator=(const VMObjectRefGuard &) = delete;
   VMObjectRefGuard(VMObjectRefGuard &&other) noexcept : object_(other.object_) {
@@ -104,14 +120,17 @@ class VMObjectRefGuard {
   }
   VMObjectRefGuard &operator=(VMObjectRefGuard &&other) noexcept {
     if (this != &other) {
-      release();
+      release_ref();
       object_ = other.object_;
       other.object_ = nullptr;
     }
     return *this;
   }
   object_t *get() const { return object_; }
-  object_t *release() {
+  // Release the held reference. Never returns a pointer: after this call
+  // the object may be freed, so returning the old pointer (the previous
+  // mixed release() semantics) invited use-after-free.
+  void release_ref() {
     auto *obj = object_;
     object_ = nullptr;
     if (obj) {
@@ -120,6 +139,12 @@ class VMObjectRefGuard {
 #endif
       free_object(&obj, "VMObjectRefGuard");
     }
+  }
+  // Detach the pointer WITHOUT releasing the reference; ownership transfers
+  // to the caller (who must free_object it on the main thread).
+  object_t *detach() {
+    auto *obj = object_;
+    object_ = nullptr;
     return obj;
   }
 

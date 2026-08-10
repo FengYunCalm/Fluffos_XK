@@ -3824,8 +3824,19 @@ uint64_t vm_owner_enqueue_task_epoch(const char *owner_id, const char *task_type
   return queued ? task_id : 0;
 }
 
+// R2-F06: object-target submission entries may only run on the main VM
+// thread. A worker-nested submission (allowlisted LPC on an owner worker
+// calling an object-target efun) is stably rejected with
+// main_thread_admission_required BEFORE any refcount or queue work, so the
+// worker never mutates plain object_t refcounts. All object-target entry
+// points share this single admission policy.
+bool owner_object_target_admission_ok() { return vm_context_is_main_thread(); }
+
 uint64_t vm_owner_enqueue_command_frame_restore(object_t *target) {
   if (!target) {
+    return 0;
+  }
+  if (!owner_object_target_admission_ok()) {
     return 0;
   }
 
@@ -3882,6 +3893,9 @@ uint64_t vm_owner_enqueue_executor_task(object_t *target, const char *task_type,
                                         std::function<void()> callback,
                                         std::function<void()> drop_callback) {
   if (!target || !callback || !vm_multicore_audit_enabled()) {
+    return 0;
+  }
+  if (!owner_object_target_admission_ok()) {
     return 0;
   }
 
@@ -3950,6 +3964,9 @@ VMOwnerStringTaskSubmission vm_owner_submit_frozen_string_task(
     std::function<bool(std::string *)> projector) {
   VMOwnerStringTaskSubmission submission;
   if (!target || !projector || !vm_multicore_audit_enabled()) {
+    return submission;
+  }
+  if (!owner_object_target_admission_ok()) {
     return submission;
   }
 
@@ -4152,6 +4169,15 @@ mapping_t *vm_owner_lpc_probe(object_t *target, const char *owner_id, const char
 }
 
 mapping_t *vm_owner_lpc_canary(object_t *target, const char *owner_id, const char *method) {
+  if (!owner_object_target_admission_ok()) {
+    auto *map = allocate_mapping(5);
+    add_mapping_pair(map, "success", 0);
+    add_mapping_pair(map, "task_id", 0);
+    add_mapping_string(map, "task_type", "lpc_canary");
+    add_mapping_string(map, "state", "rejected");
+    add_mapping_string(map, "error", "main_thread_admission_required");
+    return map;
+  }
   OwnerMailboxTask task;
   uint64_t task_id;
   bool notify_owner_thread = false;
@@ -4203,6 +4229,17 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
   auto target_owner_id = std::string(normalize_owner_id(target ? vm_owner_id(target) : nullptr));
   auto *descriptor = find_owner_lpc_task_descriptor(method_name);
   auto allowed = descriptor ? 1 : 0;
+
+  if (!owner_object_target_admission_ok()) {
+    auto *map = allocate_mapping(6);
+    add_mapping_pair(map, "success", 0);
+    add_mapping_pair(map, "future_id", 0);
+    add_mapping_pair(map, "task_id", 0);
+    add_mapping_string(map, "task_type", "lpc_task");
+    add_mapping_string(map, "state", "rejected");
+    add_mapping_string(map, "error", "main_thread_admission_required");
+    return map;
+  }
 
   if (target && normalized_owner_id != target_owner_id) {
     auto *map = allocate_mapping(27);
@@ -4330,6 +4367,17 @@ mapping_t *vm_owner_ordinary_lpc_task(object_t *target, const char *owner_id, co
   auto target_name = std::string(owner_object_name(target));
   auto target_owner_id = std::string(normalize_owner_id(target ? vm_owner_id(target) : nullptr));
   const auto *descriptor = find_owner_executor_task_descriptor("ordinary_lpc");
+
+  if (!owner_object_target_admission_ok()) {
+    auto *map = allocate_mapping(6);
+    add_mapping_pair(map, "success", 0);
+    add_mapping_pair(map, "future_id", 0);
+    add_mapping_pair(map, "task_id", 0);
+    add_mapping_string(map, "task_type", "ordinary_lpc");
+    add_mapping_string(map, "state", "rejected");
+    add_mapping_string(map, "error", "main_thread_admission_required");
+    return map;
+  }
 
   if (!explicit_open || !target || normalized_owner_id != target_owner_id) {
     auto *map = allocate_mapping(29);
@@ -4497,6 +4545,9 @@ uint64_t enqueue_owner_main_task(object_t *target, const char *task_type, const 
   if (!target || !callback) {
     return 0;
   }
+  if (!owner_object_target_admission_ok()) {
+    return 0;
+  }
 
   OwnerMainTask task;
   task.task_id = next_mailbox_task_id.fetch_add(1, std::memory_order_relaxed);
@@ -4589,6 +4640,9 @@ uint64_t vm_owner_enqueue_main_task_with_payload(object_t *target, const char *t
 }
 
 uint64_t enqueue_owner_message_main_task_locked(const OwnerMailboxTask &mailbox_task, object_t *target) {
+  if (!owner_object_target_admission_ok()) {
+    return 0;
+  }
   OwnerMainTask task;
   task.task_id = mailbox_task.task_id;
   task.sequence = mailbox_task.sequence;
@@ -5191,8 +5245,20 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
     task.target_object = target_handle->object_path;
     // Main-thread admission acquire: resolve + add_ref happen inside one
     // object-store lock domain (no TOCTOU), and the worker only consumes
-    // this already-held reference. The worker never mutates plain refcounts.
-    task.target = vm_object_handle_acquire(*target_handle);
+    // this already-held reference. The worker never mutates plain refcounts:
+    // a worker-nested submission is stably rejected here.
+    auto admission = vm_object_handle_acquire_status(*target_handle);
+    if (admission.status == VMObjectHandleResolveStatus::kMainThreadAdmissionRequired) {
+      auto *map = allocate_mapping(6);
+      add_mapping_pair(map, "success", 0);
+      add_mapping_pair(map, "message_id", 0);
+      add_mapping_pair(map, "future_id", 0);
+      add_mapping_pair(map, "target_task_id", 0);
+      add_mapping_string(map, "state", "rejected");
+      add_mapping_string(map, "error", "main_thread_admission_required");
+      return map;
+    }
+    task.target = admission.object;
   }
   auto target_task_id = task.task_id;
   auto target_status = target_handle ? vm_object_handle_resolve_status(*target_handle).status
