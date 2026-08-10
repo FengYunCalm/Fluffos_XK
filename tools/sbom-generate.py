@@ -88,11 +88,18 @@ def build_sbom(manifest):
                 }
             )
         for entry in tc.get("entries", []):
+            # Entries are structured dicts (name/version/sha/...) since
+            # R2-F09; keep the SBOM readable and deterministic.
+            name = str(entry.get("name", entry)) if isinstance(entry, dict) else str(entry)
+            version = str(entry.get("version", "pinned-by-workflow")) if isinstance(entry, dict) else "pinned-by-workflow"
             components.append(
                 {
                     "type": "application",
-                    "name": entry,
-                    "version": "pinned-by-workflow",
+                    "name": name,
+                    "version": version,
+                    "externalReferences": [
+                        {"type": "vcs", "url": str(entry["upstream"])}
+                    ] if isinstance(entry, dict) and entry.get("upstream") else [],
                 }
             )
     # Deterministic serial number: derive a UUID v5 from the manifest content
