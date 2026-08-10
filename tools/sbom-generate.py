@@ -99,13 +99,21 @@ def build_sbom(manifest):
     # so repeated runs with the same manifest produce the same SBOM identity.
     manifest_bytes = json.dumps(manifest, sort_keys=True, default=str).encode()
     serial = str(uuid.uuid5(uuid.NAMESPACE_URL, hashlib.sha256(manifest_bytes).hexdigest()))
+    # Deterministic timestamp: derive from the manifest's last_reviewed date
+    # so repeated runs with the same manifest produce an identical SBOM.
+    last_reviewed = manifest.get("last_reviewed")
+    timestamp = (
+        f"{last_reviewed}T00:00:00Z"
+        if last_reviewed
+        else datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
     return {
         "bomFormat": "CycloneDX",
         "specVersion": CYCLONEDX_SPEC,
         "serialNumber": f"urn:uuid:{serial}",
         "version": 1,
         "metadata": {
-            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "timestamp": timestamp,
             "tools": [
                 {
                     "vendor": "FluffOS",
