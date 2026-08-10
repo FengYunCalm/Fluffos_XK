@@ -1,4 +1,4 @@
-FROM alpine:3.18 AS builder
+FROM alpine:3.18@sha256:fd032399cd767f310a1d1274e81cab9f0fd8a49b3589eba2c3420228cd45b6a7 AS builder
 
 RUN apk add --no-progress --no-cache \
     linux-headers gcc g++ clang-dev make cmake bash \
@@ -8,7 +8,14 @@ RUN apk add --no-progress --no-cache \
 
 WORKDIR /build
 
-RUN wget -O - https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2 | tar -xj
+# R2-F09: no pipe-to-tar downloads. jemalloc is downloaded to a file, its
+# SHA-256 is verified against third_party/manifest.yaml, and only then is it
+# extracted.
+RUN wget -q -O jemalloc.tar.bz2 \
+      https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2 \
+    && echo "2db82d1e7119df3e71b7640219b6dfe84789bc0537983c3b7ac4f7189aecfeaa  jemalloc.tar.bz2" | sha256sum -c - \
+    && tar -xjf jemalloc.tar.bz2 \
+    && rm jemalloc.tar.bz2
 
 WORKDIR /build/jemalloc-5.3.0
 
@@ -23,7 +30,7 @@ WORKDIR /build/fluffos/build
 RUN cmake .. -DMARCH_NATIVE=OFF -DSTATIC=ON -DENABLE_LTO=OFF \
     && make install
 
-FROM alpine:3.18
+FROM alpine:3.18@sha256:fd032399cd767f310a1d1274e81cab9f0fd8a49b3589eba2c3420228cd45b6a7
 
 RUN apk add --no-progress --no-cache \
     icu-data-full

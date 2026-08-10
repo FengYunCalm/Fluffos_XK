@@ -42,7 +42,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           fetch-depth: 0
 
@@ -144,11 +144,11 @@ jobs:
     steps:
       - name: Setup MSYS2 (Windows)
         if: matrix.platform == 'windows'
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884  # v2
         with:
           update: true
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           ref: ${{ github.event.inputs.target_sha }}
 
@@ -176,7 +176,7 @@ jobs:
       - name: Build (Linux)
         if: matrix.platform == 'linux'
         run: |
-          docker run --rm -v $PWD:/workspace -w /workspace alpine:3.18 /bin/sh -c '
+          docker run --rm -v $PWD:/workspace -w /workspace alpine:3.18@sha256:fd032399cd767f310a1d1274e81cab9f0fd8a49b3589eba2c3420228cd45b6a7 /bin/sh -c '
             set -e
             apk add --no-progress --no-cache \
               linux-headers gcc g++ clang-dev make cmake bash \
@@ -238,7 +238,7 @@ jobs:
           echo "PASS: no key fixtures in release asset"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: release-asset-${{ matrix.platform }}
           path: |
@@ -253,16 +253,16 @@ jobs:
     outputs:
       image_digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           ref: ${{ github.event.inputs.target_sha }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
 
       - name: Extract Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051  # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -273,7 +273,7 @@ jobs:
       # asset and checksum gate has passed.
       - name: Build Docker image without push
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25  # v5
         with:
           context: .
           push: false
@@ -289,7 +289,7 @@ jobs:
         continue-on-error: true
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-            aquasec/trivy:0.50.1 image \
+            aquasec/trivy:0.50.1@sha256:586cf142d41727a184b2982ade6a4d94ada9e243d64fcd52e6dcfba9cce56df6 image \
             --severity HIGH,CRITICAL \
             --ignore-unfixed \
             --format json --output /tmp/trivy.json \
@@ -297,7 +297,7 @@ jobs:
           echo "trivy scan recorded (see /tmp/trivy.json)"
 
       - name: Upload image digest + scan
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: docker-digest
           path: /tmp/trivy.json
@@ -312,7 +312,7 @@ jobs:
       release_id: ${{ steps.create_release.outputs.id }}
       version: ${{ needs.validate-target.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           fetch-depth: 0
 
@@ -328,7 +328,7 @@ jobs:
 
       - name: Create Draft Release
         id: create_release
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7
         with:
           script: |
             const version = '${{ needs.validate-target.outputs.version }}';
@@ -346,7 +346,7 @@ jobs:
             return release.data.id;
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           path: assets/
           merge-multiple: true
@@ -369,7 +369,7 @@ jobs:
           python3 -m json.tool docs/evidence/manifest.schema.json >/dev/null
 
       - name: Upload Release Assets
-        uses: actions/upload-release-asset@v1
+        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5  # v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -379,7 +379,7 @@ jobs:
           asset_content_type: application/zip
 
       - name: Upload Release Assets (Linux)
-        uses: actions/upload-release-asset@v1
+        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5  # v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -394,7 +394,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           ref: ${{ github.event.inputs.target_sha }}
 
@@ -472,7 +472,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Update Release Notes
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7
         with:
           script: |
             const fs = require('fs');
