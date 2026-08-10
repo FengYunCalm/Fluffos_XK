@@ -138,5 +138,5 @@ python3 "$ROOT_DIR/tools/docs/check-evidence.py" \
   --schema "$ROOT_DIR/docs/evidence/manifest.schema.json" \
   --expected-tested-sha "$COMMIT_SHA" \
   --expected-source-sha "$SOURCE_SHA"
-rm -f "$REPORT_DIR"/*_raw.json
+
 echo "reports in: $REPORT_DIR"
