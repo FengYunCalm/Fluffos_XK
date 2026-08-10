@@ -55,5 +55,10 @@ reporter until the fix is public.
 - `testsuite/etc/cert.pem` / `testsuite/etc/key.pem` are **test-only
   fixtures**. They must never be packaged into release artifacts; release
   packaging verifies this.
+- `sys_reload_tls()` is a main-thread-only, master-authorized management
+  operation: callers must pass `valid_sys_reload_tls()` on the master object
+  and the call is rejected before any listener state is touched otherwise.
+  A failed reload keeps the old TLS context valid (see
+  `docs/runbooks/gateway-security.md`).
 - Dependency and supply-chain posture is tracked in `third_party/manifest.yaml`
   and `third_party/sbom.json`; releases verify checksums of external downloads.

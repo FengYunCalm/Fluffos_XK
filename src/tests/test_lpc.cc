@@ -26,8 +26,10 @@
 #endif
 #include "base/package_api.h"
 #include "base/internal/rc.h"
+#include "base/internal/external_port.h"
 #include "base/internal/stats.h"
 #include "base/internal/strutils.h"
+#include "net/tls.h"
 
 #include "backend.h"
 #include "interactive.h"
@@ -15322,6 +15324,143 @@ TEST_F(DriverTest, TestVmOwnerWorkerNeverMutatesObjectRefcounts) {
   free_mapping(status);
 
   vm_owner_clear_id(probe);
+  destruct_object(probe);
+}
+
+// R2-F12: sys_reload_tls() management contract matrix. Fixed check order:
+// main thread first, then master authorization, then index/TLS-type
+// validation. Worker + authorized identity is still rejected before any
+// listener state is touched; a failed reload never destroys the old
+// SSL_CTX.
+TEST_F(DriverTest, TestSysReloadTlsPermissionAndThreadMatrix) {
+  ASSERT_TRUE(vm_context_is_main_thread());
+  auto mapping_number = [](mapping_t* map, const char* key) -> long {
+    auto* value = map ? find_string_in_mapping(map, key) : nullptr;
+    EXPECT_NE(value, nullptr) << key;
+    EXPECT_EQ(value ? value->type : T_INVALID, T_NUMBER) << key;
+    return value && value->type == T_NUMBER ? value->u.number : 0;
+  };
+  auto mapping_string = [](mapping_t* map, const char* key) -> const char* {
+    auto* value = map ? find_string_in_mapping(map, key) : nullptr;
+    EXPECT_NE(value, nullptr) << key;
+    EXPECT_EQ(value ? value->type : T_INVALID, T_STRING) << key;
+    return value && value->type == T_STRING ? value->u.string : "";
+  };
+  object_t* probe = load_object_for_test("single/void");
+  ASSERT_NE(probe, nullptr);
+  ASSERT_NE(master_ob, nullptr);
+
+  auto set_authorized = [](int allowed) {
+    push_number(allowed);
+    auto* ret = safe_apply("set_sys_reload_tls_allowed", master_ob, 1,
+                           ORIGIN_DRIVER);
+    EXPECT_NE(ret, nullptr);
+  };
+  auto call_reload = [probe](int port_index) -> std::string {
+    push_number(port_index);
+    auto* ret = safe_apply("call_sys_reload_tls", probe, 1, ORIGIN_DRIVER);
+    if (!ret || ret->type != T_STRING) {
+      return "<no-string-result>";
+    }
+    return std::string(ret->u.string);
+  };
+
+  // The lpc_tests driver never binds ports (init_user_conn runs in
+  // driver_main, not init_main), so no SSL_CTX exists yet: establish one
+  // for the TLS port exactly like init_user_conn would, and tear it down
+  // when the test finishes.
+  auto& tls_port = external_port[3];
+  ASSERT_FALSE(tls_port.tls_cert.empty());
+  ASSERT_EQ(tls_port.ssl, nullptr);
+  tls_port.ssl = tls_server_init(tls_port.tls_cert, tls_port.tls_key);
+  ASSERT_NE(tls_port.ssl, nullptr);
+  struct TlsCtxGuard {
+    port_def_t& port;
+    ~TlsCtxGuard() {
+      if (port.ssl) {
+        tls_server_close(port.ssl);
+        port.ssl = nullptr;
+      }
+    }
+  } tls_guard{tls_port};
+
+  // Row: main + UNAUTHORIZED + valid TLS port -> rejected before validation.
+  set_authorized(0);
+  EXPECT_NE(call_reload(4).find("master authorization"), std::string::npos);
+
+  // Row: main + authorized + valid TLS telnet port (4) -> success.
+  set_authorized(1);
+  EXPECT_EQ(call_reload(4), "ok");
+
+  // Row: main + authorized + websocket TLS port (3) -> stable rejection.
+  EXPECT_NE(call_reload(3).find("websocket"), std::string::npos);
+
+  // Row: main + authorized + non-TLS port (1) -> stable rejection.
+  EXPECT_NE(call_reload(1).find("not TLS enabled"), std::string::npos);
+
+  // Row: main + authorized + extreme indexes -> rejected before arithmetic.
+  EXPECT_NE(call_reload(0).find("Invalid port index"), std::string::npos);
+  EXPECT_NE(call_reload(100).find("Invalid port index"), std::string::npos);
+  EXPECT_NE(call_reload(-1).find("Invalid port index"), std::string::npos);
+
+  // Row: reload failure keeps the old SSL_CTX: point the port at a missing
+  // certificate; tls_server_init fails, the error fires, and the old
+  // context pointer must be unchanged.
+  const auto saved_cert = tls_port.tls_cert;
+  const auto saved_ctx = tls_port.ssl;
+  tls_port.tls_cert = "/nonexistent/sys-reload-tls-cert.pem";
+  EXPECT_NE(call_reload(4).find("Failed to reload TLS context"),
+            std::string::npos);
+  EXPECT_EQ(tls_port.ssl, saved_ctx) << "failed reload must keep the old SSL_CTX";
+  tls_port.tls_cert = saved_cert;
+  // The listener still works after the failed reload: a subsequent reload
+  // with the valid certificate succeeds.
+  EXPECT_EQ(call_reload(4), "ok");
+
+  // Row: worker + authorized identity -> rejected for the thread, before
+  // any listener state is touched. The probe runs on the owner worker via
+  // the ordinary LPC route and returns the catch() text.
+  {
+    const char* owner = "owner/test/reload-tls-worker";
+    vm_owner_thread_stop();
+    object_t* probe2 = load_object_for_test("single/void");
+    ASSERT_NE(probe2, nullptr);
+    vm_owner_set_id(probe2, owner);
+    auto* submitted =
+        vm_owner_ordinary_lpc_task(probe2, owner, "call_sys_reload_tls_probe", 1);
+    auto future_id =
+        static_cast<uint64_t>(mapping_number(submitted, "future_id"));
+    ASSERT_EQ(mapping_number(submitted, "success"), 1);
+    free_mapping(submitted);
+    vm_owner_thread_start(1);
+    for (int i = 0; i < 200; i++) {
+      auto* polled = vm_owner_future_poll(future_id);
+      auto state = std::string(mapping_string(polled, "state"));
+      free_mapping(polled);
+      if (state != "pending") {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    auto* completed = vm_owner_future_poll(future_id);
+    ASSERT_STREQ(mapping_string(completed, "state"), "completed");
+    auto* result = find_string_in_mapping(completed, "result");
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->type, T_STRING);
+    EXPECT_NE(std::string(result->u.string).find("main thread"),
+              std::string::npos)
+        << "worker + authorized must be rejected for the thread: "
+        << result->u.string;
+    free_mapping(completed);
+    auto* taken = vm_owner_future_take(future_id);
+    ASSERT_EQ(mapping_number(taken, "consumed"), 1);
+    free_mapping(taken);
+    vm_owner_thread_stop();
+    vm_owner_clear_id(probe2);
+    destruct_object(probe2);
+  }
+
+  set_authorized(1);
   destruct_object(probe);
 }
 

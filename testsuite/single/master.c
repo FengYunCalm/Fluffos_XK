@@ -9,6 +9,20 @@ nosave int has_error = 0;
 nosave string last_error = "";
 nosave string test_login_ob = 0;
 
+// R2-F12: sys_reload_tls() authorization hook. Fail-closed by default in
+// production muds; the testsuite enables it and toggles it per test.
+nosave int sys_reload_tls_allowed = 1;
+
+public int valid_sys_reload_tls()
+{
+    return sys_reload_tls_allowed;
+}
+
+public void set_sys_reload_tls_allowed(int allowed)
+{
+    sys_reload_tls_allowed = allowed;
+}
+
 public string clear_last_error() {
   last_error = "";
 }

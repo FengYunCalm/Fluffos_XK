@@ -245,6 +245,27 @@ mapping owner_nested_submission()
     return result;
 }
 
+// R2-F12 probe: invoke sys_reload_tls() inside catch() and return the error
+// text, or "ok" when it succeeded. Runs both on the main thread (matrix
+// rows: authorized/unauthorized x valid/invalid index x websocket/non-TLS)
+// and on the owner worker (matrix row: worker + authorized identity must
+// still be rejected before any listener state is touched).
+string call_sys_reload_tls(int port_index)
+{
+    mixed err = catch(sys_reload_tls(port_index));
+    if (err) {
+        return "error: " + err;
+    }
+    return "ok";
+}
+
+// No-argument variant for the owner-worker matrix row: the ordinary LPC
+// route applies methods with zero arguments.
+string call_sys_reload_tls_probe()
+{
+    return call_sys_reload_tls(4);
+}
+
 int owner_lpc_canary()
 {
   return !vm_context_is_main_thread();

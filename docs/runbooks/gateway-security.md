@@ -36,6 +36,24 @@ grep "Accepting \[Gateway\] connections on 127.0.0.1" <log>
 - 发布资产必须不含 `*.pem`/`*.key` 私钥（release.yml 已有打包前检查，失败即阻断）。
 - 仓库扫描器规则应将 `testsuite/etc/` 下的 fixture 标记为测试用途，避免误报。
 
+## 4b. `sys_reload_tls()` 管理合同（R2-F12）
+
+`sys_reload_tls()` 是 TLS listener 状态的管理操作，合同固定如下：
+
+1. **线程**：只能在主 VM 线程调用；owner worker 或任何其他线程调用稳定拒绝
+   （`error`），不触碰 listener/TLS context。
+2. **授权**：必须在 master object 上实现 `valid_sys_reload_tls()` 并返回真值；
+   master 缺失、hook 缺失、返回假或抛错时 fail-closed 拒绝
+   （`sys_reload_tls requires master authorization`）。
+3. **校验顺序固定**：线程 → 授权 → 端口索引 → TLS 类型；未授权调用者永远
+   到不了索引/类型校验代码。
+4. **失败原子性**：新 `SSL_CTX` 完全初始化成功后才关闭旧 context；
+   `tls_server_init` 失败时旧 context 保持有效，listener 不受影响。
+5. **不支持项**：websocket 端口与未启用 TLS 的端口稳定拒绝。
+
+生产部署建议：master object 的 `valid_sys_reload_tls()` 应默认拒绝，仅对
+受信运维路径（受保护代理、管理入口）放行。
+
 ## 5. 资源耗尽边界（Gate A）
 
 | 边界 | 默认 | 验收 |
