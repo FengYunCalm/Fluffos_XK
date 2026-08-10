@@ -13,6 +13,32 @@ env:
   BUILD_TYPES: '["Debug", "RelWithDebInfo"]'
 
 jobs:
+  workflow-lint:
+    name: Workflow Lint (actionlint + parse + repo tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PyYAML
+        run: pip install --break-system-packages pyyaml
+
+      # actionlint pinned to v1.7.12; the tarball is downloaded and its
+      # SHA-256 verified before execution (no mutable-tag action dependency).
+      - name: Install actionlint (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/actionlint.tar.gz \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  /tmp/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/actionlint.tar.gz -C /usr/local/bin actionlint
+          actionlint --version
+
+      - name: actionlint all workflows
+        run: actionlint .github/workflows/*.yml
+
+      - name: PyYAML parse + job-name uniqueness + matrix contract tests
+        run: python3 tools/docs/check-workflows.py --self-test
+
   docs-check:
     name: Docs Evidence & Links
     runs-on: ubuntu-latest
@@ -66,7 +92,7 @@ jobs:
             --repo .
 
   build-and-test:
-    name: ${{ matrix.platform }} (${{ matrix.compiler || 'default' }}${{ matrix.sanitizer && '+sanitizer' || '' }}, ${{ matrix.build }})
+    name: ${{ matrix.check_name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -79,6 +105,7 @@ jobs:
             cc: gcc
             cxx: g++
             build: Debug
+            check_name: Ubuntu GCC Debug
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev
           - platform: Ubuntu
             os: ubuntu-24.04
@@ -86,6 +113,7 @@ jobs:
             cc: gcc
             cxx: g++
             build: RelWithDebInfo
+            check_name: Ubuntu GCC RelWithDebInfo
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev
 
           # Ubuntu - Clang
@@ -95,6 +123,7 @@ jobs:
             cc: clang
             cxx: clang++
             build: Debug
+            check_name: Ubuntu Clang Debug
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev
           - platform: Ubuntu
             os: ubuntu-24.04
@@ -102,6 +131,7 @@ jobs:
             cc: clang
             cxx: clang++
             build: RelWithDebInfo
+            check_name: Ubuntu Clang RelWithDebInfo
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev
 
           # Ubuntu - Clang with Sanitizer (ASan)
@@ -113,6 +143,7 @@ jobs:
             build: Debug
             sanitizer: asan
             cmake_flags: -DENABLE_ASAN=ON -DENABLE_LTO=OFF -DMARCH_NATIVE=OFF
+            check_name: Ubuntu Clang ASan Debug
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev libdw-dev libbz2-dev
           - platform: Ubuntu
             os: ubuntu-24.04
@@ -122,6 +153,7 @@ jobs:
             build: RelWithDebInfo
             sanitizer: asan
             cmake_flags: -DENABLE_ASAN=ON -DENABLE_LTO=OFF -DMARCH_NATIVE=OFF
+            check_name: Ubuntu Clang ASan RelWithDebInfo
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev libdw-dev libbz2-dev
 
           # Ubuntu - Clang with UBSan
@@ -133,6 +165,7 @@ jobs:
             build: Debug
             sanitizer: ubsan
             cmake_flags: -DENABLE_UBSAN=ON -DENABLE_LTO=OFF -DMARCH_NATIVE=OFF
+            check_name: Ubuntu Clang UBSan Debug
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev libdw-dev libbz2-dev
 
           # Ubuntu - Clang with TSan (smaller test set; TSan is incompatible
@@ -145,12 +178,14 @@ jobs:
             build: Debug
             sanitizer: tsan
             cmake_flags: -DENABLE_TSAN=ON -DENABLE_LTO=OFF -DMARCH_NATIVE=OFF
+            check_name: Ubuntu Clang TSan Debug
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev libdw-dev libbz2-dev
 
           # macOS
           - platform: macOS
             os: macos-14
             build: Debug
+            check_name: macOS Debug
             cmake_flags: -DMARCH_NATIVE=OFF -DENABLE_LTO=OFF
             packages: cmake pkg-config pcre libgcrypt openssl jemalloc icu4c mysql sqlite3 googletest
             openssl_root: /usr/local/opt/openssl
@@ -158,6 +193,7 @@ jobs:
           - platform: macOS
             os: macos-14
             build: RelWithDebInfo
+            check_name: macOS RelWithDebInfo
             cmake_flags: -DMARCH_NATIVE=OFF -DENABLE_LTO=OFF
             packages: cmake pkg-config pcre libgcrypt openssl jemalloc icu4c mysql sqlite3 googletest
             openssl_root: /usr/local/opt/openssl
@@ -168,6 +204,7 @@ jobs:
             os: windows-latest
             shell: msys2 {0}
             build: Debug
+            check_name: Windows Debug
             cmake_generator: MSYS Makefiles
             cmake_flags: -DMARCH_NATIVE=OFF -DPACKAGE_CRYPTO=OFF -DPACKAGE_DB_MYSQL="" -DPACKAGE_DB_SQLITE=1
             packages: mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-zlib mingw-w64-x86_64-pcre mingw-w64-x86_64-icu mingw-w64-x86_64-sqlite3 mingw-w64-x86_64-jemalloc mingw-w64-x86_64-gtest bison make
@@ -175,6 +212,7 @@ jobs:
             os: windows-latest
             shell: msys2 {0}
             build: RelWithDebInfo
+            check_name: Windows RelWithDebInfo
             cmake_generator: MSYS Makefiles
             cmake_flags: -DMARCH_NATIVE=OFF -DPACKAGE_CRYPTO=OFF -DPACKAGE_DB_MYSQL="" -DPACKAGE_DB_SQLITE=1
             packages: mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-zlib mingw-w64-x86_64-pcre mingw-w64-x86_64-icu mingw-w64-x86_64-sqlite3 mingw-w64-x86_64-jemalloc mingw-w64-x86_64-gtest bison make
@@ -241,7 +279,7 @@ jobs:
         # skip this step: ASan/UBSan run the full suite once in their own
         # step, and TSan runs only the concurrency-focused subset (never an
         # unconditional full CTest first).
-        if: !matrix.sanitizer
+        if: ${{ !matrix.sanitizer }}
         run: cd build && make test
 
       - name: Run Sanitizer Targeted Tests (TSan)
@@ -276,16 +314,16 @@ jobs:
           fi
 
       - name: Run LPC Modern Runtime Gate
-        if: matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer
+        if: ${{ matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer }}
         run: tools/lpc-modern-runtime-stress.sh smoke
 
       - name: Generate capacity evidence reports
-        if: matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer
+        if: ${{ matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer }}
         run: |
           tools/owner-scheduler-capacity.sh --build-dir build --report-dir build/reports/capacity
 
       - name: Upload capacity evidence reports
-        if: always() && matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer
+        if: ${{ always() && matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer }}
         uses: actions/upload-artifact@v4
         with:
           name: capacity-evidence
@@ -293,7 +331,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload LPC Modern Runtime Benchmark Reports
-        if: always() && matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer
+        if: ${{ always() && matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer }}
         uses: actions/upload-artifact@v4
         with:
           name: lpc-modern-runtime-bench-smoke
@@ -338,7 +376,7 @@ jobs:
 
       - name: Run libFuzzer (bounded)
         run: |
-          ./build-fuzz/src/tests/gateway_fuzz -runs=10000 -max_len=4096 -timeout=5 -print_final_stats=1
+          ./build-fuzz/src/tests/gateway_fuzz -runs=10000 -max_len=4096 -timeout=5 -print_final_stats=1 src/tests/fuzz/corpus/gateway/
 
       - name: Upload crash corpus on failure
         if: failure()
