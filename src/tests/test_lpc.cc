@@ -18015,10 +18015,10 @@ TEST_F(DriverTest, TestGatewayMasterOutputContinuationCountsOverBudget) {
   ASSERT_NE(master, nullptr);
 
   auto before_remaining =
-      g_gateway_runtime_counters.master_output_scan_remaining_ready.load(
+      g_gateway_runtime_counters.master_output_ready_remaining_total.load(
           std::memory_order_relaxed);
   auto before_continuations =
-      g_gateway_runtime_counters.master_output_flush_continuations.load(
+      g_gateway_runtime_counters.master_output_continuation_needed_total.load(
           std::memory_order_relaxed);
 
   // Create budget + N ready sessions on the same master. FIFO entries are
@@ -18055,11 +18055,11 @@ TEST_F(DriverTest, TestGatewayMasterOutputContinuationCountsOverBudget) {
   const int flushed = gateway_flush_master_output_fifos(master_fd, budget);
   ASSERT_EQ(flushed, static_cast<int>(budget));
   ASSERT_EQ(
-      g_gateway_runtime_counters.master_output_scan_remaining_ready.load(
+      g_gateway_runtime_counters.master_output_ready_remaining_total.load(
           std::memory_order_relaxed),
       before_remaining + extra);
   ASSERT_EQ(
-      g_gateway_runtime_counters.master_output_flush_continuations.load(
+      g_gateway_runtime_counters.master_output_continuation_needed_total.load(
           std::memory_order_relaxed),
       before_continuations + 1);
 
@@ -18074,7 +18074,7 @@ TEST_F(DriverTest, TestGatewayMasterOutputContinuationCountsOverBudget) {
   ASSERT_EQ(remaining_fifos, extra);
   // A second flush with a big budget drains everything with no continuation.
   const auto continuations_after_first =
-      g_gateway_runtime_counters.master_output_flush_continuations.load(
+      g_gateway_runtime_counters.master_output_continuation_needed_total.load(
           std::memory_order_relaxed);
   const int drained = gateway_flush_master_output_fifos(master_fd, 4096);
   ASSERT_EQ(drained, static_cast<int>(extra));
@@ -18082,7 +18082,7 @@ TEST_F(DriverTest, TestGatewayMasterOutputContinuationCountsOverBudget) {
     ASSERT_TRUE(sess->output_fifo.empty());
   }
   ASSERT_EQ(
-      g_gateway_runtime_counters.master_output_flush_continuations.load(
+      g_gateway_runtime_counters.master_output_continuation_needed_total.load(
           std::memory_order_relaxed),
       continuations_after_first);
 
@@ -18091,6 +18091,101 @@ TEST_F(DriverTest, TestGatewayMasterOutputContinuationCountsOverBudget) {
     destruct_object(objects[i]);
     free_object(&objects[i], "TestGatewayMasterOutputContinuationCountsOverBudget");
   }
+  gateway_remove_master_for_test(master_fd);
+  pair[0] = nullptr;
+  bufferevent_free(pair[1]);
+}
+
+// R2-F10: schedule/coalesce/callback counters each map to one deterministic
+// event: a request while a continuation is already scheduled is a coalesced
+// request (never a new schedule), and the callback itself is counted
+// separately when it actually runs.
+TEST_F(DriverTest, TestGatewayMasterOutputContinuationScheduleSemantics) {
+  constexpr int master_fd = 1713;
+  bufferevent *pair[2] = {nullptr, nullptr};
+  ASSERT_EQ(bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, pair), 0);
+  ASSERT_NE(pair[0], nullptr);
+  ASSERT_NE(pair[1], nullptr);
+  auto *master = gateway_register_master_for_test(master_fd, pair[0]);
+  ASSERT_NE(master, nullptr);
+
+  auto load = [](const std::atomic<uint64_t> &counter) -> uint64_t {
+    return counter.load(std::memory_order_relaxed);
+  };
+  const auto b_attempts = load(
+      g_gateway_runtime_counters.master_output_continuation_schedule_attempts_total);
+  const auto b_scheduled = load(
+      g_gateway_runtime_counters.master_output_continuation_scheduled_total);
+  const auto b_coalesced = load(
+      g_gateway_runtime_counters.master_output_continuation_coalesced_requests_total);
+  const auto b_callbacks = load(
+      g_gateway_runtime_counters.master_output_continuation_callbacks_executed_total);
+
+  // One ready session with a pending FIFO entry (writer fails so the entry
+  // stays queued).
+  auto failing_writer = [](int /*fd*/, const char * /*data*/, size_t /*len*/) -> int { return 0; };
+  const char *session_id = "gw-test-schedule-semantics";
+  auto *ob = create_gateway_session_for_test(
+      session_id, "/clone/gateway_login_example", master_fd);
+  ASSERT_NE(ob, nullptr);
+  add_ref(ob, "TestGatewayMasterOutputContinuationScheduleSemantics");
+  auto *sess = gateway_find_session(session_id);
+  ASSERT_NE(sess, nullptr);
+  auto reservation = gateway_reserve_session_output(sess);
+  ASSERT_GT(reservation, 0u);
+  ASSERT_EQ(gateway_fill_session_protocol_output_with_writer(
+                sess, reservation, "ping", 4, failing_writer),
+            1);
+  ASSERT_FALSE(sess->output_fifo.empty());
+  ASSERT_TRUE(sess->output_fifo.front().ready);
+
+  // First request: one attempt, one successful schedule, no coalesce.
+  gateway_schedule_write_flush_for_test(master_fd);
+  ASSERT_EQ(load(g_gateway_runtime_counters
+                     .master_output_continuation_schedule_attempts_total),
+            b_attempts + 1);
+  ASSERT_EQ(load(g_gateway_runtime_counters
+                     .master_output_continuation_scheduled_total),
+            b_scheduled + 1);
+  ASSERT_EQ(load(g_gateway_runtime_counters
+                     .master_output_continuation_coalesced_requests_total),
+            b_coalesced);
+
+  // Second request while a continuation is scheduled: coalesced, no new
+  // attempt, no new schedule.
+  gateway_schedule_write_flush_for_test(master_fd);
+  ASSERT_EQ(load(g_gateway_runtime_counters
+                     .master_output_continuation_schedule_attempts_total),
+            b_attempts + 1);
+  ASSERT_EQ(load(g_gateway_runtime_counters
+                     .master_output_continuation_scheduled_total),
+            b_scheduled + 1);
+  ASSERT_EQ(load(g_gateway_runtime_counters
+                     .master_output_continuation_coalesced_requests_total),
+            b_coalesced + 1);
+
+  // Let the 1ms continuation timer fire: the callback counter moves exactly
+  // once (and the scheduled flush runs its scan). Drive the event loop until
+  // the callback runs (bounded), then assert the deltas.
+  const auto b_runs = load(g_gateway_runtime_counters.master_output_scan_runs_total);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+  while (load(g_gateway_runtime_counters
+                  .master_output_continuation_callbacks_executed_total) <
+             b_callbacks + 1 &&
+         std::chrono::steady_clock::now() < deadline) {
+    event_base_loop(g_event_base, EVLOOP_ONCE | EVLOOP_NONBLOCK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_GE(load(g_gateway_runtime_counters
+                     .master_output_continuation_callbacks_executed_total),
+            b_callbacks + 1);
+  ASSERT_GE(load(g_gateway_runtime_counters.master_output_scan_runs_total),
+            b_runs + 1);
+
+  ASSERT_EQ(gateway_destroy_session_internal(session_id, "test_done", "done"), 1);
+  destruct_object(ob);
+  free_object(&ob, "TestGatewayMasterOutputContinuationScheduleSemantics");
   gateway_remove_master_for_test(master_fd);
   pair[0] = nullptr;
   bufferevent_free(pair[1]);

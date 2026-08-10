@@ -175,14 +175,21 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> main_drain_deferred_task_budget_yields{0};
   // Master output scan accounting (T13 baseline): registry size, entries
   // scanned, ready hits and flush continuation counts per scan run.
-  std::atomic<uint64_t> master_output_scan_runs{0};
-  std::atomic<uint64_t> master_output_scan_entries{0};
-  std::atomic<uint64_t> master_output_scan_ready_hits{0};
-  std::atomic<uint64_t> master_output_scan_remaining_ready{0};
-  std::atomic<uint64_t> master_output_scan_schedules{0};
-  std::atomic<uint64_t> master_output_scan_coalesced{0};
-  std::atomic<uint64_t> master_output_scan_executed{0};
-  std::atomic<uint64_t> master_output_flush_continuations{0};
+  std::atomic<uint64_t> master_output_scan_runs_total{0};
+  std::atomic<uint64_t> master_output_scan_entries_total{0};
+  std::atomic<uint64_t> master_output_ready_selected_total{0};
+  std::atomic<uint64_t> master_output_ready_remaining_total{0};
+  // R2-F10: one counter per deterministic event. A "schedule" only counts
+  // after add_walltime_event succeeded; a "coalesced request" counts when a
+  // request arrives while a flush continuation is already scheduled; a
+  // "callback executed" counts the continuation callback itself; sessions
+  // flushed is the actual flush volume (never conflated with scan runs).
+  std::atomic<uint64_t> master_output_continuation_needed_total{0};
+  std::atomic<uint64_t> master_output_continuation_schedule_attempts_total{0};
+  std::atomic<uint64_t> master_output_continuation_scheduled_total{0};
+  std::atomic<uint64_t> master_output_continuation_coalesced_requests_total{0};
+  std::atomic<uint64_t> master_output_continuation_callbacks_executed_total{0};
+  std::atomic<uint64_t> master_output_sessions_flushed_total{0};
   std::atomic<uint64_t> main_drain_deferred_remaining_total{0};
   std::atomic<uint64_t> main_drain_deferred_remaining_max{0};
   std::atomic<uint64_t> main_drain_deferred_remaining_samples{0};
@@ -590,6 +597,9 @@ int gateway_svalue_to_json_string(const svalue_t *sv, std::string *out);
 int gateway_ping_master_internal(int fd);
 void gateway_check_heartbeat_timeouts();
 bool gateway_has_master(int fd);
+// Output continuation scheduling (R2-F10): exposed for deterministic
+// schedule/coalesce/callback accounting tests.
+void gateway_schedule_write_flush_for_test(int fd);
 
 // C++ regression hooks; not part of the LPC/runtime API.
 bool gateway_external_bind_allowed_for_test();

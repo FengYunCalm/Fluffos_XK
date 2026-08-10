@@ -2719,7 +2719,7 @@ int gateway_flush_master_output_fifos(int master_fd, size_t budget) {
   if (master_fd < 0 || budget == 0) {
     return 0;
   }
-  g_gateway_runtime_counters.master_output_scan_runs.fetch_add(1, std::memory_order_relaxed);
+  g_gateway_runtime_counters.master_output_scan_runs_total.fetch_add(1, std::memory_order_relaxed);
   std::vector<GatewaySession *> sessions;
   sessions.reserve(std::min(budget, g_gateway_sessions.size()));
   size_t scanned = 0;
@@ -2742,20 +2742,20 @@ int gateway_flush_master_output_fifos(int master_fd, size_t budget) {
       }
     }
   }
-  g_gateway_runtime_counters.master_output_scan_entries.fetch_add(scanned, std::memory_order_relaxed);
-  g_gateway_runtime_counters.master_output_scan_ready_hits.fetch_add(ready_hits, std::memory_order_relaxed);
-  g_gateway_runtime_counters.master_output_scan_remaining_ready.fetch_add(remaining_ready,
+  g_gateway_runtime_counters.master_output_scan_entries_total.fetch_add(scanned, std::memory_order_relaxed);
+  g_gateway_runtime_counters.master_output_ready_selected_total.fetch_add(ready_hits, std::memory_order_relaxed);
+  g_gateway_runtime_counters.master_output_ready_remaining_total.fetch_add(remaining_ready,
                                                                           std::memory_order_relaxed);
   int flushed = 0;
   for (auto *sess : sessions) {
     flushed += gateway_flush_session_output_fifo(sess);
   }
-  g_gateway_runtime_counters.master_output_scan_executed.fetch_add(
+  g_gateway_runtime_counters.master_output_sessions_flushed_total.fetch_add(
       static_cast<uint64_t>(flushed), std::memory_order_relaxed);
   // A continuation is needed exactly when the budget was exhausted and at
   // least one ready session was left behind.
   if (budget_hit && remaining_ready > 0) {
-    g_gateway_runtime_counters.master_output_flush_continuations.fetch_add(1,
+    g_gateway_runtime_counters.master_output_continuation_needed_total.fetch_add(1,
                                                                            std::memory_order_relaxed);
   }
   return flushed;
