@@ -178,6 +178,10 @@ struct GatewayRuntimeCounters {
   std::atomic<uint64_t> master_output_scan_runs{0};
   std::atomic<uint64_t> master_output_scan_entries{0};
   std::atomic<uint64_t> master_output_scan_ready_hits{0};
+  std::atomic<uint64_t> master_output_scan_remaining_ready{0};
+  std::atomic<uint64_t> master_output_scan_schedules{0};
+  std::atomic<uint64_t> master_output_scan_coalesced{0};
+  std::atomic<uint64_t> master_output_scan_executed{0};
   std::atomic<uint64_t> master_output_flush_continuations{0};
   std::atomic<uint64_t> main_drain_deferred_remaining_total{0};
   std::atomic<uint64_t> main_drain_deferred_remaining_max{0};

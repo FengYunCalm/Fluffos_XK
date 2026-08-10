@@ -17510,6 +17510,99 @@ TEST_F(DriverTest,
   bufferevent_free(pair[1]);
 }
 
+// F10: with budget + N ready sessions, exactly one continuation is recorded
+// per flush and the FIFO drains fully in order across scheduled flushes.
+TEST_F(DriverTest, TestGatewayMasterOutputContinuationCountsOverBudget) {
+  constexpr int master_fd = 1711;
+  bufferevent *pair[2] = {nullptr, nullptr};
+  ASSERT_EQ(bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, pair), 0);
+  ASSERT_NE(pair[0], nullptr);
+  ASSERT_NE(pair[1], nullptr);
+  auto *master = gateway_register_master_for_test(master_fd, pair[0]);
+  ASSERT_NE(master, nullptr);
+
+  auto before_remaining =
+      g_gateway_runtime_counters.master_output_scan_remaining_ready.load(
+          std::memory_order_relaxed);
+  auto before_continuations =
+      g_gateway_runtime_counters.master_output_flush_continuations.load(
+          std::memory_order_relaxed);
+
+  // Create budget + N ready sessions on the same master. FIFO entries are
+  // filled through a failing writer so they stay queued until the explicit
+  // master flush below (no automatic enqueue-time flush).
+  const size_t budget = 8;
+  const size_t extra = 4;
+  auto failing_writer = [](int /*fd*/, const char* /*data*/, size_t /*len*/) -> int { return 0; };
+  std::vector<std::string> session_ids;
+  std::vector<object_t *> objects;
+  std::vector<GatewaySession *> sessions;
+  for (size_t i = 0; i < budget + extra; i++) {
+    auto id = "gw-test-continuation-" + std::to_string(i);
+    auto *ob = create_gateway_session_for_test(
+        id.c_str(), "/clone/gateway_login_example", master_fd);
+    ASSERT_NE(ob, nullptr);
+    add_ref(ob, "TestGatewayMasterOutputContinuationCountsOverBudget");
+    auto *sess = gateway_find_session(id.c_str());
+    ASSERT_NE(sess, nullptr);
+    auto reservation = gateway_reserve_session_output(sess);
+    ASSERT_GT(reservation, 0u);
+    ASSERT_EQ(gateway_fill_session_protocol_output_with_writer(
+                  sess, reservation, "ping", 4, failing_writer),
+              1);
+    ASSERT_FALSE(sess->output_fifo.empty());
+    ASSERT_TRUE(sess->output_fifo.front().ready);
+    session_ids.push_back(id);
+    objects.push_back(ob);
+    sessions.push_back(sess);
+  }
+
+  // Flush with a small budget: one continuation is recorded, remaining_ready
+  // counts the left-behind sessions.
+  const int flushed = gateway_flush_master_output_fifos(master_fd, budget);
+  ASSERT_EQ(flushed, static_cast<int>(budget));
+  ASSERT_EQ(
+      g_gateway_runtime_counters.master_output_scan_remaining_ready.load(
+          std::memory_order_relaxed),
+      before_remaining + extra);
+  ASSERT_EQ(
+      g_gateway_runtime_counters.master_output_flush_continuations.load(
+          std::memory_order_relaxed),
+      before_continuations + 1);
+
+  // Exactly `extra` sessions still carry their FIFO entries (registry
+  // traversal order is not insertion order).
+  size_t remaining_fifos = 0;
+  for (auto *sess : sessions) {
+    if (!sess->output_fifo.empty()) {
+      remaining_fifos++;
+    }
+  }
+  ASSERT_EQ(remaining_fifos, extra);
+  // A second flush with a big budget drains everything with no continuation.
+  const auto continuations_after_first =
+      g_gateway_runtime_counters.master_output_flush_continuations.load(
+          std::memory_order_relaxed);
+  const int drained = gateway_flush_master_output_fifos(master_fd, 4096);
+  ASSERT_EQ(drained, static_cast<int>(extra));
+  for (auto *sess : sessions) {
+    ASSERT_TRUE(sess->output_fifo.empty());
+  }
+  ASSERT_EQ(
+      g_gateway_runtime_counters.master_output_flush_continuations.load(
+          std::memory_order_relaxed),
+      continuations_after_first);
+
+  for (size_t i = 0; i < session_ids.size(); i++) {
+    ASSERT_EQ(gateway_destroy_session_internal(session_ids[i].c_str(), "test_done", "done"), 1);
+    destruct_object(objects[i]);
+    free_object(&objects[i], "TestGatewayMasterOutputContinuationCountsOverBudget");
+  }
+  gateway_remove_master_for_test(master_fd);
+  pair[0] = nullptr;
+  bufferevent_free(pair[1]);
+}
+
 TEST_F(DriverTest, TestGatewayProbeSuppressionIsSessionScopedAndOneShot) {
   auto *ob = create_gateway_session_for_test("gw-test-probe-suppress",
                                              "/clone/gateway_login_example", 89);

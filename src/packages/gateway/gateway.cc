@@ -1835,6 +1835,9 @@ void gateway_schedule_write_flush(int fd) {
     return;
   }
   master->write_flush_scheduled = true;
+  // Real continuation scheduling point: only a successful schedule counts.
+  g_gateway_runtime_counters.master_output_scan_schedules.fetch_add(1,
+                                                                    std::memory_order_relaxed);
   master->write_flush_event = add_walltime_event(
       kGatewayWriteFlushContinuationDelay, [fd] {
         auto current = g_gateway_masters.find(fd);
@@ -1844,6 +1847,8 @@ void gateway_schedule_write_flush(int fd) {
         auto *scheduled_master = current->second.get();
         scheduled_master->write_flush_event = nullptr;
         scheduled_master->write_flush_scheduled = false;
+        g_gateway_runtime_counters.master_output_scan_coalesced.fetch_add(
+            1, std::memory_order_relaxed);
         const auto flushed =
             gateway_flush_master_output_fifos(fd, kGatewayWriteFlushBudget);
         auto *scheduled_output = scheduled_master->bev
@@ -2810,6 +2815,22 @@ mapping_t *gateway_status_internal() {
   add_mapping_pair(
       map, "gateway_master_output_scan_ready_hits",
       static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_scan_ready_hits.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_output_scan_remaining_ready",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_scan_remaining_ready.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_output_scan_schedules",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_scan_schedules.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_output_scan_coalesced",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_scan_coalesced.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_output_scan_executed",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_scan_executed.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_master_output_flush_continuations",

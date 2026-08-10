@@ -206,7 +206,12 @@ jobs:
           OPENSSL_ROOT_DIR: ${{ matrix.openssl_root }}
           ICU_ROOT: ${{ matrix.icu_root }}
 
-      - name: Run Unit Tests
+      - name: Run Unit Tests (non-sanitizer)
+        # Plain matrix jobs run the full CTest suite once. Sanitizer jobs
+        # skip this step: ASan/UBSan run the full suite once in their own
+        # step, and TSan runs only the concurrency-focused subset (never an
+        # unconditional full CTest first).
+        if: !matrix.sanitizer
         run: cd build && make test
 
       - name: Run Sanitizer Targeted Tests (TSan)
@@ -215,14 +220,30 @@ jobs:
           cd build
           # TSan is incompatible with the full parallel test load; run the
           # owner/future/gateway/object-store concurrency-focused subset.
-          ctest --output-on-failure -R 'Owner|Future|Gateway|Context|Object|Socket'
+          # First assert the filter matches a non-empty test set so a typo
+          # cannot silently turn the gate into a no-op.
+          TARGETS='Owner|Future|Gateway|Context|Object|Socket'
+          COUNT=$(ctest -N -R "$TARGETS" | grep -c 'Test  #')
+          echo "TSan filtered tests: $COUNT (filter: $TARGETS)"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "FAIL: TSan filter matched no tests"
+            exit 1
+          fi
+          ctest --output-on-failure -R "$TARGETS"
 
       - name: Run Sanitizer Targeted Tests (ASan/UBSan)
         if: matrix.sanitizer == 'asan' || matrix.sanitizer == 'ubsan'
         run: |
           cd build
-          # Sanitizers may expose issues in the full suite; run everything.
+          # Sanitizers may expose issues in the full suite; run everything
+          # exactly once here (the generic unit-test step is skipped for
+          # sanitizer jobs).
           ctest --output-on-failure
+          # Short deterministic fuzz smoke under sanitizers: exercises the
+          # gateway frame parser with ASan/UBSan instrumentation.
+          if [ -x src/tests/gateway_fuzz_smoke ]; then
+            ./src/tests/gateway_fuzz_smoke
+          fi
 
       - name: Run LPC Modern Runtime Gate
         if: matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer
@@ -241,3 +262,48 @@ jobs:
 
       - name: Run LPC Testsuite
         run: cd testsuite && ../build/bin/driver etc/config.test -ftest
+
+  fuzz:
+    name: Fuzz (libFuzzer gateway_fuzz, clang)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential autoconf automake bison expect \
+            libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev \
+            libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev \
+            libdw-dev libbz2-dev clang
+
+      - name: Configure (libFuzzer + ASan/UBSan)
+        run: |
+          cmake -S . -B build-fuzz \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DENABLE_ASAN=ON \
+            -DENABLE_UBSAN=ON \
+            -DENABLE_LTO=OFF \
+            -DMARCH_NATIVE=OFF \
+            -DGATEWAY_FUZZ_LIBFUZZER=ON \
+            -DPACKAGE_DB_SQLITE=2
+
+      - name: Build fuzz target
+        run: cmake --build build-fuzz --target gateway_fuzz -j 2
+
+      - name: Run libFuzzer (bounded)
+        run: |
+          ./build-fuzz/src/tests/gateway_fuzz -runs=10000 -max_len=4096 -timeout=5 -print_final_stats=1
+
+      - name: Upload crash corpus on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-fuzz-crashes
+          path: |
+            build-fuzz/**/crash-*
+            build-fuzz/**/leak-*
+            build-fuzz/**/timeout-*
+          if-no-files-found: ignore
