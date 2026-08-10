@@ -273,9 +273,24 @@ def main() -> int:
 
     paths = list(args.report)
     if args.reports_dir:
+        # Envelope directory scan: every JSON is an envelope EXCEPT files
+        # that an envelope binds as raw_report (those are verified via the
+        # SHA-256 binding inside check_raw_digest, not as envelopes).
+        raw_names = set()
         for root, _dirs, files in os.walk(args.reports_dir):
             for f in sorted(files):
-                if f.endswith(".json"):
+                if not f.endswith(".json"):
+                    continue
+                try:
+                    with open(os.path.join(root, f), encoding="utf-8") as fp:
+                        data = json.load(fp)
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if isinstance(data.get("raw_report"), str):
+                    raw_names.add(data["raw_report"])
+        for root, _dirs, files in os.walk(args.reports_dir):
+            for f in sorted(files):
+                if f.endswith(".json") and f not in raw_names:
                     paths.append(os.path.join(root, f))
 
     if not paths:
