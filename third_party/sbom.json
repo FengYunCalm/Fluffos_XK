@@ -1,7 +1,7 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.4",
-  "serialNumber": "urn:uuid:e89fc4e9-e193-5c10-9f5c-d60d794b4d06",
+  "serialNumber": "urn:uuid:1bbbcc85-b239-5393-bee4-9f0ec7c8c070",
   "version": 1,
   "metadata": {
     "timestamp": "2026-08-10T00:00:00Z",
@@ -471,17 +471,6 @@
         {
           "type": "vcs",
           "url": "https://github.com/actions/download-artifact"
-        }
-      ]
-    },
-    {
-      "type": "application",
-      "name": "actions/upload-release-asset",
-      "version": "v1",
-      "externalReferences": [
-        {
-          "type": "vcs",
-          "url": "https://github.com/actions/upload-release-asset"
         }
       ]
     },

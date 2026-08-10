@@ -44,6 +44,9 @@ jobs:
           python3 -m json.tool docs/evidence/manifest.schema.json >/dev/null
           python3 tools/docs/test-evidence-gate.py
 
+      - name: Release pipeline fault injection tests (dry-run)
+        run: bash tools/release/release-fault-injection.sh
+
   docs-check:
     name: Docs Evidence & Links
     runs-on: ubuntu-latest
