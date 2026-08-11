@@ -3,14 +3,16 @@
 > 审计日期：2026-08-11（Asia/Shanghai）
 > 审计对象：[FengYunCalm/FluffOS_XK PR #36](https://github.com/FengYunCalm/FluffOS_XK/pull/36)
 > Base：`24bd5f4f5126963966d1d91787f327f4cc84a5e7`
-> 已审实现提交：`04088aa90fd6c12dfb597b9dccbce7585a87a93f`
+> 已审实现提交：`04088aa90fd6c12dfb597b9dccbce7585a87a93f`、`3fa46cf46106e83aeb30fb4a117496823c7df6a3`
+> 上一版审计文档提交：`87732d7c31cfa814f021140f72488f41fbc01ec7`
 > 分支：`feat/exec-audit-plan-2026-08-09`
 
 ## 1. 当前结论
 
-实现层面的本地阻断项已经关闭，可以进入最终远端门禁；在最终 PR HEAD 的完整 required
-checks 返回前，结论保持 **暂不合并**。这不是发现了新的未修代码阻断，而是避免把旧 HEAD
-的失败或本地单平台结果误写成最终跨平台结论。
+实现层面的本地阻断项已经关闭，可以进入最终远端门禁；在新提交推送并由最终 PR HEAD 的
+完整 required checks 返回前，结论保持 **暂不合并**。旧远端 HEAD `87732d7c` 当前仍为
+`UNSTABLE`，失败项是 Ubuntu Clang TSan Debug、macOS Debug、macOS RelWithDebInfo；这些
+结果不能代表本轮修复后的 SHA。
 
 合并结论只允许按以下规则转换：
 
@@ -43,6 +45,50 @@ Future 配额拒绝本身会正确生成可查询的 failed tombstone，但三�
 
 已修复：所有完成路径都先释放 Future store 锁，再调用同一 `target_status()` 解析真实状态；
 `PayloadByteCapsRejectDeterministically` 增加 invalid handle 回归。
+
+### F16：隔离 runner 依赖 GNU `timeout`/`stdbuf`，macOS 会直接退出 127
+
+旧 runner 在没有 GNU `timeout` 的 macOS 环境调用 `timeout`，并依赖 `stdbuf -oL` 获取实时
+日志，导致 Debug/RelWithDebInfo job 在真正运行 driver 前失败。
+
+已修复：按 `timeout`、`gtimeout`、仓库内 `portable-timeout.py` 顺序选择监督器；移除
+`stdbuf`，依赖 driver 自身逐条 flush；加入最小 PATH 合同，覆盖 timeout/stdbuf 均不存在的
+环境。测试只断言运行前后 sandbox 集合不新增，不会误删保留的审计目录。
+
+### F17：无 `flock` fallback lock 的释放状态不闭合
+
+旧 runner 在 fallback `mkdir` lock 释放后仍保留 `LOCK_FD=mkdir`，退出 trap 可能再次进入释放
+路径，且释放逻辑通过外部 `head` 读取 owner，增加最小 PATH 和重复清理场景的不确定性。
+
+已修复：用 shell 内建 `read` 读取 owner PID，释放后清空 `LOCK_FD`，并保留 owner-PID 校验；
+可移植性合同验证 lockdir 与 sandbox 均无新增残留。
+
+### F18：eval-limit 状态和 POSIX timer 原先跨线程共享
+
+旧实现使用全局 `outoftime` 与单一 `timer_t`。owner worker 首次 `set_eval()` 会覆盖主线程
+timer，信号也可能写入错误执行线程，造成误终止或数据竞争。
+
+已修复：`outoftime` 改为 VM thread-local `volatile sig_atomic_t`；Linux timer 按线程惰性
+创建，使用 `SIGEV_THREAD_ID` 投递到目标线程，并在线程退出时删除；增加三项线程隔离/到期
+信号合同。
+
+### F19：`mudlib_stats` 共享计数更新存在丢增量和衰减覆盖
+
+owner worker 与 main thread 可同时更新 `moves`、`heart_beats`、`size_array`、`errors`、
+`objects`；普通 `+=` 和衰减写回会丢失并发增量。
+
+已修复：保持 `mudlib_stats_t` ABI 字段布局，使用 C++17 可用的 `__atomic_*` relaxed 操作；
+衰减改用 CAS 循环，快照/恢复使用原子读写；增加 8 线程数组计数合同。
+
+### F20：owner message worker LPC 会修改主线程对象 reset 状态
+
+`dispatch_owner_message_in_current_context()` 执行 `safe_apply()` 前没有设置
+`controlled_lpc_active`，`apply_low_impl()` 因而写入 `object_t::time_of_ref` 并清除
+`O_RESET_STATE`。TSan 记录为 `apply.cc:218` owner/main 并发读写。
+
+已修复：owner.cc 增加异常安全的 `OwnerControlledLpcScope`，覆盖 owner message 的 LPC 执行
+范围并恢复原状态；target-message 合同固定 `time_of_ref` 与 flags，证明 worker 调用不触发
+主线程 reset 维护。
 
 ## 3. 关键代码合同复核
 
@@ -98,20 +144,24 @@ fallback 伪快路径。
 
 | 范围 | 结果 |
 | --- | --- |
-| GCC Debug CTest | 420/420 |
-| GCC ASan Debug | 420/420 |
-| GCC UBSan Debug | 420/420 |
+| GCC Debug CTest | 424/424 |
+| GCC ASan Debug | 424/424 |
+| GCC UBSan Debug | 424/424 |
 | GCC TSan focused subset | 360/360；WSL 下构建和运行均使用 `setarch x86_64 -R` |
-| 定向 Future/ObjectHandle/string 回归 | 19/19 |
-| Gateway fuzz smoke | 普通、ASan、UBSan 均通过；256 inputs、1024 accepted、256 length rejects、512 JSON rejects、零残留 |
-| LPC isolated runner | LPC 断言通过；四个实际 loopback 端口唯一；Driver 退出 0 |
+| eval-limit、owner-message、mudlib_stats 定向合同 | Debug 5/5；TSan 5/5 |
+| runner portability 合同 | 2/2；最小 PATH 下无 GNU `timeout`/`stdbuf` 通过，lock/sandbox 无新增残留 |
+| TSan LPC isolated runner | LPC 断言通过；四个实际 loopback 端口唯一；Driver 退出 0；保留日志无 TSan 报告 |
+| ASan LPC isolated runner | LPC 断言通过；四个实际 loopback 端口唯一；Driver 退出 0；保留日志无 ASan/LSan 报告 |
+| UBSan LPC isolated runner | LPC 断言通过；四个实际 loopback 端口唯一；Driver 退出 0；保留日志无 UBSan 报告 |
 | 端口隔离压力 | 5 次串行 + 20 次并发通过，无 Driver/sandbox/lockdir 残留 |
 | runtime/bench smoke | `lpc-modern-runtime-stress.sh smoke` 通过；owner-local fast path 8192、global fallback 0 |
 | 构建卫生 | 连续两次全目标构建，第二次无 C++ 编译/链接 |
 | workflow/release | check-workflows self-test、action pins self-test、release fault injection、actionlint 1.7.12 通过 |
 | docs/evidence/SBOM | check-docs、evidence negative suite、CycloneDX validate 通过 |
 
-上述是实现提交上的本地证据，不等价于最终 PR HEAD 的 Clang/macOS/Windows/CodeQL/Docker
+| 诊断日志 | `testsuite/.run-isolated-sxQmiJ`（TSan）、`.run-isolated-m7U4O0`（ASan）、`.run-isolated-knkh8t`（UBSan） |
+
+上述是实现提交 `3fa46cf46106e83aeb30fb4a117496823c7df6a3` 上的本地证据，不等价于最终 PR HEAD 的 Clang/macOS/Windows/CodeQL/Docker
 结果，也不等价于真实 registry 演练。
 
 ## 5. 性能与架构结论
@@ -146,7 +196,7 @@ fallback 伪快路径。
    - release：`release-fault-injection.sh` + `verify-release-inputs.sh` fixture；
    - fuzz：对应 sanitizer smoke，再跑 bounded libFuzzer。
 3. 为真实缺口先加失败合同，再做最小修复；不缩减矩阵、不改 required check 名、不忽略失败。
-4. 重跑受影响定向集，再跑 420/420 Debug 与相关 sanitizer 集。
+4. 重跑受影响定向集，再跑 424/424 Debug 与相关 sanitizer 集。
 5. 更新本报告的 finding、证据和剩余风险，提交并推送新 HEAD。
 6. 等待新 HEAD 全部 required checks，旧 HEAD 的绿色结果不继承。
 
