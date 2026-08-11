@@ -21,6 +21,12 @@ uint64_t saturating_add(uint64_t a, uint64_t b) {
              : a + b;
 }
 
+uint64_t saturating_multiply(uint64_t a, uint64_t b) {
+  return a != 0 && b > std::numeric_limits<uint64_t>::max() / a
+             ? std::numeric_limits<uint64_t>::max()
+             : a * b;
+}
+
 // Exact byte length of a string svalue: counted strings (malloc/shared) use
 // the allocator block size so embedded NULs are counted (strlen would
 // undercount); constant strings fall back to strlen. No global scratch
@@ -39,34 +45,37 @@ uint64_t owner_future_string_bytes(const svalue_t *sv) {
 struct FrozenWeightState {
   uint64_t bytes{0};
   uint64_t nodes{0};
-  int depth{kMaxFrozenDepth};
+  bool exhausted{false};
 };
 
 // Forward declaration: the mapping node callback below recurses into it.
 void owner_future_frozen_bytes_internal(const svalue_t *value,
-                                        FrozenWeightState *state);
+                                        FrozenWeightState *state, int depth);
+
+void owner_future_frozen_weight_exhausted(FrozenWeightState *state) {
+  state->exhausted = true;
+  state->bytes = std::numeric_limits<uint64_t>::max();
+}
+
+struct FrozenWeightMapContext {
+  FrozenWeightState *state;
+  int child_depth;
+};
 
 int owner_future_frozen_map_node(mapping_t * /*map*/, mapping_node_t *node,
                                  void *opaque) {
-  auto *state = static_cast<FrozenWeightState *>(opaque);
+  auto *context = static_cast<FrozenWeightMapContext *>(opaque);
+  auto *state = context->state;
+  if (state->exhausted) {
+    return 1;
+  }
   // Both the key and the value of every mapping pair are metered.
   auto *key = &node->values[0];
   auto *value = &node->values[1];
   state->bytes = saturating_add(state->bytes, sizeof(svalue_t));
-  if (state->depth > 0) {
-    FrozenWeightState key_state{0, state->nodes, state->depth - 1};
-    owner_future_frozen_bytes_internal(key, &key_state);
-    state->nodes = key_state.nodes;
-    state->bytes = saturating_add(state->bytes, key_state.bytes);
-
-    FrozenWeightState value_state{0, state->nodes, state->depth - 1};
-    owner_future_frozen_bytes_internal(value, &value_state);
-    state->nodes = value_state.nodes;
-    state->bytes = saturating_add(state->bytes, value_state.bytes);
-  } else {
-    state->nodes++;
-  }
-  return 1;
+  owner_future_frozen_bytes_internal(key, state, context->child_depth);
+  owner_future_frozen_bytes_internal(value, state, context->child_depth);
+  return state->exhausted ? 1 : 0;
 }
 
 // Estimate the byte weight of a frozen svalue for quota accounting. This is
@@ -75,16 +84,15 @@ int owner_future_frozen_map_node(mapping_t * /*map*/, mapping_node_t *node,
 // recursion is depth-bounded, node count is bounded, and all additions
 // saturate so a pathological value can never overflow the accounting.
 void owner_future_frozen_bytes_internal(const svalue_t *value,
-                                        FrozenWeightState *state) {
-  if (!value || !state) {
+                                        FrozenWeightState *state, int depth) {
+  if (!value || !state || state->exhausted) {
     return;
   }
-  if (state->nodes >= kMaxFrozenNodes || state->depth <= 0) {
-    state->nodes++;
+  if (state->nodes >= kMaxFrozenNodes || depth <= 0) {
+    owner_future_frozen_weight_exhausted(state);
     return;
   }
   state->nodes++;
-  state->depth--;
   state->bytes = saturating_add(state->bytes, sizeof(svalue_t));
   switch (value->type) {
     case T_STRING:
@@ -94,7 +102,11 @@ void owner_future_frozen_bytes_internal(const svalue_t *value,
       if (value->u.arr) {
         state->bytes = saturating_add(state->bytes, sizeof(array_t));
         for (int i = 0; i < value->u.arr->size; i++) {
-          owner_future_frozen_bytes_internal(&value->u.arr->item[i], state);
+          owner_future_frozen_bytes_internal(&value->u.arr->item[i], state,
+                                             depth - 1);
+          if (state->exhausted) {
+            break;
+          }
         }
       }
       break;
@@ -103,8 +115,10 @@ void owner_future_frozen_bytes_internal(const svalue_t *value,
         state->bytes = saturating_add(state->bytes, sizeof(mapping_t));
         state->bytes = saturating_add(
             state->bytes,
-            static_cast<uint64_t>(MAP_COUNT(value->u.map)) * sizeof(mapping_node_t));
-        mapTraverse(value->u.map, owner_future_frozen_map_node, state);
+            saturating_multiply(static_cast<uint64_t>(MAP_COUNT(value->u.map)),
+                                sizeof(mapping_node_t)));
+        FrozenWeightMapContext context{state, depth - 1};
+        mapTraverse(value->u.map, owner_future_frozen_map_node, &context);
       }
       break;
     default:
@@ -114,8 +128,23 @@ void owner_future_frozen_bytes_internal(const svalue_t *value,
 
 uint64_t owner_future_frozen_bytes(const svalue_t *value) {
   FrozenWeightState state;
-  owner_future_frozen_bytes_internal(value, &state);
+  owner_future_frozen_bytes_internal(value, &state, kMaxFrozenDepth);
   return state.bytes;
+}
+
+bool owner_future_total_payload_cap_breached(int64_t current_bytes,
+                                             uint64_t removed_bytes,
+                                             uint64_t added_bytes) {
+  if (current_bytes < 0) {
+    return true;
+  }
+  uint64_t remaining = static_cast<uint64_t>(current_bytes);
+  if (removed_bytes > remaining) {
+    return true;
+  }
+  remaining -= removed_bytes;
+  return added_bytes > OwnerFutureStore::kMaxTotalPayloadBytes ||
+         remaining > OwnerFutureStore::kMaxTotalPayloadBytes - added_bytes;
 }
 
 uint64_t owner_future_payload_bytes(const OwnerFutureRecord &record) {
@@ -321,13 +350,10 @@ bool OwnerFutureStore::restore_terminal_checked(OwnerFutureRecord record) {
   }
   const uint64_t payload_bytes = owner_future_payload_bytes(record);
   const bool single_cap_breach = payload_bytes > kMaxSinglePayloadBytes;
-  const bool total_cap_breach =
-      terminal_payload_bytes_ - (replacing_terminal
-                                     ? static_cast<int64_t>(
-                                           owner_future_payload_bytes(existing->second))
-                                     : 0) +
-          static_cast<int64_t>(payload_bytes) >
-      static_cast<int64_t>(kMaxTotalPayloadBytes);
+  const uint64_t replaced_payload_bytes =
+      replacing_terminal ? owner_future_payload_bytes(existing->second) : 0;
+  const bool total_cap_breach = owner_future_total_payload_cap_breached(
+      terminal_payload_bytes_, replaced_payload_bytes, payload_bytes);
   if (single_cap_breach || total_cap_breach) {
     byte_rejects_.fetch_add(1, std::memory_order_relaxed);
     return false;
@@ -427,11 +453,6 @@ std::optional<OwnerFutureCompletion> OwnerFutureStore::complete(uint64_t future_
     return std::nullopt;
   }
   auto completion = complete_record(it->second, state, result_key, error, std::move(result), nullptr);
-  if (completion.quota_rejected) {
-    lock.unlock();
-    completion.target_status = VMObjectHandleResolveStatus::kCurrent;
-    return completion;
-  }
   lock.unlock();
   completion.target_status = target_status(completion.record);
   return completion;
@@ -454,11 +475,6 @@ std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_for_task(uint64_
     }
     if (future_it->second.state == "pending") {
       auto completion = complete_record(future_it->second, state, result_key, error, std::move(result), nullptr);
-      if (completion.quota_rejected) {
-        lock.unlock();
-        completion.target_status = VMObjectHandleResolveStatus::kCurrent;
-        return completion;
-      }
       lock.unlock();
       completion.target_status = target_status(completion.record);
       return completion;
@@ -486,11 +502,6 @@ std::optional<OwnerFutureCompletion> OwnerFutureStore::complete_string_for_task(
     auto native = std::make_shared<const std::string>(std::move(result));
     auto completion = complete_record(record, "completed", result_key, "",
                                       nullptr, std::move(native));
-    if (completion.quota_rejected) {
-      lock.unlock();
-      completion.target_status = VMObjectHandleResolveStatus::kCurrent;
-      return completion;
-    }
     lock.unlock();
     completion.target_status = target_status(completion.record);
     return completion;
@@ -685,9 +696,8 @@ OwnerFutureCompletion OwnerFutureStore::complete_record(OwnerFutureRecord &recor
                                  ? native_string->size() + sizeof(std::string)
                                  : 0);
   const bool single_cap_breach = payload_bytes > kMaxSinglePayloadBytes;
-  const bool total_cap_breach =
-      terminal_payload_bytes_ + static_cast<int64_t>(payload_bytes) >
-      static_cast<int64_t>(kMaxTotalPayloadBytes);
+  const bool total_cap_breach = owner_future_total_payload_cap_breached(
+      terminal_payload_bytes_, 0, payload_bytes);
   // The lifecycle slot was reserved at admission, so the terminal record cap
   // cannot be breached by an admitted pending; this stays as a defensive
   // check that also keeps a tombstone rather than erasing the record.

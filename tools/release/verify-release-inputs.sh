@@ -14,6 +14,9 @@
 #       --expected-sha SHA --digest-file PATH --trivy-report PATH
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 ASSETS_DIR=""
 SBOM=""
 MANIFEST=""
@@ -43,56 +46,98 @@ fail=0
 
 echo "== 1. asset checksums =="
 found_asset=0
-for sha in "$ASSETS_DIR"/*.sha256; do
-  [ -e "$sha" ] || continue
+found_linux=0
+found_windows=0
+for bin in "$ASSETS_DIR"/fluffos-*.tar.gz "$ASSETS_DIR"/fluffos-*.zip; do
+  [ -f "$bin" ] || continue
   found_asset=1
-  (cd "$ASSETS_DIR" && sha256sum -c "$(basename "$sha")")
-done
-for bin in "$ASSETS_DIR"/fluffos-*; do
-  [ -e "$bin" ] || continue
-  case "$bin" in *.sha256) continue ;; esac
-  grep -q "$(basename "$bin")" "$ASSETS_DIR"/*.sha256 || {
+  case "$bin" in
+    *-linux-x86_64-static.tar.gz) found_linux=1 ;;
+    *-windows-x86_64.zip) found_windows=1 ;;
+  esac
+  sha="${bin}.sha256"
+  if [ ! -f "$sha" ]; then
     echo "FAIL: no checksum for $(basename "$bin")" >&2
     fail=1
-  }
+    continue
+  fi
+  if [ "$(wc -l < "$sha")" -ne 1 ]; then
+    echo "FAIL: checksum file must contain exactly one record: $(basename "$sha")" >&2
+    fail=1
+    continue
+  fi
+  checksum_target="$(awk 'NR == 1 { print $2 }' "$sha")"
+  checksum_target="${checksum_target#\*}"
+  if [ "$checksum_target" != "$(basename "$bin")" ]; then
+    echo "FAIL: checksum target must be the local asset basename: $(basename "$sha")" >&2
+    fail=1
+    continue
+  fi
+  (cd "$ASSETS_DIR" && sha256sum -c "$(basename "$sha")") || fail=1
 done
-[ "$found_asset" -eq 1 ] || { echo "FAIL: no checksum files found in $ASSETS_DIR" >&2; fail=1; }
+[ "$found_asset" -eq 1 ] || { echo "FAIL: no release binary assets found in $ASSETS_DIR" >&2; fail=1; }
+[ "$found_linux" -eq 1 ] || { echo "FAIL: Linux release asset is missing" >&2; fail=1; }
+[ "$found_windows" -eq 1 ] || { echo "FAIL: Windows release asset is missing" >&2; fail=1; }
 
 echo "== 2. SBOM CycloneDX schema =="
-python3 tools/sbom-generate.py --validate || fail=1
+EXPECTED_SBOM="$(mktemp)"
+trap 'rm -f "$EXPECTED_SBOM"' EXIT
+if ! cmp -s "$MANIFEST" "$ROOT_DIR/third_party/manifest.yaml"; then
+  echo "FAIL: release manifest copy differs from the target checkout" >&2
+  fail=1
+fi
+python3 "$ROOT_DIR/tools/sbom-generate.py" --manifest "$MANIFEST" --out "$EXPECTED_SBOM" --validate || fail=1
 
-echo "== 3. manifest <-> SBOM consistency =="
-python3 - "$SBOM" "$MANIFEST" <<'PY' || fail=1
-import json, sys, yaml
-sbom = json.load(open(sys.argv[1], encoding="utf-8"))
-manifest = yaml.safe_load(open(sys.argv[2], encoding="utf-8"))
-sbom_names = {c.get("name") for c in sbom.get("components", [])}
-manifest_names = set()
-for tc in manifest.get("toolchain", []):
-    if tc.get("name") == "github-actions":
-        for e in tc.get("entries", []):
-            manifest_names.add(e["name"])
-for dl in manifest.get("external_downloads", []):
-    manifest_names.add(dl["name"])
-missing = manifest_names - sbom_names
-if missing:
-    print(f"FAIL: manifest components missing from SBOM: {sorted(missing)}")
+echo "== 3. exact release SBOM <-> manifest consistency =="
+python3 - "$SBOM" "$EXPECTED_SBOM" <<'PY' || fail=1
+import json, sys
+
+try:
+    actual = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception as error:
+    print(f"FAIL: release SBOM unreadable: {error}")
     sys.exit(1)
-print(f"PASS: SBOM covers {len(manifest_names)} manifest components")
+
+expected = json.load(open(sys.argv[2], encoding="utf-8"))
+if actual != expected:
+    def identities(sbom):
+        return {
+            (component.get("type"), component.get("name"), component.get("version"))
+            for component in sbom.get("components", [])
+        }
+
+    actual_ids = identities(actual)
+    expected_ids = identities(expected)
+    missing = sorted(expected_ids - actual_ids)
+    unexpected = sorted(actual_ids - expected_ids)
+    if missing:
+        print(f"FAIL: release SBOM missing manifest components: {missing}")
+    if unexpected:
+        print(f"FAIL: release SBOM contains unexpected components: {unexpected}")
+    if not missing and not unexpected:
+        print("FAIL: release SBOM component metadata or document metadata differs from the manifest-generated SBOM")
+    sys.exit(1)
+
+print(f"PASS: release SBOM exactly matches {len(expected.get('components', []))} manifest-generated components")
 PY
 
 echo "== 4. provenance / target SHA binding =="
-grep -q "$EXPECTED_SHA" "$ASSETS_DIR"/provenance.txt || {
+if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "FAIL: expected target SHA must be exactly 40 lowercase hex characters" >&2
+  fail=1
+fi
+grep -Fqx "target_sha: $EXPECTED_SHA" "$ASSETS_DIR"/provenance.txt || {
   echo "FAIL: provenance.txt does not record target SHA $EXPECTED_SHA" >&2
   fail=1
 }
 
 echo "== 5. OCI digest <-> scan binding =="
 [ -f "$DIGEST_FILE" ] || { echo "FAIL: digest file missing: $DIGEST_FILE" >&2; fail=1; }
-recorded_digest="$(cat "$DIGEST_FILE" | tr -d ' \n')"
-case "$recorded_digest" in sha256:[0-9a-f]*) ;; *)
-  echo "FAIL: digest file content is not sha256:hex: $recorded_digest" >&2; fail=1 ;;
-esac
+recorded_digest="$(tr -d ' \n' < "$DIGEST_FILE")"
+if [[ ! "$recorded_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+  echo "FAIL: digest file content is not an exact sha256 digest: $recorded_digest" >&2
+  fail=1
+fi
 python3 - "$TRIVY_REPORT" "$recorded_digest" <<'PY' || fail=1
 import json, sys
 try:
@@ -101,10 +146,12 @@ except Exception as e:
     print(f"FAIL: trivy report unreadable: {e}")
     sys.exit(1)
 digest = sys.argv[2]
-# The scan report must reference the exact digest it scanned.
-found = json.dumps(report).find(digest) != -1
-if not found:
-    print(f"FAIL: trivy report does not reference scanned digest {digest}")
+# The workflow records the independently inspected archive digest after Trivy
+# writes its report. Require that exact, dedicated binding field; accepting a
+# matching string anywhere in arbitrary report data would be ambiguous.
+bound_digest = report.get("FluffOSImageDigest")
+if bound_digest != digest:
+    print(f"FAIL: trivy report digest binding {bound_digest!r} != {digest}")
     sys.exit(1)
 print(f"PASS: trivy report bound to {digest[:20]}...")
 PY

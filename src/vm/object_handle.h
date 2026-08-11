@@ -46,7 +46,8 @@ enum class VMObjectHandleResolveStatus {
 
 struct VMObjectHandleResolveResult {
   object_t *object{nullptr};
-  VMObjectHandleResolveStatus status{VMObjectHandleResolveStatus::kInvalidHandle};  bool resolved_via_owner_local_store{false};
+  VMObjectHandleResolveStatus status{VMObjectHandleResolveStatus::kInvalidHandle};
+  bool resolved_via_owner_local_store{false};
   bool owner_local_fast_path_used{false};
   bool diagnosed_via_owner_local_store{false};
   bool diagnosed_via_owner_local_path_index{false};
@@ -81,6 +82,12 @@ VMObjectHandle vm_object_handle_with_intent(object_t *object, const char *permis
 mapping_t *vm_object_handle_status(object_t *object);
 mapping_t *vm_object_handle_status_with_intent(object_t *object, const char *permission_intent);
 VMObjectHandleResolveResult vm_object_handle_resolve_status(const VMObjectHandle &handle);
+// Resolve only from the owner-local lifecycle record and pointer indexes.
+// This path never consults the compatibility/global object indexes and never
+// reads mutable object_t lifecycle fields, so owner workers can reject a
+// missing local record conservatively.
+VMObjectHandleResolveResult vm_object_handle_resolve_owner_local_status(
+    const VMObjectHandle &handle);
 const char *vm_object_handle_resolve_status_name(VMObjectHandleResolveStatus status);
 object_t *vm_object_handle_resolve(const VMObjectHandle &handle);
 // Result of a guarded acquire: the object pointer (when the admission was
@@ -100,6 +107,10 @@ struct VMObjectHandleAcquireResult {
 VMObjectHandleAcquireResult vm_object_handle_acquire_status(const VMObjectHandle &handle);
 // Thin wrapper returning only the object pointer (nullptr on any rejection).
 object_t *vm_object_handle_acquire(const VMObjectHandle &handle);
+// Low-frequency instrumentation for owner-target/object-handle reference
+// operations. It records only calls made off the main VM thread and is kept
+// out of the global add_ref/free_object hot paths.
+void vm_object_store_note_object_ref_mutation();
 // C++ regression hooks: worker-thread refcount mutation counter.
 uint64_t vm_object_store_test_support_worker_ref_mutation_count();
 void vm_object_store_test_support_reset_worker_ref_mutation_count();
@@ -137,6 +148,7 @@ class VMObjectRefGuard {
 #ifndef NDEBUG
       assert(vm_context_is_main_thread());
 #endif
+      vm_object_store_note_object_ref_mutation();
       free_object(&obj, "VMObjectRefGuard");
     }
   }

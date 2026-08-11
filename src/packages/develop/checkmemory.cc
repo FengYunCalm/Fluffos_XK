@@ -377,6 +377,11 @@ void compute_string_totals(uint64_t *asp, uint64_t *abp, uint64_t *bp) {
  * are added to the outbuffer.
  */
 void check_string_stats(outbuffer_t *out) {
+  const auto distinct_strings = num_distinct_strings.load(std::memory_order_relaxed);
+  const auto distinct_bytes = bytes_distinct_strings.load(std::memory_order_relaxed);
+  const auto allocated_strings = allocd_strings.load(std::memory_order_relaxed);
+  const auto allocated_bytes = allocd_bytes.load(std::memory_order_relaxed);
+  const auto string_overhead = overhead_bytes.load(std::memory_order_relaxed);
   uint64_t overhead = blocks[TAG_SHARED_STRING & 0xff] * sizeof(block_t) +
                       blocks[TAG_MALLOC_STRING & 0xff] * sizeof(malloc_block_t);
   uint64_t const num = blocks[TAG_SHARED_STRING & 0xff] + blocks[TAG_MALLOC_STRING & 0xff];
@@ -386,65 +391,65 @@ void check_string_stats(outbuffer_t *out) {
   compute_string_totals(&as, &ab, &bytes);
 
   if (!base_overhead) {
-    base_overhead = overhead_bytes - overhead;
+    base_overhead = string_overhead - overhead;
   }
   overhead += base_overhead;
 
-  if (num != num_distinct_strings) {
+  if (num != distinct_strings) {
     need_dump = 1;
     if (out) {
       outbuf_addv(out, "WARNING: num_distinct_strings is: %" PRIu64 " should be: %" PRIu64 "\n",
-                  num_distinct_strings, num);
+                  distinct_strings, num);
     } else {
       printf("WARNING: num_distinct_strings is: %" PRIu64 " should be: %" PRIu64 " \n",
-             num_distinct_strings, num);
+             distinct_strings, num);
       dump_stralloc(nullptr);
       abort();
     }
   }
-  if (overhead != overhead_bytes) {
+  if (overhead != string_overhead) {
     need_dump = 1;
     if (out) {
       outbuf_addv(out, "WARNING: overhead_bytes is: %" PRIu64 " should be: %" PRIu64 "\n",
-                  overhead_bytes, overhead);
+                  string_overhead, overhead);
     } else {
-      printf("WARNING: overhead_bytes is: %" PRIu64 " should be: %" PRIu64 "\n", overhead_bytes,
+      printf("WARNING: overhead_bytes is: %" PRIu64 " should be: %" PRIu64 "\n", string_overhead,
              overhead);
       dump_stralloc(nullptr);
       abort();
     }
   }
-  if (bytes != bytes_distinct_strings) {
+  if (bytes != distinct_bytes) {
     need_dump = 1;
     if (out) {
       outbuf_addv(out, "WARNING: bytes_distinct_strings is: %" PRIu64 " should be: %" PRIu64 "\n",
-                  bytes_distinct_strings, bytes);
+                  distinct_bytes, bytes);
     } else {
       printf("WARNING: bytes_distinct_strings is: %" PRIu64 " should be: %" PRIu64 "\n",
-             bytes_distinct_strings, bytes);
+             distinct_bytes, bytes);
       dump_stralloc(nullptr);
       abort();
     }
   }
-  if (allocd_strings != as) {
+  if (allocated_strings != as) {
     need_dump = 1;
     if (out) {
       outbuf_addv(out, "WARNING: allocd_strings is: %" PRIu64 " should be: %" PRIu64 "\n",
-                  allocd_strings, as);
+                  allocated_strings, as);
     } else {
-      printf("WARNING: allocd_strings is: %" PRIu64 " should be: %" PRIu64 "\n", allocd_strings,
+      printf("WARNING: allocd_strings is: %" PRIu64 " should be: %" PRIu64 "\n", allocated_strings,
              as);
       dump_stralloc(nullptr);
       abort();
     }
   }
-  if (allocd_bytes != ab) {
+  if (allocated_bytes != ab) {
     need_dump = 1;
     if (out) {
       outbuf_addv(out, "WARNING: allocd_bytes is: %" PRIu64 " should be: %" PRIu64 "\n",
-                  allocd_bytes, ab);
+                  allocated_bytes, ab);
     } else {
-      printf("WARNING: allocd_bytes is: %" PRIu64 " should be: %" PRIu64 "\n", allocd_bytes, ab);
+      printf("WARNING: allocd_bytes is: %" PRIu64 " should be: %" PRIu64 "\n", allocated_bytes, ab);
       dump_stralloc(nullptr);
       abort();
     }
@@ -609,12 +614,13 @@ void check_all_blocks(int flag) {
     if (totals[TAG_CLASS & 0xff] != total_class_size)
       outbuf_addv(&out, "WARNING: total_class_size is: %" PRIu64 " should be: %" PRIu64 "\n",
                   total_class_size, totals[TAG_CLASS & 0xff]);
-    if (blocks[TAG_MAPPING & 0xff] != num_mappings)
+    const auto mapping_count = num_mappings.load(std::memory_order_relaxed);
+    if (blocks[TAG_MAPPING & 0xff] != mapping_count)
       outbuf_addv(&out, "WARNING: num_mappings is: %" PRIu64 " should be: %" PRIu64 "\n",
-                  num_mappings, blocks[TAG_MAPPING & 0xff]);
-    if (blocks[TAG_MAP_TBL & 0xff] != num_mappings)
+                  mapping_count, blocks[TAG_MAPPING & 0xff]);
+    if (blocks[TAG_MAP_TBL & 0xff] != mapping_count)
       outbuf_addv(&out, "WARNING: %" PRIu64 " tables for %" PRIu64 " mappings\n",
-                  blocks[TAG_MAP_TBL & 0xff], num_mappings);
+                  blocks[TAG_MAP_TBL & 0xff], mapping_count);
     if (blocks[TAG_INTERACTIVE & 0xff] != users_num(true))
       outbuf_addv(&out, "WATNING: num_user is: %d should be: %" PRIu64 "\n", users_num(true),
                   blocks[TAG_INTERACTIVE & 0xff]);

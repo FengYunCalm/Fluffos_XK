@@ -28,6 +28,7 @@
 #include "base/internal/rc.h"
 #include "base/internal/external_port.h"
 #include "base/internal/stats.h"
+#include "base/internal/stralloc.h"
 #include "base/internal/strutils.h"
 #include "net/tls.h"
 
@@ -89,6 +90,29 @@ extern void gateway_service_admitted_receive_tasks_for_test();
 extern bool gateway_master_has_buffered_input_for_test(const GatewayMaster *master);
 
 namespace {
+struct StringStatsSnapshot {
+  uint64_t num_distinct_strings_value;
+  uint64_t bytes_distinct_strings_value;
+  uint64_t overhead_bytes_value;
+  uint64_t allocd_strings_value;
+  uint64_t allocd_bytes_value;
+
+  StringStatsSnapshot()
+      : num_distinct_strings_value(num_distinct_strings.load(std::memory_order_relaxed)),
+        bytes_distinct_strings_value(bytes_distinct_strings.load(std::memory_order_relaxed)),
+        overhead_bytes_value(overhead_bytes.load(std::memory_order_relaxed)),
+        allocd_strings_value(allocd_strings.load(std::memory_order_relaxed)),
+        allocd_bytes_value(allocd_bytes.load(std::memory_order_relaxed)) {}
+
+  ~StringStatsSnapshot() {
+    num_distinct_strings.store(num_distinct_strings_value, std::memory_order_relaxed);
+    bytes_distinct_strings.store(bytes_distinct_strings_value, std::memory_order_relaxed);
+    overhead_bytes.store(overhead_bytes_value, std::memory_order_relaxed);
+    allocd_strings.store(allocd_strings_value, std::memory_order_relaxed);
+    allocd_bytes.store(allocd_bytes_value, std::memory_order_relaxed);
+  }
+};
+
 OwnerFutureRecord owner_future_store_test_record(uint64_t future_id, uint64_t target_task_id) {
   OwnerFutureRecord record;
   record.future_id = future_id;
@@ -97,6 +121,65 @@ OwnerFutureRecord owner_future_store_test_record(uint64_t future_id, uint64_t ta
   return record;
 }
 }  // namespace
+
+TEST(StrallocAccountingTest, UintMaxLengthPreservesWraparoundAndEvaluatesOnce) {
+  StringStatsSnapshot snapshot;
+
+  unsigned int evaluations = 0;
+  const auto uint_max_length = [&evaluations]() {
+    evaluations++;
+    return std::numeric_limits<unsigned int>::max();
+  };
+
+  ADD_NEW_STRING(uint_max_length(), 0);
+  EXPECT_EQ(evaluations, 1u);
+  EXPECT_EQ(num_distinct_strings.load(std::memory_order_relaxed),
+            snapshot.num_distinct_strings_value + 1);
+  EXPECT_EQ(bytes_distinct_strings.load(std::memory_order_relaxed),
+            snapshot.bytes_distinct_strings_value);
+
+  SUB_NEW_STRING(uint_max_length(), 0);
+  EXPECT_EQ(evaluations, 2u);
+  EXPECT_EQ(num_distinct_strings.load(std::memory_order_relaxed),
+            snapshot.num_distinct_strings_value);
+  EXPECT_EQ(bytes_distinct_strings.load(std::memory_order_relaxed),
+            snapshot.bytes_distinct_strings_value);
+
+  ADD_STRING(uint_max_length());
+  EXPECT_EQ(evaluations, 3u);
+  EXPECT_EQ(allocd_strings.load(std::memory_order_relaxed), snapshot.allocd_strings_value + 1);
+  EXPECT_EQ(allocd_bytes.load(std::memory_order_relaxed), snapshot.allocd_bytes_value);
+
+  SUB_STRING(uint_max_length());
+  EXPECT_EQ(evaluations, 4u);
+  EXPECT_EQ(allocd_strings.load(std::memory_order_relaxed), snapshot.allocd_strings_value);
+  EXPECT_EQ(allocd_bytes.load(std::memory_order_relaxed), snapshot.allocd_bytes_value);
+}
+
+TEST(StrallocAccountingTest, ShrinkingCountedStringSubtractsTheRemovedBytes) {
+  StringStatsSnapshot snapshot;
+
+  char *value = new_string(8, "stralloc shrink accounting test");
+  std::memset(value, 'x', 8);
+  value[8] = '\0';
+  EXPECT_EQ(bytes_distinct_strings.load(std::memory_order_relaxed),
+            snapshot.bytes_distinct_strings_value + 9);
+  EXPECT_EQ(allocd_bytes.load(std::memory_order_relaxed), snapshot.allocd_bytes_value + 9);
+
+  value = extend_string(value, 0);
+  value[0] = '\0';
+  EXPECT_EQ(bytes_distinct_strings.load(std::memory_order_relaxed),
+            snapshot.bytes_distinct_strings_value + 1);
+  EXPECT_EQ(allocd_bytes.load(std::memory_order_relaxed), snapshot.allocd_bytes_value + 1);
+
+  FREE_MSTR(value);
+  EXPECT_EQ(num_distinct_strings.load(std::memory_order_relaxed),
+            snapshot.num_distinct_strings_value);
+  EXPECT_EQ(bytes_distinct_strings.load(std::memory_order_relaxed),
+            snapshot.bytes_distinct_strings_value);
+  EXPECT_EQ(allocd_strings.load(std::memory_order_relaxed), snapshot.allocd_strings_value);
+  EXPECT_EQ(allocd_bytes.load(std::memory_order_relaxed), snapshot.allocd_bytes_value);
+}
 
 TEST(OwnerFutureStoreTest, TtlReapsPayloadFreeTerminalRecords) {
   OwnerFutureStore store;
@@ -348,11 +431,14 @@ TEST(OwnerFutureStoreTest, PayloadByteCapsRejectDeterministically) {
   OwnerFutureStore store;
 
   // Single-payload cap breach via a huge native string result.
-  store.admit_pending(owner_future_store_test_record(1, 101));
+  auto invalid_target_record = owner_future_store_test_record(1, 101);
+  invalid_target_record.has_target_handle = true;
+  ASSERT_TRUE(store.admit_pending(std::move(invalid_target_record)));
   std::string huge(OwnerFutureStore::kMaxSinglePayloadBytes + 1, 'x');
   auto single = store.complete_string_for_task(101, "native_string", std::move(huge));
   ASSERT_TRUE(single.has_value());
   ASSERT_TRUE(single->quota_rejected);
+  ASSERT_EQ(single->target_status, VMObjectHandleResolveStatus::kInvalidHandle);
   ASSERT_STREQ(single->record.error.c_str(), "future_payload_single_byte_cap");
   ASSERT_EQ(store.byte_reject_count(), 1u);
   ASSERT_EQ(store.pending_count(), 0);
@@ -729,9 +815,62 @@ TEST_F(DriverTest, TestFutureFrozenMappingKeyAndValueBytesAreCounted) {
   ASSERT_EQ(store.terminal_payload_bytes(), 0);
 }
 
+TEST_F(DriverTest, TestFutureFrozenMappingCountsEveryNodeAgainstSinglePayloadCap) {
+  OwnerFutureStore store;
+  ASSERT_TRUE(store.admit_pending(owner_future_store_test_record(1, 101)));
+
+  svalue_t sv;
+  sv.type = T_MAPPING;
+  sv.subtype = 0;
+  sv.u.map = allocate_mapping(96);
+  const std::string value(100000, 'v');
+  for (int i = 0; i < 90; i++) {
+    const auto key = "key-" + std::to_string(i);
+    add_mapping_string(sv.u.map, key.c_str(), value.c_str());
+  }
+  auto frozen = vm_clone_frozen_value(&sv);
+  free_svalue(&sv, "multi-node frozen mapping quota test");
+  ASSERT_NE(frozen, nullptr);
+
+  auto completion = store.complete(1, "completed", "result", "", frozen);
+  ASSERT_TRUE(completion.has_value());
+  ASSERT_TRUE(completion->quota_rejected);
+  ASSERT_EQ(completion->record.state, "failed");
+  ASSERT_EQ(completion->record.error, "future_payload_single_byte_cap");
+  ASSERT_EQ(store.terminal_payload_bytes(), 0);
+  ASSERT_TRUE(store.take(1).consumed);
+}
+
+TEST_F(DriverTest, TestFutureFrozenWideArrayDoesNotConsumeDepthAcrossSiblings) {
+  OwnerFutureStore store;
+  ASSERT_TRUE(store.admit_pending(owner_future_store_test_record(1, 101)));
+
+  svalue_t sv;
+  sv.type = T_ARRAY;
+  sv.subtype = 0;
+  sv.u.arr = allocate_array(100);
+  const std::string value(100000, 'a');
+  for (int i = 0; i < sv.u.arr->size; i++) {
+    sv.u.arr->item[i].type = T_STRING;
+    sv.u.arr->item[i].subtype = STRING_SHARED;
+    sv.u.arr->item[i].u.string = make_shared_string(value.c_str());
+  }
+  auto frozen = vm_clone_frozen_value(&sv);
+  free_svalue(&sv, "wide frozen array quota test");
+  ASSERT_NE(frozen, nullptr);
+
+  auto completion = store.complete(1, "completed", "result", "", frozen);
+  ASSERT_TRUE(completion.has_value());
+  ASSERT_TRUE(completion->quota_rejected);
+  ASSERT_EQ(completion->record.state, "failed");
+  ASSERT_EQ(completion->record.error, "future_payload_single_byte_cap");
+  ASSERT_EQ(store.terminal_payload_bytes(), 0);
+  ASSERT_TRUE(store.take(1).consumed);
+}
+
 // R2-F05: the frozen weight visitor is depth- and node-bounded and uses
-// saturating arithmetic; a pathological wide value cannot blow up the quota
-// accounting, and an over-cap frozen string is rejected like a native one.
+// saturating arithmetic; exhausting either traversal budget is a conservative
+// quota rejection rather than a potentially under-counted success.
 TEST_F(DriverTest, TestFutureFrozenWeightVisitorSaturatesOnDepthAndNodes) {
   OwnerFutureStore store;
 
@@ -765,9 +904,8 @@ TEST_F(DriverTest, TestFutureFrozenWeightVisitorSaturatesOnDepthAndNodes) {
 
   // Node-cap saturation: an array of 15000 mappings x 4 string pairs is
   // ~150k metered nodes while the driver's max array size is 15000, so the
-  // visitor's 65536-node cap must saturate the accounting (bounded walk,
-  // no overflow) and the completion must still succeed.
-  constexpr size_t kMaxFrozenNodes = 65536;
+  // visitor's 65536-node cap must stop the bounded walk and reject the
+  // payload conservatively instead of accepting an incomplete byte count.
   store.admit_pending(owner_future_store_test_record(2, 202));
   svalue_t wide_sv;
   wide_sv.type = T_ARRAY;
@@ -790,9 +928,10 @@ TEST_F(DriverTest, TestFutureFrozenWeightVisitorSaturatesOnDepthAndNodes) {
   ASSERT_NE(frozen_wide, nullptr);
   auto wide_completion = store.complete(2, "completed", "result", "", frozen_wide);
   ASSERT_TRUE(wide_completion.has_value());
-  ASSERT_FALSE(wide_completion->quota_rejected);
-  ASSERT_LE(store.terminal_payload_bytes(),
-            static_cast<int64_t>(kMaxFrozenNodes * sizeof(svalue_t) + 4096));
+  ASSERT_TRUE(wide_completion->quota_rejected);
+  ASSERT_EQ(wide_completion->record.state, "failed");
+  ASSERT_EQ(wide_completion->record.error, "future_payload_single_byte_cap");
+  ASSERT_EQ(store.terminal_payload_bytes(), 0);
   ASSERT_TRUE(store.take(2).consumed);
 
   // Frozen string accounting: the allocator block size (MSTR_SIZE) is the
@@ -12993,7 +13132,9 @@ TEST_F(DriverTest, TestVmOwnerStartCannotCrossAnInProgressStop) {
   const auto before_releases = mapping_number(before, "executor_owner_releases");
   free_mapping(before);
 
-  test_set_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "300");
+  // Keep the claimed worker inside the stop-owned join window long enough
+  // for heavily instrumented TSan builds to observe and exercise the guard.
+  test_set_env("FLUFFOS_OWNER_EXECUTOR_PROBE_DELAY_MS", "3000");
   ASSERT_GT(vm_owner_enqueue_task(kOwner, "executor_probe", "stop-start-guard-a"), 0u);
   ASSERT_GT(vm_owner_enqueue_task(kOwner, "executor_probe", "stop-start-guard-b"), 0u);
   vm_owner_thread_start(1);
@@ -15282,6 +15423,15 @@ TEST_F(DriverTest, TestVmOwnerWorkerNeverMutatesObjectRefcounts) {
   vm_owner_thread_stop();
   vm_object_store_test_support_reset_worker_ref_mutation_count();
 
+  // Calibrate the probe once so a permanently-zero/unwired counter cannot
+  // make the workload assertion pass vacuously.
+  std::thread probe_calibration([] {
+    vm_object_store_note_object_ref_mutation();
+  });
+  probe_calibration.join();
+  ASSERT_EQ(vm_object_store_test_support_worker_ref_mutation_count(), 1u);
+  vm_object_store_test_support_reset_worker_ref_mutation_count();
+
   object_t* probe = load_object_for_test("single/void");
   ASSERT_NE(probe, nullptr);
   vm_owner_set_id(probe, owner);
@@ -15407,12 +15557,19 @@ TEST_F(DriverTest, TestSysReloadTlsPermissionAndThreadMatrix) {
   // certificate; tls_server_init fails, the error fires, and the old
   // context pointer must be unchanged.
   const auto saved_cert = tls_port.tls_cert;
+  const auto saved_key = tls_port.tls_key;
   const auto saved_ctx = tls_port.ssl;
   tls_port.tls_cert = "/nonexistent/sys-reload-tls-cert.pem";
   EXPECT_NE(call_reload(4).find("Failed to reload TLS context"),
             std::string::npos);
   EXPECT_EQ(tls_port.ssl, saved_ctx) << "failed reload must keep the old SSL_CTX";
   tls_port.tls_cert = saved_cert;
+  tls_port.tls_key = "/nonexistent/sys-reload-tls-key.pem";
+  EXPECT_NE(call_reload(4).find("Failed to reload TLS context"),
+            std::string::npos);
+  EXPECT_EQ(tls_port.ssl, saved_ctx)
+      << "failed private-key load must keep the old SSL_CTX";
+  tls_port.tls_key = saved_key;
   // The listener still works after the failed reload: a subsequent reload
   // with the valid certificate succeeds.
   EXPECT_EQ(call_reload(4), "ok");
@@ -15704,6 +15861,21 @@ TEST_F(DriverTest, TestVmObjectStoreReportsPointerBridgeSkippedWhenRecordBridgeR
   ASSERT_FALSE(handle_status.global_record_found);
   ASSERT_FALSE(handle_status.diagnosed_via_global_index);
   ASSERT_FALSE(handle_status.resolved_via_global_index);
+
+  // Worker-safe resolution is owner-local only: the same compatibility-only
+  // object is rejected without touching either global bridge.
+  auto owner_local_status =
+      vm_object_handle_resolve_owner_local_status(bridge_handle);
+  ASSERT_EQ(owner_local_status.object, nullptr);
+  ASSERT_EQ(owner_local_status.status,
+            VMObjectHandleResolveStatus::kObjectNotFound);
+  ASSERT_FALSE(owner_local_status.global_live_object_found);
+  ASSERT_TRUE(owner_local_status.global_live_object_source.empty());
+  ASSERT_FALSE(owner_local_status.global_record_found);
+  ASSERT_FALSE(owner_local_status.global_record_id_scan_bridge_used);
+  ASSERT_FALSE(owner_local_status.global_record_pointer_bridge_used);
+  ASSERT_FALSE(owner_local_status.diagnosed_via_global_index);
+  ASSERT_FALSE(owner_local_status.resolved_via_global_index);
 
   auto* path_lookup =
       vm_object_store_owner_path_lookup_status("owner/test/pointer-bridge/missing", bridge_path.c_str());

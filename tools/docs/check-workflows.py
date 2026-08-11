@@ -17,6 +17,11 @@ cannot protect once it fails to parse:
    matrix cannot be mistaken for a green gate;
 4. the Docker PR gate smoke path matches the Dockerfile ENTRYPOINT (R2-F03):
    a renamed binary or entrypoint that the smoke does not exercise fails here.
+5. capacity evidence uploads only `*_capacity.json` envelopes while raw JSON
+   is retained in the separate raw artifact (R2-F07);
+6. the release workflow mounts the exact image archive into Trivy, persists
+   the scan report, verifies the copied release SBOM/manifest, and binds the
+   scan report to the independently inspected digest (R2-F08).
 
 Negative tests for all of the above are executed with --self-test: the
 checker is fed synthetic broken fixtures and must reject every one of them.
@@ -61,6 +66,7 @@ EXPECTED_CI_CHECK_NAMES = {
 # name-based checks still apply to every workflow.
 CI_WORKFLOW = "ci.yml"
 DOCKER_WORKFLOW = "docker-publish.yml"
+RELEASE_WORKFLOW = "release.yml"
 
 
 def load_workflows(workflows_dir: str) -> list[tuple[str, dict]]:
@@ -220,6 +226,111 @@ def check_docker_smoke_path(workflows: list[tuple[str, dict]],
     return errors
 
 
+def find_step(workflow: dict, job_id: str, step_name: str) -> dict | None:
+    """Return a named step from a job, or None when the contract is absent."""
+    steps = ((workflow.get("jobs") or {}).get(job_id, {}).get("steps") or [])
+    for step in steps:
+        if step.get("name") == step_name:
+            return step
+    return None
+
+
+def check_capacity_artifact_split(workflows: list[tuple[str, dict]]) -> list[str]:
+    errors = []
+    ci = next((workflow for fname, workflow in workflows if fname == CI_WORKFLOW), None)
+    if ci is None:
+        return [f"{CI_WORKFLOW}: workflow is missing"]
+
+    envelope = find_step(ci, "build-and-test", "Upload capacity evidence envelope")
+    if envelope is None:
+        errors.append(f"{CI_WORKFLOW}: capacity evidence envelope upload step is missing")
+    else:
+        path = str((envelope.get("with") or {}).get("path", "")).strip()
+        if path != "build/reports/capacity/*_capacity.json":
+            errors.append(
+                f"{CI_WORKFLOW}: envelope artifact path must be exactly "
+                f"'build/reports/capacity/*_capacity.json', got {path!r}"
+            )
+
+    raw = find_step(ci, "build-and-test", "Upload LPC Modern Runtime Benchmark Raw Reports")
+    if raw is None:
+        errors.append(f"{CI_WORKFLOW}: raw benchmark artifact upload step is missing")
+    else:
+        raw_path = str((raw.get("with") or {}).get("path", ""))
+        if "build/reports/capacity/*_raw.json" not in raw_path:
+            errors.append(
+                f"{CI_WORKFLOW}: raw benchmark artifact must retain "
+                "build/reports/capacity/*_raw.json"
+            )
+    return errors
+
+
+def check_release_artifact_contract(workflows: list[tuple[str, dict]]) -> list[str]:
+    errors = []
+    release = next((workflow for fname, workflow in workflows if fname == RELEASE_WORKFLOW), None)
+    if release is None:
+        return [f"{RELEASE_WORKFLOW}: workflow is missing"]
+
+    required_checks = find_step(
+        release, "validate-target", "Verify required checks on target SHA"
+    )
+    if required_checks is None:
+        errors.append(f"{RELEASE_WORKFLOW}: required-check verification step is missing")
+    else:
+        run = str(required_checks.get("run", ""))
+        for label, fragment in {
+            "paginated API traversal": "--paginate --slurp",
+            "explicit page size": "check-runs?per_page=100",
+        }.items():
+            if fragment not in run:
+                errors.append(
+                    f"{RELEASE_WORKFLOW}: required-check verification lacks {label}: {fragment}"
+                )
+
+    scan = find_step(release, "build-docker", "Scan image archive (Trivy, blocking)")
+    if scan is None:
+        errors.append(f"{RELEASE_WORKFLOW}: blocking Trivy archive scan step is missing")
+    else:
+        run = str(scan.get("run", ""))
+        required_fragments = {
+            "read-only archive mount": "--volume /tmp/fluffos-image.tar:/input/fluffos-image.tar:ro",
+            "host output mount": "--volume /tmp:/output",
+            "container input path": "--input /input/fluffos-image.tar",
+            "persisted report path": "--output /output/trivy.json",
+            "explicit digest binding": 'report["FluffOSImageDigest"] = digest',
+        }
+        for label, fragment in required_fragments.items():
+            if fragment not in run:
+                errors.append(f"{RELEASE_WORKFLOW}: Trivy scan lacks {label}: {fragment}")
+
+    binary_download = find_step(release, "verify-release-inputs", "Download binary artifacts")
+    if binary_download is None or (binary_download.get("with") or {}).get("pattern") != "release-asset-*":
+        errors.append(
+            f"{RELEASE_WORKFLOW}: release verifier must download binary artifacts with pattern release-asset-*"
+        )
+    oci_download = find_step(release, "verify-release-inputs", "Download OCI verification artifact")
+    if oci_download is None or (oci_download.get("with") or {}).get("name") != "oci-image":
+        errors.append(
+            f"{RELEASE_WORKFLOW}: release verifier must download the named oci-image verification artifact"
+        )
+
+    verify = find_step(
+        release,
+        "verify-release-inputs",
+        "Verify checksums, SBOM, provenance and digest binding",
+    )
+    if verify is None:
+        errors.append(f"{RELEASE_WORKFLOW}: read-only release verification step is missing")
+    else:
+        run = str(verify.get("run", ""))
+        for expected in ("--sbom assets/sbom.json", "--manifest assets/manifest.yaml"):
+            if expected not in run:
+                errors.append(
+                    f"{RELEASE_WORKFLOW}: release verification must consume the copied asset: {expected}"
+                )
+    return errors
+
+
 def check_all(workflows_dir: str) -> list[str]:
     errors = []
     try:
@@ -229,6 +340,8 @@ def check_all(workflows_dir: str) -> list[str]:
     errors.extend(check_job_names_unique(workflows))
     errors.extend(check_ci_matrix_complete(workflows))
     errors.extend(check_docker_smoke_path(workflows, workflows_dir))
+    errors.extend(check_capacity_artifact_split(workflows))
+    errors.extend(check_release_artifact_contract(workflows))
     return errors
 
 
@@ -324,6 +437,106 @@ jobs:
     # 6. No jobs mapping at all.
     expect_rejected({"ci.yml": "name: CI\non: push\n"}, "workflow without jobs")
 
+    # 7. Direct contract tests for artifact separation and release scan mounts.
+    capacity_ok = {
+        "jobs": {
+            "build-and-test": {
+                "steps": [
+                    {
+                        "name": "Upload capacity evidence envelope",
+                        "with": {"path": "build/reports/capacity/*_capacity.json"},
+                    },
+                    {
+                        "name": "Upload LPC Modern Runtime Benchmark Raw Reports",
+                        "with": {"path": "build/reports/capacity/*_raw.json"},
+                    },
+                ]
+            }
+        }
+    }
+    if check_capacity_artifact_split([(CI_WORKFLOW, capacity_ok)]):
+        failures.append("capacity artifact split: checker rejected the valid contract")
+    capacity_bad = {
+        "jobs": {
+            "build-and-test": {
+                "steps": [
+                    {
+                        "name": "Upload capacity evidence envelope",
+                        "with": {"path": "build/reports/capacity/*.json"},
+                    },
+                    {
+                        "name": "Upload LPC Modern Runtime Benchmark Raw Reports",
+                        "with": {"path": "build/reports/*.json"},
+                    },
+                ]
+            }
+        }
+    }
+    if not check_capacity_artifact_split([(CI_WORKFLOW, capacity_bad)]):
+        failures.append("capacity artifact split: checker accepted raw JSON in the envelope")
+
+    release_scan = """\
+docker run --rm \\
+  --volume /tmp/fluffos-image.tar:/input/fluffos-image.tar:ro \\
+  --volume /tmp:/output image \\
+  image --input /input/fluffos-image.tar --output /output/trivy.json
+report[\"FluffOSImageDigest\"] = digest
+"""
+    release_ok = {
+        "jobs": {
+            "validate-target": {
+                "steps": [{
+                    "name": "Verify required checks on target SHA",
+                    "run": "gh api --paginate --slurp 'check-runs?per_page=100'",
+                }]
+            },
+            "build-docker": {
+                "steps": [{"name": "Scan image archive (Trivy, blocking)", "run": release_scan}]
+            },
+            "verify-release-inputs": {
+                "steps": [
+                    {"name": "Download binary artifacts", "with": {"pattern": "release-asset-*"}},
+                    {"name": "Download OCI verification artifact", "with": {"name": "oci-image"}},
+                    {
+                        "name": "Verify checksums, SBOM, provenance and digest binding",
+                        "run": "verify --sbom assets/sbom.json --manifest assets/manifest.yaml",
+                    },
+                ]
+            },
+        }
+    }
+    if check_release_artifact_contract([(RELEASE_WORKFLOW, release_ok)]):
+        failures.append("release artifact contract: checker rejected the valid contract")
+    release_bad = {
+        "jobs": {
+            **release_ok["jobs"],
+            "build-docker": {
+                "steps": [{
+                    "name": "Scan image archive (Trivy, blocking)",
+                    "run": release_scan.replace(
+                        "--volume /tmp/fluffos-image.tar:/input/fluffos-image.tar:ro", ""
+                    ),
+                }]
+            },
+        }
+    }
+    if not check_release_artifact_contract([(RELEASE_WORKFLOW, release_bad)]):
+        failures.append("release artifact contract: checker accepted an unmounted scan archive")
+
+    release_unpaginated = {
+        "jobs": {
+            **release_ok["jobs"],
+            "validate-target": {
+                "steps": [{
+                    "name": "Verify required checks on target SHA",
+                    "run": "gh api check-runs",
+                }]
+            },
+        }
+    }
+    if not check_release_artifact_contract([(RELEASE_WORKFLOW, release_unpaginated)]):
+        failures.append("release artifact contract: checker accepted an unpaginated check-runs query")
+
     return failures
 
 
@@ -349,8 +562,8 @@ def main() -> int:
         print(f"check-workflows: {len(errors)} error(s)")
         return 1
 
-    print("check-workflows: OK (all workflows parse, job names unique, "
-          "matrix contract complete, Docker smoke matches ENTRYPOINT)")
+    print("check-workflows: OK (parse/names/matrix, Docker smoke, evidence split, "
+          "release artifact binding)")
     return 0
 
 

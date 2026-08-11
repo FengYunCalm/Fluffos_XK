@@ -4,6 +4,7 @@
 
 // FIXME: get rid of malloc stats and merge with md.
 #include <cstdlib>
+#include <atomic>
 
 #include "debugmalloc.h"
 
@@ -28,10 +29,12 @@ void fatal(const char *, ...);
 #endif
 
 using stats_t = struct stats_s {
-  unsigned int free_calls, alloc_calls, realloc_calls;
+  std::atomic<unsigned int> free_calls{0};
+  std::atomic<unsigned int> alloc_calls{0};
+  std::atomic<unsigned int> realloc_calls{0};
 };
 
-static stats_t stats = {0, 0, 0};
+static stats_t stats;
 
 void *debugrealloc(void *ptr, int size, int tag, const char *desc) {
   if (size <= 0) {
@@ -86,16 +89,19 @@ void debugfree(void *ptr) {
 }
 
 void dump_malloc_data(outbuffer_t *ob) {
-  unsigned int net;
+  const auto alloc_calls = stats.alloc_calls.load(std::memory_order_relaxed);
+  const auto free_calls = stats.free_calls.load(std::memory_order_relaxed);
+  const auto realloc_calls = stats.realloc_calls.load(std::memory_order_relaxed);
+  const auto md_stats = MDget_stats();
+  const unsigned int net = alloc_calls - free_calls;
 
-  net = stats.alloc_calls - stats.free_calls;
   outbuf_add(ob, "using debug malloc:\n\n");
-  outbuf_addv(ob, "total malloc'd:   %10u\n", total_malloced);
-  outbuf_addv(ob, "high water mark:  %10u\n", hiwater);
+  outbuf_addv(ob, "total malloc'd:   %10u\n", md_stats.total_malloced);
+  outbuf_addv(ob, "high water mark:  %10u\n", md_stats.hiwater);
   outbuf_addv(ob, "overhead:         %10" PRIu64 "\n",
               (MD_TABLE_SIZE * sizeof(md_node_t *)) + (net * MD_OVERHEAD));
-  outbuf_addv(ob, "#alloc calls:     %10u\n", stats.alloc_calls);
-  outbuf_addv(ob, "#free calls:      %10u\n", stats.free_calls);
+  outbuf_addv(ob, "#alloc calls:     %10u\n", alloc_calls);
+  outbuf_addv(ob, "#free calls:      %10u\n", free_calls);
   outbuf_addv(ob, "#alloc - #free:   %10u\n", net);
-  outbuf_addv(ob, "#realloc calls:   %10u\n", stats.realloc_calls);
+  outbuf_addv(ob, "#realloc calls:   %10u\n", realloc_calls);
 }

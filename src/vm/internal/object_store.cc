@@ -406,16 +406,17 @@ object_t *shard_resolve_live_object_locked(const VMObjectShard &shard, uint64_t 
     return nullptr;
   }
   auto object = shard.local_objects.find(object_id);
-  if (object == shard.local_objects.end() || !object->second || (object->second->flags & O_DESTRUCTED) != 0) {
+  if (object == shard.local_objects.end() || !object->second) {
     return nullptr;
   }
   auto object_index = shard.local_object_index.find(object->second);
   if (object_index == shard.local_object_index.end() || object_index->second != object_id) {
     return nullptr;
   }
-  if (safe_object_path(object->second) != record->second.object_path) {
-    return nullptr;
-  }
+  // The lifecycle record and both pointer indexes are protected by the
+  // object-store lock. Do not inspect object_t flags here: owner-controlled
+  // LPC may update unrelated flag bits concurrently while the record remains
+  // current, and destruction removes the pointer under the write lock.
   return object->second;
 }
 
@@ -560,9 +561,9 @@ bool resolve_handle_from_owner_local_shard_locked(const VMObjectHandle &handle,
   }
   auto *record = find_local_record_locked(shard_it->second, handle.object_id);
   auto *object = shard_resolve_live_object_locked(shard_it->second, handle.object_id);
-  if (!record || !object || record->object_path != handle.object_path || record->owner_id != handle.owner_id ||
-      record->owner_epoch != handle.owner_epoch || handle.owner_id != vm_owner_id(object) ||
-      vm_owner_epoch(object) != handle.owner_epoch) {
+  if (!record || !object || record->object_path != handle.object_path ||
+      record->owner_id != handle.owner_id ||
+      record->owner_epoch != handle.owner_epoch) {
     return false;
   }
   result.object = object;
@@ -1491,13 +1492,13 @@ mapping_t *shard_mapping(const VMObjectShard &shard, const OwnerLocalBridgeSumma
 // contract forbids direct refcount mutation; tests assert this stays 0.
 namespace {
 std::atomic<uint64_t> g_object_ref_worker_mutations{0};
+}  // namespace
 
-void record_worker_ref_mutation() {
+void vm_object_store_note_object_ref_mutation() {
   if (!vm_context_is_main_thread()) {
     g_object_ref_worker_mutations.fetch_add(1, std::memory_order_relaxed);
   }
 }
-}  // namespace
 
 // C++ regression hooks: worker-thread refcount mutation counter. Not part of
 // the LPC/runtime API.
@@ -1648,9 +1649,99 @@ static VMObjectHandleResolveResult resolve_handle_status_locked(const VMObjectHa
   return result;
 }
 
+// Owner-worker resolver: lifecycle and identity come exclusively from the
+// owner-local shard. Missing local state is a conservative rejection; this
+// path never reaches ObjectTable/global compatibility bridges and never reads
+// mutable lifecycle fields from object_t.
+static VMObjectHandleResolveResult resolve_handle_owner_local_status_locked(
+    const VMObjectHandle &handle) {
+  VMObjectHandleResolveResult result;
+  if (!handle.valid) {
+    result.status = VMObjectHandleResolveStatus::kInvalidHandle;
+    return result;
+  }
+  if (handle.object_path.empty()) {
+    result.status = VMObjectHandleResolveStatus::kMissingPath;
+    return result;
+  }
+
+  if (resolve_handle_from_owner_local_shard_locked(handle, result)) {
+    return result;
+  }
+
+  const ObjectRecord *record = nullptr;
+  bool diagnosed_via_path_index = false;
+  bool diagnosed_via_cross_shard = false;
+  auto shard_it = owner_shards.find(safe_owner_id(handle.owner_id.c_str()));
+  if (shard_it != owner_shards.end()) {
+    record = find_local_record_locked(shard_it->second, handle.object_id);
+    if (!record) {
+      record = find_destructed_record_locked(shard_it->second, handle.object_id);
+    }
+    if (!record) {
+      auto live_path = shard_it->second.object_path_index.find(handle.object_path);
+      if (live_path != shard_it->second.object_path_index.end()) {
+        record = find_local_record_locked(shard_it->second, live_path->second);
+      }
+      if (!record) {
+        auto destructed_path =
+            shard_it->second.destructed_path_index.find(handle.object_path);
+        if (destructed_path != shard_it->second.destructed_path_index.end()) {
+          record = find_destructed_record_locked(shard_it->second,
+                                                 destructed_path->second);
+        }
+      }
+      diagnosed_via_path_index = record != nullptr;
+    }
+  }
+
+  std::string cross_owner_record_source;
+  if (!record) {
+    record = find_cross_owner_record_by_object_id_locked(
+        handle.owner_id, handle.object_id, cross_owner_record_source);
+    diagnosed_via_cross_shard = record != nullptr;
+  }
+  if (!record) {
+    record = find_cross_owner_record_by_path_locked(
+        handle.owner_id, handle.object_path, cross_owner_record_source);
+    diagnosed_via_path_index = record != nullptr;
+    diagnosed_via_cross_shard = record != nullptr;
+  }
+  if (!record) {
+    result.status = VMObjectHandleResolveStatus::kObjectNotFound;
+    return result;
+  }
+
+  if (record->object_id != handle.object_id) {
+    result.status = VMObjectHandleResolveStatus::kObjectIdMismatch;
+  } else if (record->object_path != handle.object_path) {
+    result.status = VMObjectHandleResolveStatus::kPathMismatch;
+  } else if (record->owner_id != handle.owner_id) {
+    result.status = VMObjectHandleResolveStatus::kOwnerMismatch;
+  } else if (record->owner_epoch != handle.owner_epoch) {
+    result.status = VMObjectHandleResolveStatus::kOwnerEpochMismatch;
+  } else if (record->destructed) {
+    result.status = VMObjectHandleResolveStatus::kRecordDestructed;
+  } else {
+    // The lifecycle record exists but its owner-local pointer/index pair is
+    // incomplete. Workers must reject instead of consulting a global object.
+    result.status = VMObjectHandleResolveStatus::kObjectNotFound;
+  }
+  result.diagnosed_via_owner_local_store = true;
+  result.diagnosed_via_owner_local_path_index = diagnosed_via_path_index;
+  result.diagnosed_via_owner_local_cross_shard = diagnosed_via_cross_shard;
+  return result;
+}
+
 VMObjectHandleResolveResult vm_object_handle_resolve_status(const VMObjectHandle &handle) {
   ObjectStoreReadLock lock(object_store_directory_mutex);
   return resolve_handle_status_locked(handle);
+}
+
+VMObjectHandleResolveResult vm_object_handle_resolve_owner_local_status(
+    const VMObjectHandle &handle) {
+  ObjectStoreReadLock lock(object_store_directory_mutex);
+  return resolve_handle_owner_local_status_locked(handle);
 }
 
 object_t *vm_object_handle_acquire(const VMObjectHandle &handle) {
@@ -1679,6 +1770,7 @@ VMObjectHandleAcquireResult vm_object_handle_acquire_status(const VMObjectHandle
     result.status = resolved.status;
     return result;
   }
+  vm_object_store_note_object_ref_mutation();
   add_ref(resolved.object, "vm_object_handle_acquire");
   result.object = resolved.object;
   result.status = VMObjectHandleResolveStatus::kCurrent;

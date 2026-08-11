@@ -353,7 +353,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: capacity-evidence-envelope
-          path: build/reports/capacity/*.json
+          path: build/reports/capacity/*_capacity.json
           if-no-files-found: error
 
       - name: Upload LPC Modern Runtime Benchmark Raw Reports
@@ -365,6 +365,7 @@ jobs:
             build/reports/owner_runtime_bench_smoke.json
             build/reports/lpc_vm_bench_smoke.json
             build/reports/object_store_bench_smoke.json
+            build/reports/capacity/*_raw.json
           if-no-files-found: ignore
 
       - name: Run LPC Testsuite (isolated runner, port 0)
@@ -406,7 +407,10 @@ jobs:
 
       - name: Run libFuzzer (bounded)
         run: |
-          ./build-fuzz/src/tests/gateway_fuzz -runs=10000 -max_len=4096 -timeout=5 -print_final_stats=1 src/tests/fuzz/corpus/gateway/
+          ./build-fuzz/src/tests/gateway_fuzz \
+            -runs=10000 -max_len=4096 -timeout=5 -print_final_stats=1 \
+            -artifact_prefix="${{ github.workspace }}/build-fuzz/" \
+            "${{ github.workspace }}/src/tests/fuzz/corpus/gateway/"
 
       - name: Upload crash corpus on failure
         if: failure()

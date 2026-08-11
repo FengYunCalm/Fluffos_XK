@@ -82,7 +82,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           source tools/release/common.sh
-          gh api "repos/${{ github.repository }}/commits/${{ github.event.inputs.target_sha }}/check-runs" --paginate \
+          gh api --paginate --slurp \
+            "repos/${{ github.repository }}/commits/${{ github.event.inputs.target_sha }}/check-runs?per_page=100" \
             > /tmp/check-runs.json
           verify_required_checks "${{ github.repository }}" "${{ github.event.inputs.target_sha }}" < /tmp/check-runs.json
 
@@ -295,17 +296,30 @@ jobs:
         env:
           TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+          docker run --rm \
+            --env TRIVY_DB_REPOSITORY \
+            --volume /tmp/fluffos-image.tar:/input/fluffos-image.tar:ro \
+            --volume /tmp:/output \
             aquasec/trivy:0.50.1@sha256:586cf142d41727a184b2982ade6a4d94ada9e243d64fcd52e6dcfba9cce56df6 \
-            image --input /tmp/fluffos-image.tar \
+            image --input /input/fluffos-image.tar \
             --severity HIGH,CRITICAL \
             --ignore-unfixed \
-            --format json --output /tmp/trivy.json
-          echo "trivy scan completed (exit 0 = below blocking threshold)"
+            --no-progress \
+            --format json --output /output/trivy.json
           python3 - <<'PY'
           import json
+          from pathlib import Path
+
+          digest = Path("/tmp/fluffos-digest.txt").read_text(encoding="utf-8").strip()
           with open("/tmp/trivy.json") as f:
               report = json.load(f)
+          # Trivy names --input reports after the local archive path. Record
+          # the independently inspected archive digest explicitly so the
+          # read-only release verifier can bind the scan to the promoted image.
+          report["FluffOSImageDigest"] = digest
+          with open("/tmp/trivy.json", "w", encoding="utf-8") as f:
+              json.dump(report, f, indent=2)
+              f.write("\n")
           vulns = []
           for result in report.get("Results", []):
               vulns.extend(result.get("Vulnerabilities", []) or [])
@@ -337,11 +351,18 @@ jobs:
           ref: ${{ github.event.inputs.target_sha }}
           persist-credentials: false
 
-      - name: Download all build artifacts
+      - name: Download binary artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
+          pattern: release-asset-*
           path: assets/
           merge-multiple: true
+
+      - name: Download OCI verification artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: oci-image
+          path: oci/
 
       - name: Write provenance summary
         run: |
@@ -355,13 +376,15 @@ jobs:
           } > assets/provenance.txt
           cp third_party/sbom.json assets/sbom.json
           cp third_party/manifest.yaml assets/manifest.yaml
+          cp oci/fluffos-digest.txt assets/fluffos-digest.txt
+          cp oci/trivy.json assets/trivy.json
 
       - name: Verify checksums, SBOM, provenance and digest binding
         run: |
           bash tools/release/verify-release-inputs.sh \
             --assets-dir assets \
-            --sbom third_party/sbom.json \
-            --manifest third_party/manifest.yaml \
+            --sbom assets/sbom.json \
+            --manifest assets/manifest.yaml \
             --expected-sha "${{ github.event.inputs.target_sha }}" \
             --digest-file assets/fluffos-digest.txt \
             --trivy-report assets/trivy.json
@@ -384,6 +407,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
+          ref: ${{ github.event.inputs.target_sha }}
           fetch-depth: 0
 
       - name: Dry-run guard
@@ -458,6 +482,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
+          ref: ${{ github.event.inputs.target_sha }}
           persist-credentials: false
 
       - name: Dry-run guard
@@ -493,7 +518,7 @@ jobs:
           VERSION="${{ needs.validate-target.outputs.version }}"
           IMAGE="${{ env.REGISTRY }}/${{ needs.validate-target.outputs.image_name }}"
           echo "$GITHUB_TOKEN" | skopeo login --username "${{ github.actor }}" --password-stdin "${{ env.REGISTRY }}"
-          EXPECTED="$(cat /tmp/oci/fluffos-digest.txt | tr -d ' \n')"
+          EXPECTED="$(tr -d ' \n' < /tmp/oci/fluffos-digest.txt)"
           REMOTE="$(skopeo inspect "docker://${IMAGE}:${VERSION}" --format '{{.Digest}}')"
           echo "expected: $EXPECTED"
           echo "remote:   $REMOTE"
@@ -514,7 +539,7 @@ jobs:
           echo "$GITHUB_TOKEN" | skopeo login --username "${{ github.actor }}" --password-stdin "${{ env.REGISTRY }}"
           skopeo copy "docker://${IMAGE}:${VERSION}" "docker://${IMAGE}:latest"
           LATEST="$(skopeo inspect "docker://${IMAGE}:latest" --format '{{.Digest}}')"
-          if [ "$LATEST" != "$(cat /tmp/oci/fluffos-digest.txt | tr -d ' \n')" ]; then
+          if [ "$LATEST" != "$(tr -d ' \n' < /tmp/oci/fluffos-digest.txt)" ]; then
             echo "FAIL: latest tag does not reference the scanned digest" >&2
             exit 1
           fi

@@ -86,6 +86,11 @@ void md_print_ref_journal(md_node_t *node, outbuffer_t *outbuf) {
 }
 
 namespace {
+std::recursive_mutex &md_allocation_mutex() {
+  static auto *mutex = new std::recursive_mutex();
+  return *mutex;
+}
+
 void clear_ref_journal(md_node_t* node) {
 #ifdef DEBUGMALLOC_EXTENSIONS
   auto id = node->id;
@@ -104,6 +109,7 @@ void clear_ref_journal(md_node_t* node) {
 
 
 void MDmalloc(md_node_t *node, int size, int tag, const char *desc) {
+  std::lock_guard<std::recursive_mutex> lock(md_allocation_mutex());
   unsigned long h;
   static int count = 0;
 
@@ -143,6 +149,7 @@ void MDmalloc(md_node_t *node, int size, int tag, const char *desc) {
 
 #ifdef DEBUGMALLOC_EXTENSIONS
 void set_tag(const void *ptr, int tag) {
+  std::lock_guard<std::recursive_mutex> lock(md_allocation_mutex());
   md_node_t *node = PTR_TO_NODET(ptr);
 
   if ((node->tag & 0xff) > MAX_CATEGORY) {
@@ -169,6 +176,7 @@ void set_tag(const void *ptr, int tag) {
 #endif
 
 int MDfree(md_node_t *ptr) {
+  std::lock_guard<std::recursive_mutex> lock(md_allocation_mutex());
   unsigned long h;
   md_node_t *entry, **oentry;
 
@@ -209,4 +217,12 @@ int MDfree(md_node_t *ptr) {
   return 1;
 }
 
-void set_malloc_mask(int mask) { malloc_mask = mask; }
+MDStatsSnapshot MDget_stats() {
+  std::lock_guard<std::recursive_mutex> lock(md_allocation_mutex());
+  return MDStatsSnapshot{total_malloced, hiwater};
+}
+
+void set_malloc_mask(int mask) {
+  std::lock_guard<std::recursive_mutex> lock(md_allocation_mutex());
+  malloc_mask = mask;
+}

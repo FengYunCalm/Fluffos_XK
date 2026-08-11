@@ -35,7 +35,13 @@
 // Smoke (no libFuzzer, standalone deterministic loop):
 //   build/src/tests/gateway_fuzz_smoke
 
+#ifdef _WIN32
+#include <direct.h>
+#include <winsock2.h>
+#else
 #include <arpa/inet.h>
+#include <unistd.h>
+#endif
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -62,6 +68,14 @@ uint64_t next_random() {
   return g_state;
 }
 
+int fuzz_chdir(const char *path) {
+#ifdef _WIN32
+  return _chdir(path);
+#else
+  return chdir(path);
+#endif
+}
+
 bool init_driver_once() {
   // The gateway read path needs the driver event base and runtime state,
   // mirroring the DriverTest fixture: chdir into the testsuite and init.
@@ -69,7 +83,7 @@ bool init_driver_once() {
   if (initialized) {
     return true;
   }
-  if (chdir(TESTSUITE_DIR) != 0) {
+  if (fuzz_chdir(TESTSUITE_DIR) != 0) {
     std::fprintf(stderr, "gateway_fuzz: chdir %s failed\n", TESTSUITE_DIR);
     return false;
   }
@@ -83,31 +97,33 @@ bool init_driver_once() {
 }
 
 // One isolated scenario fixture: a fresh bufferevent pair plus a registered
-// master. The master adopts bev[0] and frees it in ~GatewayMaster; the peer
-// bev[1] is freed by BEV_OPT_CLOSE_ON_FREE when bev[0] is freed, so there is
-// exactly one owner and no peer leak. After a dispatch that removed the
-// master, bev_ pointers are dangling and must not be touched; current()
-// re-resolves by fd instead.
+// master. The master adopts endpoint 0 and frees it in ~GatewayMaster; this
+// fixture always owns and explicitly frees peer endpoint 1. After a dispatch
+// that removed the master, only current() may be used to query master state.
 struct FuzzGatewayFixture {
   static constexpr int kFd = 4242;
 
+  ~FuzzGatewayFixture() { teardown(); }
+  FuzzGatewayFixture() = default;
+  FuzzGatewayFixture(const FuzzGatewayFixture &) = delete;
+  FuzzGatewayFixture &operator=(const FuzzGatewayFixture &) = delete;
+
   bool create() {
-    // Remove any master left by a previous scenario (no-op when none).
-    gateway_remove_master_for_test(kFd);
-    if (bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, bev_) != 0) {
+    teardown();
+    bufferevent *pair[2]{nullptr, nullptr};
+    if (bufferevent_pair_new(g_event_base, BEV_OPT_CLOSE_ON_FREE, pair) != 0) {
       std::fprintf(stderr, "gateway_fuzz: bufferevent_pair_new failed\n");
       return false;
     }
-    master_ = gateway_register_master_for_test(kFd, bev_[0]);
+    master_ = gateway_register_master_for_test(kFd, pair[0]);
     if (!master_) {
-      // Registration failed: the pair was never adopted. Freeing bev_[0]
-      // closes bev_[1] via BEV_OPT_CLOSE_ON_FREE.
-      bufferevent_free(bev_[0]);
-      bev_[0] = nullptr;
-      bev_[1] = nullptr;
+      // Registration failed before either endpoint was adopted.
+      bufferevent_free(pair[0]);
+      bufferevent_free(pair[1]);
       std::fprintf(stderr, "gateway_fuzz: register_master failed\n");
       return false;
     }
+    peer_ = pair[1];
     return true;
   }
 
@@ -121,13 +137,25 @@ struct FuzzGatewayFixture {
   void teardown() {
     gateway_remove_master_for_test(kFd);
     master_ = nullptr;
-    bev_[0] = nullptr;
-    bev_[1] = nullptr;
+    if (peer_) {
+      bufferevent_free(peer_);
+      peer_ = nullptr;
+    }
   }
 
   GatewayMaster *master_{nullptr};
-  bufferevent *bev_[2]{nullptr, nullptr};
+  bufferevent *peer_{nullptr};
 };
+
+template <typename Scenario>
+bool run_isolated_scenario(Scenario &&scenario) {
+  FuzzGatewayFixture fx;
+  if (!fx.create()) {
+    return false;
+  }
+  scenario(fx);
+  return true;
+}
 
 // Append bytes and dispatch. Re-resolve the master before every call: the
 // previous dispatch may have removed it. Returns false when the master is
@@ -202,10 +230,10 @@ std::string make_valid_frame(const uint8_t *data, size_t size) {
   return encode_frame(json);
 }
 
-// One fuzz iteration: run every scenario against a fresh fixture. Scenarios
+// One fuzz iteration: run every scenario against its own fresh fixture. Scenarios
 // cover: valid full frame, fragmented valid frame, coalesced valid frames,
 // oversized header, truncated frame, invalid JSON and empty input.
-void fuzz_one_input(FuzzGatewayFixture &fx, const uint8_t *data, size_t size) {
+bool fuzz_one_input(const uint8_t *data, size_t size) {
   const auto frame_len = derive_frame_length(data, size);
   auto payload = make_frame_payload(data, size, frame_len);
   auto frame = encode_frame(payload);
@@ -213,25 +241,44 @@ void fuzz_one_input(FuzzGatewayFixture &fx, const uint8_t *data, size_t size) {
   // Full frame (valid JSON only when the input bytes happen to produce a
   // parseable payload; the structured valid frame below guarantees the
   // accepted path).
-  append_and_dispatch(fx, frame.data(), frame.size());
+  if (!run_isolated_scenario(
+          [&](FuzzGatewayFixture &fx) {
+            append_and_dispatch(fx, frame.data(), frame.size());
+          })) {
+    return false;
+  }
 
   // Structured valid frame: guaranteed accepted (data_frames_received).
   auto valid = make_valid_frame(data, size);
-  append_and_dispatch(fx, valid.data(), valid.size());
+  if (!run_isolated_scenario(
+          [&](FuzzGatewayFixture &fx) {
+            append_and_dispatch(fx, valid.data(), valid.size());
+          })) {
+    return false;
+  }
 
   // Fragment: split the valid frame at a deterministic point; dispatch
   // between the two parts so the partial buffer path is exercised.
   if (valid.size() > 1) {
     const size_t split = 1 + (size % (valid.size() - 1));
-    if (append_and_dispatch(fx, valid.data(), split)) {
-      append_and_dispatch(fx, valid.data() + split, valid.size() - split);
+    if (!run_isolated_scenario([&](FuzzGatewayFixture &fx) {
+          if (append_and_dispatch(fx, valid.data(), split)) {
+            append_and_dispatch(fx, valid.data() + split,
+                                valid.size() - split);
+          }
+        })) {
+      return false;
     }
   }
 
   // Coalesced: two valid frames back to back.
   if (valid.size() < 4096) {
     std::string coalesced = valid + valid;
-    append_and_dispatch(fx, coalesced.data(), coalesced.size());
+    if (!run_isolated_scenario([&](FuzzGatewayFixture &fx) {
+          append_and_dispatch(fx, coalesced.data(), coalesced.size());
+        })) {
+      return false;
+    }
   }
 
   // Malicious length: header claims a huge payload; the parser must reject
@@ -240,24 +287,41 @@ void fuzz_one_input(FuzzGatewayFixture &fx, const uint8_t *data, size_t size) {
     uint32_t huge = 0xFFFFFFFFu;
     std::string malicious(sizeof(huge), '\0');
     std::memcpy(malicious.data(), &huge, sizeof(huge));
-    append_and_dispatch(fx, malicious.data(), malicious.size());
+    if (!run_isolated_scenario([&](FuzzGatewayFixture &fx) {
+          append_and_dispatch(fx, malicious.data(), malicious.size());
+        })) {
+      return false;
+    }
   }
 
-  // Truncated JSON payload: valid length header, half the payload.
+  // Truncated frame: retain the original length header but provide only half
+  // the payload, so the parser must keep a bounded partial frame buffered.
   if (payload.size() > 2) {
-    auto truncated = encode_frame(payload.substr(0, payload.size() / 2));
-    append_and_dispatch(fx, truncated.data(), truncated.size());
+    const auto truncated_size = sizeof(uint32_t) + payload.size() / 2;
+    if (!run_isolated_scenario([&](FuzzGatewayFixture &fx) {
+          append_and_dispatch(fx, frame.data(), truncated_size);
+        })) {
+      return false;
+    }
   }
 
   // Invalid JSON: parse must reject it (json_frames_rejected).
   {
     const std::string broken = "{\"type\":\"data\",\"cid\":";
     auto invalid = encode_frame(broken);
-    append_and_dispatch(fx, invalid.data(), invalid.size());
+    if (!run_isolated_scenario([&](FuzzGatewayFixture &fx) {
+          append_and_dispatch(fx, invalid.data(), invalid.size());
+        })) {
+      return false;
+    }
   }
 
   // Empty input: zero bytes must be a no-op, never a dereference.
-  append_and_dispatch(fx, "", 0);
+  if (!run_isolated_scenario(
+          [](FuzzGatewayFixture &fx) { append_and_dispatch(fx, "", 0); })) {
+    return false;
+  }
+  return true;
 }
 
 struct SmokeCounters {
@@ -301,13 +365,10 @@ int run_smoke() {
       const std::string json_prefix = "{\"type\":\"CHAT\",\"payload\":{\"messages\":[";
       data.insert(data.begin(), json_prefix.begin(), json_prefix.end());
     }
-    FuzzGatewayFixture fx;
-    if (!fx.create()) {
+    if (!fuzz_one_input(data.data(), data.size())) {
       std::fprintf(stderr, "gateway_fuzz smoke: fixture creation failed\n");
       return 2;
     }
-    fuzz_one_input(fx, data.data(), data.size());
-    fx.teardown();
   }
 
   const auto after = read_counters();
@@ -369,11 +430,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     std::fprintf(stderr, "gateway_fuzz: driver init failed; aborting\n");
     std::abort();
   }
-  FuzzGatewayFixture fx;
-  if (!fx.create()) {
+  if (!fuzz_one_input(data, size)) {
     std::abort();
   }
-  fuzz_one_input(fx, data, size);
-  fx.teardown();
   return 0;
 }

@@ -48,11 +48,27 @@ check_conclusion() {
 import json, sys
 name = sys.argv[1]
 data = json.loads(sys.argv[2])
-runs = [r for r in data.get("check_runs", []) if r.get("name") == name]
+# `gh api --paginate --slurp` returns one page object per array element.
+# Keep accepting a single object so the helper remains easy to unit-test and
+# compatible with callers that already hold an unpaginated response.
+pages = data if isinstance(data, list) else [data]
+runs = [
+    run
+    for page in pages
+    for run in page.get("check_runs", [])
+    if run.get("name") == name
+]
 if not runs:
     print(name + "\tmissing")
     sys.exit(0)
-print(name + "\t" + (runs[-1].get("conclusion") or "in_progress"))
+latest = max(
+    runs,
+    key=lambda run: (
+        run.get("started_at") or run.get("created_at") or "",
+        int(run.get("id") or 0),
+    ),
+)
+print(name + "\t" + (latest.get("conclusion") or "in_progress"))
 ' "$name" "$data"
 }
 

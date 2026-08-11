@@ -2,7 +2,9 @@
 #define _STRALLOC_H_
 
 #include "base/internal/options_incl.h"
+#include "base/internal/vm_thread_local.h"
 
+#include <atomic>
 #include <cstdint>
 #include <climits>  // for UINT_MAX
 #include <cstring>  // for strlen
@@ -67,25 +69,62 @@ void check_string_stats(outbuffer_t *);
 #define CHECK_STRING_STATS
 #endif
 
-#define ADD_NEW_STRING(len, overhead)  \
-  num_distinct_strings++;              \
-  bytes_distinct_strings += (len + 1); \
-  overhead_bytes += overhead
-#define SUB_NEW_STRING(len, overhead)  \
-  num_distinct_strings--;              \
-  bytes_distinct_strings -= (len + 1); \
-  overhead_bytes -= overhead
-#define ADD_STRING(len)    \
-  allocd_strings++;        \
-  allocd_bytes += len + 1; \
-  CHECK_STRING_STATS
-#define ADD_STRING_SIZE(len)         \
-  allocd_bytes = allocd_bytes + len; \
-  bytes_distinct_strings = bytes_distinct_strings + len;
-#define SUB_STRING(len)    \
-  allocd_strings--;        \
-  allocd_bytes -= len + 1; \
-  CHECK_STRING_STATS
+namespace stralloc_detail {
+template <typename Length>
+constexpr uint64_t bytes_with_terminator(Length length) noexcept {
+  return static_cast<uint64_t>(length + 1);
+}
+
+constexpr int64_t logical_length(unsigned int stored_length) noexcept {
+  return stored_length == UINT_MAX ? -1 : static_cast<int64_t>(stored_length);
+}
+
+inline void adjust_byte_counter(std::atomic<uint64_t> &counter, int64_t delta) noexcept {
+  if (delta >= 0) {
+    counter.fetch_add(static_cast<uint64_t>(delta), std::memory_order_relaxed);
+    return;
+  }
+  const auto magnitude = static_cast<uint64_t>(-(delta + 1)) + 1;
+  counter.fetch_sub(magnitude, std::memory_order_relaxed);
+}
+}  // namespace stralloc_detail
+
+#define ADD_NEW_STRING(len, overhead)                                                \
+  do {                                                                               \
+    num_distinct_strings.fetch_add(1, std::memory_order_relaxed);                    \
+    bytes_distinct_strings.fetch_add(stralloc_detail::bytes_with_terminator((len)),  \
+                                     std::memory_order_relaxed);                     \
+    overhead_bytes.fetch_add(static_cast<uint64_t>(overhead),                        \
+                             std::memory_order_relaxed);                             \
+  } while (0)
+#define SUB_NEW_STRING(len, overhead)                                                \
+  do {                                                                               \
+    num_distinct_strings.fetch_sub(1, std::memory_order_relaxed);                    \
+    bytes_distinct_strings.fetch_sub(stralloc_detail::bytes_with_terminator((len)),  \
+                                     std::memory_order_relaxed);                     \
+    overhead_bytes.fetch_sub(static_cast<uint64_t>(overhead),                        \
+                             std::memory_order_relaxed);                             \
+  } while (0)
+#define ADD_STRING(len)                                                              \
+  do {                                                                               \
+    allocd_strings.fetch_add(1, std::memory_order_relaxed);                          \
+    allocd_bytes.fetch_add(stralloc_detail::bytes_with_terminator((len)),            \
+                           std::memory_order_relaxed);                               \
+    CHECK_STRING_STATS;                                                              \
+  } while (0)
+#define ADD_STRING_SIZE(len)                                                         \
+  do {                                                                               \
+    const auto string_size_delta = static_cast<int64_t>(len);                        \
+    stralloc_detail::adjust_byte_counter(allocd_bytes, string_size_delta);            \
+    stralloc_detail::adjust_byte_counter(bytes_distinct_strings, string_size_delta);  \
+  } while (0)
+#define SUB_STRING(len)                                                              \
+  do {                                                                               \
+    allocd_strings.fetch_sub(1, std::memory_order_relaxed);                          \
+    allocd_bytes.fetch_sub(stralloc_detail::bytes_with_terminator((len)),            \
+                           std::memory_order_relaxed);                               \
+    CHECK_STRING_STATS;                                                              \
+  } while (0)
 
 // The layout of malloc_block_s must be same as block_s
 typedef struct malloc_block_s {
@@ -102,8 +141,14 @@ typedef struct malloc_block_s {
 #define MSTR_EXTRA_REF(x) (MSTR_BLOCK(x)->extra_ref)
 #define MSTR_REF(x) (MSTR_BLOCK(x)->ref)
 #define MSTR_SIZE(x) (MSTR_BLOCK(x)->size)
-#define MSTR_UPDATE_SIZE(x, y) \
-  SAFE(ADD_STRING_SIZE(y - MSTR_SIZE(x)); MSTR_BLOCK(x)->size = (y > UINT_MAX ? UINT_MAX : y);)
+#define MSTR_UPDATE_SIZE(x, y)                                                        \
+  SAFE(const auto requested_string_size = (y);                                       \
+       const auto stored_string_size =                                               \
+           requested_string_size > UINT_MAX ? UINT_MAX                               \
+                                            : static_cast<unsigned int>(requested_string_size); \
+       ADD_STRING_SIZE(stralloc_detail::logical_length(stored_string_size) -         \
+                       stralloc_detail::logical_length(MSTR_SIZE(x)));                \
+       MSTR_BLOCK(x)->size = stored_string_size;)
 
 #define FREE_MSTR(x)                                                                      \
   SAFE(DEBUG_CHECK(MSTR_REF(x) != 1, "FREE_MSTR used on a multiply referenced string\n"); \
@@ -178,7 +223,7 @@ uint64_t add_string_status(outbuffer_t *, int);
 
 char *extend_string(const char *, int);
 
-extern unsigned int svalue_strlen_size;
+extern FLUFFOS_VM_THREAD_LOCAL unsigned int svalue_strlen_size;
 
 #define make_shared_string(s) int_make_shared_string(s, __CURRENT_FILE_LINE__)
 void stralloc_print_entry(std::stringstream &ss, block_t* entry);
