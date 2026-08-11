@@ -303,6 +303,17 @@ int driver_main(int argc, char **argv);
 }
 
 int driver_main(int argc, char **argv) {
+  // Deterministic CLI entry for smoke/health probes (Docker PR gate, release
+  // verification): prints the driver version and exits 0 without any
+  // runtime init, config file, or network I/O. Side-effect-free by
+  // construction; must stay ahead of all boot banners and signal setup.
+  for (int i = 1; i < argc; i++) {
+    if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-V") == 0) {
+      std::printf("FluffOS %s (%s)\n", PROJECT_VERSION, ARCH);
+      return 0;
+    }
+  }
+
   // Install the async-signal-safe shutdown request before mudlib startup.
   signal(SIGTERM, startshutdownMudOS);
 

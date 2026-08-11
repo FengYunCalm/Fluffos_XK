@@ -63,8 +63,15 @@ extern md_node_t *table[];
 extern int malloc_mask;
 extern unsigned int total_malloced;
 extern unsigned int hiwater;
+
+struct MDStatsSnapshot {
+  unsigned int total_malloced;
+  unsigned int hiwater;
+};
+
 void MDmalloc(md_node_t *, int, int, const char *);
 int MDfree(md_node_t *);
+MDStatsSnapshot MDget_stats();
 
 #ifdef DEBUGMALLOC_EXTENSIONS
 void set_tag(const void *, int);

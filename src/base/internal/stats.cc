@@ -39,9 +39,9 @@ uint64_t num_classes = 0;
 uint64_t total_class_size = 0;
 
 // Mapping stats
-uint64_t num_mappings = 0;
-uint64_t total_mapping_size = 0;
-uint64_t total_mapping_nodes = 0;
+std::atomic<uint64_t> num_mappings{0};
+std::atomic<uint64_t> total_mapping_size{0};
+std::atomic<uint64_t> total_mapping_nodes{0};
 
 // Apply cache stats
 uint64_t apply_cache_lookups = 0;

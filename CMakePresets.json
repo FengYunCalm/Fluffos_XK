@@ -1,0 +1,106 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev-debug",
+      "displayName": "Developer Debug",
+      "description": "Debug build for local development (native tuning, LTO off)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-dev-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MARCH_NATIVE": "ON",
+        "ENABLE_LTO": "OFF",
+        "ENABLE_SANITIZER": "OFF"
+      }
+    },
+    {
+      "name": "portable-release",
+      "displayName": "Portable Release",
+      "description": "Portable release binary (no -march=native, LTO on, reproducible profile)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-portable-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MARCH_NATIVE": "OFF",
+        "ENABLE_LTO": "ON",
+        "ENABLE_SANITIZER": "OFF",
+        "STATIC": "OFF"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "AddressSanitizer",
+      "description": "AddressSanitizer build for memory safety testing",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_ASAN": "ON",
+        "ENABLE_LTO": "OFF",
+        "MARCH_NATIVE": "OFF"
+      }
+    },
+    {
+      "name": "ubsan",
+      "displayName": "UndefinedBehaviorSanitizer",
+      "description": "UBSan build for undefined behavior testing",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-ubsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_UBSAN": "ON",
+        "ENABLE_LTO": "OFF",
+        "MARCH_NATIVE": "OFF"
+      }
+    },
+    {
+      "name": "tsan",
+      "displayName": "ThreadSanitizer",
+      "description": "TSan build for data race testing (run the targeted CTest subset)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-tsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_TSAN": "ON",
+        "ENABLE_LTO": "OFF",
+        "MARCH_NATIVE": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev-debug", "configurePreset": "dev-debug" },
+    { "name": "portable-release", "configurePreset": "portable-release" },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "ubsan", "configurePreset": "ubsan" },
+    { "name": "tsan", "configurePreset": "tsan" }
+  ],
+  "testPresets": [
+    {
+      "name": "dev-debug",
+      "configurePreset": "dev-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "output": { "outputOnFailure": true },
+      "environment": { "ASAN_OPTIONS": "detect_leaks=0" }
+    },
+    {
+      "name": "ubsan",
+      "configurePreset": "ubsan",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

@@ -18,7 +18,7 @@
 #include <fmt/format.h>
 
 /* used temporarily by SVALUE_STRLEN() */
-unsigned int svalue_strlen_size;
+FLUFFOS_VM_THREAD_LOCAL unsigned int svalue_strlen_size;
 
 #ifdef NOISY_DEBUG
 void bp(void) {}
@@ -63,11 +63,11 @@ void bp(void) {}
  * next element in the chain (which you specify when you call the functions).
  */
 
-uint64_t num_distinct_strings = 0;
-uint64_t bytes_distinct_strings = 0;
-uint64_t overhead_bytes = 0;
-uint64_t allocd_strings = 0;
-uint64_t allocd_bytes = 0;
+std::atomic<uint64_t> num_distinct_strings{0};
+std::atomic<uint64_t> bytes_distinct_strings{0};
+std::atomic<uint64_t> overhead_bytes{0};
+std::atomic<uint64_t> allocd_strings{0};
+std::atomic<uint64_t> allocd_bytes{0};
 uint64_t search_len = 0;
 uint64_t num_str_searches = 0;
 
@@ -298,23 +298,31 @@ void deallocate_string(char *str) {
 
 uint64_t add_string_status(outbuffer_t *out, int verbose) {
   std::lock_guard<std::mutex> lock(stralloc_mutex);
+  const auto distinct_strings = num_distinct_strings.load(std::memory_order_relaxed);
+  const auto distinct_bytes = bytes_distinct_strings.load(std::memory_order_relaxed);
+  const auto string_overhead = overhead_bytes.load(std::memory_order_relaxed);
+  const auto allocated_strings = allocd_strings.load(std::memory_order_relaxed);
+  const auto allocated_bytes = allocd_bytes.load(std::memory_order_relaxed);
   if (verbose == 1) {
     outbuf_add(out, "All strings:\n");
     outbuf_add(out, "-------------------------\t Strings    Bytes\n");
   }
   if (verbose != -1) {
     outbuf_addv(out, "%-20s %8" PRIu64 " %8" PRIu64 " + %" PRIu64 " overhead\n", "All strings",
-                num_distinct_strings, bytes_distinct_strings, overhead_bytes);
+                distinct_strings, distinct_bytes, string_overhead);
   }
   if (verbose == 1) {
-    outbuf_addv(out, "Total asked for\t\t\t%8" PRIu64 " %8" PRIu64 "\n", allocd_strings,
-                allocd_bytes);
+    outbuf_addv(out, "Total asked for\t\t\t%8" PRIu64 " %8" PRIu64 "\n", allocated_strings,
+                allocated_bytes);
     outbuf_addv(out, "Space actually required/total string bytes %f%%\n",
-                static_cast<double>(bytes_distinct_strings + overhead_bytes) * 100 / allocd_bytes);
+                allocated_bytes == 0
+                    ? 0.0
+                    : static_cast<double>(distinct_bytes + string_overhead) * 100 /
+                          allocated_bytes);
     outbuf_addv(out, "Searches: %" PRIu64 "\tAverage search length: %6.3f\n", num_str_searches,
                 static_cast<double>(search_len) / num_str_searches);
 
-    auto load_factor = num_distinct_strings * 1.0 / htable_size;
+    auto load_factor = distinct_strings * 1.0 / htable_size;
     outbuf_addv(out, "Table size: %d, Load factor: %f\n", htable_size, load_factor);
     if (load_factor > 0.75) {
       outbuf_addv(
@@ -322,7 +330,7 @@ uint64_t add_string_status(outbuffer_t *out, int verbose) {
           "String pool is overloaded, please consider increase in the config 'hash table size'!\n");
     }
   }
-  return (bytes_distinct_strings + overhead_bytes);
+  return distinct_bytes + string_overhead;
 }
 
 #ifdef DEBUGMALLOC_EXTENSIONS
@@ -370,7 +378,7 @@ char *int_new_string(unsigned int size)
 
 char *extend_string(const char *str, int len) {
   malloc_block_t *mbt;
-  int const oldsize = MSTR_SIZE(str);
+  const auto oldsize = MSTR_SIZE(str);
 
   mbt = reinterpret_cast<malloc_block_t *>(DREALLOC(
       MSTR_BLOCK(str), len + sizeof(malloc_block_t) + 1, TAG_MALLOC_STRING, "extend_string"));
@@ -379,7 +387,8 @@ char *extend_string(const char *str, int len) {
   } else {
     mbt->size = UINT_MAX;
   }
-  ADD_STRING_SIZE(mbt->size - oldsize);
+  ADD_STRING_SIZE(stralloc_detail::logical_length(mbt->size) -
+                  stralloc_detail::logical_length(oldsize));
   CHECK_STRING_STATS;
 
   return reinterpret_cast<char *>(mbt + 1);
@@ -476,7 +485,8 @@ void dump_stralloc(outbuffer_t *out) {
   std::lock_guard<std::mutex> lock(stralloc_mutex);
   std::stringstream ss;
 
-  ss << "===STRALLOC DUMP: allocd_strings:" << allocd_strings << "\n";
+  ss << "===STRALLOC DUMP: allocd_strings:"
+     << allocd_strings.load(std::memory_order_relaxed) << "\n";
   // can't direct output to outbuf since it might realloc
   for (int hsh = 0; hsh < htable_size; hsh++) {
     for (block_t *entry = base_table[hsh]; entry; entry = entry->next) {

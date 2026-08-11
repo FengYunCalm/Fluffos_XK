@@ -3,48 +3,96 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      target_sha:
+        description: 'Commit SHA to release (must be reachable from origin/master)'
+        required: true
+        type: string
       prerelease:
         description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Execute every gate up to the mutation boundary with no write permission (no tag/release/image writes)'
         required: false
         type: boolean
         default: false
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-  # Common build configuration
   CMAKE_BUILD_TYPE: Release
   CMAKE_COMMON_FLAGS: -DCMAKE_BUILD_TYPE=Release -DMARCH_NATIVE=OFF
   CTEST_OUTPUT_ON_FAILURE: 1
+  TARGET_SHA: ${{ github.event.inputs.target_sha }}
 
+# Least privilege by default: only the final mutation jobs (publish-draft,
+# promote-image) grant write scopes, under the protected release
+# environment. Every other job runs read-only with no persisted
+# credentials.
 permissions:
-  contents: write
-  packages: write
+  contents: read
+  packages: read
+
+# ONE release pipeline at a time across ALL target SHAs: two concurrent
+# dispatches for different SHAs on the same day must not race on the date
+# version tag.
+concurrency:
+  group: release-promote
+  cancel-in-progress: false
 
 jobs:
-  generate-version:
-    name: Generate Version Number
+  validate-target:
+    name: Validate Target SHA and Required Checks
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.generate.outputs.version }}
+      version: ${{ steps.version.outputs.version }}
+      target_sha: ${{ steps.target.outputs.sha }}
+      image_name: ${{ steps.image.outputs.name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate target SHA format and ancestry
+        id: target
+        run: |
+          SHA="${{ github.event.inputs.target_sha }}"
+          if ! echo "$SHA" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "FAIL: target_sha must be a full 40-hex commit SHA" >&2
+            exit 1
+          fi
+          git fetch origin master --depth=1000
+          if ! git merge-base --is-ancestor "$SHA" origin/master; then
+            echo "FAIL: target SHA $SHA is not reachable from origin/master" >&2
+            exit 1
+          fi
+          # The checkout must resolve to exactly the requested SHA (locked
+          # target, never the workflow default ref).
+          git checkout -q "$SHA"
+          if [ "$(git rev-parse HEAD)" != "$SHA" ]; then
+            echo "FAIL: checkout HEAD $(git rev-parse HEAD) != requested $SHA" >&2
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "PASS: target SHA $SHA is reachable from origin/master and checked out exactly"
+
+      - name: Verify required checks on target SHA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          source tools/release/common.sh
+          gh api --paginate --slurp \
+            "repos/${{ github.repository }}/commits/${{ github.event.inputs.target_sha }}/check-runs?per_page=100" \
+            > /tmp/check-runs.json
+          verify_required_checks "${{ github.repository }}" "${{ github.event.inputs.target_sha }}" < /tmp/check-runs.json
 
       - name: Generate Version
-        id: generate
+        id: version
         run: |
-          # Get current date in YYYY.MMDD format
           DATE_VERSION=$(date -u '+%Y.%m%d')
-
-          # Fetch all tags
           git fetch --tags
-
-          # Find existing tags for today's date
           EXISTING_TAGS=$(git tag -l "v${DATE_VERSION}.*" | sort -V)
-
-          # Find the highest increment for today
           if [ -z "$EXISTING_TAGS" ]; then
             INCREMENT=0
           else
@@ -52,56 +100,21 @@ jobs:
             LAST_INCREMENT=$(echo "$LAST_TAG" | sed -E "s/v${DATE_VERSION}\.([0-9]+)/\1/")
             INCREMENT=$((LAST_INCREMENT + 1))
           fi
-
-          # Generate new version
           VERSION="v${DATE_VERSION}.${INCREMENT}"
+          echo "Generated version: $VERSION (target SHA: ${{ github.event.inputs.target_sha }})"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-          echo "Generated version: $VERSION"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-  create-release:
-    name: Create Release
-    needs: generate-version
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      release_id: ${{ steps.create_release.outputs.id }}
-      version: ${{ needs.generate-version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Create Git Tag
+      - name: Normalize image name
+        id: image
         run: |
-          VERSION="${{ needs.generate-version.outputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$VERSION" -m "Release $VERSION"
-          git push origin "$VERSION"
-
-      - name: Create Release
-        id: create_release
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const version = '${{ needs.generate-version.outputs.version }}';
-            const release = await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: version,
-              name: `FluffOS ${version}`,
-              generate_release_notes: true,
-              prerelease: ${{ inputs.prerelease }},
-              draft: false
-            });
-            core.setOutput('upload_url', release.data.upload_url);
-            core.setOutput('id', release.data.id);
-            return release.data.id;
+          source tools/release/common.sh
+          NAME="$(normalize_image_name "${{ github.repository }}")"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "normalized image reference: ${{ env.REGISTRY }}/$NAME"
 
   build-binaries:
     name: Build ${{ matrix.platform }} Binary
-    needs: create-release
+    needs: validate-target
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -123,13 +136,14 @@ jobs:
     steps:
       - name: Setup MSYS2 (Windows)
         if: matrix.platform == 'windows'
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884  # v2
         with:
           update: true
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
-          ref: ${{ needs.create-release.outputs.version }}
+          ref: ${{ github.event.inputs.target_sha }}
+          persist-credentials: false
 
       - name: Install Dependencies (Windows)
         if: matrix.platform == 'windows'
@@ -155,34 +169,33 @@ jobs:
       - name: Build (Linux)
         if: matrix.platform == 'linux'
         run: |
-          docker run --rm -v $PWD:/workspace -w /workspace alpine:3.18 /bin/sh -c '
+          docker run --rm -v $PWD:/workspace -w /workspace \
+            alpine:3.18@sha256:fd032399cd767f310a1d1274e81cab9f0fd8a49b3589eba2c3420228cd45b6a7 /bin/sh -c '
             set -e
-
-            # Install dependencies
             apk add --no-progress --no-cache \
               linux-headers gcc g++ clang-dev make cmake bash \
               mariadb-dev mariadb-static postgresql-dev sqlite-dev sqlite-static \
               openssl-dev openssl-libs-static zlib-dev zlib-static icu-dev icu-static \
               pcre-dev bison git musl-dev libelf-static elfutils-dev \
               zstd-static bzip2-static xz-static tar
-
-            # Build jemalloc
             cd /tmp
-            wget -q -O - https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2 | tar -xj
+            wget -q -O jemalloc.tar.bz2 https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2
+            echo "2db82d1e7119df3e71b7640219b6dfe84789bc0537983c3b7ac4f7189aecfeaa  jemalloc.tar.bz2" | sha256sum -c -
+            tar -xjf jemalloc.tar.bz2
             cd jemalloc-5.3.0
             ./configure --prefix=/usr && make -j$(nproc) && make install
-
-            # Build FluffOS
             cd /workspace
             mkdir -p build && cd build
             cmake .. ${{ env.CMAKE_COMMON_FLAGS }} -DSTATIC=ON
             make -j$(nproc) install
-
-            # Run tests
-            make test || true
-
-            # Verify static linking
-            ldd bin/driver || echo "✓ Binary is statically linked"
+            ctest --output-on-failure -j$(nproc)
+            if ldd bin/driver 2>&1 | grep -q "not a dynamic executable"; then
+              echo "PASS: bin/driver is statically linked"
+            else
+              echo "FAIL: bin/driver has dynamic dependencies:"
+              ldd bin/driver
+              exit 1
+            fi
           '
 
       - name: Run Tests (Windows)
@@ -194,180 +207,353 @@ jobs:
       - name: Package (Windows)
         if: matrix.platform == 'windows'
         run: |
-          ASSET_NAME="fluffos-${{ needs.create-release.outputs.version }}-${{ matrix.asset_suffix }}"
+          ASSET_NAME="fluffos-${{ needs.validate-target.outputs.version }}-${{ matrix.asset_suffix }}"
           cd build/bin && zip -r "../../${ASSET_NAME}" .
 
       - name: Package (Linux)
         if: matrix.platform == 'linux'
         run: |
-          ASSET_NAME="fluffos-${{ needs.create-release.outputs.version }}-${{ matrix.asset_suffix }}"
+          ASSET_NAME="fluffos-${{ needs.validate-target.outputs.version }}-${{ matrix.asset_suffix }}"
           cd build/bin && tar czf "../../${ASSET_NAME}" .
 
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute asset checksums
+        run: |
+          ASSET_NAME="fluffos-${{ needs.validate-target.outputs.version }}-${{ matrix.asset_suffix }}"
+          sha256sum "${ASSET_NAME}" > "${ASSET_NAME}.sha256"
+
+      - name: Verify no test private keys in package
+        if: matrix.platform == 'linux'
+        run: |
+          ASSET_NAME="fluffos-${{ needs.validate-target.outputs.version }}-${{ matrix.asset_suffix }}"
+          if tar tzf "${ASSET_NAME}" | grep -E '\.(pem|key)$' ; then
+            echo "FAIL: release asset contains private-key fixture files"
+            exit 1
+          fi
+          echo "PASS: no key fixtures in release asset"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./fluffos-${{ needs.create-release.outputs.version }}-${{ matrix.asset_suffix }}
-          asset_name: fluffos-${{ needs.create-release.outputs.version }}-${{ matrix.asset_suffix }}
-          asset_content_type: ${{ matrix.asset_type }}
+          name: release-asset-${{ matrix.platform }}
+          path: |
+            fluffos-${{ needs.validate-target.outputs.version }}-${{ matrix.asset_suffix }}
+            fluffos-${{ needs.validate-target.outputs.version }}-${{ matrix.asset_suffix }}.sha256
+          if-no-files-found: error
 
   build-docker:
-    name: Build and Push Docker Image
-    needs: create-release
+    name: Build OCI Archive (single build, scan, digest)
+    needs: validate-target
     runs-on: ubuntu-latest
+    outputs:
+      image_digest: ${{ steps.digest.outputs.digest }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
-          ref: ${{ needs.create-release.outputs.version }}
+          ref: ${{ github.event.inputs.target_sha }}
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log into registry ${{ env.REGISTRY }}
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
 
       - name: Extract Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051  # v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ needs.validate-target.outputs.image_name }}
           tags: |
-            type=semver,pattern={{version}},value=${{ needs.create-release.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.create-release.outputs.version }}
-            type=semver,pattern={{major}},value=${{ needs.create-release.outputs.version }}
-            type=raw,value=${{ needs.create-release.outputs.version }},enable=true
-            type=raw,value=latest,enable=${{ !inputs.prerelease }}
+            type=raw,value=${{ needs.validate-target.outputs.version }},enable=true
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+      # ONE build, one archive: buildx writes a docker-save tarball. The
+      # scan, the digest record and the final promotion all consume this
+      # exact archive - the promoted image can never differ from the
+      # scanned one (no second build anywhere in the pipeline).
+      - name: Build OCI archive (no push)
+        id: build
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25  # v5
         with:
           context: .
-          push: true
+          push: false
+          load: false
+          outputs: type=docker,dest=/tmp/fluffos-image.tar
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  finalize-release:
-    name: Finalize Release
-    needs: [create-release, build-binaries, build-docker]
+      - name: Install skopeo
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+
+      - name: Record archive digest
+        id: digest
+        run: |
+          DIGEST="$(skopeo inspect docker-archive:/tmp/fluffos-image.tar --format '{{.Digest}}')"
+          echo "$DIGEST" > /tmp/fluffos-digest.txt
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "recorded archive digest: $DIGEST"
+
+      - name: Scan image archive (Trivy, blocking)
+        env:
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db
+        run: |
+          docker run --rm \
+            --env TRIVY_DB_REPOSITORY \
+            --volume /tmp/fluffos-image.tar:/input/fluffos-image.tar:ro \
+            --volume /tmp:/output \
+            aquasec/trivy:0.50.1@sha256:586cf142d41727a184b2982ade6a4d94ada9e243d64fcd52e6dcfba9cce56df6 \
+            image --input /input/fluffos-image.tar \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --no-progress \
+            --format json --output /output/trivy.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          digest = Path("/tmp/fluffos-digest.txt").read_text(encoding="utf-8").strip()
+          with open("/tmp/trivy.json") as f:
+              report = json.load(f)
+          # Trivy names --input reports after the local archive path. Record
+          # the independently inspected archive digest explicitly so the
+          # read-only release verifier can bind the scan to the promoted image.
+          report["FluffOSImageDigest"] = digest
+          with open("/tmp/trivy.json", "w", encoding="utf-8") as f:
+              json.dump(report, f, indent=2)
+              f.write("\n")
+          vulns = []
+          for result in report.get("Results", []):
+              vulns.extend(result.get("Vulnerabilities", []) or [])
+          print(f"vulnerabilities: {len(vulns)}")
+          for v in vulns:
+              print(" ", v.get("Severity"), v.get("VulnerabilityID"), v.get("PkgName"))
+          if len(vulns) > 0:
+              raise SystemExit("FAIL: HIGH/CRITICAL vulnerabilities block the release")
+          PY
+
+      - name: Upload OCI archive, digest and scan report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: oci-image
+          path: |
+            /tmp/fluffos-image.tar
+            /tmp/fluffos-digest.txt
+            /tmp/trivy.json
+          if-no-files-found: error
+
+  verify-release-inputs:
+    name: Verify Release Inputs (read-only)
+    needs: [validate-target, build-binaries, build-docker]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
-          ref: ${{ needs.create-release.outputs.version }}
+          ref: ${{ github.event.inputs.target_sha }}
+          persist-credentials: false
 
-      - name: Generate Release Documentation
-        id: docs
+      - name: Download binary artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          pattern: release-asset-*
+          path: assets/
+          merge-multiple: true
+
+      - name: Download OCI verification artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: oci-image
+          path: oci/
+
+      - name: Write provenance summary
         run: |
-          VERSION="${{ needs.create-release.outputs.version }}"
-          cat > release-notes.md << EOF
-          ## Release Assets
+          {
+            echo "target_sha: ${{ github.event.inputs.target_sha }}"
+            echo "version: ${{ needs.validate-target.outputs.version }}"
+            echo "image_name: ${{ env.REGISTRY }}/${{ needs.validate-target.outputs.image_name }}"
+            echo "oci_digest: ${{ needs.build-docker.outputs.image_digest }}"
+            echo "workflow_run: ${{ github.run_id }}"
+            echo "workflow_attempt: ${{ github.run_attempt }}"
+          } > assets/provenance.txt
+          cp third_party/sbom.json assets/sbom.json
+          cp third_party/manifest.yaml assets/manifest.yaml
+          cp oci/fluffos-digest.txt assets/fluffos-digest.txt
+          cp oci/trivy.json assets/trivy.json
 
-          This release includes the following pre-built distributions:
+      - name: Verify checksums, SBOM, provenance and digest binding
+        run: |
+          bash tools/release/verify-release-inputs.sh \
+            --assets-dir assets \
+            --sbom assets/sbom.json \
+            --manifest assets/manifest.yaml \
+            --expected-sha "${{ github.event.inputs.target_sha }}" \
+            --digest-file assets/fluffos-digest.txt \
+            --trivy-report assets/trivy.json
 
-          ### Binary Distributions
-          - **Windows x86_64**: \`fluffos-${VERSION}-windows-x86_64.zip\`
-            - Built with MSYS2/MinGW64
-            - Complete distribution with all tools and libraries
-            - SQLite support enabled
+      - name: Upload verified release assets bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: release-assets-verified
+          path: assets/
+          if-no-files-found: error
 
-          - **Linux x86_64 (Static)**: \`fluffos-${VERSION}-linux-x86_64-static.tar.gz\`
-            - Statically linked binaries (no external dependencies)
-            - Built on Alpine Linux
-            - Complete distribution with all tools and libraries
-            - Portable across most Linux distributions
+  publish-draft:
+    name: Publish Draft Release (tag-last, gate-first)
+    needs: [validate-target, verify-release-inputs]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    environment: release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          ref: ${{ github.event.inputs.target_sha }}
+          fetch-depth: 0
 
-          ### What's Included
-          Each distribution contains:
-          - **driver** - Main FluffOS driver executable
-          - **lpcc** - LPC compiler
-          - **symbol** - Symbol table utility
-          - **o2json/json2o** - Object file converters
-          - **portbind** - Port binding helper (Linux only)
-          - **std/** - LPC standard library
-          - **include/** - LPC header files
-          - **www/** - WebSocket client files
-          - **keywords.json** - Language keywords database
+      - name: Dry-run guard
+        run: |
+          source tools/release/common.sh
+          RELEASE_DRY_RUN="${RELEASE_DRY_RUN:-0}" assert_dry_run "tag/release write"
 
-          ### Docker Images
-          Docker images are available at \`ghcr.io/${{ github.repository }}\`:
-          - \`${VERSION}\` - This release version
-          ${{ !inputs.prerelease && '- `latest` - Latest stable release' || '' }}
+      # Every gate has passed for the exact target SHA; only now may the
+      # tag be created, pointing EXACTLY at the target SHA.
+      - name: Create Git Tag (exact target SHA)
+        run: |
+          VERSION="${{ needs.validate-target.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin master --depth=1000
+          git tag -a "$VERSION" "${{ github.event.inputs.target_sha }}" -m "Release $VERSION (from ${{ github.event.inputs.target_sha }})"
+          git push origin "$VERSION"
 
-          Pull with:
-          \`\`\`bash
-          docker pull ghcr.io/${{ github.repository }}:${VERSION}
-          \`\`\`
+      - name: Create Draft Release
+        id: create_release
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7
+        with:
+          script: |
+            const version = '${{ needs.validate-target.outputs.version }}';
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: version,
+              name: `FluffOS ${version}`,
+              generate_release_notes: true,
+              prerelease: ${{ inputs.prerelease }},
+              draft: true
+            });
+            core.setOutput('upload_url', release.data.upload_url);
+            core.setOutput('id', release.data.id);
+            return release.data.id;
 
-          ## Installation
+      - name: Download verified assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: release-assets-verified
+          path: assets/
 
-          ### Windows
-          \`\`\`bash
-          # Extract distribution
-          unzip fluffos-${VERSION}-windows-x86_64.zip -d fluffos
-          cd fluffos
-
-          # Run driver with your config
-          ./driver.exe /path/to/mudlib/config.cfg
-          \`\`\`
-
-          ### Linux
-          \`\`\`bash
-          # Extract distribution
-          mkdir fluffos && cd fluffos
-          tar xzf ../fluffos-${VERSION}-linux-x86_64-static.tar.gz
-
-          # Run driver with your config
-          ./driver /path/to/mudlib/config.cfg
-          \`\`\`
-
-          ### Docker
-          \`\`\`bash
-          docker run -v /path/to/mudlib:/mudlib ghcr.io/${{ github.repository }}:${VERSION} /mudlib/config.cfg
-          \`\`\`
-
-          ---
-          EOF
-
-          echo "RELEASE_NOTES<<EOF" >> $GITHUB_OUTPUT
-          cat release-notes.md >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Update Release Notes
-        uses: actions/github-script@v7
+      - name: Upload all release assets (binaries, checksums, SBOM, manifest, provenance, digest)
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7
         with:
           script: |
             const fs = require('fs');
-            const release = await github.rest.repos.getRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: ${{ needs.create-release.outputs.release_id }}
-            });
+            const path = require('path');
+            const uploadUrl = '${{ steps.create_release.outputs.upload_url }}';
+            const assetsDir = path.resolve('assets');
+            for (const name of fs.readdirSync(assetsDir)) {
+              const full = path.join(assetsDir, name);
+              if (!fs.statSync(full).isFile()) continue;
+              console.log(`uploading ${name}`);
+              await github.rest.repos.uploadReleaseAsset({
+                url: uploadUrl,
+                headers: { 'content-type': 'application/octet-stream' },
+                name,
+                data: fs.readFileSync(full),
+              });
+            }
 
-            const additionalNotes = fs.readFileSync('release-notes.md', 'utf8');
+  promote-image:
+    name: Promote Scanned OCI Digest (protected)
+    needs: [validate-target, build-docker, verify-release-inputs, publish-draft]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    environment: release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          ref: ${{ github.event.inputs.target_sha }}
+          persist-credentials: false
 
-            await github.rest.repos.updateRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: ${{ needs.create-release.outputs.release_id }},
-              body: release.data.body + '\n\n' + additionalNotes
-            });
+      - name: Dry-run guard
+        run: |
+          source tools/release/common.sh
+          RELEASE_DRY_RUN="${RELEASE_DRY_RUN:-0}" assert_dry_run "image promotion"
+
+      - name: Install skopeo
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+
+      - name: Download the exact scanned archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: oci-image
+          path: /tmp/oci
+
+      - name: Promote the scanned archive (no rebuild)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.validate-target.outputs.version }}"
+          IMAGE="${{ env.REGISTRY }}/${{ needs.validate-target.outputs.image_name }}"
+          echo "$GITHUB_TOKEN" | skopeo login --username "${{ github.actor }}" --password-stdin "${{ env.REGISTRY }}"
+          skopeo copy docker-archive:/tmp/oci/fluffos-image.tar "docker://${IMAGE}:${VERSION}"
+          echo "promoted ${IMAGE}:${VERSION}"
+
+      - name: Verify remote digest equals the scanned digest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.validate-target.outputs.version }}"
+          IMAGE="${{ env.REGISTRY }}/${{ needs.validate-target.outputs.image_name }}"
+          echo "$GITHUB_TOKEN" | skopeo login --username "${{ github.actor }}" --password-stdin "${{ env.REGISTRY }}"
+          EXPECTED="$(tr -d ' \n' < /tmp/oci/fluffos-digest.txt)"
+          REMOTE="$(skopeo inspect "docker://${IMAGE}:${VERSION}" --format '{{.Digest}}')"
+          echo "expected: $EXPECTED"
+          echo "remote:   $REMOTE"
+          if [ "$REMOTE" != "$EXPECTED" ]; then
+            echo "FAIL: remote digest differs from the scanned digest" >&2
+            exit 1
+          fi
+          echo "PASS: remote digest matches the scanned digest"
+
+      - name: Update latest tag (stable only, same digest)
+        if: ${{ !inputs.prerelease }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.validate-target.outputs.version }}"
+          IMAGE="${{ env.REGISTRY }}/${{ needs.validate-target.outputs.image_name }}"
+          echo "$GITHUB_TOKEN" | skopeo login --username "${{ github.actor }}" --password-stdin "${{ env.REGISTRY }}"
+          skopeo copy "docker://${IMAGE}:${VERSION}" "docker://${IMAGE}:latest"
+          LATEST="$(skopeo inspect "docker://${IMAGE}:latest" --format '{{.Digest}}')"
+          if [ "$LATEST" != "$(tr -d ' \n' < /tmp/oci/fluffos-digest.txt)" ]; then
+            echo "FAIL: latest tag does not reference the scanned digest" >&2
+            exit 1
+          fi
+          echo "PASS: latest references the scanned digest"
 
       - name: Release Summary
         run: |
-          VERSION="${{ needs.create-release.outputs.version }}"
+          VERSION="${{ needs.validate-target.outputs.version }}"
+          IMAGE="${{ env.REGISTRY }}/${{ needs.validate-target.outputs.image_name }}"
           cat << EOF
-          ✅ Release ${VERSION} created successfully!
-          📦 Windows binary: fluffos-${VERSION}-windows-x86_64.zip
-          📦 Linux static binary: fluffos-${VERSION}-linux-x86_64-static.tar.gz
-          🐳 Docker image: ghcr.io/${{ github.repository }}:${VERSION}
-          🔗 View release: https://github.com/${{ github.repository }}/releases/tag/${VERSION}
+          ✅ Draft release ${VERSION} created after all gates passed!
+          📦 Binaries + checksums + SBOM + manifest + provenance + digest uploaded
+          🐳 Promoted ${IMAGE}:${VERSION} == scanned digest ${{ needs.build-docker.outputs.image_digest }}
+          🔗 View draft release: https://github.com/${{ github.repository }}/releases/tag/${VERSION}
+          ⚠️ The release is intentionally DRAFT. Review assets and click "Publish
+             release" only after manual approval per the release policy.
           EOF

@@ -1317,16 +1317,19 @@ int calculate_and_maybe_print_memory_info(outbuffer_t *ob, int verbose) {
 
   auto total_mapping_free_nodes = free_node_count();
   auto total_mapping_free_nodes_size = total_mapping_free_nodes * sizeof(mapping_node_t);
-  auto total_mapping_nodes_size = total_mapping_nodes * sizeof(mapping_node_t);
+  const auto mapping_count = num_mappings.load(std::memory_order_relaxed);
+  const auto mapping_size = total_mapping_size.load(std::memory_order_relaxed);
+  const auto mapping_nodes = total_mapping_nodes.load(std::memory_order_relaxed);
+  auto total_mapping_nodes_size = mapping_nodes * sizeof(mapping_node_t);
   if (verbose != -1) {
     outbuf_addv(ob,
                 "%-20s %8" PRIu64 " %8" PRIu64 " (nodes %" PRIu64 ", size %" PRIu64
                 ", free %" PRIu64 ", size %" PRIu64 ")\n",
-                "Mappings", num_mappings, total_mapping_size + total_mapping_free_nodes_size,
-                total_mapping_nodes, total_mapping_nodes_size, total_mapping_free_nodes,
+                "Mappings", mapping_count, mapping_size + total_mapping_free_nodes_size,
+                mapping_nodes, total_mapping_nodes_size, total_mapping_free_nodes,
                 total_mapping_free_nodes_size);
   }
-  tot += total_mapping_size + total_mapping_free_nodes_size;
+  tot += mapping_size + total_mapping_free_nodes_size;
   if (verbose && verbose != -1) outbuf_add(ob, "\n");
 
   tot += heart_beat_status(ob, verbose);

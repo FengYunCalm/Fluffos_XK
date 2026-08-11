@@ -3,7 +3,6 @@ name: Docker
 on:
   push:
     branches: [master]
-    tags: ['v*.*']
     paths-ignore: ['docs/**']
   pull_request:
     branches: [master]
@@ -11,44 +10,69 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 permissions:
   contents: read
-  packages: write
+  packages: read
 
+# This workflow is a build-and-scan gate only. It never pushes images: the
+# release workflow is the single entry point with push permission, and it
+# only pushes after every gate (tests, sanitizers, fuzz, SBOM, checksums,
+# vulnerability scan) has passed for the exact target SHA.
 jobs:
-  build-and-push:
-    name: Build and Push Docker Image
+  build-and-scan:
+    name: Build Docker Image (no push)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+
+      # Registry references are case-normalized once: GitHub lowercases
+      # repository names in image references (ghcr.io/fengyuncalm/fluffos_xk),
+      # while ${{ github.repository }} preserves the display case. Every
+      # consumer (metadata, smoke, scan, push, release notes) must use the
+      # same normalized value, never a re-joined raw reference.
+      - name: Normalize image name
+        id: image
+        run: |
+          NORMALIZED="${{ github.repository }}"
+          NORMALIZED="${NORMALIZED,,}"
+          echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
+          echo "name=${NORMALIZED}" >> "$GITHUB_OUTPUT"
+          echo "normalized image reference: ${REGISTRY}/${NORMALIZED}"
+        env:
+          REGISTRY: ghcr.io
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
 
       - name: Extract Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051  # v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ steps.image.outputs.registry }}/${{ steps.image.outputs.name }}
 
-      - name: Log into registry ${{ env.REGISTRY }}
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+      - name: Build Docker image without push
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25  # v5
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          push: false
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify image builds and runs (smoke)
+        run: |
+          # Consume the exact tags produced by the metadata step: scanning
+          # `docker images` and grepping for a case-preserved repo name is
+          # what failed when the repository name contains uppercase letters.
+          TAGS="${{ steps.meta.outputs.tags }}"
+          IMAGE=$(echo "$TAGS" | cut -d$'\n' -f1)
+          test -n "$IMAGE"
+          docker run --rm --entrypoint /bin/sh "$IMAGE" -c '\
+            test -x /fluffos/bin/driver && \
+            /fluffos/bin/driver --version
+          '

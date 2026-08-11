@@ -21,9 +21,9 @@ FluffOS_XK 是一个面向实际 MUD/LPC 运行项目的 FluffOS 维护分支。
 | 构建系统 | CMake，根入口为 `CMakeLists.txt`，核心入口为 `src/CMakeLists.txt` |
 | 运行时定位 | FluffOS LPC driver，面向 MUD mudlib |
 | 当前分支 | `master`，跟踪 `origin/master` |
-| 最近 HEAD | `6e6f60e9 Harden cross-owner LPC boundaries` |
-| 源码规模 | `src` 下约 2437 个文件 |
-| 文档规模 | `docs` 下约 939 个 Markdown 文件 |
+| 最近 HEAD | `24bd5f4f parser: bound debug output formatting`（审计基线 2026-08-09） |
+| 源码规模 | `src` 下约 2467 个文件 |
+| 文档规模 | `docs` 下约 956 个 Markdown 文件 |
 | 测试素材 | `src/tests/test_lpc.cc`、`testsuite/`、本地 `.internal` 验收素材 |
 
 ## 顶层目录
@@ -457,7 +457,7 @@ payload 约束：
 - `owner_lpc_task_allowed()` 仍是显式开放合同，不开放任意 legacy LPC 默认后台执行。
 - `normal_path_main_fallback_count` 必须保持为 0；main 线程只保留 IO adapter、cleanup adapter、显式 fallback 和 documented main-required compatibility surface。
 - gateway command、heartbeat、callout、async/db/file completion、DNS callback 和 socket read/write/close callback 已有 owner executor 入口，并已按当前接受的 10 用户 30 分钟 audit 压测口径验收。
-- 10 用户 30 分钟 audit 压测、真实 XiaKeXing mudlib final audit 和 `socket_release` owner-safe release/acquire handshake 均已收口，`production_gate_ready` 可以为 1。
+- 10 用户 30 分钟 audit 压测、真实 XiaKeXing mudlib final audit 和 `socket_release` owner-safe release/acquire handshake 均已收口（**均为 2026-06 历史证据；当前 checkout 需重跑产生 `fluffos.evidence.manifest.v1` 当前证据后，`production_gate_ready` 才能作为 release 门禁**）。
 - production rollout 策略、回滚指标和发布阻断条件以 `docs/multicore-production-gate.md` 为准；任何证据失效都必须回退对应 ready 字段并重跑验收。
 
 ## 维护原则

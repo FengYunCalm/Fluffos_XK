@@ -21,7 +21,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Skip when Coverity token is not configured
         if: env.COVERITY_SCAN_TOKEN == ''
         run: |
@@ -46,19 +46,21 @@ jobs:
       - name: Build with cov-build
         if: env.COVERITY_SCAN_TOKEN != ''
         run: |
-          export PATH=`pwd`/cov-analysis-linux64/bin:$PATH
+          repo_root="$(pwd)"
+          export PATH="$repo_root/cov-analysis-linux64/bin:$PATH"
           cd build
           cov-build --dir cov-int make -j 2 install
       - name: Submit the result to Coverity Scan
         if: env.COVERITY_SCAN_TOKEN != ''
         run: |
+          commit_sha="$(git rev-parse HEAD)"
           cd build
           tar czvf fluffos.tgz cov-int
-          curl \
+          curl --fail-with-body --show-error --silent \
             --form project="$COVERITY_SCAN_PROJECT" \
             --form token="$COVERITY_SCAN_TOKEN" \
             --form email="${COVERITY_SCAN_EMAIL:-noreply@example.com}" \
             --form file=@fluffos.tgz \
-            --form version="`git rev-parse HEAD` - ${{ matrix.build }}" \
-            --form description="`git rev-parse HEAD` - ${{ matrix.build }}" \
-            https://scan.coverity.com/builds?project=FengYunCalm%2FFluffos_XK
+            --form "version=${commit_sha} - ${{ matrix.build }}" \
+            --form "description=${commit_sha} - ${{ matrix.build }}" \
+            "https://scan.coverity.com/builds?project=FengYunCalm%2FFluffos_XK"

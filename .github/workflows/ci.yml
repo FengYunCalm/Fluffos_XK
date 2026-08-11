@@ -3,10 +3,8 @@ name: CI
 on:
   push:
     branches: [master]
-    paths-ignore: ['docs/**']
   pull_request:
     branches: [master]
-    paths-ignore: ['docs/**']
 
 env:
   CTEST_OUTPUT_ON_FAILURE: 1
@@ -15,8 +13,115 @@ env:
   BUILD_TYPES: '["Debug", "RelWithDebInfo"]'
 
 jobs:
+  workflow-lint:
+    name: Workflow Lint (actionlint + parse + repo tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+
+      - name: Install PyYAML
+        run: pip install --break-system-packages pyyaml
+
+      # actionlint pinned to v1.7.12; the tarball is downloaded and its
+      # SHA-256 verified before execution (no mutable-tag action dependency).
+      - name: Install actionlint (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/actionlint.tar.gz \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  /tmp/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/actionlint.tar.gz -C /usr/local/bin actionlint
+          actionlint --version
+
+      - name: actionlint all workflows
+        run: actionlint .github/workflows/*.yml
+
+      - name: PyYAML parse + job-name uniqueness + matrix contract tests
+        run: python3 tools/docs/check-workflows.py --self-test
+
+      - name: Isolated testsuite runner portability
+        run: python3 tools/testsuite/test-run-isolated-portability.py
+
+      - name: Evidence gate negative tests
+        run: |
+          python3 -m json.tool docs/evidence/manifest.schema.json >/dev/null
+          python3 tools/docs/test-evidence-gate.py
+
+      - name: Release pipeline fault injection tests (dry-run)
+        run: bash tools/release/release-fault-injection.sh
+
+  docs-check:
+    name: Docs Evidence & Links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          fetch-depth: 0
+
+      - name: Install PyYAML
+        run: pip install --break-system-packages pyyaml
+
+      - name: Check doc links and commit SHAs
+        run: python3 tools/docs/check-docs.py
+
+      - name: Check workflow action pins vs manifest
+        run: python3 tools/docs/check-actions-pins.py --self-test
+
+      - name: Validate SBOM and schema JSON
+        run: |
+          python3 -m json.tool docs/evidence/manifest.schema.json >/dev/null
+          python3 -m json.tool third_party/sbom.json >/dev/null
+          python3 tools/sbom-generate.py --validate
+
+  evidence-check:
+    name: Evidence Gate (non-empty, schema + HEAD)
+    runs-on: ubuntu-latest
+    needs: [build-and-test]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Python deps
+        run: pip install --break-system-packages pyyaml jsonschema
+
+      - name: Download capacity evidence envelope
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: capacity-evidence-envelope
+          path: build/reports/capacity
+
+      # Envelope files bind the benchmark raw JSON by basename and SHA-256.
+      # Download the separately retained raw artifact to its common parent so
+      # the artifact's `capacity/*_raw.json` entries land beside the envelopes.
+      - name: Download capacity evidence raw reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: lpc-modern-runtime-bench-raw
+          path: build/reports
+
+      - name: Validate evidence reports
+        env:
+          # R2-F07: the gate receives the expected commit identity from the
+          # workflow context - never from prose in the report.
+          EXPECTED_TESTED_SHA: ${{ github.sha }}
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # The gate must be non-empty: a run that produced no reports fails.
+          if [ ! -d build/reports/capacity ] || [ -z "$(find build/reports/capacity -name '*.json' | head -1)" ]; then
+            echo "FAIL: no evidence envelope reports found; benchmark job must upload them"
+            exit 1
+          fi
+          python3 tools/docs/check-evidence.py \
+            --reports-dir build/reports/capacity \
+            --schema docs/evidence/manifest.schema.json \
+            --repo . \
+            --mode gate \
+            --expected-tested-sha "$EXPECTED_TESTED_SHA" \
+            --expected-source-sha "$EXPECTED_SOURCE_SHA"
+
   build-and-test:
-    name: ${{ matrix.platform }} (${{ matrix.compiler || 'default' }}${{ matrix.sanitizer && '+sanitizer' || '' }}, ${{ matrix.build }})
+    name: ${{ matrix.check_name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -29,6 +134,7 @@ jobs:
             cc: gcc
             cxx: g++
             build: Debug
+            check_name: Ubuntu GCC Debug
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev
           - platform: Ubuntu
             os: ubuntu-24.04
@@ -36,6 +142,7 @@ jobs:
             cc: gcc
             cxx: g++
             build: RelWithDebInfo
+            check_name: Ubuntu GCC RelWithDebInfo
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev
 
           # Ubuntu - Clang
@@ -45,6 +152,7 @@ jobs:
             cc: clang
             cxx: clang++
             build: Debug
+            check_name: Ubuntu Clang Debug
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev
           - platform: Ubuntu
             os: ubuntu-24.04
@@ -52,17 +160,19 @@ jobs:
             cc: clang
             cxx: clang++
             build: RelWithDebInfo
+            check_name: Ubuntu Clang RelWithDebInfo
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev
 
-          # Ubuntu - Clang with Sanitizer
+          # Ubuntu - Clang with Sanitizer (ASan)
           - platform: Ubuntu
             os: ubuntu-24.04
             compiler: clang
             cc: clang
             cxx: clang++
             build: Debug
-            sanitizer: true
-            cmake_flags: -DENABLE_SANITIZER=ON
+            sanitizer: asan
+            cmake_flags: -DENABLE_ASAN=ON -DENABLE_LTO=OFF -DMARCH_NATIVE=OFF
+            check_name: Ubuntu Clang ASan Debug
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev libdw-dev libbz2-dev
           - platform: Ubuntu
             os: ubuntu-24.04
@@ -70,14 +180,41 @@ jobs:
             cc: clang
             cxx: clang++
             build: RelWithDebInfo
-            sanitizer: true
-            cmake_flags: -DENABLE_SANITIZER=ON
+            sanitizer: asan
+            cmake_flags: -DENABLE_ASAN=ON -DENABLE_LTO=OFF -DMARCH_NATIVE=OFF
+            check_name: Ubuntu Clang ASan RelWithDebInfo
+            packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev libdw-dev libbz2-dev
+
+          # Ubuntu - Clang with UBSan
+          - platform: Ubuntu
+            os: ubuntu-24.04
+            compiler: clang
+            cc: clang
+            cxx: clang++
+            build: Debug
+            sanitizer: ubsan
+            cmake_flags: -DENABLE_UBSAN=ON -DENABLE_LTO=OFF -DMARCH_NATIVE=OFF
+            check_name: Ubuntu Clang UBSan Debug
+            packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev libdw-dev libbz2-dev
+
+          # Ubuntu - Clang with TSan (smaller test set; TSan is incompatible
+          # with the full parallel CTest load, see sanitizer test step)
+          - platform: Ubuntu
+            os: ubuntu-24.04
+            compiler: clang
+            cc: clang
+            cxx: clang++
+            build: Debug
+            sanitizer: tsan
+            cmake_flags: -DENABLE_TSAN=ON -DENABLE_LTO=OFF -DMARCH_NATIVE=OFF
+            check_name: Ubuntu Clang TSan Debug
             packages: build-essential autoconf automake bison expect libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev libdw-dev libbz2-dev
 
           # macOS
           - platform: macOS
             os: macos-14
             build: Debug
+            check_name: macOS Debug
             cmake_flags: -DMARCH_NATIVE=OFF -DENABLE_LTO=OFF
             packages: cmake pkg-config pcre libgcrypt openssl jemalloc icu4c mysql sqlite3 googletest
             openssl_root: /usr/local/opt/openssl
@@ -85,6 +222,7 @@ jobs:
           - platform: macOS
             os: macos-14
             build: RelWithDebInfo
+            check_name: macOS RelWithDebInfo
             cmake_flags: -DMARCH_NATIVE=OFF -DENABLE_LTO=OFF
             packages: cmake pkg-config pcre libgcrypt openssl jemalloc icu4c mysql sqlite3 googletest
             openssl_root: /usr/local/opt/openssl
@@ -95,6 +233,7 @@ jobs:
             os: windows-latest
             shell: msys2 {0}
             build: Debug
+            check_name: Windows Debug
             cmake_generator: MSYS Makefiles
             cmake_flags: -DMARCH_NATIVE=OFF -DPACKAGE_CRYPTO=OFF -DPACKAGE_DB_MYSQL="" -DPACKAGE_DB_SQLITE=1
             packages: mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-zlib mingw-w64-x86_64-pcre mingw-w64-x86_64-icu mingw-w64-x86_64-sqlite3 mingw-w64-x86_64-jemalloc mingw-w64-x86_64-gtest bison make
@@ -102,6 +241,7 @@ jobs:
             os: windows-latest
             shell: msys2 {0}
             build: RelWithDebInfo
+            check_name: Windows RelWithDebInfo
             cmake_generator: MSYS Makefiles
             cmake_flags: -DMARCH_NATIVE=OFF -DPACKAGE_CRYPTO=OFF -DPACKAGE_DB_MYSQL="" -DPACKAGE_DB_SQLITE=1
             packages: mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-zlib mingw-w64-x86_64-pcre mingw-w64-x86_64-icu mingw-w64-x86_64-sqlite3 mingw-w64-x86_64-jemalloc mingw-w64-x86_64-gtest bison make
@@ -113,12 +253,12 @@ jobs:
     steps:
       - name: Setup MSYS2 (Windows)
         if: matrix.platform == 'Windows'
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884  # v2
         with:
           update: true
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
       - name: Install Dependencies (Ubuntu)
         if: matrix.platform == 'Ubuntu'
@@ -163,23 +303,134 @@ jobs:
           OPENSSL_ROOT_DIR: ${{ matrix.openssl_root }}
           ICU_ROOT: ${{ matrix.icu_root }}
 
-      - name: Run Unit Tests
+      - name: Run Unit Tests (non-sanitizer)
+        # Plain matrix jobs run the full CTest suite once. Sanitizer jobs
+        # skip this step: ASan/UBSan run the full suite once in their own
+        # step, and TSan runs only the concurrency-focused subset (never an
+        # unconditional full CTest first).
+        if: ${{ !matrix.sanitizer }}
         run: cd build && make test
 
+      - name: Run Sanitizer Targeted Tests (TSan)
+        if: matrix.sanitizer == 'tsan'
+        run: |
+          cd build
+          # TSan is incompatible with the full parallel test load; run the
+          # owner/future/gateway/object-store concurrency-focused subset.
+          # First assert the filter matches a non-empty test set so a typo
+          # cannot silently turn the gate into a no-op.
+          TARGETS='Owner|Future|Gateway|Context|Object|Socket'
+          COUNT=$(ctest -N -R "$TARGETS" | grep -c 'Test  #')
+          echo "TSan filtered tests: $COUNT (filter: $TARGETS)"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "FAIL: TSan filter matched no tests"
+            exit 1
+          fi
+          ctest --output-on-failure -R "$TARGETS"
+
+      - name: Run Sanitizer Targeted Tests (ASan/UBSan)
+        if: matrix.sanitizer == 'asan' || matrix.sanitizer == 'ubsan'
+        run: |
+          cd build
+          # Sanitizers may expose issues in the full suite; run everything
+          # exactly once here (the generic unit-test step is skipped for
+          # sanitizer jobs).
+          ctest --output-on-failure
+          # Short deterministic fuzz smoke under sanitizers: exercises the
+          # gateway frame parser with ASan/UBSan instrumentation.
+          if [ -x src/tests/gateway_fuzz_smoke ]; then
+            ./src/tests/gateway_fuzz_smoke
+          fi
+
       - name: Run LPC Modern Runtime Gate
-        if: matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer
+        if: ${{ matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer }}
         run: tools/lpc-modern-runtime-stress.sh smoke
 
-      - name: Upload LPC Modern Runtime Benchmark Reports
-        if: always() && matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer
-        uses: actions/upload-artifact@v4
+      - name: Generate capacity evidence reports
+        if: ${{ matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer }}
+        env:
+          # R2-F07: explicit commit identity. tested_sha is the checkout
+          # HEAD (github.sha, the merge commit on pull_request); source_sha
+          # is the PR head for pull_request runs.
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          tools/owner-scheduler-capacity.sh --build-dir build --report-dir build/reports/capacity
+
+      # R2-F07 artifact split: the evidence ENVELOPE goes to a fixed-name
+      # artifact that the Evidence Gate downloads exclusively; raw benchmark
+      # JSON goes to a separate artifact so a raw file can never be mistaken
+      # for an envelope.
+      - name: Upload capacity evidence envelope
+        if: ${{ always() && matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
-          name: lpc-modern-runtime-bench-smoke
+          name: capacity-evidence-envelope
+          path: build/reports/capacity/*_capacity.json
+          if-no-files-found: error
+
+      - name: Upload LPC Modern Runtime Benchmark Raw Reports
+        if: ${{ always() && matrix.platform == 'Ubuntu' && matrix.compiler == 'gcc' && matrix.build == 'Debug' && !matrix.sanitizer }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: lpc-modern-runtime-bench-raw
           path: |
             build/reports/owner_runtime_bench_smoke.json
             build/reports/lpc_vm_bench_smoke.json
             build/reports/object_store_bench_smoke.json
+            build/reports/capacity/*_raw.json
           if-no-files-found: ignore
 
-      - name: Run LPC Testsuite
-        run: cd testsuite && ../build/bin/driver etc/config.test -ftest
+      - name: Run LPC Testsuite (isolated runner, port 0)
+        run: |
+          # R2-F11: the CI consumes the isolated runner: the driver binds
+          # port 0 (OS-assigned ports, no probe/close/rebind window) and the
+          # runner asserts four distinct loopback ports + LPC assertions.
+          tools/testsuite/run-isolated.sh --driver build/bin/driver --mode audit
+
+  fuzz:
+    name: Fuzz (libFuzzer gateway_fuzz, clang)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential autoconf automake bison expect \
+            libmysqlclient-dev libpcre3-dev libpq-dev libsqlite3-dev \
+            libssl-dev libtool libz-dev telnet libgtest-dev libjemalloc-dev \
+            libdw-dev libbz2-dev clang
+
+      - name: Configure (libFuzzer + ASan/UBSan)
+        run: |
+          cmake -S . -B build-fuzz \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DENABLE_ASAN=ON \
+            -DENABLE_UBSAN=ON \
+            -DENABLE_LTO=OFF \
+            -DMARCH_NATIVE=OFF \
+            -DGATEWAY_FUZZ_LIBFUZZER=ON \
+            -DPACKAGE_DB_SQLITE=2
+
+      - name: Build fuzz target
+        run: cmake --build build-fuzz --target gateway_fuzz -j 2
+
+      - name: Run libFuzzer (bounded)
+        run: |
+          ./build-fuzz/src/tests/gateway_fuzz \
+            -runs=10000 -max_len=4096 -timeout=5 -print_final_stats=1 \
+            -artifact_prefix="${{ github.workspace }}/build-fuzz/" \
+            "${{ github.workspace }}/src/tests/fuzz/corpus/gateway/"
+
+      - name: Upload crash corpus on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: gateway-fuzz-crashes
+          path: |
+            build-fuzz/**/crash-*
+            build-fuzz/**/leak-*
+            build-fuzz/**/timeout-*
+          if-no-files-found: ignore

@@ -204,6 +204,11 @@ void vm_owner_thread_stop();
 mapping_t *vm_owner_thread_status();
 mapping_t *vm_owner_runtime_status();
 
+// C++ regression hook: reset the executor budget-yield observation fields
+// under the runtime lock so tests can assert on a known baseline. Not part
+// of the LPC/runtime API.
+void vm_owner_test_support_reset_budget_yield_observations();
+
 // Object snapshot API for safe cross-owner structure inspection.
 mapping_t *vm_owner_query_object_snapshot(object_t *target, const char *requesting_owner_id);
 

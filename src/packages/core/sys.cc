@@ -2,13 +2,17 @@
 
 #include "net/tls.h"
 
+#include <iterator>
+
 #ifdef F_SYS_NETWORK_PORTS
 void f_sys_network_ports() {
   array_t *info;
   int i = 0, p = 0;
 
+  // R2-F11: port 0 (OS-assigned) is a legal configuration; presence is
+  // determined by the port kind, not the port value.
   for (i = 0; i < 5; i++) {
-    if (external_port[i].port) {
+    if (external_port[i].kind != PORT_TYPE_UNDEFINED) {
       p++;
     }
   }
@@ -17,7 +21,7 @@ void f_sys_network_ports() {
   p = 0;
 
   for (i = 0; i < 5; i++) {
-    if (!external_port[i].port) {
+    if (external_port[i].kind == PORT_TYPE_UNDEFINED) {
       continue;
     }
     array_t *pInfo = allocate_empty_array(4);
@@ -51,12 +55,31 @@ void f_sys_network_ports() {
 #ifdef F_SYS_RELOAD_TLS
 void f_sys_reload_tls() {
   auto port_index_display = sp->u.number;
-  auto port_index = port_index_display - 1;
 
   DEFER { pop_stack(); };
-  if (port_index < 0 || port_index > sizeof(external_port)) {
+  // R2-F12 management contract, fixed order: thread first, then
+  // authorization, then index/TLS-type validation. A TLS listener context
+  // is main-thread state: worker threads must never touch it, and an
+  // unauthorized caller must never reach the validation code.
+  if (!vm_context_is_main_thread()) {
+    error("sys_reload_tls requires the main thread\n");
+  }
+  // Master-object authorization hook: valid_sys_reload_tls() on the master
+  // object must return a truthy value. Fail-closed: a missing master or a
+  // missing/erring hook rejects the call.
+  auto *authorized = safe_apply_master_ob(APPLY_VALID_SYS_RELOAD_TLS, 0);
+  if (authorized == nullptr || authorized == reinterpret_cast<svalue_t *>(-1) ||
+      (authorized->type == T_NUMBER && authorized->u.number == 0)) {
+    error("sys_reload_tls requires master authorization\n");
+  }
+  // Validate the 1-based display index *before* converting to a zero-based
+  // array index: subtracting 1 from INT64_MIN would be signed overflow, and
+  // comparing against sizeof() (bytes, not elements) allowed out-of-bounds
+  // indexes such as 6 to reach external_port[5].
+  if (port_index_display < 1 || port_index_display > static_cast<LPC_INT>(std::size(external_port))) {
     error("Invalid port index: %" LPC_INT_FMTSTR_P "\n", port_index_display);
   }
+  auto port_index = static_cast<size_t>(port_index_display - 1);
   auto *port = &external_port[port_index];
   if (port->kind == PORT_TYPE_UNDEFINED) {
     error("Invalid port index: %" LPC_INT_FMTSTR_P "\n", port_index_display);
@@ -71,7 +94,9 @@ void f_sys_reload_tls() {
     if (ctx == nullptr) {
       error("Failed to reload TLS context for port %d\n", port->port);
     }
-    // no race condition here since connection listener operates on main thread(), as all EFUNs do
+    // The listener runs on the main thread only (enforced above), so the
+    // old context is closed only after the new one is fully initialized:
+    // a failed reload never destroys the old SSL_CTX.
     auto *old_ctx = port->ssl;
     tls_server_close(old_ctx);
     port->ssl = ctx;

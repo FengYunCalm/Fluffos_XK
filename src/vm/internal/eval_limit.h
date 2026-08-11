@@ -1,11 +1,14 @@
 #ifndef EVAL_LIMIT_H
 #define EVAL_LIMIT_H
 
+#include <csignal>
 #include <cstdint>
+
+#include "base/internal/vm_thread_local.h"
 
 // Use to indicate VM execution limits are met. this variable is accessed through signal handler, so
 // it must be volatile.
-extern volatile int outoftime;
+extern FLUFFOS_VM_THREAD_LOCAL volatile std::sig_atomic_t outoftime;
 
 // TODO: we should simply remove this variable and directly read from RC.
 // Stores the current maximum eval cost, this is only changed through set_eval_limit efun and

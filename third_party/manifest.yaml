@@ -1,0 +1,205 @@
+schema: fluffos.third_party.manifest.v1
+last_reviewed: 2026-08-10
+vendored:
+- name: argparse
+  path: src/thirdparty/argparse
+  version: 2.9 (p-ranav/argparse, vendored single-header)
+  upstream: https://github.com/p-ranav/argparse
+  license: MIT
+  checksum: 446a310f4c1e5a8d06d7046b00b48278132c7fdca974b52e27ab286509b51038
+  patches: none
+  notes: Single-header library under include/argparse/.
+- name: backward-cpp
+  path: src/thirdparty/backward-cpp
+  version: 1.3.0
+  upstream: https://github.com/bombela/backward-cpp
+  license: MIT
+  checksum: 569586a3fd9bc3b90069218f2eda2e820eb556a2b4cdf086e901aea00486bfcc
+  patches: none
+  notes: Used for crash stack traces. Version from conanfile.py.
+- name: crypt
+  path: src/thirdparty/crypt
+  version: upstream lineage (OpenSSL crypt module, vendored snapshot)
+  upstream: https://github.com/openssl/openssl (crypt module lineage)
+  license: BSD-3-Clause
+  checksum: b6b403a1d5e4202b8346616d913508311b044f9ce44428d2cc8eacbb47df01d2
+  patches: none
+  notes: Legacy DES/MD5 crypt implementations (ENABLE_LEGACY_DES_CRYPT).
+- name: ghc-filesystem
+  path: src/thirdparty/filesystem
+  version: 1.5.12
+  upstream: https://github.com/gulrak/filesystem
+  license: MIT
+  checksum: d9d18c7aeae11a40f16c68a5964f93bd517097c23c863ade6b48f16114955f53
+  patches: none
+  notes: GHC_FILESYSTEM_VERSION 10512L in include/ghc/filesystem.hpp.
+- name: fmt
+  path: src/thirdparty/fmt
+  version: 10.1.0
+  upstream: https://github.com/fmtlib/fmt
+  license: MIT
+  checksum: 49027b3a00d55c4886095973180426668b0196ad41f517857b800eb95a9968e7
+  patches: none
+  notes: FMT_VERSION 100100 in include/fmt/core.h.
+- name: nlohmann-json
+  path: src/thirdparty/json
+  version: 3.11.2
+  upstream: https://github.com/nlohmann/json
+  license: MIT
+  checksum: 0ab1ca12c58eff340675695609df49b80c2e53096092ec2620ca50afaba1288e
+  patches: none
+  notes: Version banner in single_include/nlohmann/json.hpp.
+- name: libevent
+  path: src/thirdparty/libevent
+  version: 2.2.1-alpha-dev (vendored snapshot)
+  upstream: https://github.com/libevent/libevent
+  license: BSD-3-Clause
+  checksum: 1095096f8aa106a0d7e3aa1854f306ac19de152d7196dec7e3984c821bd805ba
+  patches: none
+  notes: AC_INIT(libevent,2.2.1-alpha-dev) in configure.ac.
+- name: libtelnet
+  path: src/thirdparty/libtelnet
+  version: 0.30.0
+  upstream: https://github.com/seanmiddleditch/libtelnet
+  license: Public Domain (UNLICENSE)
+  checksum: 97ab7aaf4102d9ac36ff8401de7d1a03f87091bbf74b78c60772dd67a308315c
+  patches: none
+  notes: Header banner \version 0.23 in libtelnet.h (vendored later).
+- name: libwebsockets
+  path: src/thirdparty/libwebsockets
+  version: 4.2.1
+  upstream: https://github.com/warmcat/libwebsockets
+  license: MIT
+  checksum: cbcecb4ed1b8bedf5a825049d3f90e7aa871627fdc1741bf68cd5429ad8141d0
+  patches: multiple local build tweaks (LWS_WITH_* cache vars in src/CMakeLists.txt)
+  notes: Version banner in libwebsockets.h.
+- name: scope-guard
+  path: src/thirdparty/scope_guard
+  version: 0.9.0
+  upstream: https://github.com/ricab/scope_guard
+  license: MIT
+  checksum: 941998359d2650340f255a518dff2b5ebb3c8e8042023258a1c42c78b48aba33
+  patches: none
+  notes: Header-only; banner in scope_guard.hpp.
+- name: utf8-decoder-dfa
+  path: src/thirdparty/utf8_decoder_dfa
+  version: bjoern.hoehrmann.de dfa decoder (vendored snapshot)
+  upstream: https://github.com/nelhage/utf8_decoder_dfa
+  license: MIT
+  checksum: 976a128e6d73f2ba9a8336e439a8b71b0fed2af619b7f985061064178cbb1585
+  patches: none
+  notes: Single decoder.h.
+- name: utfcpp
+  path: src/thirdparty/utfcpp
+  version: 3.2
+  upstream: https://github.com/nemtrif/utfcpp
+  license: Boost Software License 1.0
+  checksum: 1fb6608b37fea1dfb3e7a829e257eca02a06d15efeb689a7cc6d36cfbfbdee4f
+  patches: none
+  notes: project() version 3.2.
+- name: widecharwidth
+  path: src/thirdparty/widecharwidth
+  version: public-domain tables (vendored snapshot)
+  upstream: https://github.com/ridiculousfish/widecharwidth
+  license: MIT / CC0 (public domain)
+  checksum: 2bc0db7d88788db7bca418d11daa6dad2586c5c025b681fa49ec3abf8732f22b
+  patches: none
+  notes: Header-only width tables.
+external_downloads:
+- name: jemalloc
+  version: 5.3.0
+  url: https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2
+  sha256: 2db82d1e7119df3e71b7640219b6dfe84789bc0537983c3b7ac4f7189aecfeaa
+  license: BSD-2-Clause
+  used_by: .github/workflows/release.yml (Linux static build)
+  verification: sha256 must be checked before extraction; failure aborts the build
+toolchain:
+- name: alpine-base-image
+  version: 3.18
+  digest: sha256:fd032399cd767f310a1d1274e81cab9f0fd8a49b3589eba2c3420228cd45b6a7
+  license: MIT (Docker base image licensing per component)
+  used_by: .github/workflows/release.yml (Linux static build), Dockerfile
+  notes: Docker official alpine:3.18 digest (amd64). Verify before each release.
+- name: trivy
+  version: 0.50.1
+  digest: sha256:586cf142d41727a184b2982ade6a4d94ada9e243d64fcd52e6dcfba9cce56df6
+  upstream: https://github.com/aquasecurity/trivy
+  used_by: .github/workflows/release.yml (image vulnerability scan)
+  notes: Pinned by digest; the vulnerability DB version is recorded in the scan report
+    at scan time.
+- name: github-actions
+  note: Every action is pinned to a full commit SHA in workflows; the readable version
+    tag is kept as a trailing comment. The checker (tools/docs/check-actions-pins.py,
+    T08/R2-F09 gate) fails when a workflow uses a mutable tag, an undeclared action,
+    or a manifest entry that is unused.
+  entries:
+  - name: actions/checkout
+    version: v4
+    sha: 11d5960a326750d5838078e36cf38b85af677262
+    upstream: https://github.com/actions/checkout
+    review_date: 2026-08-10
+  - name: actions/checkout
+    version: v7
+    sha: 3d3c42e5aac5ba805825da76410c181273ba90b1
+    upstream: https://github.com/actions/checkout
+    review_date: 2026-08-10
+  - name: actions/upload-artifact
+    version: v4
+    sha: ea165f8d65b6e75b540449e92b4886f43607fa02
+    upstream: https://github.com/actions/upload-artifact
+    review_date: 2026-08-10
+  - name: actions/download-artifact
+    version: v4
+    sha: d3f86a106a0bac45b974a628896c90dbdf5c8093
+    upstream: https://github.com/actions/download-artifact
+    review_date: 2026-08-10
+  - name: actions/github-script
+    version: v7
+    sha: f28e40c7f34bde8b3046d885e986cb6290c5673b
+    upstream: https://github.com/actions/github-script
+    review_date: 2026-08-10
+  - name: actions/configure-pages
+    version: v5
+    sha: 983d7736d9b0ae728b81ab479565c72886d7745b
+    upstream: https://github.com/actions/configure-pages
+    review_date: 2026-08-10
+  - name: actions/deploy-pages
+    version: v4
+    sha: d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
+    upstream: https://github.com/actions/deploy-pages
+    review_date: 2026-08-10
+  - name: actions/upload-pages-artifact
+    version: v3
+    sha: 56afc609e74202658d3ffba0e8f6dda462b719fa
+    upstream: https://github.com/actions/upload-pages-artifact
+    review_date: 2026-08-10
+  - name: actions/setup-node
+    version: v4
+    sha: 49933ea5288caeca8642d1e84afbd3f7d6820020
+    upstream: https://github.com/actions/setup-node
+    review_date: 2026-08-10
+  - name: docker/setup-buildx-action
+    version: v3
+    sha: 8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+    upstream: https://github.com/docker/setup-buildx-action
+    review_date: 2026-08-10
+  - name: docker/metadata-action
+    version: v5
+    sha: c299e40c65443455700f0fdfc63efafe5b349051
+    upstream: https://github.com/docker/metadata-action
+    review_date: 2026-08-10
+  - name: docker/build-push-action
+    version: v5
+    sha: ca052bb54ab0790a636c9b5f226502c73d547a25
+    upstream: https://github.com/docker/build-push-action
+    review_date: 2026-08-10
+  - name: github/codeql-action
+    version: v4
+    sha: 5595ccaf912efad79be6eef63a5619ff05969be3
+    upstream: https://github.com/github/codeql-action
+    review_date: 2026-08-10
+  - name: msys2/setup-msys2
+    version: v2
+    sha: 66cd2cce69caa17b53920067426061ca1de3a884
+    upstream: https://github.com/msys2/setup-msys2
+    review_date: 2026-08-10

@@ -1825,16 +1825,28 @@ void gateway_readcb(bufferevent *bev, void *ctx) {
 void gateway_schedule_write_flush(int fd) {
   auto it = g_gateway_masters.find(fd);
   if (it == g_gateway_masters.end() || !it->second || !g_event_base ||
-      it->second->write_flush_scheduled ||
       !gateway_master_output_pending(fd)) {
     return;
   }
   auto *master = it->second.get();
+  // R2-F10: a request arriving while a flush continuation is already
+  // scheduled is a COALESCED request - the earlier scheduled flush covers
+  // it, so no new schedule is created. This is the only place the coalesced
+  // counter may increment (never inside the callback).
+  if (master->write_flush_scheduled) {
+    g_gateway_runtime_counters.master_output_continuation_coalesced_requests_total
+        .fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
   auto *output = master->bev ? bufferevent_get_output(master->bev) : nullptr;
   if (!output || evbuffer_get_length(output) >= gateway_write_buffer_limit()) {
     return;
   }
   master->write_flush_scheduled = true;
+  // Attempt counter: increments BEFORE add_walltime_event; the scheduled
+  // counter below only counts successful schedules.
+  g_gateway_runtime_counters.master_output_continuation_schedule_attempts_total
+      .fetch_add(1, std::memory_order_relaxed);
   master->write_flush_event = add_walltime_event(
       kGatewayWriteFlushContinuationDelay, [fd] {
         auto current = g_gateway_masters.find(fd);
@@ -1844,6 +1856,11 @@ void gateway_schedule_write_flush(int fd) {
         auto *scheduled_master = current->second.get();
         scheduled_master->write_flush_event = nullptr;
         scheduled_master->write_flush_scheduled = false;
+        // R2-F10: the callback itself is one executed continuation; it is
+        // not a coalesced request.
+        g_gateway_runtime_counters
+            .master_output_continuation_callbacks_executed_total
+            .fetch_add(1, std::memory_order_relaxed);
         const auto flushed =
             gateway_flush_master_output_fifos(fd, kGatewayWriteFlushBudget);
         auto *scheduled_output = scheduled_master->bev
@@ -1856,7 +1873,10 @@ void gateway_schedule_write_flush(int fd) {
         }
       },
       BackendEventPriority::kGateway);
-  if (!master->write_flush_event) {
+  if (master->write_flush_event) {
+    g_gateway_runtime_counters.master_output_continuation_scheduled_total
+        .fetch_add(1, std::memory_order_relaxed);
+  } else {
     master->write_flush_scheduled = false;
   }
 }
@@ -1923,6 +1943,12 @@ void gateway_listener_error_cb(evconnlistener * /*listener*/, void * /*ctx*/) {
   debug_message("Gateway listener error.\n");
 }
 }  // namespace
+
+// Test hook: exposes the (anonymous-namespace) output continuation
+// scheduler for deterministic schedule/coalesce/callback accounting tests.
+void gateway_schedule_write_flush_for_test(int fd) {
+  gateway_schedule_write_flush(fd);
+}
 
 size_t gateway_write_buffer_limit() {
   constexpr size_t kMinBytes = 64 * 1024;
@@ -2024,6 +2050,17 @@ void gateway_invoke_master_write_callback_for_test(GatewayMaster *master) {
 }
 
 void gateway_remove_master_for_test(int fd) { gateway_remove_master(fd); }
+
+GatewayMaster *gateway_master_for_test(int fd) {
+  auto it = g_gateway_masters.find(fd);
+  return (it != g_gateway_masters.end()) ? it->second.get() : nullptr;
+}
+
+size_t gateway_master_count_for_test() { return g_gateway_masters.size(); }
+
+int64_t gateway_read_dispatch_pending_for_test() {
+  return g_gateway_read_dispatch_pending_masters.load(std::memory_order_relaxed);
+}
 
 void gateway_reset_ingress_sequence_for_test() {
   g_gateway_ingress_sequence = {};
@@ -2798,6 +2835,38 @@ mapping_t *gateway_status_internal() {
   add_mapping_pair(
       map, "gateway_main_drain_deferred_task_budget_yields",
       static_cast<LPC_INT>(g_gateway_runtime_counters.main_drain_deferred_task_budget_yields.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_output_scan_runs_total",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_scan_runs_total.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_output_scan_entries_total",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_scan_entries_total.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_output_ready_selected_total",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_ready_selected_total.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_output_ready_remaining_total",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_ready_remaining_total.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_output_continuation_schedule_attempts_total",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_continuation_schedule_attempts_total.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_output_continuation_coalesced_requests_total",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_continuation_coalesced_requests_total.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_output_sessions_flushed_total",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_sessions_flushed_total.load(
+          std::memory_order_relaxed)));
+  add_mapping_pair(
+      map, "gateway_master_output_continuation_needed_total",
+      static_cast<LPC_INT>(g_gateway_runtime_counters.master_output_continuation_needed_total.load(
           std::memory_order_relaxed)));
   add_mapping_pair(
       map, "gateway_main_drain_deferred_remaining_samples",

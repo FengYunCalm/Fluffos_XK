@@ -1,6 +1,9 @@
 #ifndef SRC_VM_OBJECT_HANDLE_H_
 #define SRC_VM_OBJECT_HANDLE_H_
 
+#include "vm/context.h"
+
+#include <cassert>
 #include <cstdint>
 #include <string>
 
@@ -34,6 +37,11 @@ enum class VMObjectHandleResolveStatus {
   kOwnerEpochMismatch,
   kLiveOwnerMismatch,
   kLiveOwnerEpochMismatch,
+  // R2-F06: object-target admission may only run on the main VM thread.
+  // Worker-nested submissions (allowlisted LPC on an owner worker calling
+  // an object-target efun) are stably rejected with this status; the worker
+  // never mutates plain object refcounts.
+  kMainThreadAdmissionRequired,
 };
 
 struct VMObjectHandleResolveResult {
@@ -74,8 +82,87 @@ VMObjectHandle vm_object_handle_with_intent(object_t *object, const char *permis
 mapping_t *vm_object_handle_status(object_t *object);
 mapping_t *vm_object_handle_status_with_intent(object_t *object, const char *permission_intent);
 VMObjectHandleResolveResult vm_object_handle_resolve_status(const VMObjectHandle &handle);
+// Resolve only from the owner-local lifecycle record and pointer indexes.
+// This path never consults the compatibility/global object indexes and never
+// reads mutable object_t lifecycle fields, so owner workers can reject a
+// missing local record conservatively.
+VMObjectHandleResolveResult vm_object_handle_resolve_owner_local_status(
+    const VMObjectHandle &handle);
 const char *vm_object_handle_resolve_status_name(VMObjectHandleResolveStatus status);
 object_t *vm_object_handle_resolve(const VMObjectHandle &handle);
+// Result of a guarded acquire: the object pointer (when the admission was
+// performed on the main thread and the handle resolved current) plus the
+// exact admission status, so callers never guess whether a null pointer
+// means "stale handle" or "wrong thread".
+struct VMObjectHandleAcquireResult {
+  object_t *object{nullptr};
+  VMObjectHandleResolveStatus status{VMObjectHandleResolveStatus::kInvalidHandle};
+};
+// Resolve a handle and, on kCurrent, acquire an owning reference to the
+// target object. Main-thread admission contract (R2-F06): this refuses to
+// run off the main VM thread in ALL builds (not just Debug asserts) and
+// returns kMainThreadAdmissionRequired without touching the refcount; the
+// caller is responsible for releasing an acquired reference via
+// VMObjectRefGuard (or free_object) on the main thread.
+VMObjectHandleAcquireResult vm_object_handle_acquire_status(const VMObjectHandle &handle);
+// Thin wrapper returning only the object pointer (nullptr on any rejection).
+object_t *vm_object_handle_acquire(const VMObjectHandle &handle);
+// Low-frequency instrumentation for owner-target/object-handle reference
+// operations. It records only calls made off the main VM thread and is kept
+// out of the global add_ref/free_object hot paths.
+void vm_object_store_note_object_ref_mutation();
+// C++ regression hooks: worker-thread refcount mutation counter.
+uint64_t vm_object_store_test_support_worker_ref_mutation_count();
+void vm_object_store_test_support_reset_worker_ref_mutation_count();
+// RAII wrapper that releases the acquired reference on destruction.
+//
+// Thread contract: this guard calls free_object() directly, so it may only
+// be used on the main VM thread (the worker threads must hand references to
+// the main thread via deferred release). Debug builds assert that contract.
+class VMObjectRefGuard {
+ public:
+  VMObjectRefGuard() = default;
+  explicit VMObjectRefGuard(object_t *obj) : object_(obj) {}
+  ~VMObjectRefGuard() { release_ref(); }
+  VMObjectRefGuard(const VMObjectRefGuard &) = delete;
+  VMObjectRefGuard &operator=(const VMObjectRefGuard &) = delete;
+  VMObjectRefGuard(VMObjectRefGuard &&other) noexcept : object_(other.object_) {
+    other.object_ = nullptr;
+  }
+  VMObjectRefGuard &operator=(VMObjectRefGuard &&other) noexcept {
+    if (this != &other) {
+      release_ref();
+      object_ = other.object_;
+      other.object_ = nullptr;
+    }
+    return *this;
+  }
+  object_t *get() const { return object_; }
+  // Release the held reference. Never returns a pointer: after this call
+  // the object may be freed, so returning the old pointer (the previous
+  // mixed release() semantics) invited use-after-free.
+  void release_ref() {
+    auto *obj = object_;
+    object_ = nullptr;
+    if (obj) {
+#ifndef NDEBUG
+      assert(vm_context_is_main_thread());
+#endif
+      vm_object_store_note_object_ref_mutation();
+      free_object(&obj, "VMObjectRefGuard");
+    }
+  }
+  // Detach the pointer WITHOUT releasing the reference; ownership transfers
+  // to the caller (who must free_object it on the main thread).
+  object_t *detach() {
+    auto *obj = object_;
+    object_ = nullptr;
+    return obj;
+  }
+
+ private:
+  object_t *object_{nullptr};
+};
 bool vm_object_handle_is_current(const VMObjectHandle &handle);
 void vm_object_store_register(object_t *object);
 void vm_object_store_update_owner(object_t *object);

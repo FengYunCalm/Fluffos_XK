@@ -10,6 +10,7 @@
 #define STATS_H
 
 #include <inttypes.h>
+#include <atomic>
 
 extern uint64_t add_message_calls;
 
@@ -40,7 +41,9 @@ extern uint64_t num_arrays, total_array_size;
 extern uint64_t num_classes, total_class_size;
 
 // Mapping stats
-extern uint64_t num_mappings, total_mapping_size, total_mapping_nodes;
+extern std::atomic<uint64_t> num_mappings;
+extern std::atomic<uint64_t> total_mapping_size;
+extern std::atomic<uint64_t> total_mapping_nodes;
 
 // Apply cache stats
 extern uint64_t apply_cache_lookups;
@@ -48,10 +51,10 @@ extern uint64_t apply_cache_hits;
 extern uint64_t apply_cache_items;
 
 // string allocation stats
-extern uint64_t num_distinct_strings;
-extern uint64_t bytes_distinct_strings;
-extern uint64_t allocd_strings;
-extern uint64_t allocd_bytes;
-extern uint64_t overhead_bytes;
+extern std::atomic<uint64_t> num_distinct_strings;
+extern std::atomic<uint64_t> bytes_distinct_strings;
+extern std::atomic<uint64_t> allocd_strings;
+extern std::atomic<uint64_t> allocd_bytes;
+extern std::atomic<uint64_t> overhead_bytes;
 
 #endif

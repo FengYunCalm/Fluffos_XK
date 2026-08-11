@@ -1,12 +1,22 @@
 void do_tests_real() {
-  // non tls port
+  // boundary: below 1 must be rejected before any index arithmetic
+  ASSERT_NE(0, catch(sys_reload_tls(-MAX_INT - 1))); /* INT_MIN */
+  ASSERT_NE(0, catch(sys_reload_tls(-1)));
   ASSERT_NE(0, catch(sys_reload_tls(0)));
+
+  // non tls port
+  ASSERT_NE(0, catch(sys_reload_tls(1)));
 
   // no support for websocket
   ASSERT_NE(0, catch(sys_reload_tls(2)));
 
   // valid tls
   ASSERT_EQ(0, sys_reload_tls(4));
+
+  // boundary: beyond element count must be rejected (index 5 == external_port[5], OOB)
+  ASSERT_NE(0, catch(sys_reload_tls(5)));
+  ASSERT_NE(0, catch(sys_reload_tls(6)));
+  ASSERT_NE(0, catch(sys_reload_tls(MAX_INT)));
 }
 void after_boot() {
   mixed err;
@@ -26,4 +36,3 @@ void do_tests() {
 
   call_out("after_boot", 0);
 }
-

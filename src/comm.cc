@@ -30,6 +30,7 @@
 #include <netinet/in.h>   // for ntohl, IPPROTO_TCP
 #include <netinet/tcp.h>  // for TCP_NODELAY
 #include <sys/socket.h>   // for SOCK_STREAM
+#include <arpa/inet.h>    // for inet_ntop
 #else
 #include <ws2tcpip.h>
 #endif
@@ -562,6 +563,47 @@ void on_user_logon(interactive_t *user) {
 /*
  * Initialize new user connection socket.
  */
+
+// R2-F11: actual bound port of a socket (getsockname result), family-agnostic.
+static int socket_actual_port(const sockaddr *sa) {
+  if (!sa) {
+    return 0;
+  }
+  if (sa->sa_family == AF_INET) {
+    return ntohs(reinterpret_cast<const sockaddr_in *>(sa)->sin_port);
+  }
+#ifdef IPV6
+  if (sa->sa_family == AF_INET6) {
+    return ntohs(reinterpret_cast<const sockaddr_in6 *>(sa)->sin6_port);
+  }
+#endif
+  return 0;
+}
+
+// IP address only of a sockaddr (no port): used by listener logs so the
+// reported port is the post-bind actual port, never a stale 0.
+static const char *sockaddr_ip_only(const sockaddr *sa, socklen_t /*len*/) {
+  static thread_local char ipbuf[INET6_ADDRSTRLEN] = {0};
+  if (!sa) {
+    return "?";
+  }
+  if (sa->sa_family == AF_INET) {
+    const auto *sin = reinterpret_cast<const sockaddr_in *>(sa);
+    if (inet_ntop(AF_INET, &sin->sin_addr, ipbuf, sizeof(ipbuf))) {
+      return ipbuf;
+    }
+  }
+#ifdef IPV6
+  if (sa->sa_family == AF_INET6) {
+    const auto *sin6 = reinterpret_cast<const sockaddr_in6 *>(sa);
+    if (inet_ntop(AF_INET6, &sin6->sin6_addr, ipbuf, sizeof(ipbuf))) {
+      return ipbuf;
+    }
+  }
+#endif
+  return "?";
+}
+
 bool init_user_conn() {
   for (auto &port : external_port) {
 #ifdef F_NETWORK_STATS
@@ -570,7 +612,9 @@ bool init_user_conn() {
     port.out_packets = 0;
     port.out_volume = 0;
 #endif
-    if (!port.port) continue;
+    // R2-F11: port 0 is a legal configuration (OS-assigned port); only
+    // UNDEFINED ports are skipped.
+    if (port.kind == PORT_TYPE_UNDEFINED) continue;
 #ifdef IPV6
     auto fd = socket(AF_INET6, SOCK_STREAM, 0);
 #else
@@ -691,6 +735,24 @@ bool init_user_conn() {
         return false;
       }
 
+      // R2-F11: port 0 support. When the config requests port 0, the OS
+      // assigns a free port at bind time; getsockname reports the actual
+      // one back so sys_network_ports(), logs and the isolated runner all
+      // observe the real port (no probe/close/rebind window exists).
+      if (port.port == 0) {
+        sockaddr_storage actual_storage = {};
+        socklen_t actual_len = sizeof(actual_storage);
+        auto *actual_sa = reinterpret_cast<sockaddr *>(&actual_storage);
+        if (getsockname(fd, actual_sa, &actual_len) == 0) {
+          port.port = socket_actual_port(actual_sa);
+          debug_message("init_user_conn: port 0 assigned actual port %d for %s\n",
+                        port.port, port_kind_name(port.kind));
+        } else {
+          debug_message("init_user_conn: getsockname failed after port-0 bind: %s.\n",
+                        evutil_socket_error_to_string(evutil_socket_geterror(fd)));
+        }
+      }
+
       // Websocket TLS is handled in init_websocket_context
       if (!port.tls_cert.empty() && port.kind != PORT_TYPE_WEBSOCKET) {
         SSL_CTX *ctx = tls_server_init(port.tls_cert, port.tls_key);
@@ -702,9 +764,9 @@ bool init_user_conn() {
         port.ssl = ctx;
       }
 
-      debug_message("Accepting %s%s connections on %s.\n", port_kind_name(port.kind),
+      debug_message("Accepting %s%s connections on %s:%d.\n", port_kind_name(port.kind),
                     !port.tls_cert.empty() ? "(TLS)" : "",
-                    sockaddr_to_string(res->ai_addr, res->ai_addrlen));
+                    sockaddr_ip_only(res->ai_addr, res->ai_addrlen), port.port);
       evutil_freeaddrinfo(res);
     }
 
@@ -730,7 +792,7 @@ bool init_user_conn() {
  */
 void shutdown_external_ports() {
   for (auto &port : external_port) {
-    if (!port.port) {
+    if (port.kind == PORT_TYPE_UNDEFINED) {
       continue;
     }
     if (port.ssl) tls_server_close(port.ssl);

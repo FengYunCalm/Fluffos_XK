@@ -99,6 +99,10 @@
   X(owner_executor_max_parallel_owners, 0)                        \
   X(owner_executor_max_owner_parallel, 0)                         \
   X(owner_executor_same_owner_claim_conflicts, 0)                 \
+  X(owner_executor_owner_exceptions, 0)                           \
+  X(owner_executor_task_exceptions, 0)                            \
+  X(owner_executor_task_bad_alloc, 0)                             \
+  X(owner_executor_task_unknown_exceptions, 0)                    \
   X(owner_main_queued, 0)                                         \
   X(owner_main_dispatched, 0)                                     \
   X(owner_main_stale, 0)                                          \

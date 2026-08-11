@@ -90,6 +90,21 @@ class OwnerProgramPin {
   program_t *program_{nullptr};
 };
 
+class OwnerControlledLpcScope {
+ public:
+  OwnerControlledLpcScope() : previous_(vm_context().owner.controlled_lpc_active) {
+    vm_context().owner.controlled_lpc_active = true;
+  }
+
+  ~OwnerControlledLpcScope() { vm_context().owner.controlled_lpc_active = previous_; }
+
+  OwnerControlledLpcScope(const OwnerControlledLpcScope &) = delete;
+  OwnerControlledLpcScope &operator=(const OwnerControlledLpcScope &) = delete;
+
+ private:
+  bool previous_;
+};
+
 void add_owner_callback_diagnostic_contract_fields(mapping_t *map) {
   add_mapping_pair(map, "owner_callback_payload_strict_diagnostics_ready", 1);
   add_mapping_string(map, "owner_callback_payload_policy_schema", kOwnerCallbackPayloadPolicySchemaV1);
@@ -290,6 +305,50 @@ bool &owner_thread_stopping = owner_thread_stopping_flag();
 bool &owner_main_draining = owner_main_draining_flag();
 std::vector<std::thread> &owner_threads = owner_threads_instance();
 
+void owner_object_target_add_ref(object_t *object, const char *reason) {
+  if (!object) {
+    return;
+  }
+  vm_object_store_note_object_ref_mutation();
+  add_ref(object, reason);
+}
+
+void owner_object_target_free_ref(object_t **object, const char *reason) {
+  if (!object || !*object) {
+    return;
+  }
+  vm_object_store_note_object_ref_mutation();
+  free_object(object, reason);
+}
+
+// Worker-thread reference guard: hands the reference back to the main
+// thread via the deferred release queue instead of free_object() directly.
+// Worker threads must never mutate plain object_t refcounts themselves.
+class OwnerWorkerRefGuard {
+ public:
+  explicit OwnerWorkerRefGuard(object_t *obj) : object_(obj) {}
+  ~OwnerWorkerRefGuard() { release(); }
+  OwnerWorkerRefGuard(const OwnerWorkerRefGuard &) = delete;
+  OwnerWorkerRefGuard &operator=(const OwnerWorkerRefGuard &) = delete;
+  object_t *get() const { return object_; }
+  object_t *release() {
+    auto *obj = object_;
+    object_ = nullptr;
+    if (obj) {
+      if (vm_context_is_main_thread()) {
+        owner_object_target_free_ref(&obj, "owner worker ref guard");
+      } else {
+        std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+        owner_deferred_target_releases.push_back(obj);
+      }
+    }
+    return obj;
+  }
+
+ private:
+  object_t *object_{nullptr};
+};
+
 uint64_t append_owner_task_trace(uint64_t task_id, uint64_t sequence, const std::string &owner_id,
                                  uint64_t owner_epoch, const std::string &task_type,
                                  const std::string &task_key, const char *state);
@@ -479,6 +538,7 @@ struct OwnerStatusSnapshot {
   std::string last_budget_yield_owner;
   int64_t last_budget_yield_backlog{0};
   int64_t last_budget_yield_safe_backlog{0};
+  uint64_t executor_budget_yields{0};
   int64_t pending_futures{0};
   OwnerQueueFairnessSnapshot fairness;
 };
@@ -503,6 +563,9 @@ OwnerStatusSnapshot owner_status_snapshot_locked() {
   status.last_budget_yield_owner = owner_executor_last_budget_yield_owner;
   status.last_budget_yield_backlog = owner_executor_last_budget_yield_backlog;
   status.last_budget_yield_safe_backlog = owner_executor_last_budget_yield_safe_backlog;
+  // Read the yield counter under the same lock so callers that need the
+  // counter and the recorded owner/backlog observe one consistent snapshot.
+  status.executor_budget_yields = owner_executor_budget_yields.load(std::memory_order_relaxed);
   status.fairness = owner_scheduler_state.fairness_snapshot(
       owner_task_executor_runnable, owner_task_executor_safe,
       owner_task_requires_main_drain);
@@ -679,6 +742,28 @@ void add_owner_runtime_v2_status_fields(mapping_t *map,
                    static_cast<LPC_INT>(metrics.owner_thread_context_leak_detected));
   add_mapping_pair(map, "owner_executor_future_pending_backlog",
                    status.pending_futures);
+  add_mapping_pair(map, "owner_future_terminal_records",
+                   static_cast<LPC_INT>(owner_future_store.terminal_record_count()));
+  add_mapping_pair(map, "owner_future_oldest_terminal_age_ns",
+                   static_cast<LPC_INT>(owner_future_store.oldest_terminal_age_ns()));
+  add_mapping_pair(map, "owner_future_reaped_terminal",
+                   static_cast<LPC_INT>(owner_future_store.reaped_terminal_count()));
+  add_mapping_pair(map, "owner_future_capacity_rejects",
+                   static_cast<LPC_INT>(owner_future_store.capacity_reject_count()));
+  add_mapping_pair(map, "owner_future_byte_rejects",
+                   static_cast<LPC_INT>(owner_future_store.byte_reject_count()));
+  add_mapping_pair(map, "owner_future_terminal_payload_bytes",
+                   static_cast<LPC_INT>(owner_future_store.terminal_payload_bytes()));
+  add_mapping_pair(map, "owner_future_peak_terminal_payload_bytes",
+                   static_cast<LPC_INT>(owner_future_store.peak_terminal_payload_bytes()));
+  add_mapping_pair(map, "owner_future_max_terminal_records",
+                   static_cast<LPC_INT>(OwnerFutureStore::kMaxTerminalRecords));
+  add_mapping_pair(map, "owner_future_max_pending_records",
+                   static_cast<LPC_INT>(OwnerFutureStore::kMaxPendingRecords));
+  add_mapping_pair(map, "owner_future_max_single_payload_bytes",
+                   static_cast<LPC_INT>(OwnerFutureStore::kMaxSinglePayloadBytes));
+  add_mapping_pair(map, "owner_future_max_total_payload_bytes",
+                   static_cast<LPC_INT>(OwnerFutureStore::kMaxTotalPayloadBytes));
   add_mapping_pair(map, "owner_executor_socket_release_trace_ready", 1);
   add_mapping_pair(map, "registered_owner_task_domains_ready", 1);
   add_mapping_pair(map, "registered_owner_task_domain_count",
@@ -780,6 +865,32 @@ bool owner_handle_status_destructed(VMObjectHandleResolveStatus status) {
 bool owner_handle_status_epoch_mismatch(VMObjectHandleResolveStatus status) {
   return status == VMObjectHandleResolveStatus::kOwnerEpochMismatch ||
          status == VMObjectHandleResolveStatus::kLiveOwnerEpochMismatch;
+}
+
+VMObjectHandleResolveResult owner_worker_target_status(
+    const OwnerMailboxTask &task) {
+  VMObjectHandleResolveResult result;
+  if (!task.has_target_handle || !task.target) {
+    return result;
+  }
+  // Compare only immutable admission data here. A caller that supplies an
+  // owner route different from the captured target capability must remain a
+  // stale-owner rejection even when that capability itself is current.
+  if (task.owner_id != task.target_handle.owner_id) {
+    result.status = VMObjectHandleResolveStatus::kOwnerMismatch;
+    return result;
+  }
+  if (task.owner_epoch != task.target_handle.owner_epoch) {
+    result.status = VMObjectHandleResolveStatus::kOwnerEpochMismatch;
+    return result;
+  }
+  result = vm_object_handle_resolve_owner_local_status(task.target_handle);
+  if (result.status == VMObjectHandleResolveStatus::kCurrent &&
+      result.object != task.target) {
+    result.object = nullptr;
+    result.status = VMObjectHandleResolveStatus::kObjectIdMismatch;
+  }
+  return result;
 }
 
 void apply_owner_task_manifest_v2(OwnerMailboxTask &task) {
@@ -1987,7 +2098,7 @@ void release_owner_task_target(OwnerMailboxTask *task) {
   if (task && task->target) {
     auto *target = task->target;
     if (vm_context_is_main_thread()) {
-      free_object(&target, "owner mailbox task");
+      owner_object_target_free_ref(&target, "owner mailbox task");
     } else {
       std::lock_guard<std::mutex> lock(owner_runtime_mutex);
       owner_deferred_target_releases.push_back(target);
@@ -2000,7 +2111,7 @@ void release_owner_main_task_target(OwnerMainTask *task) {
   if (task && task->target) {
     auto *target = task->target;
     if (vm_context_is_main_thread()) {
-      free_object(&target, "owner main task");
+      owner_object_target_free_ref(&target, "owner main task");
     } else {
       std::lock_guard<std::mutex> lock(owner_runtime_mutex);
       owner_deferred_target_releases.push_back(target);
@@ -2020,7 +2131,8 @@ void release_deferred_owner_targets_on_main() {
   }
   for (auto *target : releases) {
     if (target) {
-      free_object(&target, "owner mailbox task deferred release");
+      owner_object_target_free_ref(&target,
+                                   "owner mailbox task deferred release");
     }
   }
 }
@@ -2614,7 +2726,10 @@ void dispatch_owner_main_message(const OwnerMainTask &task) {
     return;
   }
 
-  auto *target = target_status.object;
+  // Acquire an owning reference: the object-store lock is released after
+  // resolve, so the raw pointer must not be used without a reference.
+  VMObjectRefGuard target_guard(vm_object_handle_acquire(task.target_handle));
+  auto *target = target_guard.get();
   if (!target || (target->flags & O_DESTRUCTED) ||
       !vm_owner_epoch_matches(target, task.owner_id.c_str(), task.owner_epoch)) {
     complete_owner_main_message_task_threadsafe(task, "failed", "", "stale target");
@@ -2653,25 +2768,28 @@ void dispatch_owner_message_in_current_context(const OwnerMailboxTask &task) {
     complete_owner_message_task_locked(task);
     return;
   }
-  auto target_status = vm_object_handle_resolve_status(task.target_handle);
+  // Worker validity comes only from the object-store lifecycle record. The
+  // live object owner string and flags are main-thread mutable and must not be
+  // read directly here while an owner migration or destruct is publishing.
+  auto target_status = owner_worker_target_status(task);
   if (target_status.status != VMObjectHandleResolveStatus::kCurrent) {
     auto error = stale_target_error(target_status.status);
     complete_owner_message_task_threadsafe(task, "failed", "", error.c_str());
     return;
   }
-
+  // The target reference was acquired on the main thread during admission
+  // (one object-store lock domain, no TOCTOU) and handed to the worker via
+  // task.target. The worker only consumes the already-held reference and
+  // never mutates plain object_t refcounts; release happens through
+  // release_owner_task_target() (deferred to the main thread).
   auto *target = target_status.object;
-  if (!target || (target->flags & O_DESTRUCTED) ||
-      !vm_owner_epoch_matches(target, task.owner_id.c_str(), task.owner_epoch)) {
-    complete_owner_message_task_threadsafe(task, "failed", "", "stale target");
-    return;
-  }
 
   VMOwnerScope owner_scope(vm_context(), task.owner_id.c_str(), task.owner_epoch);
   VMExecutionState execution;
   execution.current_object = target;
   execution.current_prog = target->prog;
   VMExecutionScope execution_scope(vm_context(), execution);
+  OwnerControlledLpcScope controlled_lpc_scope;
   set_eval(max_eval_cost);
   int num_args = 0;
   if (task.payload) {
@@ -3043,23 +3161,24 @@ void run_owner_lpc_canary(const OwnerMailboxTask &task) {
   auto owner_bound = vm_context().owner.current_owner_id == task.owner_id &&
                      vm_context().owner.current_owner_epoch == task.owner_epoch;
   auto method_allowed = task.task_key == "owner_lpc_canary";
+  auto target_status = owner_worker_target_status(task);
+  auto *target = target_status.object;
 
-  if (!off_main_context || !object_store_isolated || !owner_bound || !task.target ||
-      !method_allowed || (task.target->flags & O_DESTRUCTED) ||
-      !vm_owner_epoch_matches(task.target, task.owner_id.c_str(), task.owner_epoch)) {
+  if (!off_main_context || !object_store_isolated || !owner_bound ||
+      !method_allowed || target_status.status != VMObjectHandleResolveStatus::kCurrent) {
     append_owner_task_trace_threadsafe(task, "thread_lpc_canary_rejected");
     owner_thread_lpc_canary_rejected.fetch_add(1, std::memory_order_relaxed);
     return;
   }
 
   VMExecutionState execution;
-  execution.current_object = task.target;
-  execution.current_prog = task.target->prog;
+  execution.current_object = target;
+  execution.current_prog = target->prog;
   VMExecutionScope execution_scope(vm_context(), execution);
   auto saved_canary = vm_context().owner.lpc_canary_active;
   vm_context().owner.lpc_canary_active = true;
   owner_thread_lpc_canary_executed.fetch_add(1, std::memory_order_relaxed);
-  auto *result = safe_apply(task.task_key.c_str(), task.target, 0, ORIGIN_DRIVER);
+  auto *result = safe_apply(task.task_key.c_str(), target, 0, ORIGIN_DRIVER);
   vm_context().owner.lpc_canary_active = saved_canary;
   auto canary_succeeded = result && result->type == T_NUMBER && result->u.number == 1;
   clear_owner_apply_return();
@@ -3079,10 +3198,12 @@ void run_owner_lpc_task(const OwnerMailboxTask &task) {
                                vm_context().object_store.objects == nullptr;
   auto owner_bound = vm_context().owner.current_owner_id == task.owner_id &&
                      vm_context().owner.current_owner_epoch == task.owner_epoch;
+  auto target_status = owner_worker_target_status(task);
+  auto *target = target_status.object;
 
-  if (!off_main_context || !object_store_isolated || !owner_bound || !task.target ||
-      !owner_lpc_task_allowed(task) || (task.target->flags & O_DESTRUCTED) ||
-      !vm_owner_epoch_matches(task.target, task.owner_id.c_str(), task.owner_epoch)) {
+  if (!off_main_context || !object_store_isolated || !owner_bound ||
+      !owner_lpc_task_allowed(task) ||
+      target_status.status != VMObjectHandleResolveStatus::kCurrent) {
     append_owner_task_trace_threadsafe(task, "thread_lpc_task_rejected");
     owner_thread_lpc_task_rejected.fetch_add(1, std::memory_order_relaxed);
     complete_owner_future_for_task_threadsafe(task.task_id, "failed", "", "owner lpc task rejected");
@@ -3090,13 +3211,13 @@ void run_owner_lpc_task(const OwnerMailboxTask &task) {
   }
 
   VMExecutionState execution;
-  execution.current_object = task.target;
-  execution.current_prog = task.target->prog;
+  execution.current_object = target;
+  execution.current_prog = target->prog;
   VMExecutionScope execution_scope(vm_context(), execution);
   auto saved_controlled_lpc = vm_context().owner.controlled_lpc_active;
   vm_context().owner.controlled_lpc_active = true;
   owner_thread_lpc_task_executed.fetch_add(1, std::memory_order_relaxed);
-  auto *result = safe_apply(task.task_key.c_str(), task.target, 0, ORIGIN_DRIVER);
+  auto *result = safe_apply(task.task_key.c_str(), target, 0, ORIGIN_DRIVER);
   vm_context().owner.controlled_lpc_active = saved_controlled_lpc;
 
   if (!result) {
@@ -3133,10 +3254,11 @@ void run_owner_ordinary_lpc(const OwnerMailboxTask &task) {
                                vm_context().object_store.objects == nullptr;
   auto owner_bound = vm_context().owner.current_owner_id == task.owner_id &&
                      vm_context().owner.current_owner_epoch == task.owner_epoch;
+  auto target_status = owner_worker_target_status(task);
+  auto *target = target_status.object;
 
   if (!off_main_context || !object_store_isolated || !owner_bound || !task.ordinary_lpc_explicit_open ||
-      !task.target || (task.target->flags & O_DESTRUCTED) ||
-      !vm_owner_epoch_matches(task.target, task.owner_id.c_str(), task.owner_epoch)) {
+      target_status.status != VMObjectHandleResolveStatus::kCurrent) {
     append_owner_task_trace_threadsafe(task, "thread_ordinary_lpc_rejected");
     owner_thread_ordinary_lpc_rejected.fetch_add(1, std::memory_order_relaxed);
     complete_owner_future_for_task_threadsafe(task.task_id, "failed", "", "ordinary lpc task rejected");
@@ -3144,13 +3266,13 @@ void run_owner_ordinary_lpc(const OwnerMailboxTask &task) {
   }
 
   VMExecutionState execution;
-  execution.current_object = task.target;
-  execution.current_prog = task.target->prog;
+  execution.current_object = target;
+  execution.current_prog = target->prog;
   VMExecutionScope execution_scope(vm_context(), execution);
   auto saved_controlled_lpc = vm_context().owner.controlled_lpc_active;
   vm_context().owner.controlled_lpc_active = true;
   owner_thread_ordinary_lpc_executed.fetch_add(1, std::memory_order_relaxed);
-  auto *result = safe_apply(task.task_key.c_str(), task.target, 0, ORIGIN_DRIVER);
+  auto *result = safe_apply(task.task_key.c_str(), target, 0, ORIGIN_DRIVER);
   vm_context().owner.controlled_lpc_active = saved_controlled_lpc;
 
   if (!result) {
@@ -3180,10 +3302,11 @@ void run_owner_command_frame_restore(const OwnerMailboxTask &task) {
                                vm_context().object_store.objects == nullptr;
   auto owner_bound = vm_context().owner.current_owner_id == task.owner_id &&
                      vm_context().owner.current_owner_epoch == task.owner_epoch;
+  auto target_status = owner_worker_target_status(task);
+  auto *target = target_status.object;
 
-  if (!off_main_context || !object_store_isolated || !owner_bound || !task.target ||
-      (task.target->flags & O_DESTRUCTED) ||
-      !vm_owner_epoch_matches(task.target, task.owner_id.c_str(), task.owner_epoch)) {
+  if (!off_main_context || !object_store_isolated || !owner_bound ||
+      target_status.status != VMObjectHandleResolveStatus::kCurrent) {
     append_owner_task_trace_threadsafe(task, "thread_command_frame_restore_rejected");
     return;
   }
@@ -3192,16 +3315,16 @@ void run_owner_command_frame_restore(const OwnerMailboxTask &task) {
   bool frame_restored_cleared = false;
   {
     VMExecutionState execution;
-    execution.current_object = task.target;
-    execution.current_prog = task.target->prog;
-    execution.current_interactive = task.target;
-    execution.command_giver = task.target;
+    execution.current_object = target;
+    execution.current_prog = target->prog;
+    execution.current_interactive = target;
+    execution.command_giver = target;
     VMExecutionScope execution_scope(vm_context(), execution);
     const auto &current_execution = vm_context().execution;
-    frame_restored = current_execution.current_object == task.target &&
-                     current_execution.current_prog == task.target->prog &&
-                     current_execution.current_interactive == task.target &&
-                     current_execution.command_giver == task.target;
+    frame_restored = current_execution.current_object == target &&
+                     current_execution.current_prog == target->prog &&
+                     current_execution.current_interactive == target &&
+                     current_execution.command_giver == target;
   }
   const auto &restored_execution = vm_context().execution;
   frame_restored_cleared = restored_execution.current_object == nullptr &&
@@ -3261,7 +3384,7 @@ void run_owner_executor_callback(OwnerMailboxTask &task) {
     return;
   }
 
-  auto target_status = vm_object_handle_resolve_status(task.target_handle);
+  auto target_status = owner_worker_target_status(task);
   if (target_status.status != VMObjectHandleResolveStatus::kCurrent) {
     drop_owner_executor_callback(task,
                                  owner_handle_status_destructed(target_status.status)
@@ -3272,16 +3395,6 @@ void run_owner_executor_callback(OwnerMailboxTask &task) {
   }
 
   auto *target = target_status.object;
-  if (!target || (target->flags & O_DESTRUCTED)) {
-    drop_owner_executor_callback(task, "thread_executor_callback_destructed",
-                                 VMObjectHandleResolveStatus::kObjectDestructed);
-    return;
-  }
-  if (!vm_owner_epoch_matches(target, task.owner_id.c_str(), task.owner_epoch)) {
-    drop_owner_executor_callback(task, "thread_executor_callback_stale",
-                                 VMObjectHandleResolveStatus::kOwnerEpochMismatch);
-    return;
-  }
   if (!target->prog) {
     drop_owner_executor_callback(task, "thread_executor_callback_stale",
                                  VMObjectHandleResolveStatus::kObjectNotFound);
@@ -3295,7 +3408,11 @@ void run_owner_executor_callback(OwnerMailboxTask &task) {
     return;
   }
 
-  OwnerProgramPin program_pin(target->prog, "owner executor callback");
+  // Admission acquired task.target on the main VM thread and the worker keeps
+  // that object reference until release_owner_task_target() defers the release
+  // back to main. The object owns its program for that lifetime, so taking a
+  // second program reference here would only mutate the non-atomic program
+  // refcount concurrently with other owner workers.
   VMExecutionState execution;
   execution.current_object = target;
   execution.current_prog = target->prog;
@@ -3361,6 +3478,18 @@ class OwnerExecutorRuntimeImpl final : public OwnerExecutorRuntime {
     finish_active_owner_task(owner_id);
   }
 
+  void record_owner_exception(const std::string &owner_id, const char *what) override {
+    owner_executor_owner_exceptions.fetch_add(1, std::memory_order_relaxed);
+    {
+      // append_owner_executor_trace_locked reads scheduler state and must
+      // hold the runtime lock; never call the _locked helper unlocked.
+      std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+      append_owner_executor_trace_locked(owner_id, "owner_exception");
+    }
+    debug_message("OwnerExecutor: exception escaped run_claimed_owner for owner '%s': %s\n",
+                  owner_id.c_str(), what ? what : "<null>");
+  }
+
  private:
   VMContext owner_context_;
   std::optional<VMContextThreadScope> context_scope_;
@@ -3387,6 +3516,15 @@ class OwnerExecutorRuntimeImpl final : public OwnerExecutorRuntime {
 
   void complete_owner_compute_result_task(const OwnerMailboxTask &task) {
     complete_owner_compute_result_task_locked(task);
+  }
+
+  // Idempotent exception finalizer: terminalize the pending future for the
+  // failed task (if any) with a stable error code. Normal completion paths
+  // already terminalized the future, so complete_for_task is a no-op there.
+  void terminalize_owner_task_after_exception(const OwnerMailboxTask &task,
+                                              const char *error_code) {
+    complete_owner_future_for_task_threadsafe(task.task_id, "failed", "",
+                                              error_code);
   }
 
   void run_task(OwnerMailboxTask &task) {
@@ -3426,7 +3564,30 @@ class OwnerExecutorRuntimeImpl final : public OwnerExecutorRuntime {
       if (owner_task_executor_safe(task)) {
         owner_executor_safe_task_dispatched.fetch_add(1, std::memory_order_relaxed);
       }
-      dispatch_task(task);
+      try {
+        dispatch_task(task);
+      } catch (const std::bad_alloc &) {
+        // A task must never take the worker down mid-claim: classify, trace,
+        // terminalize the pending future, and let the common cleanup path
+        // release the target reference.
+        owner_executor_task_bad_alloc.fetch_add(1, std::memory_order_relaxed);
+        append_owner_task_trace_threadsafe(task, "task_exception_bad_alloc");
+        terminalize_owner_task_after_exception(task, "executor_bad_alloc");
+      } catch (const std::exception &e) {
+        owner_executor_task_exceptions.fetch_add(1, std::memory_order_relaxed);
+        append_owner_task_trace_threadsafe(task, "task_exception_std");
+        terminalize_owner_task_after_exception(task, "executor_std_exception");
+        debug_message("OwnerExecutor: task %llu (%s) threw std::exception: %s\n",
+                      static_cast<unsigned long long>(task.task_id),
+                      owner_executor_dispatch_kind_name(owner_executor_task_descriptor(task).dispatch_kind), e.what());
+      } catch (...) {
+        owner_executor_task_unknown_exceptions.fetch_add(1, std::memory_order_relaxed);
+        append_owner_task_trace_threadsafe(task, "task_exception_unknown");
+        terminalize_owner_task_after_exception(task, "executor_unknown_exception");
+        debug_message("OwnerExecutor: task %llu (%s) threw unknown exception\n",
+                      static_cast<unsigned long long>(task.task_id),
+                      owner_executor_dispatch_kind_name(owner_executor_task_descriptor(task).dispatch_kind));
+      }
       total_drained.fetch_add(1, std::memory_order_relaxed);
       owner_thread_dispatched.fetch_add(1, std::memory_order_relaxed);
     }
@@ -3502,6 +3663,16 @@ void owner_thread_loop() {
   executor.run();
 }
 }  // namespace
+
+// C++ regression hook: reset budget-yield observation fields under the
+// runtime lock so tests can assert on a known baseline. Not part of the
+// LPC/runtime API.
+void vm_owner_test_support_reset_budget_yield_observations() {
+  std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+  owner_executor_last_budget_yield_owner.clear();
+  owner_executor_last_budget_yield_backlog = 0;
+  owner_executor_last_budget_yield_safe_backlog = 0;
+}
 
 void vm_owner_set_future_terminal_notifier(VMOwnerFutureTerminalNotifier notifier) {
   owner_future_terminal_notifier.store(notifier, std::memory_order_release);
@@ -3708,8 +3879,19 @@ uint64_t vm_owner_enqueue_task_epoch(const char *owner_id, const char *task_type
   return queued ? task_id : 0;
 }
 
+// R2-F06: object-target submission entries may only run on the main VM
+// thread. A worker-nested submission (allowlisted LPC on an owner worker
+// calling an object-target efun) is stably rejected with
+// main_thread_admission_required BEFORE any refcount or queue work, so the
+// worker never mutates plain object_t refcounts. All object-target entry
+// points share this single admission policy.
+bool owner_object_target_admission_ok() { return vm_context_is_main_thread(); }
+
 uint64_t vm_owner_enqueue_command_frame_restore(object_t *target) {
   if (!target) {
+    return 0;
+  }
+  if (!owner_object_target_admission_ok()) {
     return 0;
   }
 
@@ -3730,7 +3912,7 @@ uint64_t vm_owner_enqueue_command_frame_restore(object_t *target) {
   if (!task.target_handle.object_path.empty()) {
     task.target_object = task.target_handle.object_path;
   }
-  add_ref(task.target, "owner command frame restore task");
+  owner_object_target_add_ref(task.target, "owner command frame restore task");
   task_id = task.task_id;
   auto normalized_owner_id = task.owner_id;
   bool queued = false;
@@ -3768,6 +3950,9 @@ uint64_t vm_owner_enqueue_executor_task(object_t *target, const char *task_type,
   if (!target || !callback || !vm_multicore_audit_enabled()) {
     return 0;
   }
+  if (!owner_object_target_admission_ok()) {
+    return 0;
+  }
 
   auto normalized_task_type = std::string(normalize_task_text(task_type, ""));
 
@@ -3798,7 +3983,7 @@ uint64_t vm_owner_enqueue_executor_task(object_t *target, const char *task_type,
   }
   task.callback = std::move(callback);
   task.drop_callback = std::move(drop_callback);
-  add_ref(task.target, "owner executor callback task");
+  owner_object_target_add_ref(task.target, "owner executor callback task");
   task_id = task.task_id;
   auto normalized_owner_id = task.owner_id;
 
@@ -3836,6 +4021,9 @@ VMOwnerStringTaskSubmission vm_owner_submit_frozen_string_task(
   if (!target || !projector || !vm_multicore_audit_enabled()) {
     return submission;
   }
+  if (!owner_object_target_admission_ok()) {
+    return submission;
+  }
 
   const auto normalized_task_type =
       std::string(normalize_task_text(task_type, ""));
@@ -3863,7 +4051,7 @@ VMOwnerStringTaskSubmission vm_owner_submit_frozen_string_task(
   if (!task.target_handle.object_path.empty()) {
     task.target_object = task.target_handle.object_path;
   }
-  add_ref(task.target, "owner frozen string task");
+  owner_object_target_add_ref(task.target, "owner frozen string task");
 
   const auto task_id = task.task_id;
   const auto target_owner_epoch = task.owner_epoch;
@@ -3906,16 +4094,20 @@ VMOwnerStringTaskSubmission vm_owner_submit_frozen_string_task(
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
     if (!owner_threads.empty() && !owner_thread_stopping) {
-      owner_future_store.insert(std::move(future));
-      future_registered = true;
+      // Admission first (read-only w.r.t. queues); only a registered future
+      // may proceed to enqueue. A future-store capacity rejection must not
+      // leave an orphaned queued task behind.
       auto admission = admit_owner_executor_callback_task_locked(task);
       if (admission.accepted) {
-        append_owner_task_trace(task, "executor_callback_queued");
-        queued = enqueue_owner_task_locked(
-            task, normalized_owner_id, &notify_owner_thread, true);
-        if (queued) {
-          owner_executor_callback_queued.fetch_add(1,
-                                                   std::memory_order_relaxed);
+        future_registered = owner_future_store.admit_pending(std::move(future));
+        if (future_registered) {
+          append_owner_task_trace(task, "executor_callback_queued");
+          queued = enqueue_owner_task_locked(
+              task, normalized_owner_id, &notify_owner_thread, true);
+          if (queued) {
+            owner_executor_callback_queued.fetch_add(1,
+                                                     std::memory_order_relaxed);
+          }
         }
       }
     }
@@ -4032,6 +4224,15 @@ mapping_t *vm_owner_lpc_probe(object_t *target, const char *owner_id, const char
 }
 
 mapping_t *vm_owner_lpc_canary(object_t *target, const char *owner_id, const char *method) {
+  if (!owner_object_target_admission_ok()) {
+    auto *map = allocate_mapping(5);
+    add_mapping_pair(map, "success", 0);
+    add_mapping_pair(map, "task_id", 0);
+    add_mapping_string(map, "task_type", "lpc_canary");
+    add_mapping_string(map, "state", "rejected");
+    add_mapping_string(map, "error", "main_thread_admission_required");
+    return map;
+  }
   OwnerMailboxTask task;
   uint64_t task_id;
   bool notify_owner_thread = false;
@@ -4045,7 +4246,12 @@ mapping_t *vm_owner_lpc_canary(object_t *target, const char *owner_id, const cha
   task.target_object = owner_object_name(target);
   task.target = target;
   if (task.target) {
-    add_ref(task.target, "owner lpc canary task");
+    task.has_target_handle = true;
+    task.target_handle = vm_object_handle(task.target);
+    if (!task.target_handle.object_path.empty()) {
+      task.target_object = task.target_handle.object_path;
+    }
+    owner_object_target_add_ref(task.target, "owner lpc canary task");
   }
   task_id = task.task_id;
   auto normalized_owner_id = task.owner_id;
@@ -4083,6 +4289,17 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
   auto target_owner_id = std::string(normalize_owner_id(target ? vm_owner_id(target) : nullptr));
   auto *descriptor = find_owner_lpc_task_descriptor(method_name);
   auto allowed = descriptor ? 1 : 0;
+
+  if (!owner_object_target_admission_ok()) {
+    auto *map = allocate_mapping(6);
+    add_mapping_pair(map, "success", 0);
+    add_mapping_pair(map, "future_id", 0);
+    add_mapping_pair(map, "task_id", 0);
+    add_mapping_string(map, "task_type", "lpc_task");
+    add_mapping_string(map, "state", "rejected");
+    add_mapping_string(map, "error", "main_thread_admission_required");
+    return map;
+  }
 
   if (target && normalized_owner_id != target_owner_id) {
     auto *map = allocate_mapping(27);
@@ -4132,7 +4349,12 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
   task.target_object = target_name;
   task.target = target;
   if (task.target) {
-    add_ref(task.target, "owner lpc task");
+    task.has_target_handle = true;
+    task.target_handle = vm_object_handle(task.target);
+    if (!task.target_handle.object_path.empty()) {
+      task.target_object = task.target_handle.object_path;
+    }
+    owner_object_target_add_ref(task.target, "owner lpc task");
   }
   task_id = task.task_id;
 
@@ -4143,16 +4365,30 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
   future.target_owner_id = normalized_owner_id;
   future.message_type = "lpc_task";
   future.payload_key = method_name;
+  future.has_target_handle = task.has_target_handle;
+  if (task.has_target_handle) {
+    future.target_handle = task.target_handle;
+  }
   future.state = "pending";
   future.created_at_ms = owner_now_ms();
 
+  bool future_registered = false;
+  std::string submission_reason;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    owner_future_store.insert(std::move(future));
-    queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
+    future_registered = owner_future_store.admit_pending(std::move(future));
+    if (future_registered) {
+      queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
+    } else {
+      submission_reason = "future_store_capacity";
+    }
   }
   if (!queued) {
-    complete_owner_future_for_task_locked(task_id, "failed", "", "owner scheduler backpressure");
+    // Registered-but-unqueued futures are terminalized; unregistered
+    // submissions leave no orphaned task behind.
+    if (future_registered) {
+      complete_owner_future_for_task_locked(task_id, "failed", "", "owner scheduler backpressure");
+    }
     release_owner_task_target(&task);
   }
   if (notify_owner_thread) {
@@ -4161,8 +4397,8 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
 
   auto *map = allocate_mapping(23);
   add_mapping_pair(map, "success", queued ? 1 : 0);
-  add_mapping_pair(map, "future_id", static_cast<LPC_INT>(future_id));
-  add_mapping_pair(map, "task_id", static_cast<LPC_INT>(task_id));
+  add_mapping_pair(map, "future_id", static_cast<LPC_INT>(future_registered ? future_id : 0));
+  add_mapping_pair(map, "task_id", static_cast<LPC_INT>(queued ? task_id : 0));
   add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
   add_mapping_string(map, "task_type", "lpc_task");
   add_mapping_string(map, "method", method_name.c_str());
@@ -4172,6 +4408,8 @@ mapping_t *vm_owner_lpc_task(object_t *target, const char *owner_id, const char 
   add_mapping_string(map, "route", descriptor ? descriptor->route : "owner_executor");
   add_mapping_string(map, "result_policy", descriptor ? descriptor->result_policy : "none");
   add_mapping_string(map, "contract_reason", descriptor ? descriptor->reason : "ordinary LPC remains default closed");
+  add_mapping_string(map, "state", queued ? "pending" : (future_registered ? "failed" : "rejected"));
+  add_mapping_string(map, "error", queued ? "" : (future_registered ? "owner scheduler backpressure" : submission_reason.c_str()));
   add_mapping_pair(map, "requires_owner_thread", queued ? 1 : 0);
   add_mapping_pair(map, "requires_owner_message_completion", queued ? 1 : 0);
   add_mapping_pair(map, "payload_frozen", 1);
@@ -4198,6 +4436,17 @@ mapping_t *vm_owner_ordinary_lpc_task(object_t *target, const char *owner_id, co
   auto target_name = std::string(owner_object_name(target));
   auto target_owner_id = std::string(normalize_owner_id(target ? vm_owner_id(target) : nullptr));
   const auto *descriptor = find_owner_executor_task_descriptor("ordinary_lpc");
+
+  if (!owner_object_target_admission_ok()) {
+    auto *map = allocate_mapping(6);
+    add_mapping_pair(map, "success", 0);
+    add_mapping_pair(map, "future_id", 0);
+    add_mapping_pair(map, "task_id", 0);
+    add_mapping_string(map, "task_type", "ordinary_lpc");
+    add_mapping_string(map, "state", "rejected");
+    add_mapping_string(map, "error", "main_thread_admission_required");
+    return map;
+  }
 
   if (!explicit_open || !target || normalized_owner_id != target_owner_id) {
     auto *map = allocate_mapping(29);
@@ -4250,8 +4499,13 @@ mapping_t *vm_owner_ordinary_lpc_task(object_t *target, const char *owner_id, co
   task.task_key = method_name;
   task.target_object = target_name;
   task.target = target;
+  task.has_target_handle = true;
+  task.target_handle = vm_object_handle(task.target);
+  if (!task.target_handle.object_path.empty()) {
+    task.target_object = task.target_handle.object_path;
+  }
   task.ordinary_lpc_explicit_open = true;
-  add_ref(task.target, "owner ordinary lpc task");
+  owner_object_target_add_ref(task.target, "owner ordinary lpc task");
   task_id = task.task_id;
 
   OwnerFutureRecord future;
@@ -4261,16 +4515,28 @@ mapping_t *vm_owner_ordinary_lpc_task(object_t *target, const char *owner_id, co
   future.target_owner_id = normalized_owner_id;
   future.message_type = "ordinary_lpc";
   future.payload_key = method_name;
+  future.has_target_handle = true;
+  future.target_handle = task.target_handle;
   future.state = "pending";
   future.created_at_ms = owner_now_ms();
 
+  bool future_registered = false;
+  std::string submission_reason;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    owner_future_store.insert(std::move(future));
-    queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
+    future_registered = owner_future_store.admit_pending(std::move(future));
+    if (future_registered) {
+      queued = enqueue_owner_task_locked(task, normalized_owner_id, &notify_owner_thread);
+    } else {
+      submission_reason = "future_store_capacity";
+    }
   }
   if (!queued) {
-    complete_owner_future_for_task_locked(task_id, "failed", "", "owner scheduler backpressure");
+    // Registered-but-unqueued futures are terminalized; unregistered
+    // submissions leave no orphaned task behind.
+    if (future_registered) {
+      complete_owner_future_for_task_locked(task_id, "failed", "", "owner scheduler backpressure");
+    }
     release_owner_task_target(&task);
   }
   if (notify_owner_thread) {
@@ -4279,8 +4545,8 @@ mapping_t *vm_owner_ordinary_lpc_task(object_t *target, const char *owner_id, co
 
   auto *map = allocate_mapping(29);
   add_mapping_pair(map, "success", queued ? 1 : 0);
-  add_mapping_pair(map, "future_id", static_cast<LPC_INT>(future_id));
-  add_mapping_pair(map, "task_id", static_cast<LPC_INT>(task_id));
+  add_mapping_pair(map, "future_id", static_cast<LPC_INT>(future_registered ? future_id : 0));
+  add_mapping_pair(map, "task_id", static_cast<LPC_INT>(queued ? task_id : 0));
   add_mapping_string(map, "owner_id", normalized_owner_id.c_str());
   add_mapping_string(map, "target_owner_id", target_owner_id.c_str());
   add_mapping_string(map, "task_type", "ordinary_lpc");
@@ -4291,8 +4557,8 @@ mapping_t *vm_owner_ordinary_lpc_task(object_t *target, const char *owner_id, co
   add_mapping_string(map, "route", descriptor->route);
   add_mapping_string(map, "result_policy", "frozen_result_required");
   add_mapping_string(map, "contract_reason", descriptor->reason);
-  add_mapping_string(map, "state", queued ? "pending" : "failed");
-  add_mapping_string(map, "error", queued ? "" : "owner scheduler backpressure");
+  add_mapping_string(map, "state", queued ? "pending" : (future_registered ? "failed" : "rejected"));
+  add_mapping_string(map, "error", queued ? "" : (future_registered ? "owner scheduler backpressure" : submission_reason.c_str()));
   add_mapping_pair(map, "requires_owner_thread", queued ? 1 : 0);
   add_mapping_pair(map, "requires_owner_message_completion", queued ? 1 : 0);
   add_mapping_pair(map, "payload_frozen", 1);
@@ -4355,6 +4621,9 @@ uint64_t enqueue_owner_main_task(object_t *target, const char *task_type, const 
   if (!target || !callback) {
     return 0;
   }
+  if (!owner_object_target_admission_ok()) {
+    return 0;
+  }
 
   OwnerMainTask task;
   task.task_id = next_mailbox_task_id.fetch_add(1, std::memory_order_relaxed);
@@ -4398,7 +4667,7 @@ uint64_t enqueue_owner_main_task(object_t *target, const char *task_type, const 
   task.target = target;
   task.callback = std::move(callback);
   task.drop_callback = std::move(drop_callback);
-  add_ref(target, "owner main task");
+  owner_object_target_add_ref(target, "owner main task");
 
   auto task_id = task.task_id;
   record_owner_main_queue_fallback(task);
@@ -4447,6 +4716,9 @@ uint64_t vm_owner_enqueue_main_task_with_payload(object_t *target, const char *t
 }
 
 uint64_t enqueue_owner_message_main_task_locked(const OwnerMailboxTask &mailbox_task, object_t *target) {
+  if (!owner_object_target_admission_ok()) {
+    return 0;
+  }
   OwnerMainTask task;
   task.task_id = mailbox_task.task_id;
   task.sequence = mailbox_task.sequence;
@@ -4459,7 +4731,7 @@ uint64_t enqueue_owner_message_main_task_locked(const OwnerMailboxTask &mailbox_
   task.target_handle = mailbox_task.target_handle;
   task.payload = mailbox_task.payload;
   task.target = target;
-  add_ref(target, "owner message main task");
+  owner_object_target_add_ref(target, "owner message main task");
 
   auto task_id = task.task_id;
   append_owner_task_trace(task, "main_queued");
@@ -5047,6 +5319,22 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
   if (target_handle) {
     task.target_handle = *target_handle;
     task.target_object = target_handle->object_path;
+    // Main-thread admission acquire: resolve + add_ref happen inside one
+    // object-store lock domain (no TOCTOU), and the worker only consumes
+    // this already-held reference. The worker never mutates plain refcounts:
+    // a worker-nested submission is stably rejected here.
+    auto admission = vm_object_handle_acquire_status(*target_handle);
+    if (admission.status == VMObjectHandleResolveStatus::kMainThreadAdmissionRequired) {
+      auto *map = allocate_mapping(6);
+      add_mapping_pair(map, "success", 0);
+      add_mapping_pair(map, "message_id", 0);
+      add_mapping_pair(map, "future_id", 0);
+      add_mapping_pair(map, "target_task_id", 0);
+      add_mapping_string(map, "state", "rejected");
+      add_mapping_string(map, "error", "main_thread_admission_required");
+      return map;
+    }
+    task.target = admission.object;
   }
   auto target_task_id = task.task_id;
   auto target_status = target_handle ? vm_object_handle_resolve_status(*target_handle).status
@@ -5088,51 +5376,65 @@ mapping_t *submit_owner_message(const char *source_owner_id, const char *target_
 
   bool notify_owner_thread = false;
   bool enqueued_owner_task = false;
+  bool future_registered = false;
   std::string submission_error;
   {
     std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-    owner_future_store.insert(std::move(future));
-    owner_trace_store.append_message(std::move(trace));
-    if (target_handle) {
-      if (admission_target.status == VMObjectHandleResolveStatus::kCurrent && admission_target.object) {
-        enqueued_owner_task = enqueue_owner_task_locked(task, target_owner, &notify_owner_thread);
-        if (enqueued_owner_task) {
+    future_registered = owner_future_store.admit_pending(std::move(future));
+    if (!future_registered) {
+      // Future-store capacity rejection: no trace, no enqueue. The message
+      // index registered above is revoked after the lock.
+      submission_error = "future_store_capacity";
+    } else {
+      owner_trace_store.append_message(std::move(trace));
+      if (target_handle) {
+        // task.target was acquired on the main thread under the object-store
+        // lock domain; it is the authoritative current-check (no TOCTOU).
+        if (task.target) {
+          enqueued_owner_task = enqueue_owner_task_locked(task, target_owner, &notify_owner_thread);
+          if (enqueued_owner_task) {
+            owner_trace_store.update_message_route_for_task(target_task_id,
+                                                            vm_object_handle_resolve_status_name(admission_target.status),
+                                                            true, false, false);
+          } else {
+            owner_trace_store.update_message_route_for_task(target_task_id, "owner_scheduler_backpressure", false, false,
+                                                            false);
+            submission_error = "owner scheduler backpressure";
+          }
+        } else {
           owner_trace_store.update_message_route_for_task(target_task_id,
                                                           vm_object_handle_resolve_status_name(admission_target.status),
-                                                          true, false, false);
-        } else {
+                                                          false, false, false);
+          submission_error = stale_target_error(admission_target.status);
+        }
+      } else {
+        enqueued_owner_task = enqueue_owner_task_locked(task, target_owner, &notify_owner_thread);
+        if (!enqueued_owner_task) {
           owner_trace_store.update_message_route_for_task(target_task_id, "owner_scheduler_backpressure", false, false,
                                                           false);
           submission_error = "owner scheduler backpressure";
         }
-      } else {
-        owner_trace_store.update_message_route_for_task(target_task_id,
-                                                        vm_object_handle_resolve_status_name(admission_target.status),
-                                                        false, false, false);
-        submission_error = stale_target_error(admission_target.status);
-      }
-    } else {
-      enqueued_owner_task = enqueue_owner_task_locked(task, target_owner, &notify_owner_thread);
-      if (!enqueued_owner_task) {
-        owner_trace_store.update_message_route_for_task(target_task_id, "owner_scheduler_backpressure", false, false,
-                                                        false);
-        submission_error = "owner scheduler backpressure";
       }
     }
   }
   if (!enqueued_owner_task) {
     vm_object_store_remove_message(target_owner.c_str(), target_task_id);
-    complete_owner_future_for_task_locked(target_task_id, "failed", "", submission_error.c_str());
+    if (future_registered) {
+      complete_owner_future_for_task_locked(target_task_id, "failed", "", submission_error.c_str());
+    }
+    release_owner_task_target(&task);
   }
   if (notify_owner_thread) {
     owner_runtime_cv.notify_one();
   }
 
   auto *map = allocate_mapping(20);
-  add_mapping_pair(map, "success", 1);
-  add_mapping_pair(map, "message_id", static_cast<LPC_INT>(message_id));
-  add_mapping_pair(map, "future_id", static_cast<LPC_INT>(message_id));
-  add_mapping_pair(map, "target_task_id", static_cast<LPC_INT>(target_task_id));
+  add_mapping_pair(map, "success", future_registered ? 1 : 0);
+  add_mapping_pair(map, "message_id", static_cast<LPC_INT>(future_registered ? message_id : 0));
+  add_mapping_pair(map, "future_id", static_cast<LPC_INT>(future_registered ? message_id : 0));
+  add_mapping_pair(map, "target_task_id", static_cast<LPC_INT>(future_registered ? target_task_id : 0));
+  add_mapping_string(map, "state", future_registered ? (enqueued_owner_task ? "pending" : "failed") : "rejected");
+  add_mapping_string(map, "error", future_registered ? (enqueued_owner_task ? "" : submission_error.c_str()) : submission_error.c_str());
   add_mapping_string(map, "source_owner_id", source_owner.c_str());
   add_mapping_string(map, "target_owner_id", target_owner.c_str());
   add_mapping_string(map, "message_type", normalized_type.c_str());
@@ -5182,7 +5484,9 @@ uint64_t vm_owner_register_compute_future(const char *owner_id, uint64_t worker_
   future.state = "pending";
   future.created_at_ms = owner_now_ms();
 
-  owner_future_store.insert(std::move(future));
+  if (!owner_future_store.admit_pending(std::move(future))) {
+    return 0;
+  }
   return future_id;
 }
 
@@ -5704,7 +6008,7 @@ mapping_t *vm_owner_thread_status() {
   add_mapping_pair(map, "max_owner_threads", 4);
   add_mapping_pair(map, "executor_task_budget", kOwnerExecutorTaskBudget);
   add_mapping_pair(map, "executor_budget_yields",
-                   static_cast<LPC_INT>(owner_executor_budget_yields.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(status.executor_budget_yields));
   add_mapping_string(map, "executor_last_budget_yield_owner",
                      status.last_budget_yield_owner.c_str());
   add_mapping_pair(map, "executor_last_budget_yield_backlog",
@@ -5729,6 +6033,14 @@ mapping_t *vm_owner_thread_status() {
                    static_cast<LPC_INT>(owner_executor_max_owner_parallel.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_same_owner_claim_conflicts",
                    static_cast<LPC_INT>(owner_executor_same_owner_claim_conflicts.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_owner_exceptions",
+                   static_cast<LPC_INT>(owner_executor_owner_exceptions.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_task_exceptions",
+                   static_cast<LPC_INT>(owner_executor_task_exceptions.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_task_bad_alloc",
+                   static_cast<LPC_INT>(owner_executor_task_bad_alloc.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_task_unknown_exceptions",
+                   static_cast<LPC_INT>(owner_executor_task_unknown_exceptions.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_active_claims", status.active_claim_count);
   add_mapping_pair(map, "ordinary_lpc_default_closed", 1);
   add_mapping_pair(map, "ordinary_lpc_activation_policy_ready", 1);
@@ -5840,7 +6152,7 @@ mapping_t *vm_owner_runtime_status() {
   add_mapping_pair(map, "futures_completed", static_cast<LPC_INT>(owner_future_store.completed_count()));
   add_mapping_pair(map, "futures_failed", static_cast<LPC_INT>(owner_future_store.failed_count()));
   add_mapping_pair(map, "executor_budget_yields",
-                   static_cast<LPC_INT>(owner_executor_budget_yields.load(std::memory_order_relaxed)));
+                   static_cast<LPC_INT>(status.executor_budget_yields));
   add_mapping_string(map, "executor_last_budget_yield_owner",
                      status.last_budget_yield_owner.c_str());
   add_mapping_pair(map, "executor_last_budget_yield_backlog",
@@ -5991,6 +6303,14 @@ mapping_t *vm_owner_runtime_status() {
                    static_cast<LPC_INT>(owner_executor_max_owner_parallel.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_same_owner_claim_conflicts",
                    static_cast<LPC_INT>(owner_executor_same_owner_claim_conflicts.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_owner_exceptions",
+                   static_cast<LPC_INT>(owner_executor_owner_exceptions.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_task_exceptions",
+                   static_cast<LPC_INT>(owner_executor_task_exceptions.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_task_bad_alloc",
+                   static_cast<LPC_INT>(owner_executor_task_bad_alloc.load(std::memory_order_relaxed)));
+  add_mapping_pair(map, "executor_task_unknown_exceptions",
+                   static_cast<LPC_INT>(owner_executor_task_unknown_exceptions.load(std::memory_order_relaxed)));
   add_mapping_pair(map, "executor_active_claims", status.active_claim_count);
   add_mapping_pair(map, "ordinary_lpc_default_closed", 1);
   add_mapping_pair(map, "ordinary_lpc_activation_policy_ready", 1);
