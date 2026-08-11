@@ -3,7 +3,7 @@
 #include "eval_limit.h"
 #include "posix_timers.h"
 
-volatile int outoftime = 0;
+FLUFFOS_VM_THREAD_LOCAL volatile std::sig_atomic_t outoftime = 0;
 uint64_t max_eval_cost;
 
 void init_eval() {

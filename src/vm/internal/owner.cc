@@ -90,6 +90,21 @@ class OwnerProgramPin {
   program_t *program_{nullptr};
 };
 
+class OwnerControlledLpcScope {
+ public:
+  OwnerControlledLpcScope() : previous_(vm_context().owner.controlled_lpc_active) {
+    vm_context().owner.controlled_lpc_active = true;
+  }
+
+  ~OwnerControlledLpcScope() { vm_context().owner.controlled_lpc_active = previous_; }
+
+  OwnerControlledLpcScope(const OwnerControlledLpcScope &) = delete;
+  OwnerControlledLpcScope &operator=(const OwnerControlledLpcScope &) = delete;
+
+ private:
+  bool previous_;
+};
+
 void add_owner_callback_diagnostic_contract_fields(mapping_t *map) {
   add_mapping_pair(map, "owner_callback_payload_strict_diagnostics_ready", 1);
   add_mapping_string(map, "owner_callback_payload_policy_schema", kOwnerCallbackPayloadPolicySchemaV1);
@@ -2774,6 +2789,7 @@ void dispatch_owner_message_in_current_context(const OwnerMailboxTask &task) {
   execution.current_object = target;
   execution.current_prog = target->prog;
   VMExecutionScope execution_scope(vm_context(), execution);
+  OwnerControlledLpcScope controlled_lpc_scope;
   set_eval(max_eval_cost);
   int num_args = 0;
   if (task.payload) {

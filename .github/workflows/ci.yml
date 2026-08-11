@@ -39,6 +39,9 @@ jobs:
       - name: PyYAML parse + job-name uniqueness + matrix contract tests
         run: python3 tools/docs/check-workflows.py --self-test
 
+      - name: Isolated testsuite runner portability
+        run: python3 tools/testsuite/test-run-isolated-portability.py
+
       - name: Evidence gate negative tests
         run: |
           python3 -m json.tool docs/evidence/manifest.schema.json >/dev/null

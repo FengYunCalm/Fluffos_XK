@@ -51,6 +51,7 @@
 #include "vm/internal/base/array.h"
 #include "vm/internal/base/mapping.h"
 #include "vm/internal/base/object.h"
+#include "vm/internal/eval_limit.h"
 #include "vm/internal/lpc_vm_profile.h"
 #include "vm/internal/owner_future_store.h"
 #include "vm/internal/owner_scheduler_state.h"
@@ -88,6 +89,28 @@ extern int gateway_dispatch_buffered_frames_for_test(GatewayMaster *master, int 
 extern void gateway_set_read_dispatch_pending_for_test(GatewayMaster *master, bool pending);
 extern void gateway_service_admitted_receive_tasks_for_test();
 extern bool gateway_master_has_buffered_input_for_test(const GatewayMaster *master);
+
+TEST(MudlibStatsTest, ArraySizeUpdatesAreAtomicAcrossVmThreads) {
+  mudlib_stats_t stats{};
+  statgroup_t group{&stats, nullptr};
+  constexpr int kThreadCount = 8;
+  constexpr int kUpdatesPerThread = 5000;
+  std::vector<std::thread> workers;
+  workers.reserve(kThreadCount);
+
+  for (int i = 0; i < kThreadCount; i++) {
+    workers.emplace_back([&group] {
+      for (int update = 0; update < kUpdatesPerThread; update++) {
+        add_array_size(&group, 1);
+      }
+    });
+  }
+  for (auto &worker : workers) {
+    worker.join();
+  }
+
+  ASSERT_EQ(stats.size_array, kThreadCount * kUpdatesPerThread);
+}
 
 namespace {
 struct StringStatsSnapshot {
@@ -7360,6 +7383,70 @@ TEST_F(DriverTest, TestVmContextThreadScopeBindsThreadLocalContext) {
   ASSERT_EQ(&vm_context(), main_context);
 }
 
+TEST_F(DriverTest, TestEvalLimitExpiryFlagIsThreadLocal) {
+  outoftime = 1;
+  bool worker_default = true;
+  std::thread worker([&] {
+    worker_default = outoftime != 0;
+    outoftime = 0;
+  });
+  worker.join();
+
+  ASSERT_FALSE(worker_default);
+  ASSERT_EQ(outoftime, 1);
+  outoftime = 0;
+}
+
+#ifdef __linux__
+TEST_F(DriverTest, TestEvalLimitTimersAreIndependentAcrossThreads) {
+  constexpr uint64_t kMainDeadlineMicros = 3'600'000'000ULL;
+  constexpr uint64_t kWorkerDeadlineMicros = 7'200'000'000ULL;
+  constexpr uint64_t kSchedulingToleranceMicros = 100'000'000ULL;
+
+  set_eval(kMainDeadlineMicros);
+  uint64_t worker_remaining = 0;
+  std::thread worker([&] {
+    set_eval(kWorkerDeadlineMicros);
+    worker_remaining = static_cast<uint64_t>(get_eval());
+  });
+  worker.join();
+  const auto main_remaining = static_cast<uint64_t>(get_eval());
+  set_eval(max_eval_cost);
+
+  ASSERT_GT(worker_remaining,
+            kWorkerDeadlineMicros - kSchedulingToleranceMicros);
+  ASSERT_LE(worker_remaining, kWorkerDeadlineMicros);
+  ASSERT_GT(main_remaining,
+            kMainDeadlineMicros - kSchedulingToleranceMicros);
+  ASSERT_LE(main_remaining, kMainDeadlineMicros);
+}
+
+TEST_F(DriverTest, TestEvalLimitSignalExpiresOnlyTheTargetThread) {
+  constexpr uint64_t kMainDeadlineMicros = 3'600'000'000ULL;
+  constexpr uint64_t kWorkerDeadlineMicros = 25'000ULL;
+
+  outoftime = 0;
+  set_eval(kMainDeadlineMicros);
+  bool worker_expired = false;
+  std::thread worker([&] {
+    set_eval(kWorkerDeadlineMicros);
+    const auto wait_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!outoftime && std::chrono::steady_clock::now() < wait_deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    worker_expired = outoftime != 0;
+  });
+  worker.join();
+  const bool main_expired = outoftime != 0;
+  set_eval(max_eval_cost);
+  outoftime = 0;
+
+  ASSERT_TRUE(worker_expired);
+  ASSERT_FALSE(main_expired);
+}
+#endif
+
 TEST_F(DriverTest, TestVmContextObjectStoreRemainsMainThreadOwned) {
   auto *main_context = &vm_context();
   vm_context_sync_object_store(*main_context);
@@ -10791,6 +10878,10 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageUsesOwnerExecutorRoute) {
   ASSERT_NE(obj, nullptr);
   vm_owner_set_id(obj, owner);
   auto handle = vm_object_handle(obj);
+  const auto time_of_ref_before = current_gametick() + 100000;
+  obj->time_of_ref = time_of_ref_before;
+  obj->flags |= O_RESET_STATE;
+  const auto flags_before = obj->flags;
 
   auto mapping_number = [](mapping_t* map, const char* key) -> long {
     auto* value = find_string_in_mapping(map, key);
@@ -10857,6 +10948,8 @@ TEST_F(DriverTest, TestVmOwnerObjectMessageUsesOwnerExecutorRoute) {
   ASSERT_EQ(mapping_number(completed, "requires_owner_message_completion"), 0);
   ASSERT_EQ(mapping_number(completed, "frozen_result"), 1);
   free_mapping(completed);
+  ASSERT_EQ(obj->time_of_ref, time_of_ref_before);
+  ASSERT_EQ(obj->flags, flags_before);
   auto* after = vm_owner_thread_status();
   ASSERT_EQ(mapping_number(after, "main_dispatched"), before_main_dispatched);
   free_mapping(after);

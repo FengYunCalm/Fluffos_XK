@@ -91,6 +91,23 @@ fi
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TESTSUITE_DIR="$REPO_ROOT/testsuite"
 TEMPLATE="$TESTSUITE_DIR/etc/config.test"
+PORTABLE_TIMEOUT="$REPO_ROOT/tools/testsuite/portable-timeout.py"
+
+run_with_timeout() {
+  local seconds="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    exec timeout "$seconds" "$@"
+  fi
+  if command -v gtimeout >/dev/null 2>&1; then
+    exec gtimeout "$seconds" "$@"
+  fi
+  if command -v python3 >/dev/null 2>&1 && [ -f "$PORTABLE_TIMEOUT" ]; then
+    exec python3 "$PORTABLE_TIMEOUT" "$seconds" -- "$@"
+  fi
+  echo "error: no supported timeout runner found" >&2
+  exit 127
+}
 
 # Resolve the driver to an absolute path so it survives the cd into testsuite.
 case "$DRIVER" in
@@ -109,11 +126,16 @@ WORKDIR="$(mktemp -d "$TESTSUITE_DIR/.run-isolated-XXXXXX")"
 CONFIG_FILE="$WORKDIR/config.test"
 DRIVER_LOG="$WORKDIR/driver.log"
 DRIVER_PID=""
+LOCK_FILE="$TESTSUITE_DIR/.run-isolated.lock"
+LOCK_FD=""
 
 cleanup() {
   if [ -n "$DRIVER_PID" ] && kill -0 "$DRIVER_PID" 2>/dev/null; then
     kill "$DRIVER_PID" 2>/dev/null
     wait "$DRIVER_PID" 2>/dev/null || true
+  fi
+  if [ -n "$LOCK_FD" ]; then
+    release_lock
   fi
   if [ "$KEEP" -eq 1 ]; then
     echo "workspace kept at: $WORKDIR" >&2
@@ -127,8 +149,6 @@ trap cleanup EXIT INT TERM
 # and config rendering. With port 0 the OS assigns ports at bind time, so
 # no probe/close/rebind window exists anymore; the lock now only guards the
 # sandbox directory lifecycle.
-LOCK_FILE="$TESTSUITE_DIR/.run-isolated.lock"
-LOCK_FD=""
 acquire_lock() {
   if command -v flock >/dev/null 2>&1; then
     exec {LOCK_FD}>"$LOCK_FILE"
@@ -165,8 +185,11 @@ acquire_lock() {
 release_lock() {
   if [ "$LOCK_FD" = "mkdir" ]; then
     # Only the owner may remove the lock directory.
-    if [ -f "$TESTSUITE_DIR/.run-isolated.lockdir/owner" ] && \
-       [ "$(head -1 "$TESTSUITE_DIR/.run-isolated.lockdir/owner")" = "$$" ]; then
+    local owner_pid=""
+    if [ -f "$TESTSUITE_DIR/.run-isolated.lockdir/owner" ]; then
+      read -r owner_pid _ < "$TESTSUITE_DIR/.run-isolated.lockdir/owner"
+    fi
+    if [ "$owner_pid" = "$$" ]; then
       rm -rf "$TESTSUITE_DIR/.run-isolated.lockdir"
     fi
   else
@@ -175,6 +198,7 @@ release_lock() {
     # closing, so use eval with the numeric fd.
     eval "exec ${LOCK_FD}>&-" 2>/dev/null || true
   fi
+  LOCK_FD=""
 }
 
 MUD_IP="127.0.0.1"
@@ -217,15 +241,15 @@ render_config() {
 
 # R2-F11 port verification: -ftest shuts down BEFORE the listeners bind, so
 # the OS-assigned ports are verified in a normal boot: start the driver
-# without -ftest, wait for all four bind-time 'port 0 assigned' log lines
-# (stdbuf keeps the stdout line-buffered so the log is live), then SIGTERM
-# for a graceful shutdown. Sets PORTS_OK and ACTUAL_PORTS.
+# without -ftest, wait for all four bind-time 'port 0 assigned' log lines,
+# then SIGTERM for a graceful shutdown. debug_message() flushes stdout after
+# every message, so this remains live without the non-portable stdbuf command.
+# Sets PORTS_OK and ACTUAL_PORTS.
 verify_ports() {
   local port_log="$WORKDIR/port-verify.log"
-  # exec makes the timeout process the background pid itself, so SIGTERM
-  # reaches timeout (which forwards it to the driver) instead of an orphaned
-  # subshell.
-  ( cd "$TESTSUITE_DIR" && exec timeout 60 stdbuf -oL "$DRIVER_ABS" "$CONFIG_FILE" </dev/null ) >"$port_log" 2>&1 &
+  # run_with_timeout execs the selected supervisor, so SIGTERM reaches the
+  # supervisor and is forwarded to the driver instead of leaving a child.
+  ( cd "$TESTSUITE_DIR" && run_with_timeout 60 "$DRIVER_ABS" "$CONFIG_FILE" </dev/null ) >"$port_log" 2>&1 &
   local port_pid=$!
   local port_ready="no"
   for _ in $(seq 1 600); do
@@ -288,7 +312,7 @@ while [ "$RC" -ne 0 ] && [ "$ROUND" -lt "$MAX_ROUNDS" ]; do
   # when it reads the terminal, turning a clean exit into 255.
   (
     cd "$TESTSUITE_DIR" || exit 1
-    timeout "$TIMEOUT_SECS" "$DRIVER_ABS" "$CONFIG_FILE" -ftest </dev/null
+    run_with_timeout "$TIMEOUT_SECS" "$DRIVER_ABS" "$CONFIG_FILE" -ftest </dev/null
   ) >"$DRIVER_LOG" 2>&1 &
   DRIVER_PID=$!
 
@@ -305,7 +329,7 @@ while [ "$RC" -ne 0 ] && [ "$ROUND" -lt "$MAX_ROUNDS" ]; do
     ASSERT_OK="yes"
   fi
   BIND_FAIL=""
-  if grep -q "bind error\|Address already in use\|init_user_conn" "$DRIVER_LOG"; then
+  if grep -Fq "init_user_conn: bind error:" "$DRIVER_LOG"; then
     BIND_FAIL="yes"
   fi
 

@@ -80,6 +80,30 @@ static mapping_t *get_info(mudlib_stats_t * /*dl*/);
 static mapping_t *get_stats(const char * /*str*/, mudlib_stats_t * /*list*/);
 static mudlib_stats_t *insert_stat_entry(mudlib_stats_t * /*entry*/, mudlib_stats_t ** /*list*/);
 
+// VM objects and mappings can be created by owner threads while the main
+// thread continues allocating values. Keep the legacy struct layout, but make
+// the shared counters atomic through compiler builtins available in C++17.
+static int stat_load(const int *value) { return __atomic_load_n(value, __ATOMIC_RELAXED); }
+
+static void stat_store(int *value, int next) {
+  __atomic_store_n(value, next, __ATOMIC_RELAXED);
+}
+
+static void stat_add(int *value, int delta) {
+  __atomic_fetch_add(value, delta, __ATOMIC_RELAXED);
+}
+
+static void stat_decay(int *value, int numerator, int denominator) {
+  int current = stat_load(value);
+  while (true) {
+    const auto next = static_cast<int>(static_cast<int64_t>(current) * numerator / denominator);
+    if (__atomic_compare_exchange_n(value, &current, next, false, __ATOMIC_RELAXED,
+                                    __ATOMIC_RELAXED)) {
+      return;
+    }
+  }
+}
+
 #ifdef DEBUGMALLOC_EXTENSIONS
 /* debugging */
 int check_valid_stat_entry(mudlib_stats_t *se) {
@@ -180,10 +204,10 @@ void init_stats_for_object(object_t *ob) {
 void add_moves(statgroup_t *st, int moves) {
   if (st) {
     if (st->domain) {
-      st->domain->moves += moves;
+      stat_add(&st->domain->moves, moves);
     }
     if (st->author) {
-      st->author->moves += moves;
+      stat_add(&st->author->moves, moves);
     }
   }
 }
@@ -191,10 +215,10 @@ void add_moves(statgroup_t *st, int moves) {
 void add_heart_beats(statgroup_t *st, int hbs) {
   if (st) {
     if (st->domain) {
-      st->domain->heart_beats += hbs;
+      stat_add(&st->domain->heart_beats, hbs);
     }
     if (st->author) {
-      st->author->heart_beats += hbs;
+      stat_add(&st->author->heart_beats, hbs);
     }
   }
 }
@@ -202,10 +226,10 @@ void add_heart_beats(statgroup_t *st, int hbs) {
 void add_array_size(statgroup_t *st, int size) {
   if (st) {
     if (st->domain) {
-      st->domain->size_array += size;
+      stat_add(&st->domain->size_array, size);
     }
     if (st->author) {
-      st->author->size_array += size;
+      stat_add(&st->author->size_array, size);
     }
   }
 }
@@ -213,10 +237,10 @@ void add_array_size(statgroup_t *st, int size) {
 void add_errors(statgroup_t *st, int errors) {
   if (st) {
     if (st->domain) {
-      st->domain->errors += errors;
+      stat_add(&st->domain->errors, errors);
     }
     if (st->author) {
-      st->author->errors += errors;
+      stat_add(&st->author->errors, errors);
     }
   }
 }
@@ -233,13 +257,13 @@ void add_errors_for_file(const char *file, int errors) {
   if (domain_for_file(file, &domain_name) && domains) {
     entry = find_stat_entry(domain_name.c_str(), domains);
     if (entry) {
-      entry->errors += errors;
+      stat_add(&entry->errors, errors);
     }
   }
   if (author_for_file(file, &author_name) && authors) {
     entry = find_stat_entry(author_name.c_str(), authors);
     if (entry) {
-      entry->errors += errors;
+      stat_add(&entry->errors, errors);
     }
   }
 }
@@ -247,10 +271,10 @@ void add_errors_for_file(const char *file, int errors) {
 void add_objects(statgroup_t *st, int objects) {
   if (st) {
     if (st->domain) {
-      st->domain->objects += objects;
+      stat_add(&st->domain->objects, objects);
     }
     if (st->author) {
-      st->author->objects += objects;
+      stat_add(&st->author->objects, objects);
     }
   }
 }
@@ -268,12 +292,12 @@ void mudlib_stats_decay() {
 
   mudlib_stats_t *dl;
   for (dl = domains; dl; dl = dl->next) {
-    dl->moves = dl->moves * 99 / 100;
-    dl->heart_beats = dl->heart_beats * 9 / 10;
+    stat_decay(&dl->moves, 99, 100);
+    stat_decay(&dl->heart_beats, 9, 10);
   }
   for (dl = authors; dl; dl = dl->next) {
-    dl->moves = dl->moves * 99 / 100;
-    dl->heart_beats = dl->heart_beats * 9 / 10;
+    stat_decay(&dl->moves, 99, 100);
+    stat_decay(&dl->heart_beats, 9, 10);
   }
 }
 
@@ -322,11 +346,11 @@ void set_author(const char *name) {
     return;
   }
   if (ob->stats.author) {
-    ob->stats.author->objects--;
+    stat_add(&ob->stats.author->objects, -1);
   }
   ob->stats.author = add_stat_entry(name, &authors);
   if (ob->stats.author) {
-    ob->stats.author->objects++;
+    stat_add(&ob->stats.author->objects, 1);
   }
 }
 
@@ -492,7 +516,8 @@ static void save_stat_list(const char *file, mudlib_stats_t *list) {
     return;
   }
   while (list) {
-    if (fprintf(f, "%s %d %d\n", list->name, list->moves, list->heart_beats) < 0) {
+    if (fprintf(f, "%s %d %d\n", list->name, stat_load(&list->moves),
+                stat_load(&list->heart_beats)) < 0) {
       debug_message("*Error: unable to write stat file %s.\n", path.c_str());
       break;
     }
@@ -555,8 +580,8 @@ static void restore_stat_list(const char *file, mudlib_stats_t **list) {
       break;
     }
     entry = add_stat_entry(name.c_str(), list);
-    entry->moves = moves;
-    entry->heart_beats = heart_beats;
+    stat_store(&entry->moves, moves);
+    stat_store(&entry->heart_beats, heart_beats);
   }
 }
 
@@ -579,11 +604,11 @@ static mapping_t *get_info(mudlib_stats_t *dl) {
   mapping_t *ret;
 
   ret = allocate_mapping(8);
-  add_mapping_pair(ret, "moves", dl->moves);
-  add_mapping_pair(ret, "errors", dl->errors);
-  add_mapping_pair(ret, "heart_beats", dl->heart_beats);
-  add_mapping_pair(ret, "array_size", dl->size_array);
-  add_mapping_pair(ret, "objects", dl->objects);
+  add_mapping_pair(ret, "moves", stat_load(&dl->moves));
+  add_mapping_pair(ret, "errors", stat_load(&dl->errors));
+  add_mapping_pair(ret, "heart_beats", stat_load(&dl->heart_beats));
+  add_mapping_pair(ret, "array_size", stat_load(&dl->size_array));
+  add_mapping_pair(ret, "objects", stat_load(&dl->objects));
   return ret;
 }
 
