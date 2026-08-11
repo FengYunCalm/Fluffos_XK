@@ -159,7 +159,7 @@ fallback 伪快路径。
 | workflow/release | check-workflows self-test、action pins self-test、release fault injection、actionlint 1.7.12 通过 |
 | docs/evidence/SBOM | check-docs、evidence negative suite、CycloneDX validate 通过 |
 
-| 诊断日志 | `testsuite/.run-isolated-sxQmiJ`（TSan）、`.run-isolated-m7U4O0`（ASan）、`.run-isolated-knkh8t`（UBSan） |
+| 诊断日志 | 本地保留的 TSan、ASan、UBSan isolated 日志均已检查；目录为运行时临时证据，不纳入仓库 |
 
 上述是实现提交 `3fa46cf46106e83aeb30fb4a117496823c7df6a3` 上的本地证据，不等价于最终 PR HEAD 的 Clang/macOS/Windows/CodeQL/Docker
 结果，也不等价于真实 registry 演练。
