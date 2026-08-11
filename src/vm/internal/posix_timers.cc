@@ -19,6 +19,18 @@
 namespace {
 std::once_flag eval_signal_handler_once;
 
+void set_eval_timer_thread_id(struct sigevent &sev, pid_t thread_id) {
+#if defined(__GLIBC__)
+  // glibc exposes the Linux SIGEV_THREAD_ID slot only through this ABI field.
+  sev._sigev_un._tid = thread_id;
+#elif defined(sigev_notify_thread_id)
+  // musl exposes the same Linux slot through the public compatibility macro.
+  sev.sigev_notify_thread_id = thread_id;
+#else
+#error "Linux libc does not expose a SIGEV_THREAD_ID target field"
+#endif
+}
+
 void eval_timer_handler(int /*sig*/, siginfo_t *si, void * /*uc*/) {
   if (!si->si_value.sival_ptr) {
     outoftime = 1;
@@ -62,7 +74,7 @@ class ThreadEvalTimer {
     sev.sigev_signo = SIGVTALRM;
     sev.sigev_notify = SIGEV_THREAD_ID;
     sev.sigev_value.sival_ptr = nullptr;
-    sev._sigev_un._tid = static_cast<pid_t>(syscall(SYS_gettid));
+    set_eval_timer_thread_id(sev, static_cast<pid_t>(syscall(SYS_gettid)));
 
     int result = -1;
 // Only CLOCK_REALTIME is standard.

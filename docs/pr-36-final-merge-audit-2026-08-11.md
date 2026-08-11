@@ -9,10 +9,9 @@
 
 ## 1. 当前结论
 
-实现层面的本地阻断项已经关闭，可以进入最终远端门禁；在新提交推送并由最终 PR HEAD 的
-完整 required checks 返回前，结论保持 **暂不合并**。旧远端 HEAD `87732d7c` 当前仍为
-`UNSTABLE`，失败项是 Ubuntu Clang TSan Debug、macOS Debug、macOS RelWithDebInfo；这些
-结果不能代表本轮修复后的 SHA。
+实现层面的本地阻断项已经关闭，可以进入最终远端门禁；在本轮兼容性修复推送并由最终 PR
+HEAD 的完整 required checks 返回前，结论保持 **暂不合并**。审计开始时远端 HEAD
+`8dcd2e0d` 的 Docker 与 Evidence Gate 失败仍属于旧 SHA，不能代表本轮修复后的结果。
 
 合并结论只允许按以下规则转换：
 
@@ -210,3 +209,40 @@ fallback 伪快路径。
 
 这些项目必须继续保持 `needs-remediation`、`unknown` 或 `external-required`，但不应用缺失的
 生产容量证明否定本 PR 已完成的代码正确性门禁，也不能反过来把本地 smoke 写成生产证明。
+
+## 9. 2026-08-11 增量复核：Alpine/musl `sigevent` 兼容性
+
+### F19：Docker Alpine 构建依赖 glibc 私有 `sigevent` 字段
+
+远端 Docker job `31484501403 / 93756692241` 在 Alpine 3.18（musl）编译
+`src/vm/internal/posix_timers.cc:65` 时失败：musl 的 `struct sigevent` 没有 glibc 私有字段
+`_sigev_un`。直接替换为 `sigev_notify_thread_id` 又会在 Ubuntu glibc 的当前头文件下失败，
+因为 glibc 没有公开该别名。
+
+已执行的最小修复：
+
+- 增加 `set_eval_timer_thread_id()` helper；
+- glibc 使用其 Linux ABI 中的 `_sigev_un._tid`；
+- 提供 `sigev_notify_thread_id` 宏的 libc（Alpine/musl）使用公开宏；
+- 其他 Linux libc 在编译期明确报错，不静默创建错误的定时器目标。
+
+该修复不改变 `SIGEV_THREAD_ID`、`SYS_gettid`、信号处理器或计时器时钟回退顺序。
+
+### F19 验证证据
+
+| 检查 | 结果 |
+| --- | --- |
+| Ubuntu GCC Debug 增量构建 | 通过 |
+| Debug eval/mudlib/owner 定向合同 | 6/6 |
+| TSan eval/mudlib/owner 定向合同 | 6/6；`setarch x86_64 -R` |
+| TSan focused subset | 360/360；`setarch x86_64 -R`；无 TSan 报告 |
+| Alpine 3.18 Docker build | 通过；musl 编译、静态链接和镜像生成均通过 |
+| Docker entrypoint smoke | 通过；`/fluffos/bin/driver --version` 返回 0 |
+| Docs/workflow/action pin self-test | 全部通过 |
+
+### F19 远端处理
+
+本地修复完成前，PR#36 仍指向旧 SHA `8dcd2e0db945eef2b3b83b0df0c503f739367953`，
+merge state 为 `UNSTABLE`。提交并推送本修复后，必须等待 Docker、Evidence Gate 及全部
+required checks 针对新 SHA 重跑；旧 SHA 的失败或成功都不继承。远端全部 required checks
+通过且无冲突后，才可将 §1 结论改为 **可合并**。
