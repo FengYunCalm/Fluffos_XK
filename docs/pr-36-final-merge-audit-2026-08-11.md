@@ -3,15 +3,18 @@
 > 审计日期：2026-08-11（Asia/Shanghai）
 > 审计对象：[FengYunCalm/FluffOS_XK PR #36](https://github.com/FengYunCalm/FluffOS_XK/pull/36)
 > Base：`24bd5f4f5126963966d1d91787f327f4cc84a5e7`
-> 已审实现提交：`04088aa90fd6c12dfb597b9dccbce7585a87a93f`、`3fa46cf46106e83aeb30fb4a117496823c7df6a3`
+> 已审实现提交：`04088aa90fd6c12dfb597b9dccbce7585a87a93f`、`3fa46cf46106e83aeb30fb4a117496823c7df6a3`、`e588262ba71e4922f24d07852299f5a225cfd9e6`、`f45778ff7f2894fbdd0291d1b62d7a9b73a943cb`
 > 上一版审计文档提交：`87732d7c31cfa814f021140f72488f41fbc01ec7`
 > 分支：`feat/exec-audit-plan-2026-08-09`
 
 ## 1. 当前结论
 
-实现层面的本地阻断项已经关闭，可以进入最终远端门禁；在本轮兼容性修复推送并由最终 PR
-HEAD 的完整 required checks 返回前，结论保持 **暂不合并**。审计开始时远端 HEAD
-`8dcd2e0d` 的 Docker 与 Evidence Gate 失败仍属于旧 SHA，不能代表本轮修复后的结果。
+本轮兼容性修复与 Evidence Gate artifact 修复均已完成。代码修复提交
+`f45778ff7f2894fbdd0291d1b62d7a9b73a943cb` 的完整 required checks 已成功，且当时 PR
+merge state 为 `CLEAN`/`MERGEABLE`。本报告闭环提交会形成新的 PR HEAD，必须对新 HEAD
+重跑完整 required checks；重跑成功且保持无冲突后，结论为 **可合并**。审计开始时旧 HEAD
+`8dcd2e0d` 的 Docker/Evidence Gate 失败，以及中间 HEAD `e588262b` 的 Evidence Gate
+失败，均不代表当前 HEAD。
 
 合并结论只允许按以下规则转换：
 
@@ -21,7 +24,8 @@ HEAD 的完整 required checks 返回前，结论保持 **暂不合并**。审�
 - Future、ObjectHandle、release artifact/digest 三组人工合同复核无回退；
 - 工作树没有未提交任务改动，PR 可合并状态无冲突。
 
-满足以上条件后，建议改为 **可合并**。任一 required check 失败则继续按 §7 修复，不允许跳过。
+任一 required check 后续回退为失败、取消或缺失，或 merge state 变为冲突，必须回到 §7
+处理，不允许跳过门禁。
 
 ## 2. 本轮新增发现与修复
 
@@ -264,10 +268,17 @@ PR HEAD `e588262ba71e4922f24d07852299f5a225cfd9e6` 的 CI Run `31487695555` 中�
   `capacity/*_raw.json` 路径因此恢复到校验器要求的 `build/reports/capacity/*_raw.json`；
 - 不放宽 `check-evidence.py` 的 raw 文件存在性或 SHA-256 校验。
 
-### F20 验证要求
+### F20 验证结果
 
-1. 本地复现 artifact 目录布局后运行 `check-evidence.py --mode gate`，三份 envelope 的
-   raw 文件存在且 digest 全部匹配；
-2. `check-workflows.py --self-test`、`check-docs.py`、action pin 检查通过；
-3. 推送后等待 PR HEAD 对应的 Evidence Gate 与全部 required checks 重跑；Evidence Gate
-   通过、required checks 全部成功、无冲突且 merge state 为 `CLEAN` 前，结论保持 **暂不合并**。
+| 检查 | 结果 |
+| --- | --- |
+| 本地 artifact 布局复现 + `check-evidence.py --mode gate` | 通过；3 envelopes，raw 文件存在且 SHA-256 全部匹配 |
+| `check-workflows.py --self-test` | 通过；含 Evidence Gate 双 artifact 下载契约负例 |
+| `check-docs.py`、`check-actions-pins.py --self-test`、`test-evidence-gate.py` | 全部通过 |
+| 代码修复提交 `f45778ff` CI Run `31490583896` | 成功；Evidence Gate job `93783872067` 成功 |
+| Docker Run `31490583878` | 成功 |
+| CodeQL Run `31490583917` 与 CodeQL check-run | 成功 |
+| 代码修复提交当时的 PR merge state | `CLEAN` / `MERGEABLE` |
+
+F20 的 artifact 缺失阻断已关闭；当前没有遗留的 P0/P1 代码阻断。文档闭环提交后的
+required checks 仍是最终合并门禁。
