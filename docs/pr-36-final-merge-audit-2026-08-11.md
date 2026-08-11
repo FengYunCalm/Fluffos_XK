@@ -246,3 +246,28 @@ fallback 伪快路径。
 merge state 为 `UNSTABLE`。提交并推送本修复后，必须等待 Docker、Evidence Gate 及全部
 required checks 针对新 SHA 重跑；旧 SHA 的失败或成功都不继承。远端全部 required checks
 通过且无冲突后，才可将 §1 结论改为 **可合并**。
+
+## 10. 2026-08-11 增量复核：Evidence Gate raw artifact 下载边界
+
+### F20：Evidence Gate 未下载 envelope 绑定的 raw 报告
+
+PR HEAD `e588262ba71e4922f24d07852299f5a225cfd9e6` 的 CI Run `31487695555` 中，
+`capacity-evidence-envelope` 只包含三份 `*_capacity.json`，而三份 `*_raw.json` 被保存在
+独立的 `lpc-modern-runtime-bench-raw` artifact。Evidence Gate 只下载前者；校验器按
+`raw_report` + `raw_sha256` 绑定规则正确拒绝了缺失 raw 文件的 envelope。
+
+### F20 修复
+
+- 保持 envelope 与 raw artifact 分离，避免 raw JSON 被当作 envelope 扫描；
+- Evidence Gate 继续把 envelope 下载到 `build/reports/capacity`；
+- 新增 raw artifact 下载步骤，并将目标设为 `build/reports`。该 artifact 的内部
+  `capacity/*_raw.json` 路径因此恢复到校验器要求的 `build/reports/capacity/*_raw.json`；
+- 不放宽 `check-evidence.py` 的 raw 文件存在性或 SHA-256 校验。
+
+### F20 验证要求
+
+1. 本地复现 artifact 目录布局后运行 `check-evidence.py --mode gate`，三份 envelope 的
+   raw 文件存在且 digest 全部匹配；
+2. `check-workflows.py --self-test`、`check-docs.py`、action pin 检查通过；
+3. 推送后等待 PR HEAD 对应的 Evidence Gate 与全部 required checks 重跑；Evidence Gate
+   通过、required checks 全部成功、无冲突且 merge state 为 `CLEAN` 前，结论保持 **暂不合并**。

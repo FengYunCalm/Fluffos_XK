@@ -18,7 +18,8 @@ cannot protect once it fails to parse:
 4. the Docker PR gate smoke path matches the Dockerfile ENTRYPOINT (R2-F03):
    a renamed binary or entrypoint that the smoke does not exercise fails here.
 5. capacity evidence uploads only `*_capacity.json` envelopes while raw JSON
-   is retained in the separate raw artifact (R2-F07);
+   is retained in the separate raw artifact, and the Evidence Gate downloads
+   both artifacts into the layout required by the digest binding (R2-F07);
 6. the release workflow mounts the exact image archive into Trivy, persists
    the scan report, verifies the copied release SBOM/manifest, and binds the
    scan report to the independently inspected digest (R2-F08).
@@ -262,6 +263,40 @@ def check_capacity_artifact_split(workflows: list[tuple[str, dict]]) -> list[str
                 f"{CI_WORKFLOW}: raw benchmark artifact must retain "
                 "build/reports/capacity/*_raw.json"
             )
+
+    envelope_download = find_step(
+        ci, "evidence-check", "Download capacity evidence envelope"
+    )
+    if envelope_download is None:
+        errors.append(f"{CI_WORKFLOW}: Evidence Gate envelope download step is missing")
+    else:
+        with_block = envelope_download.get("with") or {}
+        if with_block.get("name") != "capacity-evidence-envelope":
+            errors.append(
+                f"{CI_WORKFLOW}: Evidence Gate must download the named envelope artifact"
+            )
+        if with_block.get("path") != "build/reports/capacity":
+            errors.append(
+                f"{CI_WORKFLOW}: Evidence Gate envelope path must be "
+                "'build/reports/capacity'"
+            )
+
+    raw_download = find_step(
+        ci, "evidence-check", "Download capacity evidence raw reports"
+    )
+    if raw_download is None:
+        errors.append(f"{CI_WORKFLOW}: Evidence Gate raw download step is missing")
+    else:
+        with_block = raw_download.get("with") or {}
+        if with_block.get("name") != "lpc-modern-runtime-bench-raw":
+            errors.append(
+                f"{CI_WORKFLOW}: Evidence Gate must download the named raw artifact"
+            )
+        if with_block.get("path") != "build/reports":
+            errors.append(
+                f"{CI_WORKFLOW}: Evidence Gate raw path must be 'build/reports' "
+                "so capacity/*_raw.json lands beside envelopes"
+            )
     return errors
 
 
@@ -451,7 +486,25 @@ jobs:
                         "with": {"path": "build/reports/capacity/*_raw.json"},
                     },
                 ]
-            }
+            },
+            "evidence-check": {
+                "steps": [
+                    {
+                        "name": "Download capacity evidence envelope",
+                        "with": {
+                            "name": "capacity-evidence-envelope",
+                            "path": "build/reports/capacity",
+                        },
+                    },
+                    {
+                        "name": "Download capacity evidence raw reports",
+                        "with": {
+                            "name": "lpc-modern-runtime-bench-raw",
+                            "path": "build/reports",
+                        },
+                    },
+                ]
+            },
         }
     }
     if check_capacity_artifact_split([(CI_WORKFLOW, capacity_ok)]):
@@ -474,6 +527,25 @@ jobs:
     }
     if not check_capacity_artifact_split([(CI_WORKFLOW, capacity_bad)]):
         failures.append("capacity artifact split: checker accepted raw JSON in the envelope")
+
+    capacity_missing_raw_download = {
+        "jobs": {
+            "build-and-test": capacity_ok["jobs"]["build-and-test"],
+            "evidence-check": {
+                "steps": [
+                    {
+                        "name": "Download capacity evidence envelope",
+                        "with": {
+                            "name": "capacity-evidence-envelope",
+                            "path": "build/reports/capacity",
+                        },
+                    }
+                ]
+            },
+        }
+    }
+    if not check_capacity_artifact_split([(CI_WORKFLOW, capacity_missing_raw_download)]):
+        failures.append("capacity artifact split: checker accepted missing raw download")
 
     release_scan = """\
 docker run --rm \\
