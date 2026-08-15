@@ -30,7 +30,7 @@
 | S3 | `aec12ca7` | 2026-07-20 | 默认参数 helper 冲突/直接调用填充 (#1298) | **accepted**（fill_default_args 提取 + 4 调用点接入；generate.cc ast_json 部分本地不存在，不适用） |
 | S4 | `2d317e45` | 2026-07-20 | apply.cc inline 默认参数栈损坏 | **accepted**（DEFER fp/sv_funcp 恢复 + 先调用后压栈；测试通过） |
 | S5 | `d9171788` | 2026-07-20 | 10 个稳定性 bug umbrella | **accepted**（子项拆分：class/socket/restore/error-handler/mapping/fill_default_args 6 项移植；disassembler std::string 安全、ast_json 本地无、lexer 旧结构无此形态、ffi 无包、add_message 本地不同实现 5 项不适用） |
-| S6 | `4d5345f5` | 2026-07-20 | preprocessor 递归 x2 + db.cc 锁 | unknown |
+| S6 | `4d5345f5` | 2026-07-20 | preprocessor 递归 x2 + db.cc 锁 | **accepted**（lex.cc cond_get_exp 深度 cap 500 wrapper；db.cc 本地已全函数加锁 included；宏展开本地 EXPANDMAX 机制 included） |
 | S7 | `948b49ed` | 2026-07-27 | object refcount over-decrement | unknown |
 | S8 | `b0d3d297` | 2026-07-27 | net_dead teardown 回归测试 (#1330) | unknown |
 | S9 | `f3e5bfa7` | 2026-07-22 | 宏展开/lexer C 栈递归消除 | B 旧结构疑似未含 |

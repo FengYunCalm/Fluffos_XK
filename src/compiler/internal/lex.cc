@@ -475,7 +475,33 @@ static char optab2[] = {
     8,    0,   '=', EQ,   7,   0,    0, 0,   '&', LAND,   3, 0,      BAND, 6,     0,   '|',
     LOR,  2,   0,   BOR,  4,   0,    0, XOR, 5,   0,      0, QMARK,  1};
 
+static LPC_INT cond_get_exp_impl(int priority);
+static LPC_INT cond_get_exp(int priority);
+
+// The #if/#elif evaluator is recursive-descent; its recursion depth tracks
+// paren / unary-operator / ternary nesting, which is attacker-controlled
+// with no bound from the token count. Cap it so a pathological
+// `#if ((((...))))` fails with a clean diagnostic instead of overflowing
+// the C stack. (Upstream lexer_rules_pp.cc kMaxIfExprDepth=500; sized well
+// under the ASan build's measured overflow boundary, matching the
+// parse-tree walkers' 500-deep caps.) The wrapper owns the depth counter so
+// every exit path (including lexerror()'s non-fatal error returns) restores
+// it; recursive calls inside the impl resolve to this wrapper and get
+// checked at every level.
 static LPC_INT cond_get_exp(int priority) {
+  static int ifexpr_depth = 0;
+  constexpr int kMaxIfExprDepth = 500;
+  if (++ifexpr_depth > kMaxIfExprDepth) {
+    --ifexpr_depth;
+    lexerror("#if expression nested too deeply");
+    return 0;
+  }
+  LPC_INT result = cond_get_exp_impl(priority);
+  --ifexpr_depth;
+  return result;
+}
+
+static LPC_INT cond_get_exp_impl(int priority) {
   int c;
   LPC_INT value, value2, x;
 

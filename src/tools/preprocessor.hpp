@@ -720,6 +720,20 @@ static int cond_get_exp(int priority) {
   char c;
   int value, value2, x;
 
+  // The #if/#elif evaluator is recursive-descent; its recursion depth tracks
+  // paren / unary-operator / ternary nesting, which is attacker-controlled
+  // with no bound from the token count. Cap it so a pathological
+  // `#if ((((...))))` fails with a clean diagnostic instead of overflowing
+  // the C stack. (Upstream lexer_rules_pp.cc kMaxIfExprDepth=500; sized well
+  // under the ASan build's measured overflow boundary, matching the
+  // parse-tree walkers' 500-deep caps.) All intermediate `return 0` paths
+  // follow yyerrorp(), which exits, so only the tail needs the decrement.
+  static int ifexpr_depth = 0;
+  constexpr int kMaxIfExprDepth = 500;
+  if (++ifexpr_depth > kMaxIfExprDepth) {
+    yyerrorp("%cif expression nested too deeply");
+  }
+
   if ((c = exgetc()) == '(') {
     value = cond_get_exp(0);
     if ((c = exgetc()) != ')') yyerrorp("bracket not paired in %cif");
@@ -876,6 +890,7 @@ static int cond_get_exp(int priority) {
     }
   }
   //outp--;
+  ifexpr_depth--;
   return value;
 }
 
