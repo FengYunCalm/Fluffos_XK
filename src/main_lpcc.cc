@@ -76,7 +76,7 @@ int run_owner_audit_json(const char *config_file, const char *lpc_file) {
 }
 }  // namespace
 
-int main(int argc, char** argv) {
+static int lpcc_main(int argc, char** argv) {
   if (argc == 5 && std::string(argv[1]) == "--owner-audit" && std::string(argv[2]) == "--format=json") {
     return run_owner_audit_json(argv[3], argv[4]);
   }
@@ -140,4 +140,20 @@ int main(int argc, char** argv) {
   clear_state();
 
   return 0;
+}
+
+
+int main(int argc, char** argv) {
+  // Nothing may throw past main() (json serialization errors, an LPC
+  // error() unwind escaping the guarded compile) -- that would be
+  // std::terminate/abort instead of a clean CLI failure.
+  try {
+    return lpcc_main(argc, argv);
+  } catch (const std::exception& e) {
+    fprintf(stderr, "lpcc: fatal: %s\n", e.what());
+    return 1;
+  } catch (...) {
+    fprintf(stderr, "lpcc: fatal: unhandled exception\n");
+    return 1;
+  }
 }

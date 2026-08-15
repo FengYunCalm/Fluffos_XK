@@ -118,10 +118,12 @@ void dump_prog(program_t *prog, FILE *f, int flags) {
     flags = prog->function_flags[runtime_index];
 
     char smods[4];
-    smods[0] = (flags & DECL_HIDDEN) ? '-' : '-';
-    smods[0] = (flags & DECL_PRIVATE) ? 'p' : '-';
-    smods[0] = (flags & DECL_PROTECTED) ? 'P' : '-';
-    smods[0] = (flags & DECL_PUBLIC) ? '+' : '-';
+    // One access-level char, most restrictive modifier wins.
+    smods[0] = (flags & DECL_HIDDEN)      ? 'h'
+               : (flags & DECL_PRIVATE)   ? 'p'
+               : (flags & DECL_PROTECTED) ? 'P'
+               : (flags & DECL_PUBLIC)    ? '+'
+                                          : '-';
     smods[1] = (flags & DECL_NOMASK) ? 'm' : '-';
     smods[2] = (flags & DECL_NOSAVE) ? 's' : '-';
     smods[3] = '\0';

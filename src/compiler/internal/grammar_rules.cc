@@ -13,6 +13,19 @@
 extern int context;       // FIXME
 extern int func_present;  // FIXME
 
+// Snapshot of the function declaration's own line, taken in rule_func_type()
+// (fired right after `type optional_star identifier` -- current_line is
+// still on the function header, in the right file) and consumed by
+// rule_func() once the whole body has been parsed. rule_func() can't just
+// capture current_line itself: by the time it fires, parsing has moved on
+// past the closing '}' (LALR needs a lookahead token to reduce), which can
+// mean a completely different file if the function was the last thing in
+// an #included header. Function declarations don't nest (LPC has no named
+// function inside a function), so a single non-reentrant slot is safe --
+// anonymous/lambda functions go through the expression rules instead and
+// never touch this. (Upstream 06d23cfb #1293.)
+static int pending_func_decl_line;
+
 void rule_program(parse_node_t *$$) { comp_trees[TREE_MAIN] = $$; }
 
 bool rule_inheritence(parse_node_t **$$, int $1, char *$3) {
@@ -104,6 +117,7 @@ LPC_INT rule_func_type(LPC_INT type, LPC_INT optional_star, char *identifier) {
 #ifdef SENSIBLE_MODIFIERS
   int acc_mod;
 #endif
+  pending_func_decl_line = current_line_base + current_line;
   func_present = 1;
   flags = (type >> 16);
 
@@ -199,6 +213,19 @@ void rule_func(parse_node_t **function, LPC_INT type, LPC_INT optional_star, cha
     if (fun != -1) {
       *function = new_node_no_line();
       (*function)->kind = NODE_FUNCTION;
+      // Safety net alongside the explicit-return line fix in the return
+      // rules: a function whose body has NO explicit return (an implicit
+      // `return 0;`/`return;` gets synthesized above by this rule itself,
+      // via CREATE_RETURN's default new_node_no_line()) can still reach
+      // codegen with every one of its statements' lines equal to 0 -- e.g.
+      // an empty body, or one whose only statement the optimizer discards
+      // entirely (a side-effect-free expression statement). Stamping the
+      // function's own declaration line here (captured early, in
+      // rule_func_type(), before parsing could drift into a different
+      // file -- see pending_func_decl_line's comment) makes
+      // i_generate_node()'s existing `if (expr->line && ...)` guard call
+      // switch_to_line() at function entry regardless of what's inside.
+      (*function)->line = pending_func_decl_line;
       (*function)->v.number = fun;
       (*function)->l.number = max_num_locals;
       (*function)->r.expr = *block_or_semi;

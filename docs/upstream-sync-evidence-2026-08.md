@@ -38,10 +38,10 @@
 | S11 | `d0549220+bf73c66e` | 2026-07-20/21 | float 未初始化 + typed lvalue (#1303/#1305) | unknown |
 | S12 | `dca0eae0` | 2026-07-20 | 位运算残留 undefined subtype (#1302) | **accepted**（f_lsh/f_rsh/f_xor 加 sp->subtype=0；测试通过） |
 | S13 | `b1fb96f3` | 2026-07-24 | AFL++ 5 bug umbrella | **accepted**（restore 字符串 NUL 终止循环 x2 文件 4 处循环 + get_restore_size sizes 边界；add_mapping_string 本地 make_shared_string 语义无所有权转移，不适用；fuzz harness 为 E2 待选） |
-| S14 | `0f91897c` | 2026-07-19 | Coverity disassembler/lpcc (#1294) | unknown |
-| S15 | `06d23cfb` | 2026-07-18 | 无 return 行号归属 (#1293) | unknown |
+| S14 | `0f91897c` | 2026-07-19 | Coverity disassembler/lpcc (#1294) | **accepted**（smods 最严格修饰符优先；lpcc main 异常包装；sprintf→snprintf 本地 std::string 无溢出形态） |
+| S15 | `06d23cfb` | 2026-07-18 | 无 return 行号归属 (#1293) | **accepted**（pending_func_decl_line 快照 + rule_func 盖章） |
 | S16 | `8fe05a5d` | 2026-07-13 | libwebsockets 4.5.8 升级 (#1260) | B 本地 4.2.1，CVE 适用性待核对 |
-| S17 | `3ec802f6` | 2026-07-21 | null backbone_domain + lpcc --batch | unknown |
+| S17 | `3ec802f6` | 2026-07-21 | null backbone_domain + lpcc --batch | **accepted**（backbone_domain null 守卫；--batch 属可选增强 T4 跳过） |
 | P1 | `3e341817` | 2026-08-09 | 去 per-svalue 堆分配 (#1342) | 未含（已确认） |
 | P2 | `1e4d4145` | 2026-08-12 | ASCII O(1) sizeof/索引 (#1344) | 未含（已确认） |
 | P3 | `1099b482` | 2026-08-12 | 诊断渲染加速 + arena (#1343) | 未含（已确认） |
