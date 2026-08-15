@@ -27,8 +27,8 @@
 |---|---|---|---|---|
 | S1 | `98f09f3d` | 2026-07-20 | f_present() id() 析构空指针 | **accepted**（基线崩溃复现→修复→通过） |
 | S2 | `ec9b6a4a` | 2026-07-20 | string/object 拼接 UAF/栈损坏 | **accepted**（逐字等价移植，测试通过） |
-| S3 | `aec12ca7` | 2026-07-20 | 默认参数 helper 冲突/直接调用填充 (#1298) | unknown |
-| S4 | `2d317e45` | 2026-07-20 | apply.cc inline 默认参数栈损坏 | unknown |
+| S3 | `aec12ca7` | 2026-07-20 | 默认参数 helper 冲突/直接调用填充 (#1298) | **accepted**（fill_default_args 提取 + 4 调用点接入；generate.cc ast_json 部分本地不存在，不适用） |
+| S4 | `2d317e45` | 2026-07-20 | apply.cc inline 默认参数栈损坏 | unknown（与 S3 同批，待核对） |
 | S5 | `d9171788` | 2026-07-20 | 10 个稳定性 bug umbrella | unknown |
 | S6 | `4d5345f5` | 2026-07-20 | preprocessor 递归 x2 + db.cc 锁 | unknown |
 | S7 | `948b49ed` | 2026-07-27 | object refcount over-decrement | unknown |
