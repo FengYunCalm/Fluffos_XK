@@ -25,7 +25,7 @@
 
 | # | 上游 commit | 日期 | 问题 | 本地状态（初筛） |
 |---|---|---|---|---|
-| S1 | `98f09f3d` | 2026-07-20 | f_present() id() 析构空指针 | B 疑似已含 |
+| S1 | `98f09f3d` | 2026-07-20 | f_present() id() 析构空指针 | **accepted**（基线崩溃复现→修复→通过） |
 | S2 | `ec9b6a4a` | 2026-07-20 | string/object 拼接 UAF/栈损坏 | unknown |
 | S3 | `aec12ca7` | 2026-07-20 | 默认参数 helper 冲突/直接调用填充 (#1298) | unknown |
 | S4 | `2d317e45` | 2026-07-20 | apply.cc inline 默认参数栈损坏 | unknown |
