@@ -110,9 +110,23 @@ inline void ReplaceStringInPlace(std::string &subject, const std::string &search
 // relative movement to improve speed. but offer no access to underlying break iterator.
 class EGCSmartIterator : public EGCIterator {
  public:
-  EGCSmartIterator(const char *src, int32_t slen) : EGCIterator(src, slen) {}
+  EGCSmartIterator(const char* src, int32_t slen) : EGCIterator(src, slen) {}
   size_t count() {
     if (count_ == -1) {
+      // ASCII: one cluster per byte, so the count is the byte length. This is
+      // the hot one -- sizeof(str) on a mudlib string lands here.
+      //
+      // Leave the cursor at the end, exactly where the ICU walk below leaves
+      // it. No current caller counts and then keeps iterating (they all use
+      // the value, or re-seek with index_to_offset first), but letting the
+      // two paths disagree about cursor state would make a later count() +
+      // next() silently mean different things on ASCII and non-ASCII input.
+      if (is_ascii()) {
+        count_ = len();
+        current_idx_ = count_;
+        ascii_pos_ = len();
+        return count_;
+      }
       count_ = 0;
       brk_->first();
       while (brk_->next() != icu::BreakIterator::DONE) ++count_;
@@ -121,6 +135,16 @@ class EGCSmartIterator : public EGCIterator {
     return count_;
   }
   int32_t index_to_offset(int32_t index) {
+    // ASCII: EGC index == byte offset. Boundaries are 0..len, a negative index
+    // counts back from the end, and anything outside that range is DONE --
+    // matching what the ICU walk below returns for the same input.
+    if (is_ascii()) {
+      int32_t off = index >= 0 ? index : len() + index;
+      if (off < 0 || off > len()) return icu::BreakIterator::DONE;
+      ascii_pos_ = off;
+      current_idx_ = index;
+      return off;
+    }
     if (index == 0) {
       current_idx_ = 0;
       return brk_->first();
@@ -154,19 +178,42 @@ class EGCSmartIterator : public EGCIterator {
   int32_t post_index_to_offset(int32_t index) {
     auto pos = index_to_offset(index);
     if (pos < 0) return pos;
+    if (is_ascii()) {
+      // Mirrors the ICU pair below: next() then previous(). Off the end,
+      // next() reports DONE and the following previous() still steps the
+      // cursor back one boundary -- reproduce that side effect exactly.
+      if (pos >= len()) {
+        ascii_pos_ = len() > 0 ? len() - 1 : 0;
+        return icu::BreakIterator::DONE;
+      }
+      return pos + 1;  // cursor stays at pos, as next()+previous() leaves it
+    }
     pos = brk_->next();
     brk_->previous();
     return pos;
   }
   int32_t first() {
     current_idx_ = 0;
+    if (is_ascii()) {
+      ascii_pos_ = 0;
+      return 0;
+    }
     return brk_->first();
   }
   int32_t last() {
     current_idx_ = -1;
+    if (is_ascii()) {
+      ascii_pos_ = len();
+      return len();
+    }
     return brk_->last();
   }
   int32_t next() {
+    if (is_ascii()) {
+      if (ascii_pos_ >= len()) return icu::BreakIterator::DONE;  // cursor unchanged
+      current_idx_++;
+      return ++ascii_pos_;
+    }
     auto oldpos = brk_->current();
     auto pos = brk_->next();
     if (pos == icu::BreakIterator::DONE) {
@@ -180,6 +227,7 @@ class EGCSmartIterator : public EGCIterator {
  private:
   int32_t current_idx_ = 0;
   int32_t count_ = -1;
+  int32_t ascii_pos_ = 0;  // byte offset cursor, ASCII fast path only
 };
 
 // Check string s is valid utf8
@@ -201,4 +249,5 @@ int32_t u8_egc_find_as_offset(EGCIterator &iter, const char *needle, size_t need
 
 std::vector<std::string_view> u8_egc_split(const char *src, int32_t slen);
 std::string u8_convert_encoding(UConverter *trans, const char *data, int len);
+bool u8_string_is_ascii_cached(const char *str, int32_t len, bool counted);
 #endif  // STRUTILS_H

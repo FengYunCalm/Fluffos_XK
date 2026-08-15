@@ -178,6 +178,7 @@ static block_t *alloc_new_shared_string(const char *string, int h, const char *w
   }
   SIZE(b) = (len > UINT_MAX ? UINT_MAX : len);
   REFS(b) = 1;
+  b->ascii = MSTR_ASCII_UNKNOWN;  // computed lazily on first EGC query
   md_record_ref_journal(PTR_TO_NODET(b), true, b->refs, "alloc_new_shared_string: " + std::string(why));
   NEXT(b) = base_table[h];
   HASH(b) = h;
@@ -371,6 +372,7 @@ char *int_new_string(unsigned int size)
     ADD_NEW_STRING(UINT_MAX, sizeof(malloc_block_t));
   }
   mbt->ref = 1;
+  mbt->ascii = MSTR_ASCII_UNKNOWN;  // computed lazily on first EGC query
   ADD_STRING(mbt->size);
   CHECK_STRING_STATS;
   return reinterpret_cast<char *>(mbt + 1);
@@ -387,6 +389,9 @@ char *extend_string(const char *str, int len) {
   } else {
     mbt->size = UINT_MAX;
   }
+  // The caller is about to write new bytes into the extended buffer, so a
+  // previously cached ASCII answer no longer describes the contents.
+  mbt->ascii = MSTR_ASCII_UNKNOWN;
   ADD_STRING_SIZE(stralloc_detail::logical_length(mbt->size) -
                   stralloc_detail::logical_length(oldsize));
   CHECK_STRING_STATS;
@@ -466,6 +471,13 @@ char *int_string_unlink(const char *str)
     ADD_NEW_STRING(mbt->size, sizeof(malloc_block_t));
   }
   newmbt->ref = 1;
+  // This is the one string-block allocation that goes through raw DMALLOC
+  // instead of int_new_string()/alloc_new_shared_string(), so the ascii
+  // field is heap garbage unless set here. Garbage that happens to equal
+  // MSTR_ASCII_YES on a non-ASCII string would make sizeof() answer from
+  // the byte length. UNKNOWN (not a copy of mbt->ascii) because every
+  // caller unlinks precisely in order to mutate the bytes next.
+  newmbt->ascii = MSTR_ASCII_UNKNOWN;
   CHECK_STRING_STATS;
 
   return reinterpret_cast<char *>(newmbt + 1);

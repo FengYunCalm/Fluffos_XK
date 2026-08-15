@@ -1,3 +1,4 @@
+#include "base/internal/stralloc.h"
 #include "base/internal/strutils.h"
 
 #include <cctype>
@@ -554,4 +555,22 @@ std::string u8_convert_encoding(UConverter *trans, const char *data, int len) {
     }
   }
   return result;
+}
+
+
+// See the declaration in strutils.h. The scan itself is EGCIterator's
+// (all_ascii); this only adds the per-string memoization, which is what
+// makes a repeated sizeof() on the same string O(1) instead of O(n).
+// (Upstream #1344.)
+bool u8_string_is_ascii_cached(const char *str, int32_t len, bool counted) {
+  if (!counted) {  // no block header to memoize into
+    return EGCIterator::scan_is_ascii(str, len);
+  }
+  unsigned char cached = MSTR_ASCII(str);
+  if (cached != MSTR_ASCII_UNKNOWN) {
+    return cached == MSTR_ASCII_YES;
+  }
+  bool ascii = EGCIterator::scan_is_ascii(str, len);
+  MSTR_ASCII(str) = ascii ? MSTR_ASCII_YES : MSTR_ASCII_NO;
+  return ascii;
 }

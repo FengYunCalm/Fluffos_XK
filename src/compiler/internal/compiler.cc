@@ -16,6 +16,7 @@
 #include "icode.h"
 #include "lex.h"
 #include "compiler/internal/lpc_source_encoding.h"
+#include "base/internal/strutils.h"  // u8_string_is_ascii_cached
 #include "scratchpad.h"
 #include "symbol.h"
 #include <string>
@@ -1437,6 +1438,17 @@ short store_prog_string(const char *str) {
 
   const auto *origin_str = str;
 
+  // Settle "is this pure ASCII?" HERE, at compile time, once per literal.
+  //
+  // Every program string literal is interned through this one function, and
+  // the shared-string header has a field for the answer -- so paying a single
+  // scan now means sizeof()/indexing on a literal never scans at runtime, no
+  // matter how hot the loop around it is. The alternative is deriving it
+  // lazily on first use: the same scan, but on the runtime path and after the
+  // mud is live.
+  //
+  // Cheap and idempotent -- a string already interned by an earlier compile
+  // just reads its cached tag straight back. (Upstream #1344.)
   bool is_new_string = false;
   str = findstring(origin_str);
 
@@ -1444,6 +1456,7 @@ short store_prog_string(const char *str) {
     str = make_shared_string(origin_str);
     is_new_string = true;
   }
+  u8_string_is_ascii_cached(str, static_cast<int32_t>(strlen(str)), /*counted=*/true);
 
   STRING_HASH(hash, str);
   idxp = &string_idx[hash];

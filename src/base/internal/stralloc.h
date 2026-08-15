@@ -127,6 +127,19 @@ inline void adjust_byte_counter(std::atomic<uint64_t> &counter, int64_t delta) n
   } while (0)
 
 // The layout of malloc_block_s must be same as block_s
+/* Cached answer to "is this string pure ASCII (and CR-free)?", so the
+ * grapheme-cluster machinery can be skipped outright rather than re-derived
+ * on every sizeof()/index. Tri-state, and the UNKNOWN default is
+ * load-bearing: a string-creation path that forgets to set it degrades to
+ * scanning (slow but correct) instead of asserting a wrong answer.
+ *
+ * Lives in the two bytes of padding that already sat between `ref` and the
+ * string data, so sizeof(block_t) is unchanged in every build. (Upstream
+ * #1344.) */
+#define MSTR_ASCII_UNKNOWN 0u
+#define MSTR_ASCII_YES 1u
+#define MSTR_ASCII_NO 2u
+
 typedef struct malloc_block_s {
   void *_padding1;
   unsigned int _padding2;
@@ -135,12 +148,16 @@ typedef struct malloc_block_s {
 #endif
   unsigned int size;
   unsigned short ref;
+  unsigned char ascii;
 } malloc_block_t;
 
 #define MSTR_BLOCK(x) (((malloc_block_t *)(x)) - 1)
 #define MSTR_EXTRA_REF(x) (MSTR_BLOCK(x)->extra_ref)
 #define MSTR_REF(x) (MSTR_BLOCK(x)->ref)
 #define MSTR_SIZE(x) (MSTR_BLOCK(x)->size)
+/* Valid only for STRING_MALLOC / STRING_SHARED (i.e. STRING_COUNTED) strings;
+ * a STRING_CONSTANT points at a literal with no block header. */
+#define MSTR_ASCII(x) (MSTR_BLOCK(x)->ascii)
 #define MSTR_UPDATE_SIZE(x, y)                                                        \
   SAFE(const auto requested_string_size = (y);                                       \
        const auto stored_string_size =                                               \
@@ -185,6 +202,7 @@ typedef struct block_s {
   /* these two must be last */
   unsigned int size;   /* length of the string */
   unsigned short refs; /* reference count    */
+  unsigned char ascii;
 } block_t;
 
 static_assert(sizeof(malloc_block_t) == sizeof(block_t),
