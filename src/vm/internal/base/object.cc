@@ -75,6 +75,30 @@ static void reset_restore_scratch() {
   }
 }
 
+// restore_array()/restore_mapping()/restore_class() recurse in lockstep
+// with the one-shot sizing pre-pass (restore_size()/restore_internal_size(),
+// which populates sizes[0..N-1] as it walks the string) ONLY as long as
+// both parsers agree on where each nested container starts. They are two
+// independent hand-written parsers over the same untrusted bytes, and a
+// malformed byte sequence can desync them -- e.g. parse_numeric() silently
+// treats whatever byte follows a numeral as an already-consumed delimiter
+// without validating it, so a numeral directly followed by a stray "({"
+// makes the real parse believe it has entered a nested array the sizing
+// pass never saw (it read that same span as one opaque scalar token via
+// its coarser "scan to the next delimiter" fallback). When that happens,
+// save_svalue_depth can exceed what the sizing pass ever populated --
+// `sizes` may still be null, or the depth may exceed max_depth -- and
+// indexing sizes[save_svalue_depth - 1] reads off the end of (or into a
+// null) allocation. Treat that as the malformed input it is.
+// (Upstream b1fb96f3.)
+static bool get_restore_size(int *out) {
+  if (!sizes || save_svalue_depth > max_depth) {
+    return false;
+  }
+  *out = sizes[save_svalue_depth - 1];
+  return true;
+}
+
 int svalue_save_size(svalue_t *v) {
   switch (v->type) {
     case T_STRING: {
@@ -470,7 +494,7 @@ static int restore_interior_string(char **val, svalue_t *sv) {
   char c;
   int len;
 
-  while ((c = *cp++) != '"') {
+  while ((c = *cp++) != '"' && c) {
     switch (c) {
       case '\r': {
         *(cp - 1) = '\n';
@@ -481,7 +505,14 @@ static int restore_interior_string(char **val, svalue_t *sv) {
         char *news = cp - 1;
 
         if ((*news++ = *cp++)) {
-          while ((c = *cp++) != '"') {
+          // The condition must stop on '\0' too, not just '"': an
+          // unterminated escaped string (no closing quote before the end
+          // of the buffer) otherwise falls into the plain-character branch
+          // below, which copies the NUL byte and keeps looping -- an
+          // unbounded read past the end of the allocation. The `if (c ==
+          // '\0')` check after the loop only catches this correctly once
+          // the loop itself can actually exit on NUL. (Upstream b1fb96f3.)
+          while ((c = *cp++) != '"' && c) {
             if (c == '\\') {
               if (!(*news++ = *cp++)) {
                 return ROB_STRING_ERROR;
@@ -657,7 +688,9 @@ static int restore_mapping(char **str, svalue_t *sv) {
   int err;
 
   if (save_svalue_depth) {
-    size = sizes[save_svalue_depth - 1];
+    if (!get_restore_size(&size)) {
+      return 0;
+    }
   } else if ((size = restore_size((const char **)str, 1)) < 0) {
     return 0;
   }
@@ -886,7 +919,9 @@ static int restore_class(char **str, svalue_t *ret) {
   int err;
 
   if (save_svalue_depth) {
-    size = sizes[save_svalue_depth - 1];
+    if (!get_restore_size(&size)) {
+      return ROB_CLASS_ERROR;
+    }
   } else if ((size = restore_size((const char **)str, 0)) < 0) {
     return ROB_CLASS_ERROR;
   }
@@ -994,7 +1029,9 @@ static int restore_array(char **str, svalue_t *ret) {
   int err;
 
   if (save_svalue_depth) {
-    size = sizes[save_svalue_depth - 1];
+    if (!get_restore_size(&size)) {
+      return ROB_ARRAY_ERROR;
+    }
   } else if ((size = restore_size((const char **)str, 0)) < 0) {
     return ROB_ARRAY_ERROR;
   }
@@ -1104,7 +1141,7 @@ static int restore_string(char *val, svalue_t *sv) {
   char c;
   int len;
 
-  while ((c = *cp++) != '"') {
+  while ((c = *cp++) != '"' && c) {
     switch (c) {
       case '\r': {
         *(cp - 1) = '\n';

@@ -37,7 +37,7 @@
 | S10 | `8b0aee8a` | 2026-07-21 | 5 个 latent gaps umbrella | **accepted**（async readthread fd/size 修复；mark_sockets TLS options 标记；parser parse_recurse 预算；#if 求值器已在 S6；icode 聚合 guard 本地无 NODE_AGGREGATE 降级记录） |
 | S11 | `d0549220+bf73c66e` | 2026-07-20/21 | float 未初始化 + typed lvalue (#1303/#1305) | unknown |
 | S12 | `dca0eae0` | 2026-07-20 | 位运算残留 undefined subtype (#1302) | **accepted**（f_lsh/f_rsh/f_xor 加 sp->subtype=0；测试通过） |
-| S13 | `b1fb96f3` | 2026-07-24 | AFL++ 5 bug umbrella | unknown |
+| S13 | `b1fb96f3` | 2026-07-24 | AFL++ 5 bug umbrella | **accepted**（restore 字符串 NUL 终止循环 x2 文件 4 处循环 + get_restore_size sizes 边界；add_mapping_string 本地 make_shared_string 语义无所有权转移，不适用；fuzz harness 为 E2 待选） |
 | S14 | `0f91897c` | 2026-07-19 | Coverity disassembler/lpcc (#1294) | unknown |
 | S15 | `06d23cfb` | 2026-07-18 | 无 return 行号归属 (#1293) | unknown |
 | S16 | `8fe05a5d` | 2026-07-13 | libwebsockets 4.5.8 升级 (#1260) | B 本地 4.2.1，CVE 适用性待核对 |

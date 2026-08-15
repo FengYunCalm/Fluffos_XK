@@ -417,7 +417,7 @@ int restore_hash_string(char **val, svalue_t *sv) {
   char *cp = *val;
   char c, *start = cp;
 
-  while ((c = *cp++) != '"') {
+  while ((c = *cp++) != '"' && c) {
     switch (c) {
       case '\r':
         *(cp - 1) = '\n';
@@ -427,7 +427,10 @@ int restore_hash_string(char **val, svalue_t *sv) {
         char *news = cp - 1;
 
         if ((c = *news++ = *cp++)) {
-          while ((c = *cp++) != '"') {
+          // The condition must stop on '\0' too, not just '"': an
+          // unterminated escaped string otherwise copies the NUL byte and
+          // keeps looping -- unbounded read past the end. (Upstream b1fb96f3.)
+          while ((c = *cp++) != '"' && c) {
             if (c == '\\') {
               if (!(c = *news++ = *cp++)) {
                 return ROB_STRING_ERROR;
