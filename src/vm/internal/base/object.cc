@@ -1930,6 +1930,25 @@ void dealloc_object(object_t *ob, const char *from) {
     FREE((char *)ob->obname);
     SETOBNAME(ob, nullptr);
   }
+  // Unlink from the destruct queue if this object is still awaiting its
+  // remove_destructed_objects() sweep -- an early drop to ref 0 (e.g.
+  // reclaim_objects() freeing a stray reference to a destructed object)
+  // reaches here first, and leaving it queued would have the sweep call
+  // destruct2() on freed memory (an ASan-confirmed heap-use-after-free).
+  // The queue lives on its own next_destruct link, so this unlink can
+  // never disturb next_all/prev_all (which DEBUG builds use below for the
+  // obj_list_dangling leak-hunting list).
+  if (obj_list_destruct == ob) {
+    obj_list_destruct = ob->next_destruct;
+  } else if (obj_list_destruct) {
+    for (object_t *q = obj_list_destruct; q->next_destruct; q = q->next_destruct) {
+      if (q->next_destruct == ob) {
+        q->next_destruct = ob->next_destruct;
+        break;
+      }
+    }
+  }
+  ob->next_destruct = nullptr;
 #ifdef DEBUG
   prev_all = ob->prev_all;
   if (prev_all) {

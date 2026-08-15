@@ -124,15 +124,23 @@ void int_free_svalue(svalue_t *v)
     }
 #endif
     /* TODO: Set to 0 on condition that REF overflow to negative. */
+    bool reached_zero = false;
     if (v->u.refed->ref > 0) {
       v->u.refed->ref--;
+      reached_zero = (v->u.refed->ref == 0);
 #ifdef DEBUGMALLOC_EXTENSIONS
       if (v->u.refed != (void *) &the_null_array && v->u.refed != (void *) &null_buf) {
         md_record_ref_journal(PTR_TO_NODET(v->u.refed), false, v->u.refed->ref, tag);
       }
 #endif // DEBUGMALLOC_EXTENSIONS
     }
-    if (v->u.refed->ref == 0) {
+    /* Only deallocate when THIS call performed the 1 -> 0 decrement. The
+     * underflow guard above used to suppress just the decrement while the
+     * unconditional `ref == 0` check still ran the dealloc -- so a second
+     * aliased svalue freeing an already-deallocated value (ref reads 0 from
+     * freed memory) triggered a second dealloc instead of containing the
+     * corruption. */
+    if (reached_zero) {
       switch (v->type) {
         case T_OBJECT:
           dealloc_object(v->u.ob, "free_svalue");

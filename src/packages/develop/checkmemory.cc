@@ -645,7 +645,7 @@ void check_all_blocks(int flag) {
         DEBUG_CHECK(query_heart_beat(ob) == 0, "Driver BUG: object with heartbeat not in hb table");
       }
     }
-    for (ob = obj_list_destruct; ob; ob = ob->next_all) {
+    for (ob = obj_list_destruct; ob; ob = ob->next_destruct) {
       if ((ob->flags & O_HEART_BEAT) != 0) {
         DEBUG_CHECK(query_heart_beat(ob) == 0, "Driver BUG: object with heartbeat not in hb table");
       }
@@ -734,7 +734,7 @@ void check_all_blocks(int flag) {
       ob->extra_ref++;
     }
     /* objects on obj_list_destruct still have a ref too */
-    for (ob = obj_list_destruct; ob; ob = ob->next_all) {
+    for (ob = obj_list_destruct; ob; ob = ob->next_destruct) {
       ob->extra_ref++;
     }
 
@@ -805,19 +805,19 @@ void check_all_blocks(int flag) {
             {
               object_t *tmp = obj_list;
               while (tmp && tmp != ob) {
-                tmp = tmp->next_all;
+                tmp = tmp->next_destruct;
               }
               if (!tmp) {
                 tmp = obj_list_destruct;
                 while (tmp && tmp != ob) {
-                  tmp = tmp->next_all;
+                  tmp = tmp->next_destruct;
                 }
               }
 #ifdef DEBUG
               if (!tmp) {
                 tmp = obj_list_dangling;
                 while (tmp && tmp != ob) {
-                  tmp = tmp->next_all;
+                  tmp = tmp->next_destruct;
                 }
                 if (tmp) outbuf_addv(&out, "WARNING: %s is dangling.\n", ob->obname);
               }

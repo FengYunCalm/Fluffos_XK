@@ -164,15 +164,20 @@ size_t remove_destructed_objects_bounded(size_t max_count) {
 
   size_t removed = 0;
   while (obj_list_destruct && removed < max_count) {
+    /* Detach the whole queue up front: destruct2() frees object variables,
+     * which can re-enter destruct_object() -- those pushes must land on a
+     * fresh queue for the next sweep instead of being dropped when the head
+     * is cleared afterwards. Each object is unlinked before its destruct2()
+     * so a still-referenced survivor keeps no stale queue link. */
     auto *ob = obj_list_destruct;
-    obj_list_destruct = ob->next_all;
-    if (obj_list_destruct) {
-      obj_list_destruct->prev_all = nullptr;
+    obj_list_destruct = nullptr;
+    while (ob && removed < max_count) {
+      auto *next = ob->next_destruct;
+      ob->next_destruct = nullptr;
+      destruct2(ob);
+      removed++;
+      ob = next;
     }
-    ob->next_all = nullptr;
-    ob->prev_all = nullptr;
-    destruct2(ob);
-    removed++;
   }
 
   destructed_object_cleanup_last_removed.store(removed, std::memory_order_relaxed);
@@ -190,7 +195,7 @@ void remove_destructed_objects() {
 
 size_t vm_destructed_object_backlog_size() {
   size_t count = 0;
-  for (auto *ob = obj_list_destruct; ob; ob = ob->next_all) {
+  for (auto *ob = obj_list_destruct; ob; ob = ob->next_destruct) {
     count++;
   }
   return count;
