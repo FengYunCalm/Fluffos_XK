@@ -3116,6 +3116,21 @@ static void parse_recurse(char **iwords, char **ostart, char **oend) {
   int first = 1;
   int l, idx;
 
+  // parse_recurse() enumerates every way to segment the sentence's words into
+  // dictionary phrases -- a tree whose branching factor is the number of
+  // registered compound-noun prefixes, so a cooperating dictionary can make it
+  // exponential independently of parse_rule()'s own backtracking. Meter it
+  // with a hard budget: once tripped, every pending parse_recurse() frame
+  // returns immediately, running its normal cleanup on the way out (a plain
+  // return chain, not an error() that would skip it). (Upstream 8b0aee8a
+  // shares parse_rule's counter; the local parser has no such counter, so a
+  // dedicated budget is used instead.)
+  static int parse_recurse_steps = 0;
+  constexpr int kMaxParseRecurseSteps = 1000000;
+  if (++parse_recurse_steps > kMaxParseRecurseSteps) {
+    return;
+  }
+
   if (*iwords[0]) {
     *buf = 0;
     p = buf;
