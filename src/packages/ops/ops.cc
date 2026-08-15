@@ -351,6 +351,7 @@ void f_lsh() {
   CHECK_TYPES(sp, T_NUMBER, 2, F_LSH);
   sp--;
   sp->u.number <<= (sp + 1)->u.number;
+  sp->subtype = 0;
 }
 
 void f_lsh_eq() {
@@ -861,6 +862,7 @@ void f_rsh() {
   CHECK_TYPES(sp, T_NUMBER, 2, F_RSH);
   sp--;
   sp->u.number >>= (sp + 1)->u.number;
+  sp->subtype = 0;
 }
 
 void f_rsh_eq() {
@@ -1156,6 +1158,7 @@ void f_xor() {
   CHECK_TYPES(sp, T_NUMBER, 2, F_XOR);
   sp--;
   sp->u.number ^= (sp + 1)->u.number;
+  sp->subtype = 0;
 }
 
 void f_xor_eq() {

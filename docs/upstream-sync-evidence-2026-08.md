@@ -36,7 +36,7 @@
 | S9 | `f3e5bfa7` | 2026-07-22 | 宏展开/lexer C 栈递归消除 | **not-applicable**（本地 add_input 输入缓冲迭代式展开 + EXPANDMAX 全局计数，无 C 栈递归形态；已核对） |
 | S10 | `8b0aee8a` | 2026-07-21 | 5 个 latent gaps umbrella | **accepted**（async readthread fd/size 修复；mark_sockets TLS options 标记；parser parse_recurse 预算；#if 求值器已在 S6；icode 聚合 guard 本地无 NODE_AGGREGATE 降级记录） |
 | S11 | `d0549220+bf73c66e` | 2026-07-20/21 | float 未初始化 + typed lvalue (#1303/#1305) | unknown |
-| S12 | `dca0eae0` | 2026-07-20 | 位运算残留 undefined subtype (#1302) | unknown |
+| S12 | `dca0eae0` | 2026-07-20 | 位运算残留 undefined subtype (#1302) | **accepted**（f_lsh/f_rsh/f_xor 加 sp->subtype=0；测试通过） |
 | S13 | `b1fb96f3` | 2026-07-24 | AFL++ 5 bug umbrella | unknown |
 | S14 | `0f91897c` | 2026-07-19 | Coverity disassembler/lpcc (#1294) | unknown |
 | S15 | `06d23cfb` | 2026-07-18 | 无 return 行号归属 (#1293) | unknown |
