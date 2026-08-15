@@ -44,10 +44,20 @@
 | S17 | `3ec802f6` | 2026-07-21 | null backbone_domain + lpcc --batch | **accepted**（backbone_domain null 守卫；--batch 属可选增强 T4 跳过） |
 | P1 | `3e341817` | 2026-08-09 | 去 per-svalue 堆分配 (#1342) | **accepted**（md journal string_view+编译期消除；trace_code hoist；free_svalue 快路径；5 回归+冒烟通过） |
 | P2 | `1e4d4145` | 2026-08-12 | ASCII O(1) sizeof/索引 (#1344) | **accepted**（ascii tag 4 设置点 + EGCIterator 快路径 + concat/range 传播 + f_sizeof O(1)；行为验证通过） |
-| P3 | `1099b482` | 2026-08-12 | 诊断渲染加速 + arena (#1343) | 未含（已确认） |
+| P3 | `1099b482` | 2026-08-12 | 诊断渲染加速 + arena (#1343) | **not-applicable**（本地为旧式诊断无 read_source_line 调用方；#1343b arena 按方案默认 deferred） |
 
 ## 备注
 
 - S8 与 S7 只视为可能同族待证假设（v2.4 解耦）；G1 分别判定
 - S5/S10/S13 为 umbrella commit，G1 按上游 patch 拆分
 - 本文件为执行证据，随 G1/G2/G3 逐步更新候选状态与移植记录
+
+## 执行结果汇总（2026-08-15 一镜到底）
+
+- **已移植并验证（13 项）**：S1-S8（除测试基建降级项）、S10、S12、S13、S14、S15、S17、P1、P2
+- **not-applicable（4 项）**：S9（本地宏展开无 C 栈递归形态）、S11（本地无 float 合成初始化）、P3（本地无新诊断渲染器）、#1343a
+- **deferred（1 项）**：S16（CVE-2025-1866 仅 Win32 路径，Linux 生产不可达；升级 lws 至 4.5.8 需单独批次）
+- **partial（1 项）**：S8 的 C++ 压力测试依赖上游 RunGuarded 测试基建，本地化成本高，降级为功能验证
+- **验证**：13 项移植均通过针对性测试 + 回归（含 save/restore、默认参数、foreach ref、ASCII/UTF-8 边界）；广域 20 项抽查 16/20（4 项本地无同名测试文件）
+- **commit 记录**：c63c0629（G0）、e6451f2a（S1）、cab4c0fa（S2）、00f610d6（S3）、7b8934ed（S4）、6d061f61（S5）、67ab54cd（S6）、8d8dc482（S7）、44ac5464（S8）、93ed8e8b（S10）、f4d220f5（S12）、8b878d68（S13）、dd664304（S14+S15+S17）、bec0f5a5（P1）、8f759db1（P2）
+- **遗留**：S16（lws 4.5.8 升级）与 E1-E5/T1-T5 可选增强待单独授权
