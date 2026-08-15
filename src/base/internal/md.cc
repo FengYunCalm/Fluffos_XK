@@ -52,8 +52,8 @@ std::mutex &md_refjournal_mutex() {
 } // namespace
 #endif
 
-void md_record_ref_journal(md_node_t *node, bool is_ref, int current_ref, std::string desc) {
 #ifdef DEBUGMALLOC_EXTENSIONS
+void md_record_ref_journal(md_node_t *node, bool is_ref, int current_ref, std::string_view desc) {
   auto tag = node->tag & 0xff;
   if (tag != (TAG_STRING & 0xff) && tag != (TAG_MALLOC_STRING & 0xff) &&
       tag != (TAG_SHARED_STRING & 0xff)) {
@@ -63,11 +63,9 @@ void md_record_ref_journal(md_node_t *node, bool is_ref, int current_ref, std::s
   auto entry = fmt::format(FMT_STRING("{:s}: {:s}, ref={:d}\n"), is_ref ? "REF" : "UNREF", desc, current_ref);
   std::lock_guard<std::mutex> lock(md_refjournal_mutex());
   md_refjournal()[id].push_back(std::move(entry));
-#endif
 }
 
 void md_print_ref_journal(md_node_t *node, outbuffer_t *outbuf) {
-#ifdef DEBUGMALLOC_EXTENSIONS
   auto id = node->id;
   std::vector<std::string> entries;
   {
@@ -82,8 +80,8 @@ void md_print_ref_journal(md_node_t *node, outbuffer_t *outbuf) {
   for (auto &entry: entries) {
     outbuf_add(outbuf, entry.c_str());
   }
-#endif
 }
+#endif  // DEBUGMALLOC_EXTENSIONS
 
 namespace {
 std::recursive_mutex &md_allocation_mutex() {

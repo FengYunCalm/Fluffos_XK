@@ -42,7 +42,7 @@
 | S15 | `06d23cfb` | 2026-07-18 | 无 return 行号归属 (#1293) | **accepted**（pending_func_decl_line 快照 + rule_func 盖章） |
 | S16 | `8fe05a5d` | 2026-07-13 | libwebsockets 4.5.8 升级 (#1260) | B 本地 4.2.1，CVE 适用性待核对 |
 | S17 | `3ec802f6` | 2026-07-21 | null backbone_domain + lpcc --batch | **accepted**（backbone_domain null 守卫；--batch 属可选增强 T4 跳过） |
-| P1 | `3e341817` | 2026-08-09 | 去 per-svalue 堆分配 (#1342) | 未含（已确认） |
+| P1 | `3e341817` | 2026-08-09 | 去 per-svalue 堆分配 (#1342) | **accepted**（md journal string_view+编译期消除；trace_code hoist；free_svalue 快路径；5 回归+冒烟通过） |
 | P2 | `1e4d4145` | 2026-08-12 | ASCII O(1) sizeof/索引 (#1344) | 未含（已确认） |
 | P3 | `1099b482` | 2026-08-12 | 诊断渲染加速 + arena (#1343) | 未含（已确认） |
 
