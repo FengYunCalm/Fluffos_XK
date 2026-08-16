@@ -40,6 +40,8 @@ struct FlagEntry {
 };
 
 const FlagEntry INT_FLAGS[] = {
+    {"enable recompile object", __RECOMPILE_OBJECT_ENABLED__, 0},
+    {"recompile object quiesce timeout ms", __RECOMPILE_OBJECT_QUIESCE_TIMEOUT_MS__, 2000},
     {"time to clean up", __TIME_TO_CLEAN_UP__, 600},
     {"time to reset", __TIME_TO_RESET__, 900},
     {"time to swap", __TIME_TO_SWAP__, 300},

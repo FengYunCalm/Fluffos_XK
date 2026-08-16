@@ -119,3 +119,10 @@ int valid_hide() {
     // same here
     return 1;
 }
+
+int valid_recompile_object(object binder, object target) {
+    inherit_called++;
+    // Tests use this to exercise the recompile_object() path; production
+    // mudlibs decide here.
+    return 1;
+}

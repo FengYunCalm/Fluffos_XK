@@ -220,6 +220,7 @@ void set_hide(int);
 
 #ifndef NO_RESETS
 void set_clean_up(object, void | int);
+int recompile_object(object);
 void set_reset(object, void | int);
 #endif
 
