@@ -7,6 +7,11 @@
 /* FP_LOCAL */
 typedef struct {
   short index;
+  /* E3 P2: the program this index belongs to at creation/bind time. It is
+   * also the func_ref accounting object: dealloc_funp() decrements THIS
+   * program's func_ref, never the owner's current program (which can be
+   * hot-replaced). NULL for non-FP_LOCAL uses of the union slot. */
+  struct program_t *prog;
 } local_ptr_t;
 
 /* FP_SIMUL */
@@ -36,6 +41,11 @@ struct funptr_hdr_t {
 #endif
   struct object_t *owner;
   struct array_t *args;
+  /* E3 P2: owner->prog_generation at creation/bind time. FP_LOCAL and
+   * FP_FUNCTIONAL call paths compare generations and report a stable
+   * stale-function-pointer error after recompile_object() swaps programs;
+   * a fresh funptr snapshots the new generation. */
+  uint64_t owner_gen;
 };
 
 struct funptr_t {

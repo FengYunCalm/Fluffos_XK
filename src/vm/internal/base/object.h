@@ -86,6 +86,10 @@ struct object_t {
                            0 = use the idle-time rule (time_of_ref +
                            time_to_clean_up) */
   program_t *prog;
+  /* E3 P2: bumped by recompile_object() when the program is swapped on the
+   * live object; funptrs snapshot it so stale function pointers report a
+   * stable error instead of resolving indices against the new program. */
+  uint64_t prog_generation;
   struct object_t *next_all;
   struct object_t *prev_all;
   struct object_t *next_destruct; /* obj_list_destruct queue link (destruct_object() ->

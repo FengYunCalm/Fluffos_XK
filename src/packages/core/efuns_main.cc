@@ -26,6 +26,8 @@
 #include "packages/core/regexp.h"
 #include "packages/core/sprintf.h"  // string_print_formatted
 #include "packages/core/outbuf.h"
+#include "vm/internal/owner_runtime_coordinator.h"
+#include "vm/internal/base/apply_cache.h"
 #include "packages/core/reclaim.h"
 #include "packages/core/custom_crypt.h"
 #include "packages/core/ed.h"
@@ -152,6 +154,10 @@ void f_bind() {
   *new_fp = *old_fp;
   new_fp->hdr.ref = 1;
   new_fp->hdr.owner = ob; /* one ref from being on stack */
+  /* E3 P2: bind re-homes the funptr on the new owner -- snapshot the new
+   * owner's generation, and for FP_LOCAL move the func_ref accounting to
+   * the new owner's program (the index is resolved against the caller's
+   * current program at call time). */
   if (new_fp->hdr.args) {
     new_fp->hdr.args->ref++;
   }
@@ -159,7 +165,12 @@ void f_bind() {
     new_fp->f.functional.prog->func_ref++;
     debug(d_flag, "add func ref /%s: now %i\n", new_fp->f.functional.prog->filename,
           new_fp->f.functional.prog->func_ref);
+  } else if ((old_fp->hdr.type & 0x0f) == FP_LOCAL && new_fp->f.local.prog != ob->prog) {
+    new_fp->f.local.prog->func_ref--;
+    new_fp->f.local.prog = ob->prog;
+    new_fp->f.local.prog->func_ref++;
   }
+  new_fp->hdr.owner_gen = ob->prog_generation;
 
   free_funp(old_fp);
   sp--;
@@ -3341,6 +3352,116 @@ void f_query_shadowing() {
 
 #ifdef F_SET_RESET
 #ifdef F_SET_CLEAN_UP
+#ifdef F_RECOMPILE_OBJECT
+namespace {
+// Process-local transaction guard: only the main thread competes for it,
+// and it is held before the master hook so nested recompile attempts (from
+// valid_recompile_object itself) are rejected. (v0.4 §5.3.)
+std::atomic<bool> g_recompile_transaction_active{false};
+}  // namespace
+
+void f_recompile_object() {
+  object_t *ob = sp->u.ob;
+
+  // 1. Main-thread check, no shared writes yet (owner workers get a stable
+  //    error without touching the guard).
+  if (!vm_context_is_main_thread()) {
+    error("recompile_object requires the main thread\n");
+  }
+
+  // 2. Transaction guard.
+  bool expected = false;
+  if (!g_recompile_transaction_active.compare_exchange_strong(expected, true)) {
+    error("recompile_object transaction already active\n");
+  }
+  struct Guard {
+    ~Guard() { g_recompile_transaction_active.store(false); }
+  } guard;
+
+  // 3. Runtime switch (default off).
+  if (!CONFIG_INT(__RECOMPILE_OBJECT_ENABLED__)) {
+    error("recompile_object is disabled\n");
+  }
+
+  // 4. Live blueprint argument (clones and destructed objects rejected).
+  if (!ob || (ob->flags & O_DESTRUCTED) || !ob->prog) {
+    error("recompile_object requires a blueprint\n");
+  }
+  if (ob->flags & O_CLONE) {
+    error("recompile_object requires a blueprint\n");
+  }
+
+  // 5. Master authorization (fail-closed).
+  push_object(ob);
+  svalue_t *ret = safe_apply_master_ob(APPLY_VALID_RECOMPILE_OBJECT, 1);
+  if (!MASTER_APPROVED(ret)) {
+    error("recompile_object requires master authorization\n");
+  }
+
+  // 6. Special targets rejected (v1).
+  {
+    extern object_t *master_ob;
+    if (ob == master_ob) {
+      error("recompile_object target is unsupported: master\n");
+    }
+    extern object_t *simul_efun_ob;
+    if (ob == simul_efun_ob) {
+      error("recompile_object target is unsupported: simul_efun\n");
+    }
+  }
+
+  // 7. Owner quiescence: close admission and wait for active owner work.
+  int64_t timeout_ms = CONFIG_INT(__RECOMPILE_OBJECT_QUIESCE_TIMEOUT_MS__);
+  if (timeout_ms <= 0) timeout_ms = 2000;
+  auto quiesce = vm_owner_recompile_quiesce_begin(std::chrono::milliseconds(timeout_ms));
+  if (!quiesce.ok) {
+    error("recompile_object owner quiescence timed out\n");
+  }
+  struct QuiesceGuard {
+    uint64_t epoch;
+    ~QuiesceGuard() { vm_owner_recompile_quiesce_end(epoch); }
+  } quiesce_guard{quiesce.epoch};
+
+  // Re-check the blueprint after freezing (TOCTOU).
+  if ((ob->flags & O_DESTRUCTED) || !ob->prog || (ob->flags & O_CLONE)) {
+    error("recompile_object requires a blueprint\n");
+  }
+
+  // 8. Staging compile, layout check, frozen snapshot, no-fail commit.
+  RecompilePrepared prepared;
+  prepared.staged = compile_program_for_recompile(ob);
+  prepared.old_prog = ob->prog;
+  prepared.old_prog->ref++;  // transaction pin
+  prepared.old_layout = describe_recompile_layout(ob->prog);
+  prepared.new_layout = describe_recompile_layout(prepared.staged.prog);
+
+  std::string first_diff;
+  if (!recompile_layouts_match(prepared.old_layout, prepared.new_layout, &first_diff)) {
+    error("recompile_object layout mismatch: %s\n", first_diff.c_str());
+  }
+
+  // Apply lookup table must be fully built while still frozen (v0.4 §9.3).
+  prepare_apply_lookup_table(prepared.staged.prog);
+
+  snapshot_recompile_targets(ob, &prepared);
+  commit_recompile_targets_noexcept(&prepared);
+
+  int count = static_cast<int>(prepared.targets.size());
+  // Release the snapshot add_refs (still FROZEN; objects are live and keep
+  // their identity; the refs were for snapshot stability only).
+  for (auto &t : prepared.targets) {
+    if (t.ob) {
+      object_t *snap = t.ob;
+      t.ob = nullptr;
+      free_object(&snap, "f_recompile_object");
+    }
+  }
+  free_object(&ob, "f_recompile_object");
+  sp--;
+  push_number(count);
+}
+#endif
+
 void f_set_clean_up() {
   object_t *ob;
 

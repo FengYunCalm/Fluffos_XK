@@ -15,9 +15,9 @@ void dealloc_funp(funptr_t *fp) {
 
   switch (fp->hdr.type) {
     case FP_LOCAL | FP_NOT_BINDABLE:
-      if (fp->hdr.owner) {
-        prog = fp->hdr.owner->prog;
-      }
+      /* E3 P2: decrement the creation-time program, never the owner's
+       * current program (recompile_object() may have swapped it). */
+      prog = fp->f.local.prog;
       break;
     case FP_FUNCTIONAL:
     case FP_FUNCTIONAL | FP_NOT_BINDABLE:
@@ -132,9 +132,13 @@ funptr_t *make_lfun_funp(int index, svalue_t *args) {
   add_ref(current_object, "make_lfun_funp");
   fp->hdr.type = FP_LOCAL | FP_NOT_BINDABLE;
 
-  fp->hdr.owner->prog->func_ref++;
-  debug(d_flag, "add func ref /%s: now %i\n", fp->hdr.owner->prog->filename,
-        fp->hdr.owner->prog->func_ref);
+  /* E3 P2: snapshot the creation-time program and generation. The program
+   * pointer is the func_ref accounting object for this funptr. */
+  fp->f.local.prog = fp->hdr.owner->prog;
+  fp->hdr.owner_gen = fp->hdr.owner->prog_generation;
+  fp->f.local.prog->func_ref++;
+  debug(d_flag, "add func ref /%s: now %i\n", fp->f.local.prog->filename,
+        fp->f.local.prog->func_ref);
 
   newindex = index + function_index_offset;
   if (current_object->prog->function_flags[newindex] & FUNC_ALIAS) {
@@ -188,6 +192,7 @@ funptr_t *make_functional_funp(short num_arg, short num_local, short len, svalue
   fp->hdr.owner = current_object;
   add_ref(current_object, "make_functional_funp");
   fp->hdr.type = FP_FUNCTIONAL + flag;
+  fp->hdr.owner_gen = current_object->prog_generation;  // E3 P2
 
   current_prog->func_ref++;
   debug(d_flag, "add func ref /%s: now %i\n", current_prog->filename, current_prog->func_ref);
@@ -293,6 +298,14 @@ svalue_t *call_function_pointer(funptr_t *funp, int num_arg) {
     }
     case FP_LOCAL | FP_NOT_BINDABLE: {
       function_t *func;
+
+      /* E3 P2: after recompile_object() swaps the owner's program, this
+       * funptr's index refers to the OLD program; never re-resolve it
+       * against the new one. Report a stable stale-pointer error (the old
+       * program stays alive via local.prog's func_ref for this message). */
+      if (funp->hdr.owner_gen != funp->hdr.owner->prog_generation) {
+        error("stale function pointer: the target program was recompiled\n");
+      }
 
       if (current_object->prog->function_flags[funp->f.local.index] &
           (FUNC_PROTOTYPE | FUNC_UNDEFINED)) {

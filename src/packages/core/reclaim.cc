@@ -49,14 +49,11 @@ static void check_svalue(svalue_t *v) {
       program_t *prog;
 
       if (v->u.fp->hdr.owner && (v->u.fp->hdr.owner->flags & O_DESTRUCTED)) {
-        if (v->u.fp->hdr.type == (FP_LOCAL | FP_NOT_BINDABLE)) {
-          prog = v->u.fp->hdr.owner->prog;
-          prog->func_ref--;
-          debug(d_flag, "subtr func ref /%s: now %i\n", prog->filename, prog->func_ref);
-          if (!prog->ref && !prog->func_ref) {
-            deallocate_program(prog);
-          }
-        }
+        /* E3 P2: detach the owner only. The funptr keeps pinning its
+         * creation-time program via local.prog's func_ref; dealloc_funp()
+         * performs the single symmetric decrement. The old manual
+         * owner->prog->func_ref-- here double-decremented once
+         * dealloc_funp() switched to local.prog (v0.4 §10.3). */
         free_object(&v->u.fp->hdr.owner, "reclaim_objects");
         v->u.fp->hdr.owner = nullptr;
         cleaned++;
