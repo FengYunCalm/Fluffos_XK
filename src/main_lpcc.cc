@@ -81,7 +81,7 @@ int run_owner_audit_json(const char *config_file, const char *lpc_file) {
 static int lpcc_main(int argc, char** argv) {
   bool flag_batch = false;
   std::vector<const char*> batch_files;
-  if (argc >= 3 && std::string(argv[1]) == "--owner-audit" && std::string(argv[2]) == "--format=json") {
+  if (argc == 5 && std::string(argv[1]) == "--owner-audit" && std::string(argv[2]) == "--format=json") {
     return run_owner_audit_json(argv[3], argv[4]);
   }
   if (argc >= 3 && std::string(argv[1]) == "--batch") {
