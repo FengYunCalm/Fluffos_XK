@@ -1952,10 +1952,8 @@ void dealloc_object(object_t *ob, const char *from) {
      * block leaked every reference the globals held. A variable
      * containing this very object is safe: its ref is already 0, so
      * int_free_svalue's underflow guard makes the nested free a no-op. */
-    if (ob->variables) {
-      for (int i = 0; i < ob->prog->num_variables_total; i++) {
-        free_svalue(&ob->variables[i], "dealloc_object");
-      }
+    for (int i = 0; i < ob->prog->num_variables_total; i++) {
+      free_svalue(&ob->variables[i], "dealloc_object");
     }
     tot_alloc_object_size -=
         (ob->prog->num_variables_total - 1) * sizeof(svalue_t) + sizeof(object_t);
