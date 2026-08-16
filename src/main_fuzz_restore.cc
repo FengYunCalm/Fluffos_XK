@@ -1,64 +1,68 @@
 // AFL++ deferred-fork-server harness for restore_variable()/save_variable().
 //
-// Boots the VM once (master + simul_efun, same as lpcc/lpcshell), then
-// calls __AFL_INIT() so AFL forks a fresh child per test case AFTER that
-// expensive one-time setup. Each child splits the input on a "\n===\n"
-// delimiter into a SEQUENCE of save-strings and runs restore_variable() on
-// each in turn, in the SAME process -- not just one call per exec. This
-// matters: object.cc's restore_svalue()/restore_array()/restore_mapping()/
-// restore_class() share file-scope scratch state (save_svalue_depth,
-// sizes[]) across calls, and the known bug class here (see AGENTS.md
-// section 13 point 4, and restore_variable_class.lpc) is exactly "one
-// restore's error() path leaves that scratch state dirty, and the NEXT
-// restore in the same process reads the stale value." A harness that forks
-// fresh per input and calls restore_variable() only once could never find
-// that -- it needs a first call to dirty the state and a second to observe
-// it, both inside one exec. Every successfully-restored value is also
-// round-tripped through save_variable()/restore_variable() once more, the
-// same sequence used while chasing the reported printf("%O") corruption.
-// Not wired into the default build (see BUILD_FUZZERS in CMakeLists.txt);
-// throwaway investigation tooling, not shipped functionality.
-#include "base/std.h"
+// Boots the VM once (master + simul_efun, same as lpcc), then calls
+// __AFL_INIT() so AFL forks a fresh child per test case AFTER that expensive
+// one-time setup. Each child splits the input on a "\n#==#\n" delimiter into
+// a SEQUENCE of save-strings and runs restore_variable() on each in the SAME
+// process.
+//
+// R2 hardening (2026-08): input open/read failures are now visible and fail
+// the process; success/diagnostic counts self-validate the harness (both
+// zero after non-empty input means restore_variable() was never actually
+// exercised -> non-zero exit).
 
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <string>
-#include <vector>
+#include "base/std.h"
 
 #include "mainlib.h"
 #include "vm/vm.h"
-#include "vm/internal/base/object.h"
-#include "vm/internal/base/machine.h"
+#include "vm/internal/simulate.h"
 #include "vm/internal/base/interpret.h"
+#include "vm/internal/base/machine.h"
+#include "vm/internal/base/object.h"
+#include "vm/internal/base/svalue.h"
+
+#include <cstdio>
+#include <string>
+#include <vector>
+
+char *save_variable(svalue_t *var);  // packages/core/save.cc
 
 #ifdef __AFL_HAVE_MANUAL_CONTROL
 #include <unistd.h>
 #endif
 
-char* save_variable(svalue_t* var);
-
 namespace {
 
-std::vector<char> read_file(const char* path) {
-  std::vector<char> data;
+// Reads the whole file. Returns false when the file cannot be opened or a
+// read error occurs (caller fails closed); an empty-but-open file returns
+// true with an empty vector.
+bool read_file(const char* path, std::vector<char>* out) {
+  out->clear();
   FILE* f = fopen(path, "rb");
-  if (!f) return data;
+  if (!f) {
+    return false;
+  }
   char buf[65536];
   size_t n;
+  bool read_ok = true;
   while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
-    data.insert(data.end(), buf, buf + n);
+    out->insert(out->end(), buf, buf + n);
+  }
+  if (ferror(f)) {
+    read_ok = false;
   }
   fclose(f);
-  return data;
+  return read_ok;
 }
 
-constexpr std::string_view kDelim = "\n===\n";
-constexpr size_t kMaxChunks = 64;  // bound worst-case work per exec
+constexpr std::string_view kDelim = "\n#==#\n";
+constexpr size_t kMaxChunks = 32;
 
-// One restore_variable() call, in its own caught error context -- exactly
-// how f_restore_variable() runs it -- followed by a save_variable()/
-// restore_variable() round-trip on success.
+// Per-process counters: both must be non-zero after any non-empty input, or
+// the harness did not exercise restore_variable() and must fail closed.
+int g_restore_success = 0;
+int g_restore_diagnostic = 0;
+
 void run_chunk(std::string chunk) {
   error_context_t econ{};
   save_context(&econ);
@@ -74,9 +78,12 @@ void run_chunk(std::string chunk) {
     FREE_MSTR(s2);
     free_svalue(&v2, "fuzz_restore: v2");
     free_svalue(&v, "fuzz_restore: v");
+    g_restore_success++;
   } catch (const char*) {
+    g_restore_diagnostic++;
     restore_context(&econ);
   } catch (...) {
+    g_restore_diagnostic++;
     restore_context(&econ);
   }
   pop_context(&econ);
@@ -120,8 +127,27 @@ int main(int argc, char** argv) {
   __AFL_INIT();
 #endif
 
-  std::vector<char> input = read_file(argv[2]);
+  std::vector<char> input;
+  if (!read_file(argv[2], &input)) {
+    fprintf(stderr, "fuzz_restore: cannot open/read input %s\n", argv[2]);
+    return 1;
+  }
+  if (input.empty()) {
+    fprintf(stderr, "fuzz_restore: input is empty; nothing to restore\n");
+    return 1;
+  }
+
   run_sequence(input);
 
+  if (g_restore_success == 0 && g_restore_diagnostic == 0) {
+    fprintf(stderr,
+            "fuzz_restore: harness self-check failed: restore_variable never exercised "
+            "(success=%d diagnostic=%d)\n",
+            g_restore_success, g_restore_diagnostic);
+    return 1;
+  }
+
+  fprintf(stderr, "fuzz_restore: success=%d diagnostic=%d\n", g_restore_success,
+          g_restore_diagnostic);
   return 0;
 }

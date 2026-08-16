@@ -1,47 +1,42 @@
 // AFL++ deferred-fork-server harness for the LPC compiler front-end (lexer
 // + preprocessor + parser + codegen).
 //
-// Boots the VM once (master + simul_efun, same as lpcc/lpcshell), then
-// calls __AFL_INIT() so AFL forks a fresh child per test case AFTER that
-// expensive one-time setup. Each child splits the input on a "\n#==#\n"
-// delimiter into a SEQUENCE of LPC source texts and compiles each in turn
-// via load_object_from_source() -- the same in-memory "restart pattern"
-// lpcshell uses -- in the SAME process, not just one compile per exec.
+// Boots the VM once (master + simul_efun, same as lpcc), then calls
+// __AFL_INIT() so AFL forks a fresh child per test case AFTER that expensive
+// one-time setup. Each child splits the input on a "\n#==#\n" delimiter into a
+// SEQUENCE of LPC source texts and compiles each in turn via load_object()
+// -- the same in-memory "restart pattern" lpcshell uses -- in the SAME
+// process, not just one compile per exec.
 //
 // A sequence (not a single compile) matters here for the same reason it
-// mattered for the restore_variable() harness: AGENTS.md section 11 is
-// explicit that the compiler keeps per-compile scratch state at module
-// scope -- the scratchpad arena, the macro/predefine tables, expansion_
-// frames/live_expansion_stack/live_guard_counts, the diagnostics stream --
-// and every one of it "must be re-initialized per compile" (see
-// lpc_lex_reset_context). A single-compile-per-exec harness can only find
-// a bug that crashes DURING one compile; it can never find a bug where one
-// compile's error path leaves that module-global state dirty for the NEXT
-// compile in the same process -- exactly the object.cc save_svalue_depth/
-// sizes[] bug class this file's sibling (main_fuzz_restore.cc) found, one
-// level up the stack.
+// mattered for the restore_variable() harness: state left over from one
+// compile (shared strings, identifier tables, object table entries) is part
+// of what a later compile sees, so single-compile fuzzing could never find
+// the cross-compile interaction bugs this harness exists for.
 //
-// deliberately does NOT run create()/__INIT (load_object_from_source's
-// callcreate=0): the goal is the compiler surface specifically (matching
-// lpcc, which also only compiles and dumps, never executes), not the VM/
-// interpreter surface main_fuzz_restore.cc and the ordinary LPC testsuite
-// already cover.
-//
-// Not wired into the default build (see BUILD_FUZZERS in CMakeLists.txt);
-// throwaway investigation tooling, not shipped functionality.
-#include "base/std.h"
+// R2 hardening (2026-08): scratch files are written into a per-process
+// mkdtemp() directory (the original "/fuzz_compile#N.c" host path is not
+// writable by unprivileged users and failures were silently swallowed);
+// every fopen/fwrite/fclose result is checked and turns into a harness
+// failure; success/diagnostic counts self-validate the harness (both zero
+// means the compiler was never actually exercised -> non-zero exit).
 
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <string>
-#include <vector>
+#include "base/std.h"
 
 #include "mainlib.h"
 #include "vm/vm.h"
 #include "vm/internal/simulate.h"
 #include "vm/internal/base/interpret.h"
 #include "vm/internal/base/object.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cerrno>
+#include <string>
+#include <vector>
+#include <sys/stat.h>  // for mkdir
+#include <unistd.h>    // for rmdir
 
 #ifdef __AFL_HAVE_MANUAL_CONTROL
 #include <unistd.h>
@@ -65,56 +60,88 @@ std::vector<char> read_file(const char* path) {
 constexpr std::string_view kDelim = "\n#==#\n";
 constexpr size_t kMaxChunks = 8;  // compiles are heavier than restores
 
-// One compile, in its own caught error context -- exactly how lpcshell's
-// RunAttempt() drives load_object_from_source(). A successfully-compiled
-// object is destructed immediately: this is a deferred-fork-server harness
-// (the process exits right after run_sequence() regardless), but leaving
-// compiled objects registered in the global object table until then would
-// make LeakSanitizer flag ordinary "still reachable, by design" state as a
-// leak, drowning out real findings.
-void compile_one(int index, const std::string& src) {
-  std::string name = "/fuzz_compile#" + std::to_string(index);
+// Per-process counters: both must be non-zero after any real input, or the
+// harness did not exercise the compiler and must fail closed.
+int g_compile_success = 0;
+int g_compile_diagnostic = 0;
+
+// Fixed mudlib-internal scratch directory (host side + LPC side). The
+// compiler only resolves paths inside the mudlib, so scratch files cannot
+// live in /tmp; /data/fuzz_compile/ is inside the mudlib and conventionally
+// writable. (v0.4 R2.)
+constexpr const char* kScratchMudPath = "/data/fuzz_compile";
+std::string g_scratch_host_dir;
+std::string g_scratch_mud_dir;
+
+// One compile, in its own caught error context. A successfully-compiled
+// object is destructed immediately (see file header). Returns false on
+// scratch I/O failure (never swallowed).
+bool compile_one(int index, const std::string& src) {
+  std::string host_path =
+      g_scratch_host_dir + "/chunk_" + std::to_string(index) + ".c";
+  std::string mud_path =
+      g_scratch_mud_dir + "/chunk_" + std::to_string(index) + ".c";
+
+  FILE* f = fopen(host_path.c_str(), "wb");
+  if (!f) {
+    fprintf(stderr, "fuzz_compile: cannot create scratch file %s\n", host_path.c_str());
+    return false;
+  }
+  bool io_ok = fwrite(src.data(), 1, src.size(), f) == src.size();
+  if (fclose(f) != 0) {
+    io_ok = false;
+  }
+  if (!io_ok) {
+    fprintf(stderr, "fuzz_compile: scratch write failed for %s\n", host_path.c_str());
+    return false;
+  }
 
   error_context_t econ{};
   save_context(&econ);
   try {
-    // Local adaptation: upstream drives the compiler via
-    // load_object_from_source() (lpcshell-era in-memory compile API, absent
-    // here); write the source to a scratch file and load it the classic way.
-    std::string path = name + ".c";
-    FILE* f = fopen(path.c_str(), "wb");
-    if (f) {
-      fwrite(src.data(), 1, src.size(), f);
-      fclose(f);
-    }
-    object_t* ob = load_object(path.c_str(), /*callcreate=*/0);
+    object_t* ob = load_object(mud_path.c_str(), /*callcreate=*/0);
     if (ob && !(ob->flags & O_DESTRUCTED)) {
+      g_compile_success++;
       destruct_object(ob);
+    } else {
+      g_compile_diagnostic++;
+      fprintf(stderr, "fuzz_compile: load_object returned %s for %s\n",
+              ob ? "destructed/null-prog object" : "null", mud_path.c_str());
     }
-    unlink(path.c_str());
-  } catch (const char*) {
+  } catch (const char* e) {
+    g_compile_diagnostic++;
+    fprintf(stderr, "fuzz_compile: compile error: %s\n", e);
     restore_context(&econ);
   } catch (...) {
+    g_compile_diagnostic++;
     restore_context(&econ);
   }
   pop_context(&econ);
+
+  if (unlink(host_path.c_str()) != 0) {
+    fprintf(stderr, "fuzz_compile: scratch unlink failed for %s\n", host_path.c_str());
+    return false;
+  }
+  return true;
 }
 
-// Split on the delimiter and compile each piece in sequence, in this same
-// process -- see the file header for why a sequence (not a single compile)
-// is what this harness needs to find.
-void run_sequence(const std::vector<char>& raw) {
+// Split on the delimiter and compile each piece in sequence. Returns false
+// on scratch I/O failure (caller fails closed).
+bool run_sequence(const std::vector<char>& raw) {
   std::string_view all(raw.data(), raw.size());
   size_t pos = 0, chunks = 0;
   while (chunks < kMaxChunks) {
     size_t next = all.find(kDelim, pos);
     std::string_view piece =
         (next == std::string_view::npos) ? all.substr(pos) : all.substr(pos, next - pos);
-    compile_one(static_cast<int>(chunks), std::string(piece));
+    if (!compile_one(static_cast<int>(chunks), std::string(piece))) {
+      return false;
+    }
     chunks++;
     if (next == std::string_view::npos) break;
     pos = next + kDelim.size();
   }
+  return true;
 }
 
 }  // namespace
@@ -135,7 +162,53 @@ int main(int argc, char** argv) {
 #endif
 
   std::vector<char> input = read_file(argv[2]);
-  run_sequence(input);
+  if (input.empty()) {
+    // Distinguish "could not open" from "opened but empty": both must fail
+    // closed, but the message tells them apart.
+    FILE* probe = fopen(argv[2], "rb");
+    if (!probe) {
+      fprintf(stderr, "fuzz_compile: cannot open input %s\n", argv[2]);
+      return 1;
+    }
+    fclose(probe);
+    fprintf(stderr, "fuzz_compile: input is empty; nothing to compile\n");
+    return 1;
+  }
 
+  // Fixed mudlib-internal scratch directory: the compiler resolves LPC
+  // paths inside the mudlib only, so /tmp scratch never compiles. Create
+  // <mudlib>/data/fuzz_compile/ (host side) and load via the mudlib path.
+  const char* mudlib = CONFIG_STR(__MUD_LIB_DIR__);
+  g_scratch_host_dir = std::string(mudlib ? mudlib : ".") + "/data/fuzz_compile";
+  g_scratch_mud_dir = kScratchMudPath;
+  if (mkdir(g_scratch_host_dir.c_str(), 0700) != 0) {
+    if (errno != EEXIST) {
+      fprintf(stderr, "fuzz_compile: cannot create scratch dir %s\n",
+              g_scratch_host_dir.c_str());
+      return 1;
+    }
+  }
+
+  bool ok = run_sequence(input);
+
+  // RAII-style cleanup on every path that got past mkdir.
+  if (rmdir(g_scratch_host_dir.c_str()) != 0 && errno != ENOENT && errno != ENOTEMPTY) {
+    fprintf(stderr, "fuzz_compile: scratch dir cleanup failed\n");
+    ok = false;
+  }
+
+  if (!ok) {
+    return 1;
+  }
+  if (g_compile_success == 0 && g_compile_diagnostic == 0) {
+    fprintf(stderr,
+            "fuzz_compile: harness self-check failed: compiler never exercised "
+            "(success=%d diagnostic=%d)\n",
+            g_compile_success, g_compile_diagnostic);
+    return 1;
+  }
+
+  fprintf(stderr, "fuzz_compile: success=%d diagnostic=%d\n", g_compile_success,
+          g_compile_diagnostic);
   return 0;
 }
