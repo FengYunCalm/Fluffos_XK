@@ -1,5 +1,6 @@
 # List of compile options to tweak
 option(MARCH_NATIVE "use march=native for GCC" ON)
+option(BUILD_FUZZERS "Build AFL++/libFuzzer investigation harnesses (not shipped functionality)" OFF)
 option(STATIC "Build static version of driver" OFF)
 option(USE_JEMALLOC "Build driver with jemalloc support" ON)
 option(ENABLE_SANITIZER "Build driver with sanitizer support (deprecated: use ENABLE_ASAN/ENABLE_UBSAN/ENABLE_TSAN)" OFF)
@@ -604,7 +605,15 @@ target_link_libraries(symbol PUBLIC ${FLUFFOS_LINK})
 add_executable(generate_keywords "main_generate_keywords.cc")
 target_link_libraries(generate_keywords PUBLIC ${FLUFFOS_LINK})
 
-add_executable(o2json "main_o2json.cc")
+  if (BUILD_FUZZERS)
+    add_executable(fuzz_restore "main_fuzz_restore.cc")
+    target_link_libraries(fuzz_restore PUBLIC ${FLUFFOS_LINK})
+
+    add_executable(fuzz_compile "main_fuzz_compile.cc")
+    target_link_libraries(fuzz_compile PUBLIC ${FLUFFOS_LINK})
+  endif ()
+
+  add_executable(o2json "main_o2json.cc")
 target_link_libraries(o2json PUBLIC ${FLUFFOS_LINK})
 
 add_executable(json2o "main_json2o.cc")
