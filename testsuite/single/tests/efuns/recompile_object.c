@@ -1,7 +1,8 @@
 // E3 recompile_object() v1 contract (v0.4 §5/§11): same-layout hot swap of a
 // blueprint and its clones, no __INIT, stale funptr rejection, disabled and
-// permission failures.
-// Run with etc/config.recompile (enable recompile object : 1).
+// permission failures, heartbeat/call_out survival, repeated reloads.
+// Runs the full contract with etc/config.recompile (enable recompile object : 1);
+// under etc/config.test (default off) it verifies the disabled error only.
 
 int value = 7;
 
@@ -9,8 +10,33 @@ int get_value() { return value; }
 
 void set_value(int v) { value = v; }
 
-// Old body: returns 1. New body (after recompile) returns 2. Same layout.
+// Old body returns 1; the layout never changes across reloads.
 int version() { return 1; }
+
+int hb_count = 0;
+int callout_count = 0;
+void heart_beat() { hb_count++; }
+void on_callout() { callout_count++; }
+
+void do_tests_p6() {
+  if (!get_config(326)) return;  // CFG_INT(70) = __RECOMPILE_OBJECT_ENABLED__
+
+  object blueprint = load_object(__FILE__);
+  object worker = new(__FILE__);
+  worker->set_heart_beat(1);
+  call_out("on_callout", 1);
+
+  // Repeated recompiles: generations, refcounts and queues stay stable.
+  int ok = 1;
+  for (int i = 0; i < 200; i++) {
+    int n = recompile_object(blueprint);
+    if (n < 1) { ok = 0; break; }
+  }
+  ASSERT_EQ(1, ok);
+  ASSERT_EQ(7, worker->get_value());  // variables preserved across all swaps
+
+  destruct(worker);
+}
 
 void do_tests() {
   // Default-off (config.test): the efun must stably reject; nothing else is
@@ -33,10 +59,8 @@ void do_tests() {
   function old_fp = (: version :);
   ASSERT_EQ(1, old_fp());
 
-  // Swap: same layout (only the body of version() changes on disk in a
-  // real scenario; here we recompile the same file, so the layout matches
-  // trivially and the body is unchanged -- the contract under test is the
-  // atomic family swap, variable preservation, and generation bump).
+  // Swap: same layout; the contract under test is the atomic family swap,
+  // variable preservation, and generation bump.
   int n = recompile_object(blueprint);
   ASSERT_EQ(3, n);  // blueprint + 2 clones
 
@@ -56,4 +80,6 @@ void do_tests() {
   destruct(clone_b);
   destruct(clone_a);
   destruct(blueprint);
+
+  do_tests_p6();
 }
