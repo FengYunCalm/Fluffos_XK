@@ -11,6 +11,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-build}"
+JOBS="${JOBS:-${CMAKE_BUILD_PARALLEL_LEVEL:-8}}"
 export REPORT_DIR="${REPORT_DIR:-$ROOT_DIR/build/reports/capacity}"
 
 case "$BUILD_DIR" in
@@ -44,7 +45,7 @@ BUILD_CONFIG_HASH="$( {
 # Local runs get a UUID run id (CI passes run_id+run_attempt+matrix key).
 LOCAL_RUN_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 
-cmake --build "$BUILD_DIR" --target owner_runtime_bench lpc_vm_bench object_store_bench -j "$(nproc)" >/dev/null
+cmake --build "$BUILD_DIR" --target owner_runtime_bench lpc_vm_bench object_store_bench -j "$JOBS" >/dev/null
 
 wrap() {
   local raw="$1" name="$2" command="$3" run_id="$4" contracts="$5" metrics_key="$6"
