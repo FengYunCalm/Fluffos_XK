@@ -69,3 +69,20 @@
 - contrib.cc：deep_copy_* RAII 化 + deep_copy_svalue 先子后写（循环结构触发
   depth cap 时 error 展开泄漏/借用指针修复）
 - 测试：has_cycle/find_cycles/break_cycles 全通过 + copy 回归
+
+## 遗留项执行记录（用户全量授权, 2026-08-15）
+
+- **S16 lws 4.5.8**：accepted（0322733b）
+- **E1 循环引用 efun**：accepted（a3865995）
+- **E2 fuzz harness**：accepted（12316152；AFL 运行需 afl-clang-fast 环境）
+- **T1 get_os_env/set_os_env**：accepted（61ab872e）
+- **T2 set_clean_up**：accepted（提交于 T2 commit）
+- **T4 lpcc --batch**：accepted（fff68619）
+- **E3 recompile_object**：**已授权，未实施**——上游 PR #1237 为 897 行/5 commit 大功能
+  （function.h prog_generation、object program 热交换、shadow/catch_tell/add_action/
+  heartbeat 生存性、master/simul_efun 支持、replace_program 交互），本地移植需
+  专项设计审计（owner shard program pin 并发、跨 owner 引用、失败原子性），
+  照搬风险过高。按方案 §6.1 条款保持 blocked，待专项设计。
+- **T3 lpcshell**：已授权，未实施——依赖上游 #1343 scratchpad/结构化诊断基建
+  （本地 P3 判定不适用），无可移植的独立载体。
+- **push**：已执行（除最后一个 commit 外全部推送；最终收尾后补推）
