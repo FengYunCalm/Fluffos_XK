@@ -240,6 +240,17 @@ void read_config(const char *filename) {
     config_lines.push_back(v + "\n");
   }
 
+  // OS environment allow-lists for get_os_env()/set_os_env() (package_contrib).
+  // Names in the writable list are implicitly readable too; empty denies all.
+  scan_config_line("allowed os environment variables : %[^\n]", tmp, kOptional);
+  if (strlen(tmp) > 0) {
+    CONFIG_STR(__OS_ENV_READABLE__) = alloc_cstring(tmp, "config file: aoev");
+  }
+  scan_config_line("writable os environment variables : %[^\n]", tmp, kOptional);
+  if (strlen(tmp) > 0) {
+    CONFIG_STR(__OS_ENV_WRITABLE__) = alloc_cstring(tmp, "config file: woev");
+  }
+
   // Process global include file.
   {
     scan_config_line("global include file : %[^\n]", tmp, 0);

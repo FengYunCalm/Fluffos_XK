@@ -64,3 +64,5 @@ int test_load(string);
 int has_cycle(mixed);
 string *find_cycles(mixed);
 int break_cycles(mixed);
+string get_os_env(string);
+int set_os_env(string, string | void);

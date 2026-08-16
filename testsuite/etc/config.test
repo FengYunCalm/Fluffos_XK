@@ -387,3 +387,5 @@ evaluator stack size : 65536
 # Define the size of the compiler stack. This defines how complex
 # expressions the compiler can parse.  (unused currently)
 compiler stack size : 600
+allowed os environment variables : PATH:HOME
+writable os environment variables : FLUFFOS_XK_TEST_ENV

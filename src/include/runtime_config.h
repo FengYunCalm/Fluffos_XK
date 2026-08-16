@@ -37,6 +37,9 @@
 #define __MUD_IP__ CFG_STR(14)
 #define __RC_WEBSOCKET_HTTP_DIR__ CFG_STR(15)
 
+#define __OS_ENV_READABLE__ CFG_STR(17)
+#define __OS_ENV_WRITABLE__ CFG_STR(18)
+
 #define RC_LAST_CONFIG_STR CFG_STR(255)
 /*
  * These config settings return an int (ie number)
