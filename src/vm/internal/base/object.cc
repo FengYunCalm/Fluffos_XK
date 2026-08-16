@@ -551,6 +551,11 @@ static int restore_interior_string(char **val, svalue_t *sv) {
     }
   }
 
+  // Same NUL-exit fix as restore_string: `&& c` leaves cp past the NUL on
+  // an unterminated string; fail it instead of accepting it.
+  if (c == '\0') {
+    return ROB_STRING_ERROR;
+  }
   *val = cp;
   *--cp = '\0';
   len = cp - start;
@@ -1187,6 +1192,13 @@ static int restore_string(char *val, svalue_t *sv) {
     }
   }
 
+  // `&& c` in the loop condition exits on NUL BEFORE the switch's
+  // case '\0' can fire; handle that here so an unterminated string still
+  // fails instead of being parsed as a successful empty string with cp
+  // already one byte past the NUL (R5 regression from S13's loop fix).
+  if (c == '\0') {
+    return ROB_STRING_ERROR;
+  }
   if (*cp--) {
     return ROB_STRING_ERROR;
   }

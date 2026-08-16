@@ -464,6 +464,11 @@ int restore_hash_string(char **val, svalue_t *sv) {
         return ROB_STRING_ERROR;
     }
   }
+  // Same NUL-exit fix as restore_string: `&& c` leaves cp past the NUL on
+  // an unterminated string; fail it instead of accepting it.
+  if (c == '\0') {
+    return ROB_STRING_ERROR;
+  }
   *val = cp;
   *--cp = '\0';
   if (!u8_validate(start)) {

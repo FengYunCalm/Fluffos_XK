@@ -92,7 +92,13 @@ class EGCIterator {
   int32_t len_;
 
   static BreakIteratorPool* pool() {
-    static BreakIteratorPool pool(32);
+    // thread_local: the pool's stack is not synchronized, and FluffOS_XK's
+    // owner threads run VM code concurrently (the upstream tree is
+    // single-threaded and tolerates a process-wide pool; we do not). Local
+    // pre-P2 versions had thread_local here; P2's wholesale file swap lost
+    // it and reintroduced a data race (R5, TestStringIndexHandlesConcurrent
+    // EgcIterators SIGSEGV).
+    static thread_local BreakIteratorPool pool(32);
     return &pool;
   }
 

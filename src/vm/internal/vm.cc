@@ -164,20 +164,17 @@ size_t remove_destructed_objects_bounded(size_t max_count) {
 
   size_t removed = 0;
   while (obj_list_destruct && removed < max_count) {
-    /* Detach the whole queue up front: destruct2() frees object variables,
-     * which can re-enter destruct_object() -- those pushes must land on a
-     * fresh queue for the next sweep instead of being dropped when the head
-     * is cleared afterwards. Each object is unlinked before its destruct2()
-     * so a still-referenced survivor keeps no stale queue link. */
+    /* Unlink one object before its destruct2(): destruct2() frees object
+     * variables, which can re-enter destruct_object() -- those pushes must
+     * land on the queue, not be dropped. A bounded drain must leave any
+     * unprocessed remainder on the queue for the next sweep (local
+     * TestRemoveDestructedObjectsBoundedDrainsIncrementally pins this;
+     * the whole-queue detach only ever made sense for an unbounded sweep). */
     auto *ob = obj_list_destruct;
-    obj_list_destruct = nullptr;
-    while (ob && removed < max_count) {
-      auto *next = ob->next_destruct;
-      ob->next_destruct = nullptr;
-      destruct2(ob);
-      removed++;
-      ob = next;
-    }
+    obj_list_destruct = ob->next_destruct;
+    ob->next_destruct = nullptr;
+    destruct2(ob);
+    removed++;
   }
 
   destructed_object_cleanup_last_removed.store(removed, std::memory_order_relaxed);
