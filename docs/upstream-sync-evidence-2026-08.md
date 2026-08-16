@@ -61,3 +61,11 @@
 - **验证**：13 项移植均通过针对性测试 + 回归（含 save/restore、默认参数、foreach ref、ASCII/UTF-8 边界）；广域 20 项抽查 16/20（4 项本地无同名测试文件）
 - **commit 记录**：c63c0629（G0）、e6451f2a（S1）、cab4c0fa（S2）、00f610d6（S3）、7b8934ed（S4）、6d061f61（S5）、67ab54cd（S6）、8d8dc482（S7）、44ac5464（S8）、93ed8e8b（S10）、f4d220f5（S12）、8b878d68（S13）、dd664304（S14+S15+S17）、bec0f5a5（P1）、8f759db1（P2）
 - **遗留**：S16（lws 4.5.8 升级）与 E1-E5/T1-T5 可选增强待单独授权
+
+## E1 循环引用回收（PR #1276, 用户授权）
+
+- cycles.cc：has_cycle/find_cycles/break_cycles 迭代式 DFS（显式堆栈，无
+  MAX_SAVE_SVALUE_DEPTH cap），白/灰/黑着色 + 回边断裂（最小无环编辑）
+- contrib.cc：deep_copy_* RAII 化 + deep_copy_svalue 先子后写（循环结构触发
+  depth cap 时 error 展开泄漏/借用指针修复）
+- 测试：has_cycle/find_cycles/break_cycles 全通过 + copy 回归
