@@ -152,6 +152,8 @@ FLUFFOS_VM_THREAD_LOCAL svalue_t catch_value = {T_NUMBER};
 
 // For safety, we leave some buffer in before and after the space.
 static FLUFFOS_VM_THREAD_LOCAL control_stack_t _control_stack[5 + CFG_MAX_CALL_DEPTH + 5];
+
+control_stack_t *control_stack_base() { return &_control_stack[0]; }
 FLUFFOS_VM_THREAD_LOCAL control_stack_t *control_stack = nullptr;
 FLUFFOS_VM_THREAD_LOCAL control_stack_t *csp; /* Points to last element pushed */
 

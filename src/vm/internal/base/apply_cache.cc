@@ -260,3 +260,11 @@ void apply_cache_invalidate_program(program_t * /*prog*/) {
 #endif
   apply_dispatch_cache_epoch.fetch_add(1, std::memory_order_acq_rel);
 }
+
+
+void prepare_apply_lookup_table(program_t *prog) {
+  if (prog == nullptr) return;
+  if (prog->apply_lookup_table == nullptr) {
+    fill_lookup_table(prog);
+  }
+}

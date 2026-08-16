@@ -122,6 +122,11 @@ extern FLUFFOS_VM_THREAD_LOCAL svalue_t *end_of_stack;
 extern FLUFFOS_VM_THREAD_LOCAL svalue_t catch_value;
 extern FLUFFOS_VM_THREAD_LOCAL control_stack_t *control_stack;
 extern FLUFFOS_VM_THREAD_LOCAL control_stack_t *csp;
+
+// E3 P4: the main control stack array base (interpret.cc holds it static).
+// Used by the recompile transaction to prove no live frame references the
+// to-be-replaced program.
+control_stack_t *control_stack_base();
 extern FLUFFOS_VM_THREAD_LOCAL int too_deep_error;
 extern FLUFFOS_VM_THREAD_LOCAL int max_eval_error;
 extern FLUFFOS_VM_THREAD_LOCAL int function_index_offset;
