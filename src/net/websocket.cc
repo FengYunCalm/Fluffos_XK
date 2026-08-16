@@ -124,7 +124,15 @@ struct lws_context *init_websocket_context(event_base *base, port_def_t *port) {
 }
 
 struct lws *init_user_websocket(struct lws_context *context, evutil_socket_t fd) {
-  return lws_adopt_socket(context, fd);
+  // Since lws v4.3 the context's vhost list is headed by an internal "system"
+  // vhost, which carries none of our ws protocols; lws_adopt_socket() adopts
+  // onto the list head, so adopt explicitly onto our own vhost instead.
+  // (Upstream 8fe05a5d.)
+  auto *vhost = lws_get_vhost_by_name(context, "default");
+  if (!vhost) {
+    return nullptr;
+  }
+  return lws_adopt_socket_vhost(vhost, fd);
 }
 
 void websocket_send_text(struct lws *wsi, const char *data, size_t len) {

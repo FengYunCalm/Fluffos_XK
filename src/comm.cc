@@ -428,7 +428,10 @@ void new_conn_handler(evconnlistener *listener, evutil_socket_t fd, struct socka
 
   if (port->kind == PORT_TYPE_WEBSOCKET) {
     // For websocket connections, wait until they are handshake finished.
-    init_user_websocket(port->lws_context, fd);
+    if (init_user_websocket(port->lws_context, fd) == nullptr) {
+      debug_message("new_conn_handler: failed to adopt websocket fd %d.\n", (int)fd);
+      evutil_closesocket(fd);
+    }
     return;
   } else {
     // For other connections go straight to no handshake necessary, schedule to logon.
