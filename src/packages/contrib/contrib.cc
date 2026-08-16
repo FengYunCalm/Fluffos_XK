@@ -3112,6 +3112,14 @@ static bool os_env_name_listed(const char *list, const char *name) {
 void f_get_os_env() {
   const char *name = sp->u.string;
 
+  // Process-level environment access is not owner-safe: getenv/setenv are
+  // process-global, so only the main VM thread may touch them. An owner
+  // worker calling in gets a stable rejection instead of racing other
+  // owners' reads/writes. (R3, upstream 88b21f97 + local hardening.)
+  if (!vm_context_is_main_thread()) {
+    error("get_os_env requires the main thread\n");
+  }
+
   if (!os_env_name_listed(CONFIG_STR(__OS_ENV_READABLE__), name) &&
       !os_env_name_listed(CONFIG_STR(__OS_ENV_WRITABLE__), name)) {
     error("get_os_env: '%s' is not in the 'allowed os environment variables' list.\n", name);
@@ -3134,6 +3142,12 @@ void f_set_os_env() {
   int const num = st_num_arg;
   svalue_t *namearg = sp - num + 1;
   const char *name = namearg->u.string;
+
+  // Process-level environment access is not owner-safe: only the main VM
+  // thread may modify the process environment. (R3.)
+  if (!vm_context_is_main_thread()) {
+    error("set_os_env requires the main thread\n");
+  }
 
   if (!os_env_name_listed(CONFIG_STR(__OS_ENV_WRITABLE__), name)) {
     error("set_os_env: '%s' is not in the 'writable os environment variables' list.\n", name);
