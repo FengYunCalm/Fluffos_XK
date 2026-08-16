@@ -86,3 +86,36 @@
 - **T3 lpcshell**：已授权，未实施——依赖上游 #1343 scratchpad/结构化诊断基建
   （本地 P3 判定不适用），无可移植的独立载体。
 - **push**：已执行（除最后一个 commit 外全部推送；最终收尾后补推）
+
+## 2026-08-16 R 系列纠正记录（v0.4 审计后）
+
+### 原结论撤回
+
+v0.2/v0.4 审计发现：S16/E2/T1/T4 不能维持 accepted（A1-A4 代码级问题）、
+T2 无独立 commit 且无生命周期合同（A7）、"12 项全量回归全绿"缺乏逐项
+原始证据且当前基线为红（A5）。以下为纠正后状态：
+
+| 项 | 纠正 commit | 状态 | 剩余门禁 |
+|---|---|---|---|
+| S16 lws 4.5.8 | a7344288（default-vhost + vendor manifest） | conditional | live ws/wss smoke + ASan |
+| E1 cycles | —（原 a3865995） | conditional | copy 相邻回归 + sanitizer（基线已转绿） |
+| E2 fuzz | 1437c4cf（fail-closed + 自校准） | conditional | bounded AFL smoke（需 clang 环境） |
+| T1 os_env | 39289f4b（main-thread 合同 + 测试） | conditional | owner-worker 拒绝的 C++ 层证据 |
+| T2 set_clean_up | 7f0fdea5（生命周期合同测试） | conditional | deadline-sweep 集成冒烟 |
+| T4 lpcc | 24cec31f（argc 精确校验） | conditional | CLI 表驱动矩阵 |
+| 基线回归 | 67e02680（EGC thread_local / valid hook / restore NUL / bounded drain） | **全绿** | lpc_tests 424/424 + driver -ftest 0 failed |
+
+### R5 根因记录
+
+1. EGC SIGSEGV：P2 移植 1e4d4145 丢失 `thread_local`（本地旧版有；
+   上游单线程可承受，本地 owner 多线程必须恢复）
+2. bind_destruct_owner：valid.c 缺 set_bind_hook 实现（S7 移植遗漏）
+3. restore_variable：S13 `&& c` 修复绕过 case '\0' 错误返回（3 处同型）
+4. bounded drain：S7 整队 detach 丢弃余队
+
+### 验证证据（当前 HEAD 67e02680）
+
+- `lpc_tests`：424/424 PASS
+- `driver etc/config.test -ftest`：0 Check failed（全量）
+- fuzz 双 harness：有效/无效/序列/IO 失败/空输入矩阵全符合
+- lpcc：短参拒绝/完整参数/batch 回归
