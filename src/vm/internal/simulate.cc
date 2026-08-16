@@ -2597,7 +2597,15 @@ void snapshot_recompile_targets(object_t *blueprint, RecompilePrepared *prepared
   }
   program_t *old_prog = blueprint->prog;
 
-  // Main control stack must not contain a frame of the target program.
+  // The top-level frame's csp->prog holds the CALLER's program (it is
+  // captured at push_control_stack() time and restored on pop), so walking
+  // frames alone misses the target program executing at the top level --
+  // e.g. a member of the blueprint family calling recompile_object() on
+  // itself. Check the VM's current program explicitly, then walk the
+  // remaining frames for nested occurrences.
+  if (current_prog == old_prog) {
+    error("recompile_object target program is executing\n");
+  }
   for (control_stack_t *frame = csp; frame && frame >= control_stack; frame--) {
     if (frame->prog == old_prog) {
       error("recompile_object target program is executing\n");

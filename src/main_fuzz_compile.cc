@@ -14,12 +14,14 @@
 // of what a later compile sees, so single-compile fuzzing could never find
 // the cross-compile interaction bugs this harness exists for.
 //
-// R2 hardening (2026-08): scratch files are written into a per-process
-// mkdtemp() directory (the original "/fuzz_compile#N.c" host path is not
-// writable by unprivileged users and failures were silently swallowed);
-// every fopen/fwrite/fclose result is checked and turns into a harness
-// failure; success/diagnostic counts self-validate the harness (both zero
-// means the compiler was never actually exercised -> non-zero exit).
+// R2 hardening (2026-08): scratch files are written into the mudlib-internal
+// directory <mudlib>/data/fuzz_compile/ (the original "/fuzz_compile#N.c"
+// host path is not writable by unprivileged users AND is not resolvable by
+// the LPC loader, so the compiler was never actually exercised; failures
+// were silently swallowed). Every fopen/fwrite/fclose result is checked and
+// turns into a harness failure; success/diagnostic counts self-validate the
+// harness (both zero means the compiler was never actually exercised ->
+// non-zero exit).
 
 #include "base/std.h"
 

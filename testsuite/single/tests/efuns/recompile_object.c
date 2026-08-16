@@ -1,17 +1,20 @@
 // E3 recompile_object() v1 contract (v0.4 §5/§11): same-layout hot swap of a
-// blueprint and its clones, no __INIT, stale funptr rejection, disabled and
-// permission failures, heartbeat/call_out survival, repeated reloads.
-// Runs the full contract with etc/config.recompile (enable recompile object : 1);
+// blueprint and its clones, no __INIT, stale funptr rejection, executing
+// guard, disabled and permission failures, heartbeat/call_out survival,
+// repeated reloads.
+// Full contract runs with etc/config.recompile (enable recompile object : 1);
 // under etc/config.test (default off) it verifies the disabled error only.
 
-int value = 7;
-
-int get_value() { return value; }
-
-void set_value(int v) { value = v; }
-
-// Old body returns 1; the layout never changes across reloads.
-int version() { return 1; }
+// Self-reload probe: a family member calling recompile_object() on its own
+// blueprint must hit the "target program is executing" guard.
+object family_blueprint;
+int self_reload() {
+  mixed err = catch(recompile_object(family_blueprint));
+  if (stringp(err) && strsrch(err, "target program is executing") != -1) {
+    return 1;
+  }
+  return 0;
+}
 
 int hb_count = 0;
 int callout_count = 0;
@@ -21,8 +24,8 @@ void on_callout() { callout_count++; }
 void do_tests_p6() {
   if (!get_config(326)) return;  // CFG_INT(70) = __RECOMPILE_OBJECT_ENABLED__
 
-  object blueprint = load_object(__FILE__);
-  object worker = new(__FILE__);
+  object blueprint = load_object("/clone/recompile_blueprint");
+  object worker = new("/clone/recompile_blueprint");
   worker->set_heart_beat(1);
   call_out("on_callout", 1);
 
@@ -39,28 +42,28 @@ void do_tests_p6() {
 }
 
 void do_tests() {
-  // Default-off (config.test): the efun must stably reject; nothing else is
-  // reachable. The full contract runs under etc/config.recompile.
+  // Default-off (config.test): the efun must stably reject.
   if (!get_config(326)) {  // CFG_INT(70) = __RECOMPILE_OBJECT_ENABLED__ (70 + 256 base)
     mixed err = catch(recompile_object(this_object()));
     ASSERT2(stringp(err), "expected disabled");
     return;
   }
 
-  object blueprint = load_object(__FILE__);
-  object clone_a = new(__FILE__);
-  object clone_b = new(__FILE__);
+  // The blueprint family lives in /clone/recompile_blueprint; THIS object
+  // (running do_tests) is not a member, so the swap below is legal.
+  object blueprint = load_object("/clone/recompile_blueprint");
+  object clone_a = new("/clone/recompile_blueprint");
+  object clone_b = new("/clone/recompile_blueprint");
   clone_a->set_value(100);
   clone_b->set_value(200);
   ASSERT_EQ(1, blueprint->version());
   ASSERT_EQ(100, clone_a->get_value());
 
-  // Old funptr created before the swap must go stale afterwards.
-  function old_fp = (: version :);
+  // Old funptr created on a family member before the swap must go stale
+  // afterwards (the owner's generation is bumped by the swap).
+  function old_fp = clone_a->make_fp();
   ASSERT_EQ(1, old_fp());
 
-  // Swap: same layout; the contract under test is the atomic family swap,
-  // variable preservation, and generation bump.
   int n = recompile_object(blueprint);
   ASSERT_EQ(3, n);  // blueprint + 2 clones
 
@@ -69,14 +72,22 @@ void do_tests() {
   ASSERT_EQ(200, clone_b->get_value());
   ASSERT_EQ(7, blueprint->get_value());
 
-  // Old funptr is now stale.
+  // Old funptr is now stale: stable error, no re-resolution against the
+  // new program.
   mixed err = catch(old_fp());
   ASSERT2(stringp(err), "expected stale function pointer error");
 
-  // New funptr works.
-  function new_fp = (: version :);
+  // A funptr created after the swap snapshots the new generation.
+  function new_fp = clone_a->make_fp();
   ASSERT_EQ(1, new_fp());
 
+  // Executing guard: a family member reloading its own blueprint must be
+  // rejected with "target program is executing" (top-level frame).
+  object self = new("/clone/recompile_blueprint");
+  self->set_family_blueprint(blueprint);
+  ASSERT_EQ(1, self->self_reload());
+
+  destruct(self);
   destruct(clone_b);
   destruct(clone_a);
   destruct(blueprint);
