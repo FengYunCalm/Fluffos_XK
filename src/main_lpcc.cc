@@ -7,6 +7,8 @@
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <string>
+#include <vector>
 #include <unistd.h>
 #include <nlohmann/json.hpp>
 
@@ -77,8 +79,21 @@ int run_owner_audit_json(const char *config_file, const char *lpc_file) {
 }  // namespace
 
 static int lpcc_main(int argc, char** argv) {
-  if (argc == 5 && std::string(argv[1]) == "--owner-audit" && std::string(argv[2]) == "--format=json") {
+  bool flag_batch = false;
+  std::vector<const char*> batch_files;
+  if (argc >= 3 && std::string(argv[1]) == "--owner-audit" && std::string(argv[2]) == "--format=json") {
     return run_owner_audit_json(argv[3], argv[4]);
+  }
+  if (argc >= 3 && std::string(argv[1]) == "--batch") {
+    flag_batch = true;
+    // argv[2] is the config file (consumed by get_argument below); the rest
+    // are files to compile.
+    for (int i = 3; i < argc; i++) {
+      batch_files.push_back(argv[i]);
+    }
+  } else if (argc != 3) {
+    print_usage();
+    return 1;
   }
 
   Tracer::start("trace_lpcc.json");
@@ -86,11 +101,6 @@ static int lpcc_main(int argc, char** argv) {
   Tracer::setThreadName("lpcc main");
 
   ScopedTracer const trace(__PRETTY_FUNCTION__);
-
-  if (argc != 3) {
-    print_usage();
-    return 1;
-  }
 
   Tracer::begin("init_main", EventCategory::DEFAULT);
 
@@ -108,8 +118,58 @@ static int lpcc_main(int argc, char** argv) {
   }
 
   current_object = master_ob;
-  const char* file = argv[2];
+  const char* file = nullptr;
   struct object_t* obj = nullptr;
+
+  if (flag_batch) {
+    // Compile MANY files against this ONE VM boot (master/simul_efun loaded
+    // once above) instead of paying a fresh boot per file. Reads
+    // newline-separated paths from stdin when no files are given.
+    std::vector<std::string> files(batch_files.begin(), batch_files.end());
+    if (files.empty()) {
+      std::string line;
+      while (std::getline(std::cin, line)) {
+        if (!line.empty()) files.push_back(line);
+      }
+    }
+    int failed = 0;
+    for (const auto& f : files) {
+      printf("===== %s =====\n", f.c_str());
+      fflush(stdout);
+
+      // set_eval() arms a real OS timer (see eval_limit.cc) that isn't reset
+      // just by looping here -- without this, elapsed wall-clock time keeps
+      // accumulating across every file's compile in this one process. The
+      // real driver rearms this before every top-level command/heartbeat;
+      // do the same per batch file.
+      set_eval(max_eval_cost);
+
+      current_object = master_ob;
+      struct object_t* bobj = nullptr;
+      error_context_t econ{};
+      save_context(&econ);
+      try {
+        bobj = find_object(f.c_str());
+      } catch (...) {
+        restore_context(&econ);
+      }
+      pop_context(&econ);
+      current_object = master_ob;
+
+      bool ok = bobj != nullptr && bobj->prog != nullptr;
+      if (!ok) {
+        fprintf(stderr, "Fail to load object %s.\n", f.c_str());
+        failed++;
+      }
+      printf("%s %s\n", ok ? "PASS" : "FAIL", f.c_str());
+      fflush(stdout);
+    }
+    Tracer::collect();
+    clear_state();
+    return failed > 0 ? 1 : 0;
+  }
+
+  file = argv[2];
 
   {
     ScopedTracer const tracer("find_object");

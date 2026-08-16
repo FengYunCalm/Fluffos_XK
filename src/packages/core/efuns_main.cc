@@ -3340,6 +3340,34 @@ void f_query_shadowing() {
 #endif
 
 #ifdef F_SET_RESET
+#ifdef F_SET_CLEAN_UP
+void f_set_clean_up() {
+  object_t *ob;
+
+  if (st_num_arg == 2) {
+    ob = (sp - 1)->u.ob;
+    ob->next_cleanup =
+        current_gametick() + time_to_next_gametick(std::chrono::seconds(sp->u.number));
+  } else {
+    ob = sp->u.ob;
+    ob->next_cleanup = 0; /* back to the idle-time rule */
+  }
+
+  /* Same gate as at load/clone time: only objects that actually define
+   * clean_up() are queried by the sweep. */
+  if (!(ob->flags & O_DESTRUCTED) && function_exists(APPLY_CLEAN_UP, ob, 1)) {
+    ob->flags |= O_WILL_CLEAN_UP;
+  }
+
+  if (st_num_arg == 2) {
+    free_object(&(--sp)->u.ob, "f_set_clean_up:1");
+    sp--;
+  } else {
+    free_object(&(sp--)->u.ob, "f_set_clean_up:2");
+  }
+}
+#endif
+
 void f_set_reset() {
   const auto time_to_reset = CONFIG_INT(__TIME_TO_RESET__);
 
