@@ -2960,6 +2960,16 @@ void store_max_atomic(std::atomic<uint64_t> &target, uint64_t value) {
 
 bool enqueue_owner_task_locked(OwnerMailboxTask &task, const std::string &owner_id, bool *notify_owner_thread,
                                bool admission_recorded = false) {
+  // E3 P1 quiescence gate: while CLOSING/FROZEN (recompile_object() in
+  // flight), new owner submissions are stably rejected. The gate lives at
+  // the central enqueue so every public submit path converges here.
+  if (owner_runtime_coordinator().recompile_state() != OwnerRecompileState::kOpen) {
+    owner_runtime_coordinator().admission_rejected()++;
+    if (task.drop_callback) {
+      enqueue_owner_executor_callback_cleanup_locked(task);
+    }
+    return false;
+  }
   if (task.manifest_version == 0 || task.admission_policy.empty()) {
     apply_owner_task_manifest_v2(task);
   }
@@ -3455,6 +3465,8 @@ class OwnerExecutorRuntimeImpl final : public OwnerExecutorRuntime {
       auto owner_id = first_task.owner_id;
       owner_scheduler_state.push_front_owner_task(owner_id, std::move(first_task));
       append_owner_executor_trace_locked(owner_id, "owner_claimed");
+      // E3 P1: an active claim keeps the quiescence gate waiting.
+      owner_runtime_coordinator().active_owner_claims()++;
       return owner_id;
     }
   }
@@ -3475,6 +3487,14 @@ class OwnerExecutorRuntimeImpl final : public OwnerExecutorRuntime {
   }
 
   void release_owner_after_task(const std::string &owner_id) override {
+    // E3 P1: the claim is over; wake a possibly-waiting quiescence.
+    {
+      std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+      if (owner_runtime_coordinator().active_owner_claims() > 0) {
+        owner_runtime_coordinator().active_owner_claims()--;
+      }
+      owner_runtime_cv.notify_all();
+    }
     finish_active_owner_task(owner_id);
   }
 
@@ -3484,6 +3504,10 @@ class OwnerExecutorRuntimeImpl final : public OwnerExecutorRuntime {
       // append_owner_executor_trace_locked reads scheduler state and must
       // hold the runtime lock; never call the _locked helper unlocked.
       std::lock_guard<std::mutex> lock(owner_runtime_mutex);
+      if (owner_runtime_coordinator().active_owner_claims() > 0) {
+        owner_runtime_coordinator().active_owner_claims()--;
+      }
+      owner_runtime_cv.notify_all();
       append_owner_executor_trace_locked(owner_id, "owner_exception");
     }
     debug_message("OwnerExecutor: exception escaped run_claimed_owner for owner '%s': %s\n",
