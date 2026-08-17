@@ -34,6 +34,9 @@
 #include "options.autogen.h"
 #include "vm/internal/base/program.h"
 #include "vm/internal/base/svalue.h"
+#include "vm/internal/base/machine.h"
+#include "vm/internal/master.h"
+#include "packages/core/file.h"
 #include "compiler.h"
 #include "keyword.h"
 
@@ -46,14 +49,7 @@
 #include "compiler/internal/LexStream.h"
 #include "compiler/internal/lpc_source_encoding.h"
 
-// FIXME: in master.h
-extern struct object_t *master_ob;
-// FIXME: in file.h
-const char *check_valid_path(const char *, object_t *, const char *const, int);
-
 // FIXME: lexer() is using global stack machine?!
-void push_malloced_string(const char *p);
-void pop_stack();
 
 // FIXME: lexer needs a list of predefines
 extern int NUM_OPTION_DEFS;
