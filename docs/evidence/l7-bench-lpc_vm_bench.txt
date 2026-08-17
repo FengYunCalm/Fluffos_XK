@@ -1,0 +1,5 @@
+    "hot_path_profile_mapping_lookup_count": 2,
+    "hot_path_profile_mapping_insert_lookup_count": 2,
+    "hot_path_profile_string_push_count": 4240
+  }
+}

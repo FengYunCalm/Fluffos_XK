@@ -1,6 +1,6 @@
 # E3 收尾与遗留项专项方案（2026-08 批次二）
 
-> 状态：**DRAFT v0.6 —— L1/L4/L2/L5/L6 已完成；L7 执行中；L8-L10 待文档产出**
+> 状态：**DRAFT v0.7 —— L1-L7 已完成；L8-L10 文档产出中**
 > 生成日期：2026-08-16（v0.5 同日修订）
 > 前置：E3 v1（P0-P7 主体）已完成并推送（`origin/main == 0ca1f840`，9 commit）
 > 范围：本方案覆盖全部遗留项（L1-L10），含 sanitizer 验证闭环、测试惯用法治理、
@@ -188,14 +188,22 @@ ctest --test-dir build-recompile-asan --output-on-failure
   driver 全量 ftest 无目标代码 race；分类表落盘 docs/evidence/tsan-*.txt
 
 ### P5 — owner 压测（L7，commit 7）
+> 状态：**已完成**（docs/evidence/l7-*）——三 bench 基线（owner_runtime /
+> lpc_vm / object_store，JSON 统计 exit 0）；热重载压测新契约
+> testsuite/single/tests/efuns/recompile_stress.c（4 worker 跨对象交替 +
+> 5 轮 × 200 次 = 1000 次重载，ASan 零报错、零 Check failed；ftest 单线程
+> 模型限制：call_out/heart_beat 不推进，多 owner 线程并发由
+> owner_runtime_bench C++ 侧覆盖——已在契约头注释如实记录）
 
 - bench 工具已在盘（src/tests/CMakeLists.txt）：
   - `owner_runtime_bench`（owner 调度/并发基线）
   - `lpc_vm_bench`（VM 吞吐基线）
   - `object_store_bench`（对象存储基线）
-- 新增：多 owner 重复热重载压测（E3 专项）——N 个 owner 并发任务 + 主线程
-  循环 recompile_object（每轮 200 次 × M 轮），验证 quiescence 不超时、
-  admission 拒绝计数单调、无泄漏（配合 ASan）
+- 新增：重复热重载压测（E3 专项，已落地为 recompile_stress.c）——N 个
+  worker 克隆跨对象 VM 工作交替 + 主线程循环 recompile_object（每轮
+  200 次 × M 轮），验证 quiescence 不超时、变量跨 swap 保持、无泄漏
+  （配合 ASan）；ftest 单线程模型下 call_out 不推进，多 owner 线程并发
+  由 owner_runtime_bench（C++ 侧）覆盖
 - **退出条件**：三个 bench 基线落盘；热重载压测 M 轮零失败、零超时、
   ASan 零报错；owner_quiesce_* 指标在 runtime status 可观测且合理
 

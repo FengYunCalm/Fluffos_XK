@@ -121,9 +121,14 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL
     # async-resource cleanup gaps -- async req / TLS ctx / socket events --
     # unrelated to this change, see docs/evidence/asan-*lsan*.txt). ASan
     # still catches genuine null dereferences (SEGV/addressability), so
-    # coverage loss is limited to this false-positive class. Re-evaluate
-    # if the toolchain changes (clang sanitizers are not affected by this
-    # GCC behavior).
+    # coverage loss is limited to this false-positive class. Note: with
+    # ENABLE_UBSAN alone (or TSan+UBSAN) the null check is disabled
+    # entirely and no other sanitizer backstops it; null-check coverage
+    # then requires the ASan combination. This is deliberate -- gating
+    # -fno-sanitize=null on ASan would re-expose the same GCC 13.3 TLS
+    # false positives (and -fno-sanitize-recover=all aborts) in
+    # UBSAN-only builds. Re-evaluate if the toolchain changes (clang
+    # sanitizers are not affected by this GCC behavior).
     add_compile_options("-fsanitize=undefined" "-fno-sanitize-recover=all" "-fno-omit-frame-pointer"
                         "-fno-sanitize=null")
     add_link_options("-fsanitize=undefined")

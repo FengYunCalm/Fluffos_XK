@@ -18,6 +18,10 @@
 #define SRC_VM_INTERNAL_BASE_SCOPED_CURRENT_OBJECT_AS_MASTER_H_
 
 #include "vm/internal/base/machine.h"
+// Upward include of vm/internal/master.h (master_ob declaration site) is
+// deliberate: base/ is the ownership layer of current_object, and this is
+// the only base/ header reaching outside the subtree. master.h has no
+// includes of its own (forward declarations only), so there is no cycle.
 #include "vm/internal/master.h"
 
 // Sets current_object to master_ob on construction and restores the

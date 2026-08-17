@@ -1,0 +1,5 @@
+    "lifecycle_stage_destruct_free_object_count": 0,
+    "lifecycle_stage_destruct_free_object_total_ns": 0,
+    "lifecycle_stage_destruct_free_object_avg_ns": 0
+  }
+}
