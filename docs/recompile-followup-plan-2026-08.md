@@ -1,6 +1,7 @@
 # E3 收尾与遗留项专项方案（2026-08 批次二）
 
-> 状态：**DRAFT v0.7 —— L1-L7 已完成；L8-L10 文档产出中**
+> 状态：**DRAFT v0.8 —— L1-L10 全部完成**（L1-L7 实施 + L8-L10 文档产出）；
+> 本方案全部阶段闭环
 > 生成日期：2026-08-16（v0.5 同日修订）
 > 前置：E3 v1（P0-P7 主体）已完成并推送（`origin/main == 0ca1f840`，9 commit）
 > 范围：本方案覆盖全部遗留项（L1-L10），含 sanitizer 验证闭环、测试惯用法治理、
@@ -208,6 +209,9 @@ ctest --test-dir build-recompile-asan --output-on-failure
   ASan 零报错；owner_quiesce_* 指标在 runtime status 可观测且合理
 
 ### P6 — E3 v2 设计（L8，commit 8，文档产出）
+> 状态：**已完成**（docs/recompile-object-v2-design-2026-08.md）：审计
+> （v1 现状 + 扩展点逐项确认 + 新交互面）/ v2 合同（master/simul_efun
+> 重载 + __INIT/create + 失败回滚）/ 两期拆分 / 门禁 / 测试矩阵
 
 - v2 能力：master/simul_efun 热重载、`__INIT`/`create()` 执行、失败回滚
 - 已确认扩展点（v1 架构审计结论）：
@@ -222,6 +226,10 @@ ctest --test-dir build-recompile-asan --output-on-failure
 - **退出条件**：设计文档完成；**实施不并入本批**，走单项授权
 
 ### P7 — E4 `read_source_line()` 移植评估（L9，commit 9，评估产出）
+> 状态：**已完成**（docs/e4-read-source-line-port-eval-2026-08.md）：
+> 上游对照实证（compiler.cc:177 memchr 版 + 4540 万 fgetc 动机记录）；
+> 本地诊断栈零匹配；结论：不单独立项，随诊断渲染栈整体移植；
+> 验收门按本地无基准现状调整
 
 - 现状：本地 src 树零匹配（该函数不存在，属移植而非修复）
 - 上游对照：#1343a（read_source_line 独立优化）；本地诊断栈
@@ -233,6 +241,9 @@ ctest --test-dir build-recompile-asan --output-on-failure
 - **退出条件**：评估文档完成；实施需单独授权
 
 ### P8 — T3 lpcshell 前置基建立项（L10，commit 10，立项产出）
+> 状态：**已完成**（docs/lpcshell-prerequisite-plan-2026-08.md）：
+> 四阶段拆分（arena → 结构化诊断 → 渲染栈=E4 → lpcshell REPL），
+> 每阶段独立授权；本批仅立项文档
 
 - 现状：lpcshell 依赖上游 #1343 scratchpad/结构化诊断基建（本地不存在）
 - **产出**：`docs/lpcshell-prerequisite-plan-2026-08.md`——诊断渲染基建
@@ -282,6 +293,8 @@ ctest --test-dir build-recompile-asan --output-on-failure
 - commit 4：L5 ASan 全矩阵证据（docs/evidence/）
 - commit 6：L6 TSan 构建 + 分类表
 - commit 7：L7 压测基线 + 热重载压测
-- commit 8：L8 E3 v2 设计文档
+- commit 8：L8 E3 v2 设计文档（recompile-object-v2-design-2026-08.md）
+- commit 9：L9 E4 移植评估（e4-read-source-line-port-eval-2026-08.md）
+- commit 10：L10 T3 立项（lpcshell-prerequisite-plan-2026-08.md）
 - commit 9：L9 E4 移植评估
 - commit 10：L10 T3 前置基建立项文档
