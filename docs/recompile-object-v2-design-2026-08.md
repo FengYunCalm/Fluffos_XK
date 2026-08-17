@@ -41,7 +41,7 @@
 
 ### 1.3 新发现的交互面（v2 设计必须处理）
 
-1. **destruct 替换路径（既有非事务性重载）**：simulate.cc:1257 不是
+1. **destruct 替换路径（既有非事务性重载）**：simulate.cc:1258 不是
    valid_destruct 拒绝——destruct master/simul_efun 时**重新 load_object
    新副本并 set_master/set_simul_efun**（:1263-1283，含 error handler 与
    名字保存），即一条**已存在的非事务性 master/simul_efun 重载路径**
@@ -154,7 +154,7 @@ create 段与收尾段之间的状态：目标对象持新 prog（若 create 失
 | simul_efun 重载成功 | P1 | dispatch 表重建；新旧函数名解析 |
 | master 重载后立即二次重载 | P1 | 授权 apply 命中新 program（§1.3.2 验证点） |
 | master/simul_efun self-reload | P1 | executing guard 拒绝（与 v1 family self-reload 一致） |
-| destruct master/simul_efun 触发替换路径（既有行为不变） | P1 | 替换路径语义保持（simulate.cc:1257 起） |
+| destruct master/simul_efun 触发替换路径（既有行为不变） | P1 | 替换路径语义保持（simulate.cc:1258 起） |
 | 编译失败 → 旧 program 保持 | P1 | v1 语义回归 |
 | create 执行序（__INIT → create） | P2 | 执行序断言（探针计数） |
 | create 抛错 → 回滚 | P2 | 旧 program 生效、变量保持、epoch 双 bump 可观测 |

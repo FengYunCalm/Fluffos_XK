@@ -289,12 +289,10 @@ ctest --test-dir build-recompile-asan --output-on-failure
   证据文档 L3 改写（L3 依赖 L1 机制定案；旧排序已废弃）
 - commit 2：L4 lex.cc include 清理（edf5b8bf）
 - commit 3：L2 RAII helper 统一（scoped_current_object_as_master.h +
-  全点位替换，进行中）
+  全点位替换，b7141ebc）
 - commit 4：L5 ASan 全矩阵证据（docs/evidence/）
 - commit 6：L6 TSan 构建 + 分类表
 - commit 7：L7 压测基线 + 热重载压测
 - commit 8：L8 E3 v2 设计文档（recompile-object-v2-design-2026-08.md）
 - commit 9：L9 E4 移植评估（e4-read-source-line-port-eval-2026-08.md）
 - commit 10：L10 T3 立项（lpcshell-prerequisite-plan-2026-08.md）
-- commit 9：L9 E4 移植评估
-- commit 10：L10 T3 前置基建立项文档
