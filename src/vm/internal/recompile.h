@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "vm/internal/base/program.h"  // free_prog, program_t
+#include "vm/internal/simul_efun.h"     // simul_efun_prepared_t
 
 struct object_t;
 
@@ -70,6 +71,12 @@ struct RecompilePrepared {
   RecompileLayout old_layout;
   RecompileLayout new_layout;
   std::vector<RecompileTarget> targets;
+
+  // Optional simul_efun dispatch rebuild (v2 design Phase 1): prepared in
+  // the allocatable frozen segment, activated inside commit()'s no-fail
+  // segment, discarded by the destructor on failure paths.
+  simul_efun_prepared_t simuls;
+  bool simuls_prepared{false};
 
   RecompilePrepared() = default;
   ~RecompilePrepared();

@@ -2,6 +2,7 @@
 
 #include "vm/internal/simul_efun.h"
 
+#include <cassert>
 #include <cstdio>
 #include <cstdlib>
 
@@ -26,11 +27,6 @@
  * table is used at compile time.
  */
 
-struct simul_entry {
-  const char *name;
-  short index;
-};
-
 simul_entry *simul_names = nullptr;
 function_lookup_info_t *simuls = nullptr;
 int num_simul_efun = 0;
@@ -38,6 +34,48 @@ object_t *simul_efun_ob;
 
 static void find_or_add_simul_efun(function_t * /*funp*/, int /*runtime_index*/);
 static void remove_simuls(void);
+
+// Sorted-name insertion shared by the online builder (find_or_add_simul_efun)
+// and the two-phase recompile path (simul_efuns_prepare): binary-search the
+// sorted name list (identity order), update an existing same-name entry, or
+// insert a new one.
+//
+// Key discipline: names/idents are position-keyed (the sorted table used for
+// binary search), funcs is DISPATCH-INDEX-keyed (simuls[sindex] at runtime)
+// and is NEVER shifted -- a new entry always lands at funcs[count], with the
+// dispatch index being the cumulative count. Only names/idents shift on a
+// middle insert.
+//
+// Returns the new entry's sorted position (>= 0) on insert, or -1 - index on
+// a same-name update, where index is the entry's stable dispatch index.
+static int add_simul_entry(simul_entry *names, function_lookup_info_t *funcs, void **idents,
+                           int count, function_t *funp, int runtime_index) {
+  int first = 0;
+  int last = count - 1;
+  while (first <= last) {
+    int j = ((first + last) >> 1);
+    if (funp->funcname < names[j].name) {
+      last = j - 1;
+    } else if (funp->funcname > names[j].name) {
+      first = j + 1;
+    } else {
+      funcs[names[j].index].index = runtime_index;
+      funcs[names[j].index].func = funp;
+      return -1 - names[j].index;
+    }
+  }
+  for (int i = count - 1; i > last; i--) {
+    names[i + 1] = names[i];
+    if (idents) {
+      idents[i + 1] = idents[i];
+    }
+  }
+  funcs[count].index = runtime_index;
+  funcs[count].func = funp;
+  names[first].name = funp->funcname;
+  names[first].index = count;
+  return first;
+}
 
 #ifdef DEBUGMALLOC_EXTENSIONS
 void mark_simuls() {
@@ -139,44 +177,177 @@ static void get_simul_efuns(program_t *prog) {
 }
 
 /*
- * Define a new simul_efun
+ * Define a new simul_efun (online builder, live tables)
  */
 static void find_or_add_simul_efun(function_t *funp, int runtime_index) {
-  ident_hash_elem_t *ihe;
-  int first = 0;
-  int last = num_simul_efun - 1;
-  int i, j;
-
-  while (first <= last) {
-    j = ((first + last) >> 1);
-    if (funp->funcname < simul_names[j].name) {
-      last = j - 1;
-    } else if (funp->funcname > simul_names[j].name) {
-      first = j + 1;
-    } else {
-      ihe = find_or_add_perm_ident(simul_names[j].name);
-      ihe->token |= IHE_SIMUL;
-      ihe->token &= ~IHE_ORPHAN;
-      ihe->sem_value++;
-      ihe->dn.simul_num = simul_names[j].index;
-      simuls[simul_names[j].index].index = runtime_index;
-      simuls[simul_names[j].index].func = funp;
-      return;
-    }
+  int r = add_simul_entry(simul_names, simuls, nullptr, num_simul_efun, funp, runtime_index);
+  int sim_idx;
+  if (r < 0) {
+    sim_idx = -1 - r;  // same-name entry updated; its dispatch index survives
+  } else {
+    sim_idx = num_simul_efun;  // fresh entry: dispatch index = cumulative count
+    ref_string(funp->funcname);
   }
-  for (i = num_simul_efun - 1; i > last; i--) {
-    simul_names[i + 1] = simul_names[i];
-  }
-  simuls[num_simul_efun].index = runtime_index;
-  simuls[num_simul_efun].func = funp;
-  simul_names[first].name = funp->funcname;
-  simul_names[first].index = num_simul_efun;
-  ihe = find_or_add_perm_ident(funp->funcname);
+  ident_hash_elem_t *ihe = find_or_add_perm_ident(funp->funcname);
   ihe->token |= IHE_SIMUL;
   ihe->token &= ~IHE_ORPHAN;
   ihe->sem_value++;
-  ihe->dn.simul_num = num_simul_efun++;
-  ref_string(funp->funcname);
+  ihe->dn.simul_num = sim_idx;
+  if (r >= 0) {
+    num_simul_efun++;
+  }
+}
+
+void simul_efuns_prepare(program_t *prog, simul_efun_prepared_t *out) {
+  *out = {};
+  int num_new = prog->num_functions_defined + prog->last_inherited;
+  if (!num_new && !num_simul_efun) {
+    return;
+  }
+
+  // Cumulative-table semantics (same as the online get_simul_efuns): the
+  // dispatch index of a name is assigned once and never recycled, so every
+  // already-compiled caller's hardcoded F_SIMUL_EFUN sindex stays valid
+  // across reloads. The shadow table starts as a clone of the live table
+  // with all func slots cleared (a name the new program no longer provides
+  // stays in the table, inactive, instead of shifting indices); then the
+  // new program's functions update their same-name entries in place (same
+  // dispatch index) or insert fresh ones at their sorted name position
+  // (dispatch index = cumulative count; the sorted table shifts, the
+  // dispatch-keyed funcs array never does).
+  int capacity = num_simul_efun + num_new;
+  simul_entry *names = reinterpret_cast<simul_entry *>(
+      DCALLOC(capacity, sizeof(simul_entry), TAG_SIMULS, "simul_efuns_prepare"));
+  function_lookup_info_t *funcs = reinterpret_cast<function_lookup_info_t *>(
+      DCALLOC(capacity, sizeof(function_lookup_info_t), TAG_SIMULS, "simul_efuns_prepare: 2"));
+  void **idents = reinterpret_cast<void **>(
+      DCALLOC(capacity, sizeof(void *), TAG_SIMULS, "simul_efuns_prepare: 3"));
+
+  int count = 0;
+  for (int i = 0; i < num_simul_efun; i++) {
+    names[count] = simul_names[i];  // name + stable dispatch index survive
+    funcs[count].func = nullptr;    // inactive until the new program provides it
+    funcs[count].index = 0;
+    // Resolve every ident slot here in the allocatable segment. Old names
+    // are resident with sem_value >= 1 (nothing decremented yet), so this
+    // is a pure lookup that cannot fail; a re-added name (dropped by an
+    // earlier build) is re-resolved to its existing perm-ident. Do NOT
+    // resolve via lookup_ident in activate(): step 1's decrement leaves
+    // sem_value == 0, and lookup_ident returns NULL for such entries.
+    idents[count] = find_or_add_perm_ident(simul_names[i].name);
+    count++;
+  }
+
+  for (int i = 0; i < num_new; i++) {
+    if (prog->function_flags[i] & (FUNC_NO_CODE | DECL_PROTECTED | DECL_PRIVATE | DECL_HIDDEN)) {
+      continue;
+    }
+    function_t *funp = find_func_entry(prog, i);
+    int pos = add_simul_entry(names, funcs, idents, count, funp, i);
+    if (pos < 0) {
+      continue;  // same-name entry updated in place; ident already resident
+    }
+    // Pre-insert the identifier-hash entry now (allocation allowed here);
+    // activation only writes fields on the stable element. The ident slot
+    // is POSITION-keyed (idents[i] aligns with names[i]): the fresh entry
+    // sits at sorted position pos while its dispatch index is count. A name
+    // later abandoned by a failed transaction stays an inert perm-ident
+    // (token 0, simul_num -1) for the driver lifetime -- harmless, and the
+    // normal loader's ident semantics are identical.
+    idents[pos] = find_or_add_perm_ident(funp->funcname);
+    ref_string(funp->funcname);
+    count++;
+  }
+
+  if (count) {
+    names = RESIZE(names, count, simul_entry, TAG_SIMULS, "simul_efuns_prepare");
+    funcs = RESIZE(funcs, count, function_lookup_info_t, TAG_SIMULS, "simul_efuns_prepare");
+    idents = static_cast<void **>(
+        RESIZE(idents, count, void *, TAG_SIMULS, "simul_efuns_prepare"));
+  } else {
+    FREE(names);
+    FREE(funcs);
+    FREE(idents);
+    return;
+  }
+  out->names = names;
+  out->funcs = funcs;
+  out->idents = idents;
+  out->count = count;
+}
+
+void simul_efuns_activate(simul_efun_prepared_t *p) noexcept {
+  // 1. Inactivate the old identifiers first (pure field writes, same as
+  //    remove_simuls): clear IHE_SIMUL, mark orphan, drop simul_num/sem.
+  //    Order matters: a name present in both tables nets sem_value 0 here
+  //    and +1 in step 3 (mirror of the normal path's remove-then-insert).
+  for (int i = 0; i < num_simul_efun; i++) {
+    ident_hash_elem_t *ihe = lookup_ident(simul_names[i].name);
+    if (ihe) {
+      if (ihe->dn.simul_num != -1) {
+        ihe->sem_value--;
+      }
+      ihe->dn.simul_num = -1;
+      ihe->token &= ~IHE_SIMUL;
+      ihe->token |= IHE_ORPHAN;
+    }
+  }
+
+  // 2. Swap in the shadow arrays (free() only -- no allocation).
+  if (num_simul_efun) {
+    FREE(simul_names);
+    FREE(simuls);
+  }
+  simul_names = static_cast<simul_entry *>(p->names);
+  simuls = static_cast<function_lookup_info_t *>(p->funcs);
+  num_simul_efun = p->count;
+
+  // 3. Activate the entries the new program provides (dispatch-keyed func
+  //    non-null), pure field writes mirroring the online builder. The loop
+  //    iterates POSITION-keyed (names/idents) while funcs is DISPATCH-keyed:
+  //    position != dispatch index in general (sorted name table vs
+  //    cumulative index assignment), so every func access goes through
+  //    simul_names[i].index. Entries with func null are dropped names: they
+  //    stay inactive, and callers holding their old sindex get the stable
+  //    "no longer a simul_efun" error instead of an out-of-bounds read.
+  //    Every ident slot [0, count) was pre-resolved by prepare() -- there
+  //    is deliberately no lookup_ident fallback here, because step 1's
+  //    decrement leaves sem_value == 0 and lookup_ident returns NULL for
+  //    such entries (assert guards regressions).
+  for (int i = 0; i < num_simul_efun; i++) {
+    int sim_idx = simul_names[i].index;
+    if (!simuls[sim_idx].func) {
+      continue;
+    }
+    ident_hash_elem_t *ihe = static_cast<ident_hash_elem_t *>(p->idents[i]);
+    assert(ihe != nullptr);
+    ihe->token |= IHE_SIMUL;
+    ihe->token &= ~IHE_ORPHAN;
+    ihe->sem_value++;
+    ihe->dn.simul_num = sim_idx;
+  }
+
+  // Ownership moved into the live tables.
+  p->names = nullptr;
+  p->funcs = nullptr;
+  p->idents = nullptr;
+  p->count = 0;
+  p->active = true;
+}
+
+void simul_efuns_discard(simul_efun_prepared_t *p) noexcept {
+  if (!p->active) {
+    if (p->names) {
+      FREE(p->names);
+    }
+    if (p->funcs) {
+      FREE(p->funcs);
+    }
+    if (p->idents) {
+      FREE(p->idents);
+    }
+  }
+  *p = {};
 }
 
 void set_simul_efun(object_t *ob) {

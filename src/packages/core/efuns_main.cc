@@ -3401,13 +3401,12 @@ void f_recompile_object() {
     error("recompile_object requires master authorization\n");
   }
 
-  // 6. Special targets rejected (v1).
-  if (ob == master_ob) {
-    error("recompile_object target is unsupported: master\n");
-  }
-  if (ob == simul_efun_ob) {
-    error("recompile_object target is unsupported: simul_efun\n");
-  }
+  // 6. Special targets (v2 Phase 1): master and simul_efun reloads are now
+  //    supported. Master needs no special handling -- applies resolve
+  //    through the per-program apply lookup table prepared below (step 8).
+  //    The simul_efun dispatch rebuild is hooked next to that table
+  //    preparation: shadow tables in the frozen segment, activation inside
+  //    commit()'s no-fail segment.
 
   // 7. Owner quiescence: close admission and wait for active owner work.
   int64_t timeout_ms = CONFIG_INT(__RECOMPILE_OBJECT_QUIESCE_TIMEOUT_MS__);
@@ -3441,6 +3440,14 @@ void f_recompile_object() {
 
   // Apply lookup table must be fully built while still frozen (v0.4 §9.3).
   prepare_apply_lookup_table(prepared.staged.prog);
+
+  // v2 Phase 1: simul_efun dispatch rebuild -- frozen-segment preparation.
+  // Shadow arrays and identifier-hash pre-inserts happen here (allocation
+  // allowed); the no-fail activation runs inside commit().
+  if (ob == simul_efun_ob) {
+    simul_efuns_prepare(prepared.staged.prog, &prepared.simuls);
+    prepared.simuls_prepared = true;
+  }
 
   snapshot_recompile_targets(ob, &prepared);
   prepared.commit();

@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "base/package_api.h"
+#include "vm/internal/base/apply_cache.h"
 #include "vm/internal/base/interpret.h"
 #include "vm/internal/base/object.h"
 #include "vm/internal/base/program.h"
@@ -229,6 +230,9 @@ RecompilePrepared::~RecompilePrepared() {
     if (t.ob) free_object(&t.ob, "recompile_prepared");
   }
   if (old_prog) free_prog(&old_prog);
+  if (simuls_prepared) {
+    simul_efuns_discard(&simuls);
+  }
 }
 
 void RecompilePrepared::commit() noexcept {
@@ -247,6 +251,20 @@ void RecompilePrepared::commit() noexcept {
     t.ob->prog = new_prog;
     t.ob->prog_generation++;
     t.ob->flags = (t.ob->flags & ~kProgramDerivedFlags) | t.precomputed_flags;
+  }
+
+  // v2 design Phase 1: the apply lookup cache is keyed per program; every
+  // target shared old_prog, so one explicit invalidation covers them all.
+  // (v1 only invalidated indirectly, via deallocate_program -- this is the
+  // contract-level invalidation. Pure epoch bump, no allocation.)
+  apply_cache_invalidate_program(old_prog);
+
+  // v2 design Phase 1: simul_efun dispatch activation (no-fail: ident field
+  // writes + pointer swap + free() only). Cumulative-table semantics keep
+  // every already-compiled caller's sindex valid; dropped names stay in the
+  // table, inactive.
+  if (simuls_prepared) {
+    simul_efuns_activate(&simuls);
   }
 
   // Release the N old-program references held by the targets. The

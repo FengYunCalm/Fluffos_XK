@@ -38,6 +38,7 @@
 #include "user.h"
 
 #include "compiler/internal/compiler.h"
+#include "compiler/internal/lex.h"
 #include "compiler/internal/lpc_modern_profile.h"
 #include "vm/internal/owner_executor.h"
 #include "vm/internal/base/scoped_current_object_as_master.h"
@@ -60,6 +61,7 @@
 #include "vm/internal/owner_service_registry.h"
 #include "vm/internal/otable.h"
 #include "vm/internal/simulate.h"
+#include "vm/internal/simul_efun.h"
 #include "vm/object_handle.h"
 #include "vm/owner.h"
 #include "vm/vm.h"
@@ -24915,4 +24917,218 @@ TEST_F(DriverTest, TestGatewaySessionIdBoundaryTableDriven) {
     EXPECT_EQ(gateway_session_id_is_valid(c.input, c.len), c.expected)
         << "input=" << (c.input ? c.input : "(null)") << " len=" << c.len;
   }
+}
+
+// ---------------------------------------------------------------------------
+// v2 Phase 1: simul_efun two-phase dispatch rebuild (position key vs
+// dispatch index discipline). These tests drive simul_efuns_prepare/activate
+// against the live tables loaded from testsuite/single/simul_efun.c, covering
+// the middle-insert, dropped-name and re-add-after-drop cases that a
+// same-set reload contract cannot reach. They mutate process globals
+// (simul_names/simuls/num_simul_efun and the ident hash), so every test
+// snapshots the live tables first and restores them afterwards.
+// ---------------------------------------------------------------------------
+
+namespace {
+struct SimulTableSnapshot {
+  simul_entry *names = nullptr;
+  function_lookup_info_t *funcs = nullptr;
+  int count = 0;
+};
+
+SimulTableSnapshot SaveSimulTable() {
+  SimulTableSnapshot s;
+  s.count = num_simul_efun;
+  if (s.count) {
+    s.names = static_cast<simul_entry *>(malloc(s.count * sizeof(simul_entry)));
+    s.funcs = static_cast<function_lookup_info_t *>(
+        malloc(s.count * sizeof(function_lookup_info_t)));
+    memcpy(s.names, simul_names, s.count * sizeof(simul_entry));
+    memcpy(s.funcs, simuls, s.count * sizeof(function_lookup_info_t));
+  }
+  return s;
+}
+
+void RestoreSimulTable(const SimulTableSnapshot &s) {
+  // Deactivate every currently active name (mirror of remove_simuls).
+  for (int i = 0; i < num_simul_efun; i++) {
+    ident_hash_elem_t *ihe = lookup_ident(simul_names[i].name);
+    if (ihe) {
+      if (ihe->dn.simul_num != -1) {
+        ihe->sem_value--;
+      }
+      ihe->dn.simul_num = -1;
+      ihe->token &= ~IHE_SIMUL;
+      ihe->token |= IHE_ORPHAN;
+    }
+  }
+  // Re-activate exactly the snapshot's active entries.
+  for (int i = 0; i < s.count; i++) {
+    if (!s.funcs[i].func) {
+      continue;
+    }
+    ident_hash_elem_t *ihe = lookup_ident(s.names[i].name);
+    if (!ihe) {
+      // Same CHECK_ELEM trap as the reload path: lookup_ident() returns
+      // NULL for sem_value == 0 entries, which the deactivation loop above
+      // just produced. The perm-ident element itself always survives.
+      ihe = find_or_add_perm_ident(s.names[i].name);
+    }
+    EXPECT_NE(ihe, nullptr) << "missing ident for " << s.names[i].name;
+    if (!ihe) {
+      continue;
+    }
+    ihe->token |= IHE_SIMUL;
+    ihe->token &= ~IHE_ORPHAN;
+    ihe->sem_value++;
+    ihe->dn.simul_num = s.names[i].index;
+  }
+  // Swap the live pointers back to the snapshot copies (driver-lifetime;
+  // the tables built by the tests were activated and are intentionally
+  // never freed). Deactivated names from the tests keep an inert perm-ident
+  // (token 0, simul_num -1) -- harmless, matching failed-transaction
+  // semantics.
+  simul_names = s.names;
+  simuls = s.funcs;
+  num_simul_efun = s.count;
+}
+
+int FindDispatchIndex(const char *name) {
+  for (int i = 0; i < num_simul_efun; i++) {
+    if (strcmp(simul_names[i].name, name) == 0) {
+      return simul_names[i].index;
+    }
+  }
+  return -1;
+}
+
+int FindProgramIndex(program_t *prog, const char *name) {
+  for (int i = 0; i < prog->num_functions_defined + prog->last_inherited; i++) {
+    function_t *f = find_func_entry(prog, i);
+    if (strcmp(f->funcname, name) == 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+program_t *CompileSimulProg(const std::string &src) {
+  std::istringstream stream(src);
+  return compile_file(std::make_unique<IStreamLexStream>(stream), "simul_reload_test");
+}
+}  // namespace
+
+TEST_F(DriverTest, TestSimulEfunReloadAddDropReadd) {
+  ASSERT_GT(num_simul_efun, 0) << "config.test must load a simul_efun file";
+  SimulTableSnapshot snap = SaveSimulTable();
+
+  const int old_count = num_simul_efun;
+
+  const char *kFoo = "simul_efun_xyz_foo";
+  const char *kBar = "simul_efun_xyz_bar";
+  ASSERT_EQ(lookup_ident(kFoo), nullptr) << "test name must not collide";
+
+  // Program A: provides foo (a fresh name) -> middle insert at a sorted
+  // position that is not the cumulative tail, plus a live-table survivor.
+  std::string survivor = simul_names[0].name;  // sorted position 0, real name
+  std::string src_a = std::string("string ") + kFoo + "() { return \"a\"; }\n"
+                      "string " + survivor + "() { return \"survivor\"; }\n";
+  program_t *prog_a = CompileSimulProg(src_a);
+
+  ASSERT_NE(prog_a, nullptr);
+
+  simul_efun_prepared_t prep_a;
+  simul_efuns_prepare(prog_a, &prep_a);
+  ASSERT_EQ(prep_a.count, old_count + 1) << "foo inserted, survivor updated in place";
+  simul_efuns_activate(&prep_a);
+
+  // foo: fresh dispatch index = cumulative count; survivor: index preserved.
+  int foo_idx = FindDispatchIndex(kFoo);
+  int surv_idx = FindDispatchIndex(survivor.c_str());
+  ASSERT_GE(foo_idx, old_count);
+  ASSERT_EQ(surv_idx, snap.names[0].index);
+  // Survivor slot must hold the NEW program's function (the pre-fix bug
+  // shifted dispatch slots on middle insert, making this a different or
+  // null function).
+  ASSERT_NE(simuls[surv_idx].func, nullptr);
+  ASSERT_STREQ(simuls[surv_idx].func->funcname, survivor.c_str());
+  // Function-table order is sorted by funcname, not declaration order:
+  // locate foo's program index by name. The dispatch slot must hold the
+  // new program's function AND its runtime index (call_direct relies on
+  // both matching the caller's expectation).
+  int foo_pidx = FindProgramIndex(prog_a, kFoo);
+  ASSERT_GE(foo_pidx, 0);
+  ASSERT_EQ(simuls[foo_idx].func, find_func_entry(prog_a, foo_pidx));
+  ASSERT_EQ(simuls[foo_idx].index, foo_pidx);
+
+  // Position key != dispatch index must actually hold (sorted table).
+  int foo_pos = -1;
+  for (int i = 0; i < num_simul_efun; i++) {
+    if (strcmp(simul_names[i].name, kFoo) == 0) {
+      foo_pos = i;
+    }
+  }
+  ASSERT_GE(foo_pos, 0);
+  ASSERT_NE(foo_pos, foo_idx) << "position key must differ from dispatch index";
+  ident_hash_elem_t *ihe = lookup_ident(kFoo);
+  ASSERT_NE(ihe, nullptr);
+  ASSERT_TRUE(ihe->token & IHE_SIMUL);
+  ASSERT_EQ(ihe->dn.simul_num, foo_idx);
+
+  // Program B: drops foo (and the survivor). foo must stay in the table at
+  // its dispatch index, inactive; its ident must become the compile-time
+  // rejection state (IHE_ORPHAN, simul_num -1).
+  std::string src_b = std::string("string ") + kBar + "() { return \"b\"; }\n";
+  program_t *prog_b = CompileSimulProg(src_b);
+  ASSERT_NE(prog_b, nullptr);
+  simul_efun_prepared_t prep_b;
+  simul_efuns_prepare(prog_b, &prep_b);
+  simul_efuns_activate(&prep_b);
+
+  ASSERT_EQ(FindDispatchIndex(kFoo), foo_idx) << "dropped name keeps its index";
+  ASSERT_EQ(simuls[foo_idx].func, nullptr) << "dropped name stays inactive";
+  // lookup_ident() returns NULL for sem_value == 0 entries (CHECK_ELEM in
+  // lex.cc), which is exactly the post-drop state; the perm-ident element
+  // itself survives in the compile-time rejection state (IHE_ORPHAN,
+  // simul_num -1) and is reachable via find_or_add_perm_ident.
+  ihe = find_or_add_perm_ident(kFoo);
+  ASSERT_NE(ihe, nullptr);
+  ASSERT_FALSE(ihe->token & IHE_SIMUL);
+  ASSERT_TRUE(ihe->token & IHE_ORPHAN);
+  ASSERT_EQ(ihe->dn.simul_num, -1);
+  int bar_idx = FindDispatchIndex(kBar);
+  ASSERT_EQ(bar_idx, old_count + 1) << "next cumulative index (foo took old_count, survivor updated in place)";
+  int bar_pidx = FindProgramIndex(prog_b, kBar);
+  ASSERT_GE(bar_pidx, 0);
+  ASSERT_EQ(simuls[bar_idx].func, find_func_entry(prog_b, bar_pidx));
+  ASSERT_EQ(simuls[bar_idx].index, bar_pidx);
+
+  // Program C: re-adds foo. prepare() re-resolves the ident slot to the
+  // existing perm-ident (dropped entries keep their ident hash element);
+  // the same dispatch index must dispatch again.
+  std::string src_c = std::string("string ") + kFoo + "() { return \"c\"; }\n";
+  program_t *prog_c = CompileSimulProg(src_c);
+  ASSERT_NE(prog_c, nullptr);
+  simul_efun_prepared_t prep_c;
+  simul_efuns_prepare(prog_c, &prep_c);
+  simul_efuns_activate(&prep_c);
+
+  ASSERT_EQ(FindDispatchIndex(kFoo), foo_idx) << "re-added name keeps its index";
+  int foo_pidx_c = FindProgramIndex(prog_c, kFoo);
+  ASSERT_GE(foo_pidx_c, 0);
+  ASSERT_EQ(simuls[foo_idx].func, find_func_entry(prog_c, foo_pidx_c));
+  ASSERT_EQ(simuls[foo_idx].index, foo_pidx_c);
+  ihe = lookup_ident(kFoo);
+  ASSERT_NE(ihe, nullptr);
+  ASSERT_TRUE(ihe->token & IHE_SIMUL);
+  ASSERT_FALSE(ihe->token & IHE_ORPHAN);
+  ASSERT_EQ(ihe->dn.simul_num, foo_idx);
+
+  // Restore live tables and ident state; the activated tables are
+  // intentionally leaked (driver-lifetime), the programs are safe to free
+  // after the live tables no longer reference them.
+  RestoreSimulTable(snap);
+  deallocate_program(prog_a);
+  deallocate_program(prog_b);
+  deallocate_program(prog_c);
 }
