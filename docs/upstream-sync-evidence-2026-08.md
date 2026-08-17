@@ -119,3 +119,78 @@ T2 无独立 commit 且无生命周期合同（A7）、"12 项全量回归全绿
 - `driver etc/config.test -ftest`：0 Check failed（全量）
 - fuzz 双 harness：有效/无效/序列/IO 失败/空输入矩阵全符合
 - lpcc：短参拒绝/完整参数/batch 回归
+
+## 2026-08-16 E3 recompile_object 实施记录（v0.4 专项方案 P0-P7）
+
+### 实施 commit 链（均在 main，推送后以 origin/main 为准）
+
+| 阶段 | commit | 内容 |
+|---|---|---|
+| P1 | 225fc567 | owner quiescence：kOpen/kClosing/kFrozen 状态机 + epoch + claim 计数 + 中央 admission 门禁 |
+| P2 | 353ff204 | funptr 代际：object.prog_generation / funptr owner_gen / local_ptr.prog 对称记账 / f_bind 转移 / stale 检查 |
+| P3/P4 | e7612199 | StagedProgram/RecompileLayout/compile_program_for_recompile/snapshot/commit（先 N 个 new_prog 引用预留再交换） |
+| P5 | 4d15f15c | f_recompile_object 八步入口 + CFG_INT(70)/(71) + VALID_RECOMPILE_OBJECT + core.spec |
+| P6 | 6099a817 | 双模式测试（config.test disabled / config.recompile 全合同）+ efun 文档 |
+| 守卫修复 | 4aef7ad5 | 执行中守卫补顶层帧检查（csp->prog 语义缺陷）+ 测试重构（独立 fixture + self_reload 探针 + 真实 stale funptr） |
+| 架构重构 | （待推送 commit） | recompile.{h,cc} 事务模块抽取、RecompilePrepared 资源自持、claim 计数封装、局部 extern 清理 |
+| pin/死锁修复 | （待推送 commit） | commit() 释放 old_prog transaction pin；claim_begin_locked 无锁变体（同一非递归 mutex 自死锁） |
+
+### 守卫缺陷根因（审查发现）
+
+csp->prog 在 push_control_stack() 时保存的是调用方 program（弹出恢复用），
+帧遍历对顶层正在执行目标 program 的帧完全失效；家族内自重载被放行，
+原测试靠旧 funptr 的 func_ref pin 意外保活旧 program 掩盖了顶层 UAF。
+修复：显式 current_prog == old_prog 检查 + 帧遍历兜底；测试改为独立
+blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
+
+### 架构重构（审阅驱动）
+
+- 事务子系统从 simulate.{h,cc} 抽到 recompile.{h,cc}（单一归属）
+- RecompilePrepared::commit() 自持全部资源释放（含 old_prog transaction
+  pin——修复了每次成功重载泄漏整个旧 program 的回归）
+- owner 计数封装：claim_begin_locked()（持锁上下文）/claim_end()（无锁
+  上下文，锁契约不对称，防误用）；admission 门禁锁内裸读 recompile_state()
+- 修复重构引入的自死锁：owner_runtime_mutex 与 coordinator.mutex_ 是同一
+  非递归 mutex，helper 内二次上锁必挂（owner_payload 金丝雀验证）
+
+### 验证矩阵（正确二进制，死锁修复后）
+
+- `driver etc/config.recompile -ftest:single/tests/efuns/recompile_object`：exit 0，Checks succeeded
+- `driver etc/config.test -ftest:single/tests/efuns/recompile_object`：exit 0（disabled 合同）
+- `driver etc/config.test -ftest` 全量：Checks succeeded，0 Check failed
+- `lpc_tests`：424/424 PASS
+- `driver etc/config.test -ftest:single/tests/efuns/owner_payload`：exit 0（死锁金丝雀）
+- P7 ASan：见下
+
+### F1/F2/F3 收口（架构审阅驱动）
+
+- F1：quiesce 计数器（attempts/success/timeouts/admission_rejected）经
+  OwnerStatusSnapshot 锁内快照暴露到 runtime status（owner_quiesce_*），
+  锁外零直读（消除 plain uint64_t 锁外读的 data race）
+- F2：8 个 `uint64_t&` 裸引用访问器改只读 const + 语义化递增方法
+  （note_*_locked / advance_recompile_epoch，全部要求调用方持锁——
+  与 owner_runtime_mutex 同一非递归 mutex，方法内上锁会自死锁）
+- F3：simulate.h 移除 E3 遗留的 <string>/<vector> include
+- 过程教训：note_* 方法首版带内部锁，在持锁调用点（quiesce_begin /
+  enqueue_owner_task_locked）二次上锁自死锁（owner_payload/recompile 单测
+  挂起实证），改 _locked 无锁变体后金丝雀通过
+
+### P7 ASan 状态
+
+- ASan/UBSan driver 构建完成；config.recompile 的 recompile_object 测试
+  （含 200 次重载 + self_reload + stale funptr）Checks succeeded，无
+  AddressSanitizer 报错
+- ASan lpc_tests：被 pre-existing UBSan 报错中止（test_lpc.cc:4433
+  `current_object = master_ob` 赋 null，TestReadBytesPreservesLpc64BitOffsets；
+  blame 为 2026-08 早期 "Kimi Security Fix" 64-bit 系列引入，早于 E3 全部
+  commit，非 E3 回归）。构建带 -fno-sanitize-recover=all，UBSan 致命。
+  该测试文件 E3 零触及，定性为遗留项（修复需在锁外读路径加空指针防护，
+  与 E3 无关，另行处理）
+- ASan 全量 ftest、TSan、owner 压测：未跑，deferred
+
+### 剩余门禁
+
+- ASan lpc_tests pre-existing UBSan 修复（test_lpc.cc:4433，与 E3 无关）
+- ASan 全量 ftest / TSan / owner 压测
+- E3 v2 能力（master/simul_efun 热重载、__INIT/create()、失败回滚）deferred
+- T3 lpcshell / E4 保持 deferred

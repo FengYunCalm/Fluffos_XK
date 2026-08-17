@@ -28,6 +28,9 @@
 #include "packages/core/outbuf.h"
 #include "vm/internal/owner_runtime_coordinator.h"
 #include "vm/internal/base/apply_cache.h"
+#include "vm/internal/recompile.h"
+#include "vm/internal/master.h"
+#include "vm/internal/simul_efun.h"
 #include "packages/core/reclaim.h"
 #include "packages/core/custom_crypt.h"
 #include "packages/core/ed.h"
@@ -3399,15 +3402,11 @@ void f_recompile_object() {
   }
 
   // 6. Special targets rejected (v1).
-  {
-    extern object_t *master_ob;
-    if (ob == master_ob) {
-      error("recompile_object target is unsupported: master\n");
-    }
-    extern object_t *simul_efun_ob;
-    if (ob == simul_efun_ob) {
-      error("recompile_object target is unsupported: simul_efun\n");
-    }
+  if (ob == master_ob) {
+    error("recompile_object target is unsupported: master\n");
+  }
+  if (ob == simul_efun_ob) {
+    error("recompile_object target is unsupported: simul_efun\n");
   }
 
   // 7. Owner quiescence: close admission and wait for active owner work.
@@ -3444,18 +3443,9 @@ void f_recompile_object() {
   prepare_apply_lookup_table(prepared.staged.prog);
 
   snapshot_recompile_targets(ob, &prepared);
-  commit_recompile_targets_noexcept(&prepared);
+  prepared.commit();
 
   int count = static_cast<int>(prepared.targets.size());
-  // Release the snapshot add_refs (still FROZEN; objects are live and keep
-  // their identity; the refs were for snapshot stability only).
-  for (auto &t : prepared.targets) {
-    if (t.ob) {
-      object_t *snap = t.ob;
-      t.ob = nullptr;
-      free_object(&snap, "f_recompile_object");
-    }
-  }
   free_object(&ob, "f_recompile_object");
   sp--;
   push_number(count);

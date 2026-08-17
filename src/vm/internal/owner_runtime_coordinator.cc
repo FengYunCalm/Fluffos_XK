@@ -20,25 +20,63 @@ bool &OwnerRuntimeCoordinator::main_draining() { return main_draining_; }
 
 std::vector<std::thread> &OwnerRuntimeCoordinator::threads() { return threads_; }
 
+void OwnerRuntimeCoordinator::claim_begin_locked() {
+  // Caller must already hold the runtime mutex (owner.cc claim_next_owner).
+  active_owner_claims_++;
+}
+
+void OwnerRuntimeCoordinator::claim_end() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (active_owner_claims_ > 0) {
+    active_owner_claims_--;
+  }
+  cv_.notify_all();
+}
+
 OwnerRecompileState &OwnerRuntimeCoordinator::recompile_state() { return recompile_state_; }
 
-uint64_t &OwnerRuntimeCoordinator::recompile_epoch() { return recompile_epoch_; }
+uint64_t OwnerRuntimeCoordinator::active_worker_tasks() const { return active_worker_tasks_; }
 
-uint64_t &OwnerRuntimeCoordinator::active_worker_tasks() { return active_worker_tasks_; }
+uint64_t OwnerRuntimeCoordinator::active_owner_claims() const { return active_owner_claims_; }
 
-uint64_t &OwnerRuntimeCoordinator::active_owner_claims() { return active_owner_claims_; }
-
-uint64_t &OwnerRuntimeCoordinator::active_worker_program_pins() {
+uint64_t OwnerRuntimeCoordinator::active_worker_program_pins() const {
   return active_worker_program_pins_;
 }
 
-uint64_t &OwnerRuntimeCoordinator::quiesce_attempts() { return quiesce_attempts_; }
+uint64_t OwnerRuntimeCoordinator::quiesce_attempts() const { return quiesce_attempts_; }
 
-uint64_t &OwnerRuntimeCoordinator::quiesce_success() { return quiesce_success_; }
+uint64_t OwnerRuntimeCoordinator::quiesce_success() const { return quiesce_success_; }
 
-uint64_t &OwnerRuntimeCoordinator::quiesce_timeouts() { return quiesce_timeouts_; }
+uint64_t OwnerRuntimeCoordinator::quiesce_timeouts() const { return quiesce_timeouts_; }
 
-uint64_t &OwnerRuntimeCoordinator::admission_rejected() { return admission_rejected_; }
+uint64_t OwnerRuntimeCoordinator::admission_rejected() const { return admission_rejected_; }
+
+uint64_t OwnerRuntimeCoordinator::recompile_epoch() const { return recompile_epoch_; }
+
+uint64_t OwnerRuntimeCoordinator::advance_recompile_epoch() {
+  // Caller must hold the runtime mutex (quiesce_end path).
+  return ++recompile_epoch_;
+}
+
+void OwnerRuntimeCoordinator::note_admission_rejected_locked() {
+  // Caller must hold the runtime mutex (owner.cc enqueue_owner_task_locked).
+  admission_rejected_++;
+}
+
+void OwnerRuntimeCoordinator::note_quiesce_attempt_locked() {
+  // Caller must hold the runtime mutex (quiesce_begin path).
+  quiesce_attempts_++;
+}
+
+void OwnerRuntimeCoordinator::note_quiesce_success_locked() {
+  // Caller must hold the runtime mutex (quiesce_begin success path).
+  quiesce_success_++;
+}
+
+void OwnerRuntimeCoordinator::note_quiesce_timeout_locked() {
+  // Caller must hold the runtime mutex (quiesce_begin timeout path).
+  quiesce_timeouts_++;
+}
 
 OwnerRuntimeCoordinator &owner_runtime_coordinator() {
   static OwnerRuntimeCoordinator coordinator;
@@ -84,7 +122,7 @@ OwnerRecompileQuiesceResult vm_owner_recompile_quiesce_begin(
     return result;  // would self-deadlock
   }
 
-  coordinator.quiesce_attempts()++;
+  coordinator.note_quiesce_attempt_locked();
   coordinator.recompile_state() = OwnerRecompileState::kClosing;
 
   auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -97,7 +135,7 @@ OwnerRecompileQuiesceResult vm_owner_recompile_quiesce_begin(
       return result;
     }
     if (coordinator.cv().wait_until(lock, deadline) == std::cv_status::timeout) {
-      coordinator.quiesce_timeouts()++;
+      coordinator.note_quiesce_timeout_locked();
       coordinator.recompile_state() = OwnerRecompileState::kOpen;
       coordinator.cv().notify_all();
       return result;
@@ -105,7 +143,7 @@ OwnerRecompileQuiesceResult vm_owner_recompile_quiesce_begin(
   }
 
   coordinator.recompile_state() = OwnerRecompileState::kFrozen;
-  coordinator.quiesce_success()++;
+  coordinator.note_quiesce_success_locked();
   result.ok = true;
   result.epoch = coordinator.recompile_epoch();
   return result;
@@ -116,14 +154,9 @@ void vm_owner_recompile_quiesce_end(uint64_t epoch) noexcept {
   std::lock_guard<std::mutex> lock(coordinator.mutex());
   if (coordinator.recompile_state() == OwnerRecompileState::kFrozen &&
       coordinator.recompile_epoch() == epoch) {
-    coordinator.recompile_epoch()++;
+    coordinator.advance_recompile_epoch();
     coordinator.recompile_state() = OwnerRecompileState::kOpen;
     coordinator.cv().notify_all();
   }
 }
 
-bool vm_owner_recompile_context_allowed() noexcept {
-  auto &coordinator = owner_runtime_coordinator();
-  std::lock_guard<std::mutex> lock(coordinator.mutex());
-  return coordinator.recompile_state() == OwnerRecompileState::kOpen;
-}

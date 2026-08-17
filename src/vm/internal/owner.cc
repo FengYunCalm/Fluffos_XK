@@ -539,6 +539,10 @@ struct OwnerStatusSnapshot {
   int64_t last_budget_yield_backlog{0};
   int64_t last_budget_yield_safe_backlog{0};
   uint64_t executor_budget_yields{0};
+  uint64_t quiesce_attempts{0};
+  uint64_t quiesce_success{0};
+  uint64_t quiesce_timeouts{0};
+  uint64_t quiesce_admission_rejected{0};
   int64_t pending_futures{0};
   OwnerQueueFairnessSnapshot fairness;
 };
@@ -566,6 +570,11 @@ OwnerStatusSnapshot owner_status_snapshot_locked() {
   // Read the yield counter under the same lock so callers that need the
   // counter and the recorded owner/backlog observe one consistent snapshot.
   status.executor_budget_yields = owner_executor_budget_yields.load(std::memory_order_relaxed);
+  // E3 P1 quiescence counters: read under the same lock (plain uint64_t).
+  status.quiesce_attempts = owner_runtime_coordinator().quiesce_attempts();
+  status.quiesce_success = owner_runtime_coordinator().quiesce_success();
+  status.quiesce_timeouts = owner_runtime_coordinator().quiesce_timeouts();
+  status.quiesce_admission_rejected = owner_runtime_coordinator().admission_rejected();
   status.fairness = owner_scheduler_state.fairness_snapshot(
       owner_task_executor_runnable, owner_task_executor_safe,
       owner_task_requires_main_drain);
@@ -673,6 +682,17 @@ void add_owner_runtime_v2_status_fields(mapping_t *map,
                    static_cast<LPC_INT>(metrics.owner_executor_admission_rejected));
   add_mapping_pair(map, "owner_executor_admission_dropped",
                    static_cast<LPC_INT>(metrics.owner_executor_admission_dropped));
+  // E3 P1 quiescence counters (F1): observable alongside admission stats so
+  // "recompile blocked by owner load" is diagnosable. Values come from the
+  // lock-held snapshot (owner_status_snapshot_locked), never read unlocked.
+  add_mapping_pair(map, "owner_quiesce_attempts",
+                   static_cast<LPC_INT>(status.quiesce_attempts));
+  add_mapping_pair(map, "owner_quiesce_success",
+                   static_cast<LPC_INT>(status.quiesce_success));
+  add_mapping_pair(map, "owner_quiesce_timeouts",
+                   static_cast<LPC_INT>(status.quiesce_timeouts));
+  add_mapping_pair(map, "owner_quiesce_admission_rejected",
+                   static_cast<LPC_INT>(status.quiesce_admission_rejected));
   add_mapping_pair(map, "owner_executor_payload_policy_v2_ready", 1);
   add_mapping_pair(map, "owner_executor_trace_schema_v2_ready", 1);
   add_mapping_string(map, "owner_executor_trace_schema", kOwnerExecutorTraceSchemaV2);
@@ -2964,7 +2984,10 @@ bool enqueue_owner_task_locked(OwnerMailboxTask &task, const std::string &owner_
   // flight), new owner submissions are stably rejected. The gate lives at
   // the central enqueue so every public submit path converges here.
   if (owner_runtime_coordinator().recompile_state() != OwnerRecompileState::kOpen) {
-    owner_runtime_coordinator().admission_rejected()++;
+    // Quiescence rejection (E3 P1): distinct from the pre-existing
+    // owner_executor_admission_rejected counter, which counts backpressure
+    // and manifest rejections. Both are observable in runtime status.
+    owner_runtime_coordinator().note_admission_rejected_locked();
     if (task.drop_callback) {
       enqueue_owner_executor_callback_cleanup_locked(task);
     }
@@ -3465,8 +3488,9 @@ class OwnerExecutorRuntimeImpl final : public OwnerExecutorRuntime {
       auto owner_id = first_task.owner_id;
       owner_scheduler_state.push_front_owner_task(owner_id, std::move(first_task));
       append_owner_executor_trace_locked(owner_id, "owner_claimed");
-      // E3 P1: an active claim keeps the quiescence gate waiting.
-      owner_runtime_coordinator().active_owner_claims()++;
+      // E3 P1: an active claim keeps the quiescence gate waiting. Caller
+      // holds the runtime mutex, hence the _locked variant.
+      owner_runtime_coordinator().claim_begin_locked();
       return owner_id;
     }
   }
@@ -3488,26 +3512,17 @@ class OwnerExecutorRuntimeImpl final : public OwnerExecutorRuntime {
 
   void release_owner_after_task(const std::string &owner_id) override {
     // E3 P1: the claim is over; wake a possibly-waiting quiescence.
-    {
-      std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-      if (owner_runtime_coordinator().active_owner_claims() > 0) {
-        owner_runtime_coordinator().active_owner_claims()--;
-      }
-      owner_runtime_cv.notify_all();
-    }
+    owner_runtime_coordinator().claim_end();
     finish_active_owner_task(owner_id);
   }
 
   void record_owner_exception(const std::string &owner_id, const char *what) override {
     owner_executor_owner_exceptions.fetch_add(1, std::memory_order_relaxed);
+    owner_runtime_coordinator().claim_end();
     {
       // append_owner_executor_trace_locked reads scheduler state and must
       // hold the runtime lock; never call the _locked helper unlocked.
       std::lock_guard<std::mutex> lock(owner_runtime_mutex);
-      if (owner_runtime_coordinator().active_owner_claims() > 0) {
-        owner_runtime_coordinator().active_owner_claims()--;
-      }
-      owner_runtime_cv.notify_all();
       append_owner_executor_trace_locked(owner_id, "owner_exception");
     }
     debug_message("OwnerExecutor: exception escaped run_claimed_owner for owner '%s': %s\n",

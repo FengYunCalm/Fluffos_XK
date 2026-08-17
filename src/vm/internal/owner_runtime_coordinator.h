@@ -35,17 +35,40 @@ class OwnerRuntimeCoordinator {
   bool &main_draining();
   std::vector<std::thread> &threads();
 
+  // E3 P1: worker claim accounting. Only these methods touch the counters,
+  // so a missed decrement cannot silently wedge quiescence.
+  //
+  // Lock contract is asymmetric on purpose: claim_begin_locked() runs while
+  // the caller already holds the runtime mutex (the state machine's single
+  // lock) and must NOT lock again; claim_end() runs outside the lock and
+  // takes it internally. Do not "unify" this.
+  void claim_begin_locked();
+  void claim_end();
+
   // Recompile quiescence (E3 P1). Callers must hold no locks; begin/end take
   // the runtime mutex internally.
   OwnerRecompileState &recompile_state();
-  uint64_t &recompile_epoch();
-  uint64_t &active_worker_tasks();
-  uint64_t &active_owner_claims();
-  uint64_t &active_worker_program_pins();
-  uint64_t &quiesce_attempts();
-  uint64_t &quiesce_success();
-  uint64_t &quiesce_timeouts();
-  uint64_t &admission_rejected();
+
+  // Read-only counters (F1: observable in runtime status). Mutation happens
+  // only inside the state machine; external code cannot write these.
+  uint64_t active_worker_tasks() const;
+  uint64_t active_owner_claims() const;
+  uint64_t active_worker_program_pins() const;
+  uint64_t quiesce_attempts() const;
+  uint64_t quiesce_success() const;
+  uint64_t quiesce_timeouts() const;
+  uint64_t recompile_epoch() const;
+  uint64_t advance_recompile_epoch();
+  uint64_t admission_rejected() const;
+  // E3 P1: semantic increment points for the quiescence lifecycle. Only
+  // these methods (plus the state machine itself) may touch the counters.
+  // All _locked variants require the caller to hold the runtime mutex
+  // (same non-recursive mutex as the state machine -- locking inside would
+  // self-deadlock); advance_recompile_epoch() has the same contract.
+  void note_admission_rejected_locked();
+  void note_quiesce_attempt_locked();
+  void note_quiesce_success_locked();
+  void note_quiesce_timeout_locked();
 
  private:
   OwnerRuntimeMetrics metrics_;
@@ -87,4 +110,7 @@ std::vector<std::thread> &owner_threads_instance();
 OwnerRecompileQuiesceResult vm_owner_recompile_quiesce_begin(
     std::chrono::milliseconds timeout);
 void vm_owner_recompile_quiesce_end(uint64_t epoch) noexcept;
-bool vm_owner_recompile_context_allowed() noexcept;
+// NOTE: there is intentionally no unlocked vm_owner_recompile_context_allowed()
+// helper -- the only admission gate (enqueue_owner_task_locked in owner.cc)
+// runs under the runtime mutex and reads recompile_state() directly. A
+// locking helper here would self-deadlock on the same non-recursive mutex.
