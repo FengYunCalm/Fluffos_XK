@@ -15,6 +15,7 @@
 
 #include "mainlib.h"
 #include "vm/vm.h"
+#include "vm/internal/base/scoped_current_object_as_master.h"
 #include "vm/internal/simulate.h"
 #include "vm/internal/base/interpret.h"
 #include "vm/internal/base/machine.h"
@@ -121,7 +122,8 @@ int main(int argc, char** argv) {
   auto config = get_argument(0, argc, argv);
   init_main(config);
   vm_start();
-  current_object = master_ob;
+    ScopedCurrentObjectAsMaster master_scope;
+
 
 #ifdef __AFL_HAVE_MANUAL_CONTROL
   __AFL_INIT();

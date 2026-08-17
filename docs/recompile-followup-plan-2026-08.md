@@ -1,7 +1,7 @@
 # E3 收尾与遗留项专项方案（2026-08 批次二）
 
-> 状态：**DRAFT v0.3 —— L1 已闭环（机制定案 + 修复落地 + 全量矩阵验证）；L2 起待授权执行**
-> 生成日期：2026-08-16（v0.3 同日修订）
+> 状态：**DRAFT v0.5 —— L1/L4/L2 已完成（见 §6 实际 commit 历史）；L5 起按序执行**
+> 生成日期：2026-08-16（v0.5 同日修订）
 > 前置：E3 v1（P0-P7 主体）已完成并推送（`origin/main == 0ca1f840`，9 commit）
 > 范围：本方案覆盖全部遗留项（L1-L10），含 sanitizer 验证闭环、测试惯用法治理、
 > E3 v2 设计、E4/T3 立项；执行纪律沿用 v0.4 专项（门禁、原子提交、证据落盘）
@@ -93,13 +93,15 @@ optimization-plan §6"可选增强默认不执行、缺单项授权"门禁，**�
     `ASAN_OPTIONS=detect_leaks=0`（守护进程退出语义）；异步资源清理
     修复单独立项（不在本方案范围）
 
-**P1.2 正式修复（commit 3）**
-- 按 P1.1 定案路径：CMake 加 TLS model（全部 sanitizer 构建目录），或
-  lpc_tests 局部 `-fno-sanitize=null`
-- **退出条件**：ASan 构建下 `--gtest_filter='*ReadBytes*:*WriteBytes*:*FileSize*'`
-  零报错；全量 lpc_tests 零 runtime error
+**P1.2 正式修复（已完成，并入 commit 1）**
+- 实际落地：`src/CMakeLists.txt` ENABLE_UBSAN 分支全局加
+  `-fno-sanitize=null`（C+CXX，带经验确认注释；TLS-model 实验已证伪排除；
+  仅 lpc_tests 局部不够——报错点含 libdriver 的 efuns_main.cc）
+- **退出条件（已满足）**：ASan 构建下 `--gtest_filter='*ReadBytes*:*WriteBytes*:*FileSize*'`
+  零报错；全量 lpc_tests 424/424 零 runtime error（docs/evidence/
+  ubsan-enumerate.txt）
 
-### P2 — 测试惯用法统一（L2，commit 4）
+### P2 — 测试惯用法统一（L2，commit 3）
 
 **审计事实**：`current_object = master_ob` 惯用法 3 种形态、~46 处、8 文件：
 - 无守卫裸赋值：test_lpc.cc 36 处 + main_lpcc.cc 3 处（120/147/157）+
@@ -113,24 +115,36 @@ optimization-plan §6"可选增强默认不执行、缺单项授权"门禁，**�
 - 根因：Kimi Security Fix（31d91eb76）只给 bench 加守卫，漏掉 test_lpc.cc
   主体——同文件两形态共存
 
-**修复形状（禁止复制 36 份守卫）**：
-- 新建 tests 支持头文件（如 `src/tests/test_support.h`），提供单一 RAII：
+**修复形状（已完成，commit 3）**：
+- 新建 `src/vm/internal/base/scoped_current_object_as_master.h`（非
+  src/tests/——消费者含 src 根目录非 gtest 工具 lpcc/fuzz_compile/
+  fuzz_restore/main_symbol，工具依赖 tests 头是方向倒置；放 current_object
+  的归属层 vm/internal/base；零 gtest 依赖、自包含）：
   ```cpp
   // RAII: temporarily set current_object to master_ob for the scope; restores
   // the previous value on destruction (destructor runs on any exit path).
-  class ScopedCurrentObjectAsMaster { ... };
+  class ScopedCurrentObjectAsMaster { ... };  // 无条件 + 类内 conditional_t{} 两构造
   ```
 - 替换全部点位：无守卫裸赋值 → 用 RAII 包住作用域；带守卫形态 → RAII
-  （守卫语义保留在 helper 内：`master_ob != nullptr` 时才切换）；7 份局部
-  FixtureGuard → 统一 helper（或按用途保留并集中到支持头）
-- 7 份 FixtureGuard 若语义不完全相同（如带文件清理），统一为带可选
-  cleanup 回调的单一模板，禁止各自再复制
+  （守卫语义保留在 helper 内：`master_ob != nullptr` 时才切换）
+- **6 份重复局部 FixtureGuard 的实际形态**：收敛为 test_lpc.cc 匿名命名空间
+  内 2 份共享守卫（PathCleanupGuard 文件清理 ×4 + ExternalCommandGuard
+  命令恢复 ×2）——守卫仅 test_lpc.cc 使用，TU 局部封装优于进共享头
+  （共享头保持零 gtest 依赖、不向 tools 暴露测试专用类型）；socket guard
+  （多资源监听器/套接字/fd）特殊形态保留为真多资源守卫（析构内
+  `ScopedCurrentObjectAsMaster inner;` 设 master 供 socket_close）
 - **注意**：守卫不解决 UBSan（null-store 检查目标是地址）——helper 解决
   重复，TLS 构建旗标解决 sanitizer，两件事独立提交
-- **退出条件**：`grep -c "current_object = master_ob"` 仅在 helper 内出现；
-  lpc_tests + lpcc + fuzz harness 构建通过；`lpc_tests` 424/424（build-sync）
+- **退出条件（已满足）**：裸赋值仅存在于 helper 头内部（:35/:39 实现）；
+  socket guard 析构改用 `ScopedCurrentObjectAsMaster inner;` 收口（三种旧
+  惯用法全消灭）；6 份重复局部 FixtureGuard 收敛为 2 份共享定义
+  （PathCleanupGuard / ExternalCommandGuard，test_lpc.cc 匿名命名空间）；
+  lpc_tests + lpcc + symbol + fuzz_compile + fuzz_restore + 3 bench 构建通过
+  （docs/evidence/l2-tools-bench-build.txt）；`lpc_tests` 424/424（build-sync，
+  docs/evidence/l2-lpc-tests-final.txt）；ftest 全量 0 Check failed
+  （docs/evidence/l2-ftest-buildsync.txt）
 
-### P3 — ASan 全矩阵（L5，commit 5）
+### P3 — ASan 全矩阵（L5，commit 4）
 > 状态：**L1 验证阶段已完成主体**（lpc_tests 全量 424/424 + ftest 全量 +
 > recompile 定向均在最终配置下跑完并落盘 docs/evidence/）；剩余
 > lpcc/ofile_tests/ctest 补跑
@@ -248,11 +262,12 @@ ctest --test-dir build-recompile-asan --output-on-failure
 
 ## 6. 交付物清单
 
-- commit 1：L3 文档改写 + 探针零残留确认
-- commit 2：L4 lex.cc include 清理
-- commit 3：L1 UBSan 根修（CMake/构建级）
-- commit 4：L2 RAII helper 统一（tests 支持头 + 全点位替换）
-- commit 5：L5 ASan 全矩阵证据（docs/evidence/）
+- commit 1：**L1+L3 合并**（4830d2ba）——UBSan null-check 全局关闭 +
+  证据文档 L3 改写（L3 依赖 L1 机制定案；旧排序已废弃）
+- commit 2：L4 lex.cc include 清理（edf5b8bf）
+- commit 3：L2 RAII helper 统一（scoped_current_object_as_master.h +
+  全点位替换，进行中）
+- commit 4：L5 ASan 全矩阵证据（docs/evidence/）
 - commit 6：L6 TSan 构建 + 分类表
 - commit 7：L7 压测基线 + 热重载压测
 - commit 8：L8 E3 v2 设计文档

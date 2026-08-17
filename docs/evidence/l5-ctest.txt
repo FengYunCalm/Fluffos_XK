@@ -1,0 +1,853 @@
+Test project /home/mechrevo/projects/fluffos-xk/build-sync
+        Start   1: MudlibStatsTest.ArraySizeUpdatesAreAtomicAcrossVmThreads
+  1/424 Test   #1: MudlibStatsTest.ArraySizeUpdatesAreAtomicAcrossVmThreads ...........................................   Passed    0.01 sec
+        Start   2: StrallocAccountingTest.UintMaxLengthPreservesWraparoundAndEvaluatesOnce
+  2/424 Test   #2: StrallocAccountingTest.UintMaxLengthPreservesWraparoundAndEvaluatesOnce ............................   Passed    0.01 sec
+        Start   3: StrallocAccountingTest.ShrinkingCountedStringSubtractsTheRemovedBytes
+  3/424 Test   #3: StrallocAccountingTest.ShrinkingCountedStringSubtractsTheRemovedBytes ..............................   Passed    0.01 sec
+        Start   4: OwnerFutureStoreTest.TtlReapsPayloadFreeTerminalRecords
+  4/424 Test   #4: OwnerFutureStoreTest.TtlReapsPayloadFreeTerminalRecords ............................................   Passed    0.01 sec
+        Start   5: OwnerFutureStoreTest.TtlKeepsPayloadBearingTerminalRecords
+  5/424 Test   #5: OwnerFutureStoreTest.TtlKeepsPayloadBearingTerminalRecords .........................................   Passed    0.01 sec
+        Start   6: OwnerFutureStoreTest.CapacityRejectsNewPendingBeyondTerminalCap
+  6/424 Test   #6: OwnerFutureStoreTest.CapacityRejectsNewPendingBeyondTerminalCap ....................................   Passed    0.01 sec
+        Start   7: OwnerFutureStoreTest.KeepsTaskLookupUntilTerminalTake
+  7/424 Test   #7: OwnerFutureStoreTest.KeepsTaskLookupUntilTerminalTake ..............................................   Passed    0.01 sec
+        Start   8: OwnerFutureStoreTest.ReindexesOverwriteAndDuplicateTaskIds
+  8/424 Test   #8: OwnerFutureStoreTest.ReindexesOverwriteAndDuplicateTaskIds .........................................   Passed    0.01 sec
+        Start   9: OwnerFutureStoreTest.PendingTaskLookupTracksTerminalTransition
+  9/424 Test   #9: OwnerFutureStoreTest.PendingTaskLookupTracksTerminalTransition .....................................   Passed    0.01 sec
+        Start  10: OwnerFutureStoreTest.PendingCountTracksRecordTransitions
+ 10/424 Test  #10: OwnerFutureStoreTest.PendingCountTracksRecordTransitions ...........................................   Passed    0.01 sec
+        Start  11: OwnerFutureStoreTest.RejectsNonTerminalCompletionStateWithoutCounterDrift
+ 11/424 Test  #11: OwnerFutureStoreTest.RejectsNonTerminalCompletionStateWithoutCounterDrift ..........................   Passed    0.01 sec
+        Start  12: OwnerFutureStoreTest.TerminalCapHoldsAcrossPendingToTerminalTransitions
+ 12/424 Test  #12: OwnerFutureStoreTest.TerminalCapHoldsAcrossPendingToTerminalTransitions ............................   Passed    0.01 sec
+        Start  13: OwnerFutureStoreTest.PayloadByteCapsRejectDeterministically
+ 13/424 Test  #13: OwnerFutureStoreTest.PayloadByteCapsRejectDeterministically ........................................   Passed    0.07 sec
+        Start  14: OwnerFutureStoreTest.TtlReapCountersSettleAfterMixedOperations
+ 14/424 Test  #14: OwnerFutureStoreTest.TtlReapCountersSettleAfterMixedOperations .....................................   Passed    0.01 sec
+        Start  15: OwnerFutureStoreTest.QuotaRejectedTombstoneQueryableUntilTakeOrTtl
+ 15/424 Test  #15: OwnerFutureStoreTest.QuotaRejectedTombstoneQueryableUntilTakeOrTtl .................................   Passed    0.01 sec
+        Start  16: OwnerFutureStoreTest.AllCompletionEntriesShareAccounting
+ 16/424 Test  #16: OwnerFutureStoreTest.AllCompletionEntriesShareAccounting ...........................................   Passed    0.01 sec
+        Start  17: OwnerFutureStoreTest.ConcurrentCompletionTakeReapKeepsCountersConsistent
+ 17/424 Test  #17: OwnerFutureStoreTest.ConcurrentCompletionTakeReapKeepsCountersConsistent ...........................   Passed    0.01 sec
+        Start  18: OwnerFutureStoreTest.PayloadBearingTerminalInOldestAgeButNotReapable
+ 18/424 Test  #18: OwnerFutureStoreTest.PayloadBearingTerminalInOldestAgeButNotReapable ...............................   Passed    0.01 sec
+        Start  19: OwnerTraceStoreTest.AssignsTraceIdToUnsequencedTaskTrace
+ 19/424 Test  #19: OwnerTraceStoreTest.AssignsTraceIdToUnsequencedTaskTrace ...........................................   Passed    0.01 sec
+        Start  20: OwnerSchedulerStateTest.RemovesOneQueuedTaskWithoutDroppingNeighbors
+ 20/424 Test  #20: OwnerSchedulerStateTest.RemovesOneQueuedTaskWithoutDroppingNeighbors ...............................   Passed    0.01 sec
+        Start  21: OwnerSchedulerStateTest.ForcedReleaseClearsClaimsAndRestoresRunnableOwner
+ 21/424 Test  #21: OwnerSchedulerStateTest.ForcedReleaseClearsClaimsAndRestoresRunnableOwner ..........................   Passed    0.01 sec
+        Start  22: DriverTest.TestFutureFrozenMappingKeyAndValueBytesAreCounted
+ 22/424 Test  #22: DriverTest.TestFutureFrozenMappingKeyAndValueBytesAreCounted .......................................   Passed    0.01 sec
+        Start  23: DriverTest.TestFutureFrozenMappingCountsEveryNodeAgainstSinglePayloadCap
+ 23/424 Test  #23: DriverTest.TestFutureFrozenMappingCountsEveryNodeAgainstSinglePayloadCap ...........................   Passed    0.01 sec
+        Start  24: DriverTest.TestFutureFrozenWideArrayDoesNotConsumeDepthAcrossSiblings
+ 24/424 Test  #24: DriverTest.TestFutureFrozenWideArrayDoesNotConsumeDepthAcrossSiblings ..............................   Passed    0.01 sec
+        Start  25: DriverTest.TestFutureFrozenWeightVisitorSaturatesOnDepthAndNodes
+ 25/424 Test  #25: DriverTest.TestFutureFrozenWeightVisitorSaturatesOnDepthAndNodes ...................................   Passed    0.03 sec
+        Start  26: DriverTest.TestArraySetOperationsDistinguishExtremeIntegers
+ 26/424 Test  #26: DriverTest.TestArraySetOperationsDistinguishExtremeIntegers ........................................   Passed    0.01 sec
+        Start  27: DriverTest.TestLpcModernProfilePragmasAndAuditRules
+ 27/424 Test  #27: DriverTest.TestLpcModernProfilePragmasAndAuditRules ................................................   Passed    0.01 sec
+        Start  28: DriverTest.TestLpcModernProfileDetectsSourceEncodingPragma
+ 28/424 Test  #28: DriverTest.TestLpcModernProfileDetectsSourceEncodingPragma .........................................   Passed    0.01 sec
+        Start  29: DriverTest.TestCompileFileAcceptsGbkSourceEncodingPragma
+ 29/424 Test  #29: DriverTest.TestCompileFileAcceptsGbkSourceEncodingPragma ...........................................   Passed    0.01 sec
+        Start  30: DriverTest.TestLpcVmProfileRecordsApplyCacheLookups
+ 30/424 Test  #30: DriverTest.TestLpcVmProfileRecordsApplyCacheLookups ................................................   Passed    0.01 sec
+        Start  31: DriverTest.TestLpcVmProfileRecordsHotPathCounters
+ 31/424 Test  #31: DriverTest.TestLpcVmProfileRecordsHotPathCounters ..................................................   Passed    0.01 sec
+        Start  32: DriverTest.TestLpcVmProfileRequiresExplicitThreadRecording
+ 32/424 Test  #32: DriverTest.TestLpcVmProfileRequiresExplicitThreadRecording .........................................   Passed    0.01 sec
+        Start  33: DriverTest.TestLpcVmProfileRecordingIsThreadLocal
+ 33/424 Test  #33: DriverTest.TestLpcVmProfileRecordingIsThreadLocal ..................................................   Passed    0.01 sec
+        Start  34: DriverTest.TestOwnerFuturePendingCountUsesTransitionCounter
+ 34/424 Test  #34: DriverTest.TestOwnerFuturePendingCountUsesTransitionCounter ........................................   Passed    0.01 sec
+        Start  35: DriverTest.TestOwnerFutureCountChainUsesFixedWidthTypes
+ 35/424 Test  #35: DriverTest.TestOwnerFutureCountChainUsesFixedWidthTypes ............................................   Passed    0.01 sec
+        Start  36: DriverTest.TestOwnerFutureStoreResolvesTargetsAfterTerminalLockScope
+ 36/424 Test  #36: DriverTest.TestOwnerFutureStoreResolvesTargetsAfterTerminalLockScope ...............................   Passed    0.01 sec
+        Start  37: DriverTest.TestGatewayStatusReportsSessionFifoContract
+ 37/424 Test  #37: DriverTest.TestGatewayStatusReportsSessionFifoContract .............................................   Passed    0.01 sec
+        Start  38: DriverTest.TestGatewayStatusDerivesRoomProjectionThreadCpuAverages
+ 38/424 Test  #38: DriverTest.TestGatewayStatusDerivesRoomProjectionThreadCpuAverages .................................   Passed    0.01 sec
+        Start  39: DriverTest.TestGatewayOutputReservationBlocksAndPreservesFifo
+ 39/424 Test  #39: DriverTest.TestGatewayOutputReservationBlocksAndPreservesFifo ......................................   Passed    0.01 sec
+        Start  40: DriverTest.TestGatewayPendingReservationDetectsReadySuccessor
+ 40/424 Test  #40: DriverTest.TestGatewayPendingReservationDetectsReadySuccessor ......................................   Passed    0.01 sec
+        Start  41: DriverTest.TestGatewayOutputReservationTimeoutReleaseUnblocksFollowingOutput
+ 41/424 Test  #41: DriverTest.TestGatewayOutputReservationTimeoutReleaseUnblocksFollowingOutput .......................   Passed    0.01 sec
+        Start  42: DriverTest.TestGatewayOrdinaryOutputQueuesExactWireEnvelope
+ 42/424 Test  #42: DriverTest.TestGatewayOrdinaryOutputQueuesExactWireEnvelope ........................................   Passed    0.01 sec
+        Start  43: DriverTest.TestGatewayMasterOutputBufferRejectsSlowPeerBeforeUnboundedGrowth
+ 43/424 Test  #43: DriverTest.TestGatewayMasterOutputBufferRejectsSlowPeerBeforeUnboundedGrowth .......................   Passed    0.01 sec
+        Start  44: DriverTest.TestGatewayWireFactoryRejectsOversizeBeforeFifoMutation
+ 44/424 Test  #44: DriverTest.TestGatewayWireFactoryRejectsOversizeBeforeFifoMutation .................................   Passed    0.01 sec
+        Start  45: DriverTest.TestGatewaySessionFifoWireByteLimitRejectsWithoutQueueMutation
+ 45/424 Test  #45: DriverTest.TestGatewaySessionFifoWireByteLimitRejectsWithoutQueueMutation ..........................   Passed    0.01 sec
+        Start  46: DriverTest.TestGatewayFlushDropsReadyWireMadeOversizeByLimitReduction
+ 46/424 Test  #46: DriverTest.TestGatewayFlushDropsReadyWireMadeOversizeByLimitReduction ..............................   Passed    0.01 sec
+        Start  47: DriverTest.TestGatewayFlushClassifiesReadyReservationOversizeExactlyOnce
+ 47/424 Test  #47: DriverTest.TestGatewayFlushClassifiesReadyReservationOversizeExactlyOnce ...........................   Passed    0.01 sec
+        Start  48: DriverTest.TestGatewayWireReadyQueueRejectsMalformedSouthboundJson
+ 48/424 Test  #48: DriverTest.TestGatewayWireReadyQueueRejectsMalformedSouthboundJson .................................   Passed    0.01 sec
+        Start  49: DriverTest.TestGatewayProjectedWireBatchRejectsUnboundRecipientsAtomically
+ 49/424 Test  #49: DriverTest.TestGatewayProjectedWireBatchRejectsUnboundRecipientsAtomically .........................   Passed    0.01 sec
+        Start  50: DriverTest.TestGatewayProjectedWireBatchRejectsOversizeAtomically
+ 50/424 Test  #50: DriverTest.TestGatewayProjectedWireBatchRejectsOversizeAtomically ..................................   Passed    0.01 sec
+        Start  51: DriverTest.TestGatewayProjectedWireBatchRejectsWireByteLimitAtomically
+ 51/424 Test  #51: DriverTest.TestGatewayProjectedWireBatchRejectsWireByteLimitAtomically .............................   Passed    0.01 sec
+        Start  52: DriverTest.TestGatewaySessionSendKeepsHistoricalMixedPayloadSemantics
+ 52/424 Test  #52: DriverTest.TestGatewaySessionSendKeepsHistoricalMixedPayloadSemantics ..............................   Passed    0.01 sec
+        Start  53: DriverTest.TestGatewayWriterFailureRetainsOneReadyFrameForExactRetry
+ 53/424 Test  #53: DriverTest.TestGatewayWriterFailureRetainsOneReadyFrameForExactRetry ...............................   Passed    0.01 sec
+        Start  54: DriverTest.TestGatewayOutputReservationIdsDoNotRepeatAcrossSessions
+ 54/424 Test  #54: DriverTest.TestGatewayOutputReservationIdsDoNotRepeatAcrossSessions ................................   Passed    0.01 sec
+        Start  55: DriverTest.TestGatewayBatchReservationReusesOnlyPendingTailSlots
+ 55/424 Test  #55: DriverTest.TestGatewayBatchReservationReusesOnlyPendingTailSlots ...................................   Passed    0.03 sec
+        Start  56: DriverTest.TestGatewayBatchReservationPrevalidatesAllSessions
+ 56/424 Test  #56: DriverTest.TestGatewayBatchReservationPrevalidatesAllSessions ......................................   Passed    0.01 sec
+        Start  57: DriverTest.TestGatewayBatchReservationRejectsDuplicateSessions
+ 57/424 Test  #57: DriverTest.TestGatewayBatchReservationRejectsDuplicateSessions .....................................   Passed    0.01 sec
+        Start  58: DriverTest.TestGatewayPendingMessageEventBatchAppendsMultipleProducerWaves
+ 58/424 Test  #58: DriverTest.TestGatewayPendingMessageEventBatchAppendsMultipleProducerWaves .........................   Passed    0.01 sec
+        Start  59: DriverTest.TestGatewayPendingMessageEventBatchFillsRecipientSliceNatively
+ 59/424 Test  #59: DriverTest.TestGatewayPendingMessageEventBatchFillsRecipientSliceNatively ..........................   Passed    0.01 sec
+        Start  60: DriverTest.TestGatewayPendingMessageEventSnapshotProjectsByteEquivalentFrame
+ 60/424 Test  #60: DriverTest.TestGatewayPendingMessageEventSnapshotProjectsByteEquivalentFrame .......................   Passed    0.01 sec
+        Start  61: DriverTest.TestGatewayLocalProjectionSkipsFullValidationWhileUntrustedWireKeepsIt
+ 61/424 Test  #61: DriverTest.TestGatewayLocalProjectionSkipsFullValidationWhileUntrustedWireKeepsIt ..................   Passed    0.01 sec
+        Start  62: DriverTest.TestGatewayPendingMessageEventBatchPreencodesEveryWireBeforeFirstWrite
+ 62/424 Test  #62: DriverTest.TestGatewayPendingMessageEventBatchPreencodesEveryWireBeforeFirstWrite ..................   Passed    0.01 sec
+        Start  63: DriverTest.TestGatewayPendingMessageEventBatchFillsTwoSlotsForSameSessionInFifoOrder
+ 63/424 Test  #63: DriverTest.TestGatewayPendingMessageEventBatchFillsTwoSlotsForSameSessionInFifoOrder ...............   Passed    0.01 sec
+        Start  64: DriverTest.TestGatewayPendingMessageEventBatchSameSessionFailureWritesNothing
+ 64/424 Test  #64: DriverTest.TestGatewayPendingMessageEventBatchSameSessionFailureWritesNothing ......................   Passed    0.01 sec
+        Start  65: DriverTest.TestGatewayPendingMessageEventBatchStagesWholeWaveBeforeFirstWrite
+ 65/424 Test  #65: DriverTest.TestGatewayPendingMessageEventBatchStagesWholeWaveBeforeFirstWrite ......................   Passed    0.01 sec
+        Start  66: DriverTest.TestGatewayPendingMessageEventBatchRejectsWaveAtomically
+ 66/424 Test  #66: DriverTest.TestGatewayPendingMessageEventBatchRejectsWaveAtomically ................................   Passed    0.01 sec
+        Start  67: DriverTest.TestGatewayPendingMessageEventBatchHonorsLimitAndRelease
+ 67/424 Test  #67: DriverTest.TestGatewayPendingMessageEventBatchHonorsLimitAndRelease ................................   Passed    0.01 sec
+        Start  68: DriverTest.TestGatewayReserveAndAppendWaveRollsBackOnlyNewWork
+ 68/424 Test  #68: DriverTest.TestGatewayReserveAndAppendWaveRollsBackOnlyNewWork .....................................   Passed    0.01 sec
+        Start  69: DriverTest.TestGatewayWaveRollbackRejectsWrongIdentityAtomically
+ 69/424 Test  #69: DriverTest.TestGatewayWaveRollbackRejectsWrongIdentityAtomically ...................................   Passed    0.01 sec
+        Start  70: DriverTest.TestGatewayReserveAndAppendWaveFailuresLeaveNoNewSlots
+ 70/424 Test  #70: DriverTest.TestGatewayReserveAndAppendWaveFailuresLeaveNoNewSlots ..................................   Passed    0.01 sec
+        Start  71: DriverTest.TestGatewayCompactRoomWaveReturnsOnlySparseBookkeeping
+ 71/424 Test  #71: DriverTest.TestGatewayCompactRoomWaveReturnsOnlySparseBookkeeping ..................................   Passed    0.01 sec
+        Start  72: DriverTest.TestGatewayPendingMessageEventBatchFillReturnsAuthoritativeTotals
+ 72/424 Test  #72: DriverTest.TestGatewayPendingMessageEventBatchFillReturnsAuthoritativeTotals .......................   Passed    0.01 sec
+        Start  73: DriverTest.TestGatewayCompactRoomWaveRollsBackUncommittedCreatedSlots
+ 73/424 Test  #73: DriverTest.TestGatewayCompactRoomWaveRollsBackUncommittedCreatedSlots ..............................   Passed    0.01 sec
+        Start  74: DriverTest.TestGatewayCompactRoomWaveMixedRollbackIsAtomic
+ 74/424 Test  #74: DriverTest.TestGatewayCompactRoomWaveMixedRollbackIsAtomic .........................................   Passed    0.01 sec
+        Start  75: DriverTest.TestGatewayPreencodedChatBatchBuilderKeepsStableAndDynamicBoundaries
+ 75/424 Test  #75: DriverTest.TestGatewayPreencodedChatBatchBuilderKeepsStableAndDynamicBoundaries ....................   Passed    0.01 sec
+        Start  76: DriverTest.TestGatewayPreencodedMessageEventBatchBuilderKeepsEnvelopeAndMetaSemantics
+ 76/424 Test  #76: DriverTest.TestGatewayPreencodedMessageEventBatchBuilderKeepsEnvelopeAndMetaSemantics ..............   Passed    0.01 sec
+        Start  77: DriverTest.TestGatewayPreencodedMessageEventSingletonUsesReservedOuterSequence
+ 77/424 Test  #77: DriverTest.TestGatewayPreencodedMessageEventSingletonUsesReservedOuterSequence .....................   Passed    0.01 sec
+        Start  78: DriverTest.TestGatewayPreencodedMessageEventBuilderRejectsMalformedOrDynamicStableInput
+ 78/424 Test  #78: DriverTest.TestGatewayPreencodedMessageEventBuilderRejectsMalformedOrDynamicStableInput ............   Passed    0.01 sec
+        Start  79: DriverTest.TestGatewayPreencodedMessageEventTemplateCacheKeepsDynamicMetadataIsolated
+ 79/424 Test  #79: DriverTest.TestGatewayPreencodedMessageEventTemplateCacheKeepsDynamicMetadataIsolated ..............   Passed    0.01 sec
+        Start  80: DriverTest.TestGatewayPreencodedMessageEventTemplateEscapesDynamicScope
+ 80/424 Test  #80: DriverTest.TestGatewayPreencodedMessageEventTemplateEscapesDynamicScope ............................   Passed    0.01 sec
+        Start  81: DriverTest.TestGatewayPreencodedMessageEventTemplateCacheRejectsInvalidAndBypassesOversizedInput
+ 81/424 Test  #81: DriverTest.TestGatewayPreencodedMessageEventTemplateCacheRejectsInvalidAndBypassesOversizedInput ...   Passed    0.01 sec
+        Start  82: DriverTest.TestGatewayPreencodedMessageEventTemplateCacheEvictsAtBound
+ 82/424 Test  #82: DriverTest.TestGatewayPreencodedMessageEventTemplateCacheEvictsAtBound .............................   Passed    0.01 sec
+        Start  83: DriverTest.TestGatewayReceiveDoesNotDrainMainTasksInsideReadCallback
+ 83/424 Test  #83: DriverTest.TestGatewayReceiveDoesNotDrainMainTasksInsideReadCallback ...............................   Passed    0.01 sec
+        Start  84: DriverTest.TestGatewayReadBatchDrainsAdmittedTasksBeforeDeferredRemainder
+ 84/424 Test  #84: DriverTest.TestGatewayReadBatchDrainsAdmittedTasksBeforeDeferredRemainder ..........................   Passed    0.01 sec
+        Start  85: DriverTest.TestGatewayCommandPendingCountUsesAtomicSessionLifecycle
+ 85/424 Test  #85: DriverTest.TestGatewayCommandPendingCountUsesAtomicSessionLifecycle ................................   Passed    0.01 sec
+        Start  86: DriverTest.TestGatewayLivePressureCountsUseLpcIntegerWidth
+ 86/424 Test  #86: DriverTest.TestGatewayLivePressureCountsUseLpcIntegerWidth .........................................   Passed    0.01 sec
+        Start  87: DriverTest.TestGatewayReadDispatchPressureIsTransitionCountedAndUnderflowSafe
+ 87/424 Test  #87: DriverTest.TestGatewayReadDispatchPressureIsTransitionCountedAndUnderflowSafe ......................   Passed    0.01 sec
+        Start  88: DriverTest.TestGatewayStatusSnapshotDefersPastCurrentReadDispatch
+ 88/424 Test  #88: DriverTest.TestGatewayStatusSnapshotDefersPastCurrentReadDispatch ..................................   Passed    0.01 sec
+        Start  89: DriverTest.TestGatewayStatusWireIncludesMudlibRuntimeExtension
+ 89/424 Test  #89: DriverTest.TestGatewayStatusWireIncludesMudlibRuntimeExtension .....................................   Passed    0.01 sec
+        Start  90: DriverTest.TestGatewayBufferedInputPressureRequiresACompleteFrame
+ 90/424 Test  #90: DriverTest.TestGatewayBufferedInputPressureRequiresACompleteFrame ..................................   Passed    0.01 sec
+        Start  91: DriverTest.TestGatewayMainQueueReadAdmissionUsesComposedHighLowWaterBackpressure
+ 91/424 Test  #91: DriverTest.TestGatewayMainQueueReadAdmissionUsesComposedHighLowWaterBackpressure ...................   Passed    0.01 sec
+        Start  92: DriverTest.TestGatewayReadCallbackYieldsAfterEveryCompleteFrame
+ 92/424 Test  #92: DriverTest.TestGatewayReadCallbackYieldsAfterEveryCompleteFrame ....................................   Passed    0.01 sec
+        Start  93: DriverTest.TestGatewayBufferedReadParserUsesCursorInsteadOfPerFrameFrontErase
+ 93/424 Test  #93: DriverTest.TestGatewayBufferedReadParserUsesCursorInsteadOfPerFrameFrontErase ......................   Passed    0.01 sec
+        Start  94: DriverTest.TestGatewayBufferedReadParserHonorsFrameBudgetAndOrder
+ 94/424 Test  #94: DriverTest.TestGatewayBufferedReadParserHonorsFrameBudgetAndOrder ..................................   Passed    0.01 sec
+        Start  95: DriverTest.TestGatewayBufferedReadParserPreservesPartialFramesAndChargesBadJson
+ 95/424 Test  #95: DriverTest.TestGatewayBufferedReadParserPreservesPartialFramesAndChargesBadJson ....................   Passed    0.01 sec
+        Start  96: DriverTest.TestGatewayBufferedReadParserRejectsConfiguredOversizeFrame
+ 96/424 Test  #96: DriverTest.TestGatewayBufferedReadParserRejectsConfiguredOversizeFrame .............................   Passed    0.01 sec
+        Start  97: DriverTest.TestGatewayReadBufferRejectsAggregateOverflowBeforeCopy
+ 97/424 Test  #97: DriverTest.TestGatewayReadBufferRejectsAggregateOverflowBeforeCopy .................................   Passed    0.01 sec
+        Start  98: DriverTest.TestGatewayMasterReadWatermarkMatchesBoundedAggregateBuffer
+ 98/424 Test  #98: DriverTest.TestGatewayMasterReadWatermarkMatchesBoundedAggregateBuffer .............................   Passed    0.01 sec
+        Start  99: DriverTest.TestGatewayPacketSizeRuntimeOverrideHonorsWireHardLimit
+ 99/424 Test  #99: DriverTest.TestGatewayPacketSizeRuntimeOverrideHonorsWireHardLimit .................................   Passed    0.01 sec
+        Start 100: DriverTest.TestGatewayMasterListenerEnablesTcpNoDelayAndGatewayPriority
+100/424 Test #100: DriverTest.TestGatewayMasterListenerEnablesTcpNoDelayAndGatewayPriority ............................   Passed    0.01 sec
+        Start 101: DriverTest.TestGatewayListenerDescriptorsCloseOnExec
+101/424 Test #101: DriverTest.TestGatewayListenerDescriptorsCloseOnExec ...............................................   Passed    0.01 sec
+        Start 102: DriverTest.TestGatewayRejectsExternalBindWithoutAuthenticatedTransport
+102/424 Test #102: DriverTest.TestGatewayRejectsExternalBindWithoutAuthenticatedTransport .............................   Passed    0.01 sec
+        Start 103: DriverTest.TestMudPortRejectsInvalidWirePayloadLengths
+103/424 Test #103: DriverTest.TestMudPortRejectsInvalidWirePayloadLengths .............................................   Passed    0.01 sec
+        Start 104: DriverTest.TestReadBytesPreservesLpc64BitOffsets
+104/424 Test #104: DriverTest.TestReadBytesPreservesLpc64BitOffsets ...................................................   Passed    0.01 sec
+        Start 105: DriverTest.TestWriteBytesPreservesLpc64BitOffsets
+105/424 Test #105: DriverTest.TestWriteBytesPreservesLpc64BitOffsets ..................................................   Passed    0.01 sec
+        Start 106: DriverTest.TestFileSizePreservesLpc64BitSize
+106/424 Test #106: DriverTest.TestFileSizePreservesLpc64BitSize .......................................................   Passed    0.01 sec
+        Start 107: DriverTest.TestSocketAcceptMarksAcceptedDescriptorCloseOnExec
+107/424 Test #107: DriverTest.TestSocketAcceptMarksAcceptedDescriptorCloseOnExec ......................................   Passed    0.01 sec
+        Start 108: DriverTest.TestExternalSpawnFailureDoesNotPublishSocket
+108/424 Test #108: DriverTest.TestExternalSpawnFailureDoesNotPublishSocket ............................................   Passed    0.01 sec
+        Start 109: DriverTest.TestExternalEmptyCommandDoesNotPublishSocket
+109/424 Test #109: DriverTest.TestExternalEmptyCommandDoesNotPublishSocket ............................................   Passed    0.01 sec
+        Start 110: DriverTest.TestReadJsonRejectsUnsignedIntegerOutsideLpcRange
+110/424 Test #110: DriverTest.TestReadJsonRejectsUnsignedIntegerOutsideLpcRange .......................................   Passed    0.01 sec
+        Start 111: DriverTest.TestGatewayLoginRunsThroughOwnerMainQueue
+111/424 Test #111: DriverTest.TestGatewayLoginRunsThroughOwnerMainQueue ...............................................   Passed    0.01 sec
+        Start 112: DriverTest.TestGatewayLoginMainQueueDropsStaleMaster
+112/424 Test #112: DriverTest.TestGatewayLoginMainQueueDropsStaleMaster ...............................................   Passed    0.01 sec
+        Start 113: DriverTest.TestOwnerServiceRegistryUsesKeyedShardsForHotPaths
+113/424 Test #113: DriverTest.TestOwnerServiceRegistryUsesKeyedShardsForHotPaths ......................................   Passed    0.01 sec
+        Start 114: DriverTest.TestSimulEfunReservesCapacityForCSourceSuffix
+114/424 Test #114: DriverTest.TestSimulEfunReservesCapacityForCSourceSuffix ...........................................   Passed    0.01 sec
+        Start 115: DriverTest.TestSaveObjectStringRejectsInvalidDestinationBeforeWriting
+115/424 Test #115: DriverTest.TestSaveObjectStringRejectsInvalidDestinationBeforeWriting ..............................   Passed    0.01 sec
+        Start 116: DriverTest.TestSaveObjectStringRecursionAccountsForConsumedPrefix
+116/424 Test #116: DriverTest.TestSaveObjectStringRecursionAccountsForConsumedPrefix ..................................   Passed    0.01 sec
+        Start 117: DriverTest.TestSaveObjectStringPreservesHeaderAndRejectsShortHeader
+117/424 Test #117: DriverTest.TestSaveObjectStringPreservesHeaderAndRejectsShortHeader ................................   Passed    0.01 sec
+        Start 118: DriverTest.TestSaveObjectPathAvoidsFixedBuffers
+118/424 Test #118: DriverTest.TestSaveObjectPathAvoidsFixedBuffers ....................................................   Passed    0.01 sec
+        Start 119: DriverTest.TestSocketAddressFormattingAvoidsFixedOutputBuffer
+119/424 Test #119: DriverTest.TestSocketAddressFormattingAvoidsFixedOutputBuffer ......................................   Passed    0.01 sec
+        Start 120: DriverTest.TestFileMovePathConstructionUsesOwnedStrings
+120/424 Test #120: DriverTest.TestFileMovePathConstructionUsesOwnedStrings ............................................   Passed    0.01 sec
+        Start 121: DriverTest.TestQueryIpNumberRejectsInvalidSocketAddress
+121/424 Test #121: DriverTest.TestQueryIpNumberRejectsInvalidSocketAddress ............................................   Passed    0.01 sec
+        Start 122: DriverTest.TestPerfCounterUsesMonotonicSteadyClock
+122/424 Test #122: DriverTest.TestPerfCounterUsesMonotonicSteadyClock .................................................   Passed    0.01 sec
+        Start 123: DriverTest.TestPerformanceWallClockUsesRawMonotonicSource
+123/424 Test #123: DriverTest.TestPerformanceWallClockUsesRawMonotonicSource ..........................................   Passed    0.01 sec
+        Start 124: DriverTest.TestPerformanceWallClockContainsCurrentThreadCpuInterval
+124/424 Test #124: DriverTest.TestPerformanceWallClockContainsCurrentThreadCpuInterval ................................   Passed    0.02 sec
+        Start 125: DriverTest.TestThreadCpuClockUsesDedicatedPerThreadSources
+125/424 Test #125: DriverTest.TestThreadCpuClockUsesDedicatedPerThreadSources .........................................   Passed    0.01 sec
+        Start 126: DriverTest.TestThreadCpuClockIsMonotonicWhenAvailable
+126/424 Test #126: DriverTest.TestThreadCpuClockIsMonotonicWhenAvailable ..............................................   Passed    0.01 sec
+        Start 127: DriverTest.TestOwnerAsyncLpcAndCompletionExposeWorkerThreadCpuCounters
+127/424 Test #127: DriverTest.TestOwnerAsyncLpcAndCompletionExposeWorkerThreadCpuCounters .............................   Passed    0.01 sec
+        Start 128: DriverTest.TestOwnerRuntimeMetricMappingsUseLpcIntegerWidth
+128/424 Test #128: DriverTest.TestOwnerRuntimeMetricMappingsUseLpcIntegerWidth ........................................   Passed    0.01 sec
+        Start 129: DriverTest.TestOwnerStatusMappingsUseLpcIntegerWidth
+129/424 Test #129: DriverTest.TestOwnerStatusMappingsUseLpcIntegerWidth ...............................................   Passed    0.01 sec
+        Start 130: DriverTest.TestGatewayStatusMappingsUseLpcIntegerWidth
+130/424 Test #130: DriverTest.TestGatewayStatusMappingsUseLpcIntegerWidth .............................................   Passed    0.01 sec
+        Start 131: DriverTest.TestVmWorkerMappingCountersUseLpcIntegerWidth
+131/424 Test #131: DriverTest.TestVmWorkerMappingCountersUseLpcIntegerWidth ...........................................   Passed    0.01 sec
+        Start 132: DriverTest.TestGatewaySessionCountMappingsUseLpcIntegerWidth
+132/424 Test #132: DriverTest.TestGatewaySessionCountMappingsUseLpcIntegerWidth .......................................   Passed    0.01 sec
+        Start 133: DriverTest.TestGatewaySessionInfoMappingsUseLpcIntegerWidth
+133/424 Test #133: DriverTest.TestGatewaySessionInfoMappingsUseLpcIntegerWidth ........................................   Passed    0.01 sec
+        Start 134: DriverTest.TestObjectStoreShardMappingsUseLpcIntegerWidth
+134/424 Test #134: DriverTest.TestObjectStoreShardMappingsUseLpcIntegerWidth ..........................................   Passed    0.01 sec
+        Start 135: DriverTest.TestObjectStoreGlobalStatusMappingUsesLpcIntegerWidth
+135/424 Test #135: DriverTest.TestObjectStoreGlobalStatusMappingUsesLpcIntegerWidth ...................................   Passed    0.01 sec
+        Start 136: DriverTest.TestOwnerSchedulerCountsUseFixedIntegerWidth
+136/424 Test #136: DriverTest.TestOwnerSchedulerCountsUseFixedIntegerWidth ............................................   Passed    0.01 sec
+        Start 137: DriverTest.TestOwnerDiagnosticMappingsUseLpcIntegerWidth
+137/424 Test #137: DriverTest.TestOwnerDiagnosticMappingsUseLpcIntegerWidth ...........................................   Passed    0.01 sec
+        Start 138: DriverTest.TestOwnerTraceAppendMetadataUsesStoreLockBoundary
+138/424 Test #138: DriverTest.TestOwnerTraceAppendMetadataUsesStoreLockBoundary .......................................   Passed    0.01 sec
+        Start 139: DriverTest.TestOwnerMessageSubmissionLimitsCoordinatorLockToRegistrationAndEnqueue
+139/424 Test #139: DriverTest.TestOwnerMessageSubmissionLimitsCoordinatorLockToRegistrationAndEnqueue .................   Passed    0.01 sec
+        Start 140: DriverTest.TestOwnerQueueTraceRecordsQueuedAfterSuccessfulAdmissionOnly
+140/424 Test #140: DriverTest.TestOwnerQueueTraceRecordsQueuedAfterSuccessfulAdmissionOnly ............................   Passed    0.01 sec
+        Start 141: DriverTest.TestOwnerRejectedSubmissionsCompleteAfterCoordinatorUnlock
+141/424 Test #141: DriverTest.TestOwnerRejectedSubmissionsCompleteAfterCoordinatorUnlock ..............................   Passed    0.01 sec
+        Start 142: DriverTest.TestOwnerComputeResultBackpressureCompletesAfterCoordinatorUnlock
+142/424 Test #142: DriverTest.TestOwnerComputeResultBackpressureCompletesAfterCoordinatorUnlock .......................   Passed    0.01 sec
+        Start 143: DriverTest.TestOwnerTerminalCompletionPathsAvoidCoordinatorLock
+143/424 Test #143: DriverTest.TestOwnerTerminalCompletionPathsAvoidCoordinatorLock ....................................   Passed    0.01 sec
+        Start 144: DriverTest.TestOwnerStatusMappingsBuildAfterRuntimeSnapshotLockScope
+144/424 Test #144: DriverTest.TestOwnerStatusMappingsBuildAfterRuntimeSnapshotLockScope ...............................   Passed    0.01 sec
+        Start 145: DriverTest.TestOwnerDebugReferenceMarkUsesCoordinatorLockBoundary
+145/424 Test #145: DriverTest.TestOwnerDebugReferenceMarkUsesCoordinatorLockBoundary ..................................   Passed    0.01 sec
+        Start 146: DriverTest.TestOwnerMainQueueDepthGetterUsesRuntimeLock
+146/424 Test #146: DriverTest.TestOwnerMainQueueDepthGetterUsesRuntimeLock ............................................   Passed    0.01 sec
+        Start 147: DriverTest.TestOwnerDrainMailboxSnapshotsRemainingDepthUnderRuntimeLock
+147/424 Test #147: DriverTest.TestOwnerDrainMailboxSnapshotsRemainingDepthUnderRuntimeLock ............................   Passed    0.01 sec
+        Start 148: DriverTest.TestOwnerDrainProcessesDetachedTasksAfterRuntimeUnlock
+148/424 Test #148: DriverTest.TestOwnerDrainProcessesDetachedTasksAfterRuntimeUnlock ..................................   Passed    0.01 sec
+        Start 149: DriverTest.TestOwnerQueuedFutureCancellationProcessesRemovedTaskAfterRuntimeUnlock
+149/424 Test #149: DriverTest.TestOwnerQueuedFutureCancellationProcessesRemovedTaskAfterRuntimeUnlock .................   Passed    0.01 sec
+        Start 150: DriverTest.TestOwnerPurgeProcessesDetachedTasksAfterRuntimeUnlock
+150/424 Test #150: DriverTest.TestOwnerPurgeProcessesDetachedTasksAfterRuntimeUnlock ..................................   Passed    0.01 sec
+        Start 151: DriverTest.TestOwnerScheduleProcessesDetachedTasksAfterRuntimeUnlock
+151/424 Test #151: DriverTest.TestOwnerScheduleProcessesDetachedTasksAfterRuntimeUnlock ...............................   Passed    0.01 sec
+        Start 152: DriverTest.TestOwnerMainDrainAppendsDetachedTaskTracesAfterRuntimeUnlock
+152/424 Test #152: DriverTest.TestOwnerMainDrainAppendsDetachedTaskTracesAfterRuntimeUnlock ...........................   Passed    0.01 sec
+        Start 153: DriverTest.TestOwnerMailboxStatusBuildsMappingAfterRuntimeUnlock
+153/424 Test #153: DriverTest.TestOwnerMailboxStatusBuildsMappingAfterRuntimeUnlock ...................................   Passed    0.01 sec
+        Start 154: DriverTest.TestGatewayFutureCompletionExposesMainThreadCpuCounter
+154/424 Test #154: DriverTest.TestGatewayFutureCompletionExposesMainThreadCpuCounter ..................................   Passed    0.01 sec
+        Start 155: DriverTest.TestGatewayRoomProjectionExposesDedicatedThreadCpuCounters
+155/424 Test #155: DriverTest.TestGatewayRoomProjectionExposesDedicatedThreadCpuCounters ..............................   Passed    0.01 sec
+        Start 156: DriverTest.TestGatewayReceiveApplyExposesMainThreadCpuCounter
+156/424 Test #156: DriverTest.TestGatewayReceiveApplyExposesMainThreadCpuCounter ......................................   Passed    0.01 sec
+        Start 157: DriverTest.TestGatewayReceiveApplyUsesPerformanceWallClock
+157/424 Test #157: DriverTest.TestGatewayReceiveApplyUsesPerformanceWallClock .........................................   Passed    0.01 sec
+        Start 158: DriverTest.TestSaveSvalueDepthIsThreadLocal
+158/424 Test #158: DriverTest.TestSaveSvalueDepthIsThreadLocal ........................................................   Passed    0.01 sec
+        Start 159: DriverTest.TestStringIndexRejectsEmptySource
+159/424 Test #159: DriverTest.TestStringIndexRejectsEmptySource .......................................................   Passed    0.01 sec
+        Start 160: DriverTest.TestStringIndexHandlesConcurrentEgcIterators
+160/424 Test #160: DriverTest.TestStringIndexHandlesConcurrentEgcIterators ............................................   Passed    0.02 sec
+        Start 161: DriverTest.TestMappingNodeFreelistIsOwnerThreadLocal
+161/424 Test #161: DriverTest.TestMappingNodeFreelistIsOwnerThreadLocal ...............................................   Passed    0.02 sec
+        Start 162: DriverTest.TestCompileDumpProgWorks
+162/424 Test #162: DriverTest.TestCompileDumpProgWorks ................................................................   Passed    0.01 sec
+        Start 163: DriverTest.TestCompileDumpProgHandlesLongFunctionNames
+163/424 Test #163: DriverTest.TestCompileDumpProgHandlesLongFunctionNames .............................................   Passed    0.01 sec
+        Start 164: DriverTest.TestCallOtherDiagnosticsAvoidFixedMessageBuffers
+164/424 Test #164: DriverTest.TestCallOtherDiagnosticsAvoidFixedMessageBuffers ........................................   Passed    0.01 sec
+        Start 165: DriverTest.TestCompressFilePathsUseOwnedDynamicStorage
+165/424 Test #165: DriverTest.TestCompressFilePathsUseOwnedDynamicStorage .............................................   Passed    0.01 sec
+        Start 166: DriverTest.TestVmContextTracksTopLevelState
+166/424 Test #166: DriverTest.TestVmContextTracksTopLevelState ........................................................   Passed    0.01 sec
+        Start 167: DriverTest.TestGameTickQueueSupportsConcurrentProducersAndFullDrain
+167/424 Test #167: DriverTest.TestGameTickQueueSupportsConcurrentProducersAndFullDrain ................................   Passed    0.03 sec
+        Start 168: DriverTest.TestGameTickQueueRunsReentrantCallbacksOutsideLockAndHonorsCancellation
+168/424 Test #168: DriverTest.TestGameTickQueueRunsReentrantCallbacksOutsideLockAndHonorsCancellation .................   Passed    0.01 sec
+        Start 169: DriverTest.TestGameTickAndOwnerMainDrainsUseBoundedPositiveDelaySlices
+169/424 Test #169: DriverTest.TestGameTickAndOwnerMainDrainsUseBoundedPositiveDelaySlices .............................   Passed    0.01 sec
+        Start 170: DriverTest.TestWalltimeEventsShareInteractivePriorityAndCleanup
+170/424 Test #170: DriverTest.TestWalltimeEventsShareInteractivePriorityAndCleanup ....................................   Passed    0.03 sec
+        Start 171: DriverTest.TestNormalAndGatewaySelfReschedulingAreBidirectionallyFair
+171/424 Test #171: DriverTest.TestNormalAndGatewaySelfReschedulingAreBidirectionallyFair ..............................   Passed    0.01 sec
+        Start 172: DriverTest.TestPrioritizedWalltimeCalloutsPreserveHandleLifecycle
+172/424 Test #172: DriverTest.TestPrioritizedWalltimeCalloutsPreserveHandleLifecycle ..................................   Passed    0.01 sec
+        Start 173: DriverTest.TestGatewayPriorityPreemptsQueuedBackgroundWarmups
+173/424 Test #173: DriverTest.TestGatewayPriorityPreemptsQueuedBackgroundWarmups ......................................   Passed    0.01 sec
+        Start 174: DriverTest.TestBackgroundDispatchRepollsBeforeDrainingWholeActiveQueue
+174/424 Test #174: DriverTest.TestBackgroundDispatchRepollsBeforeDrainingWholeActiveQueue .............................   Passed    0.01 sec
+        Start 175: DriverTest.TestGatewayOwnerOutputQuiescesBeforeOwnerStopAndCleanup
+175/424 Test #175: DriverTest.TestGatewayOwnerOutputQuiescesBeforeOwnerStopAndCleanup .................................   Passed    0.01 sec
+        Start 176: DriverTest.TestSigtermUsesControlledShutdownWithSuccessExitCode
+176/424 Test #176: DriverTest.TestSigtermUsesControlledShutdownWithSuccessExitCode ....................................   Passed    0.01 sec
+        Start 177: DriverTest.TestControlledShutdownPreparesMudlibBeforeRuntimeTeardown
+177/424 Test #177: DriverTest.TestControlledShutdownPreparesMudlibBeforeRuntimeTeardown ...............................   Passed    0.01 sec
+        Start 178: DriverTest.TestGatewayOwnerOutputQuiesceRejectsOffMainBeforeContainerAccess
+178/424 Test #178: DriverTest.TestGatewayOwnerOutputQuiesceRejectsOffMainBeforeContainerAccess ........................   Passed    0.01 sec
+        Start 179: DriverTest.TestVmExecutionScopeRestoresGlobalState
+179/424 Test #179: DriverTest.TestVmExecutionScopeRestoresGlobalState .................................................   Passed    0.01 sec
+        Start 180: DriverTest.TestVmContextResetClearsThreadExecutionState
+180/424 Test #180: DriverTest.TestVmContextResetClearsThreadExecutionState ............................................   Passed    0.01 sec
+        Start 181: DriverTest.TestDetachedVmContextSettersDoNotClobberThreadState
+181/424 Test #181: DriverTest.TestDetachedVmContextSettersDoNotClobberThreadState .....................................   Passed    0.01 sec
+        Start 182: DriverTest.TestVmCurrentInteractiveScopeRestoresState
+182/424 Test #182: DriverTest.TestVmCurrentInteractiveScopeRestoresState ..............................................   Passed    0.01 sec
+        Start 183: DriverTest.TestVmCommandGiverStackSyncsContext
+183/424 Test #183: DriverTest.TestVmCommandGiverStackSyncsContext .....................................................   Passed    0.01 sec
+        Start 184: DriverTest.TestVmExecutionFrameSettersSyncContext
+184/424 Test #184: DriverTest.TestVmExecutionFrameSettersSyncContext ..................................................   Passed    0.01 sec
+        Start 185: DriverTest.TestVmErrorContextStackSyncsContext
+185/424 Test #185: DriverTest.TestVmErrorContextStackSyncsContext .....................................................   Passed    0.01 sec
+        Start 186: DriverTest.TestVmErrorFlagsSyncContext
+186/424 Test #186: DriverTest.TestVmErrorFlagsSyncContext .............................................................   Passed    0.01 sec
+        Start 187: DriverTest.TestVmObjectLifecycleStateSyncsContext
+187/424 Test #187: DriverTest.TestVmObjectLifecycleStateSyncsContext ..................................................   Passed    0.01 sec
+        Start 188: DriverTest.TestVmContextThreadScopeBindsThreadLocalContext
+188/424 Test #188: DriverTest.TestVmContextThreadScopeBindsThreadLocalContext .........................................   Passed    0.01 sec
+        Start 189: DriverTest.TestEvalLimitExpiryFlagIsThreadLocal
+189/424 Test #189: DriverTest.TestEvalLimitExpiryFlagIsThreadLocal ....................................................   Passed    0.01 sec
+        Start 190: DriverTest.TestEvalLimitTimersAreIndependentAcrossThreads
+190/424 Test #190: DriverTest.TestEvalLimitTimersAreIndependentAcrossThreads ..........................................   Passed    0.01 sec
+        Start 191: DriverTest.TestEvalLimitSignalExpiresOnlyTheTargetThread
+191/424 Test #191: DriverTest.TestEvalLimitSignalExpiresOnlyTheTargetThread ...........................................   Passed    0.04 sec
+        Start 192: DriverTest.TestVmContextObjectStoreRemainsMainThreadOwned
+192/424 Test #192: DriverTest.TestVmContextObjectStoreRemainsMainThreadOwned ..........................................   Passed    0.01 sec
+        Start 193: DriverTest.TestRemoveDestructedObjectsBoundedDrainsIncrementally
+193/424 Test #193: DriverTest.TestRemoveDestructedObjectsBoundedDrainsIncrementally ...................................   Passed    0.01 sec
+        Start 194: DriverTest.TestVmOwnerScopeBindsAndRestoresCurrentOwner
+194/424 Test #194: DriverTest.TestVmOwnerScopeBindsAndRestoresCurrentOwner ............................................   Passed    0.01 sec
+        Start 195: DriverTest.TestVmOwnerMetadataDefaultsAndChecks
+195/424 Test #195: DriverTest.TestVmOwnerMetadataDefaultsAndChecks ....................................................   Passed    0.01 sec
+        Start 196: DriverTest.TestVmOwnerQueryObjectSnapshotOnlyForCrossOwnerTargets
+196/424 Test #196: DriverTest.TestVmOwnerQueryObjectSnapshotOnlyForCrossOwnerTargets ..................................   Passed    0.01 sec
+        Start 197: DriverTest.TestLoadedSingletonUsesDefaultOwnerInsideOwnerScope
+197/424 Test #197: DriverTest.TestLoadedSingletonUsesDefaultOwnerInsideOwnerScope .....................................   Passed    0.01 sec
+        Start 198: DriverTest.TestCommandSingletonUsesDefaultOwnerInsidePlayerOwnerScope
+198/424 Test #198: DriverTest.TestCommandSingletonUsesDefaultOwnerInsidePlayerOwnerScope ..............................   Passed    0.01 sec
+        Start 199: DriverTest.TestStdServiceUsesDefaultOwnerInsidePlayerOwnerScope
+199/424 Test #199: DriverTest.TestStdServiceUsesDefaultOwnerInsidePlayerOwnerScope ....................................   Passed    0.01 sec
+        Start 200: DriverTest.TestSharedStdServicesUseDefaultOwnerInsidePlayerOwnerScope
+200/424 Test #200: DriverTest.TestSharedStdServicesUseDefaultOwnerInsidePlayerOwnerScope ..............................   Passed    0.01 sec
+        Start 201: DriverTest.TestStdHelperServicesUseDefaultOwnerInsidePlayerOwnerScope
+201/424 Test #201: DriverTest.TestStdHelperServicesUseDefaultOwnerInsidePlayerOwnerScope ..............................   Passed    0.01 sec
+        Start 202: DriverTest.TestSimulEfunSingletonKeepsDefaultOwnerInsidePlayerOwnerScope
+202/424 Test #202: DriverTest.TestSimulEfunSingletonKeepsDefaultOwnerInsidePlayerOwnerScope ...........................   Passed    0.01 sec
+        Start 203: DriverTest.TestVirtualObjectUsesDefaultOwnerAndUpdatesStorePath
+203/424 Test #203: DriverTest.TestVirtualObjectUsesDefaultOwnerAndUpdatesStorePath ....................................   Passed    0.01 sec
+        Start 204: DriverTest.TestCloneOwnerUsesCurrentObjectNotAmbientScope
+204/424 Test #204: DriverTest.TestCloneOwnerUsesCurrentObjectNotAmbientScope ..........................................   Passed    0.01 sec
+        Start 205: DriverTest.TestMoveObjectOwnerInheritanceRespectsExplicitOwner
+205/424 Test #205: DriverTest.TestMoveObjectOwnerInheritanceRespectsExplicitOwner .....................................   Passed    0.01 sec
+        Start 206: DriverTest.TestInteractiveExecPreservesNewObjectOwner
+206/424 Test #206: DriverTest.TestInteractiveExecPreservesNewObjectOwner ..............................................   Passed    0.01 sec
+        Start 207: DriverTest.TestVmOwnerMailboxDrainsOwnerFifo
+207/424 Test #207: DriverTest.TestVmOwnerMailboxDrainsOwnerFifo .......................................................   Passed    0.01 sec
+        Start 208: DriverTest.TestVmOwnerEpochRejectsStaleTask
+208/424 Test #208: DriverTest.TestVmOwnerEpochRejectsStaleTask ........................................................   Passed    0.01 sec
+        Start 209: DriverTest.TestVmOwnerPurgeRemovesOwnerQueueBeforeSchedule
+209/424 Test #209: DriverTest.TestVmOwnerPurgeRemovesOwnerQueueBeforeSchedule .........................................   Passed    0.01 sec
+        Start 210: DriverTest.TestVmOwnerTaskTraceRecordsObservedAndDispatchedEvents
+210/424 Test #210: DriverTest.TestVmOwnerTaskTraceRecordsObservedAndDispatchedEvents ..................................   Passed    0.01 sec
+        Start 211: DriverTest.TestVmOwnerMainQueueDispatchesWithOwnerScope
+211/424 Test #211: DriverTest.TestVmOwnerMainQueueDispatchesWithOwnerScope ............................................   Passed    0.01 sec
+        Start 212: DriverTest.TestVmOwnerMainDrainRecoversAfterCallbackException
+212/424 Test #212: DriverTest.TestVmOwnerMainDrainRecoversAfterCallbackException ......................................   Passed    0.01 sec
+        Start 213: DriverTest.TestVmOwnerMainDrainWallBudgetYieldsAfterFirstTask
+213/424 Test #213: DriverTest.TestVmOwnerMainDrainWallBudgetYieldsAfterFirstTask ......................................   Passed    0.02 sec
+        Start 214: DriverTest.TestVmOwnerMainQueueDropsStaleOwnerEpoch
+214/424 Test #214: DriverTest.TestVmOwnerMainQueueDropsStaleOwnerEpoch ................................................   Passed    0.01 sec
+        Start 215: DriverTest.TestVmOwnerMainQueueRunsDropCallbackForStaleTask
+215/424 Test #215: DriverTest.TestVmOwnerMainQueueRunsDropCallbackForStaleTask ........................................   Passed    0.01 sec
+        Start 216: DriverTest.TestVmOwnerHeartbeatTraceRecordsScheduledEvent
+216/424 Test #216: DriverTest.TestVmOwnerHeartbeatTraceRecordsScheduledEvent ..........................................   Passed    0.01 sec
+        Start 217: DriverTest.TestVmObjectStoreTracksPendingCallouts
+217/424 Test #217: DriverTest.TestVmObjectStoreTracksPendingCallouts ..................................................   Passed    0.01 sec
+        Start 218: DriverTest.TestVmObjectStoreTracksPendingOwnerMessages
+218/424 Test #218: DriverTest.TestVmObjectStoreTracksPendingOwnerMessages .............................................   Passed    0.01 sec
+        Start 219: DriverTest.TestVmOwnerHeartbeatStaleOwnerSkipsExecution
+219/424 Test #219: DriverTest.TestVmOwnerHeartbeatStaleOwnerSkipsExecution ............................................   Passed    0.01 sec
+        Start 220: DriverTest.TestVmOwnerHeartbeatDispatchesThroughOwnerExecutor
+220/424 Test #220: DriverTest.TestVmOwnerHeartbeatDispatchesThroughOwnerExecutor ......................................   Passed    0.01 sec
+        Start 221: DriverTest.TestVmOwnerHeartbeatExecutorDropsStaleOwnerEpoch
+221/424 Test #221: DriverTest.TestVmOwnerHeartbeatExecutorDropsStaleOwnerEpoch ........................................   Passed    0.01 sec
+        Start 222: DriverTest.TestVmOwnerCalloutDispatchesThroughOwnerExecutor
+222/424 Test #222: DriverTest.TestVmOwnerCalloutDispatchesThroughOwnerExecutor ........................................   Passed    0.03 sec
+        Start 223: DriverTest.TestVmOwnerCalloutExecutorDropsStaleOwnerEpoch
+223/424 Test #223: DriverTest.TestVmOwnerCalloutExecutorDropsStaleOwnerEpoch ..........................................   Passed    0.01 sec
+        Start 224: DriverTest.TestVmOwnerAsyncDnsCallbacksDispatchThroughOwnerExecutor
+224/424 Test #224: DriverTest.TestVmOwnerAsyncDnsCallbacksDispatchThroughOwnerExecutor ................................   Passed    0.03 sec
+        Start 225: DriverTest.TestVmOwnerAsyncCallbackExecutorDropsStaleOwnerEpoch
+225/424 Test #225: DriverTest.TestVmOwnerAsyncCallbackExecutorDropsStaleOwnerEpoch ....................................   Passed    0.01 sec
+        Start 226: DriverTest.TestVmOwnerSocketCallbacksDispatchThroughOwnerExecutor
+226/424 Test #226: DriverTest.TestVmOwnerSocketCallbacksDispatchThroughOwnerExecutor ..................................   Passed    0.02 sec
+        Start 227: DriverTest.TestVmOwnerSocketCallbackExecutorDropsStaleOwnerEpoch
+227/424 Test #227: DriverTest.TestVmOwnerSocketCallbackExecutorDropsStaleOwnerEpoch ...................................   Passed    0.01 sec
+        Start 228: DriverTest.TestVmOwnerAccessTraceRecordsCrossOwnerAccess
+228/424 Test #228: DriverTest.TestVmOwnerAccessTraceRecordsCrossOwnerAccess ...........................................   Passed    0.01 sec
+        Start 229: DriverTest.TestVmOwnerCrossOwnerAccessTraceSkipsSameOwner
+229/424 Test #229: DriverTest.TestVmOwnerCrossOwnerAccessTraceSkipsSameOwner ..........................................   Passed    0.01 sec
+        Start 230: DriverTest.TestVmOwnerCrossOwnerAccessTraceClassifiesPolicyModes
+230/424 Test #230: DriverTest.TestVmOwnerCrossOwnerAccessTraceClassifiesPolicyModes ...................................   Passed    0.01 sec
+        Start 231: DriverTest.TestVmMulticoreModeControlsCrossOwnerBlocking
+231/424 Test #231: DriverTest.TestVmMulticoreModeControlsCrossOwnerBlocking ...........................................   Passed    0.01 sec
+        Start 232: DriverTest.TestVmOwnerAccessFastBypassOnlySkipsDefaultModeDiagnostics
+232/424 Test #232: DriverTest.TestVmOwnerAccessFastBypassOnlySkipsDefaultModeDiagnostics ..............................   Passed    0.01 sec
+        Start 233: DriverTest.TestCurrentOwnerScopeControlsCrossOwnerBlocking
+233/424 Test #233: DriverTest.TestCurrentOwnerScopeControlsCrossOwnerBlocking .........................................   Passed    0.01 sec
+        Start 234: DriverTest.TestAllInventoryRecordsCrossOwnerAccessTrace
+234/424 Test #234: DriverTest.TestAllInventoryRecordsCrossOwnerAccessTrace ............................................   Passed    0.01 sec
+        Start 235: DriverTest.TestPresentRecordsCrossOwnerAccessTrace
+235/424 Test #235: DriverTest.TestPresentRecordsCrossOwnerAccessTrace .................................................   Passed    0.01 sec
+        Start 236: DriverTest.TestPresentEnforcedModeBlocksCrossOwnerIdSearch
+236/424 Test #236: DriverTest.TestPresentEnforcedModeBlocksCrossOwnerIdSearch .........................................   Passed    0.01 sec
+        Start 237: DriverTest.TestParserEnforcedModeBlocksCrossOwnerInterrogateApply
+237/424 Test #237: DriverTest.TestParserEnforcedModeBlocksCrossOwnerInterrogateApply ..................................   Passed    0.01 sec
+        Start 238: DriverTest.TestMoveObjectRecordsCrossOwnerAccessTrace
+238/424 Test #238: DriverTest.TestMoveObjectRecordsCrossOwnerAccessTrace ..............................................   Passed    0.01 sec
+        Start 239: DriverTest.TestMoveObjectEnforcedModeBlocksCrossOwnerMove
+239/424 Test #239: DriverTest.TestMoveObjectEnforcedModeBlocksCrossOwnerMove ..........................................   Passed    0.01 sec
+        Start 240: DriverTest.TestDestructRecordsCrossOwnerAccessTrace
+240/424 Test #240: DriverTest.TestDestructRecordsCrossOwnerAccessTrace ................................................   Passed    0.01 sec
+        Start 241: DriverTest.TestDestructEnforcedModeBlocksCrossOwnerDestruct
+241/424 Test #241: DriverTest.TestDestructEnforcedModeBlocksCrossOwnerDestruct ........................................   Passed    0.01 sec
+        Start 242: DriverTest.TestCallOtherRecordsCrossOwnerAccessTrace
+242/424 Test #242: DriverTest.TestCallOtherRecordsCrossOwnerAccessTrace ...............................................   Passed    0.01 sec
+        Start 243: DriverTest.TestCallOtherEnforcedModeBlocksCrossOwnerCall
+243/424 Test #243: DriverTest.TestCallOtherEnforcedModeBlocksCrossOwnerCall ...........................................   Passed    0.02 sec
+        Start 244: DriverTest.TestVmOwnerObjectMessageRejectsNonFrozenResult
+244/424 Test #244: DriverTest.TestVmOwnerObjectMessageRejectsNonFrozenResult ..........................................   Passed    0.02 sec
+        Start 245: DriverTest.TestVmOwnerScheduleRoundsOwnersAndKeepsOwnerFifo
+245/424 Test #245: DriverTest.TestVmOwnerScheduleRoundsOwnersAndKeepsOwnerFifo ........................................   Passed    0.01 sec
+        Start 246: DriverTest.TestVmOwnerThreadExperimentIsOptInAndDispatchesMailboxTasks
+246/424 Test #246: DriverTest.TestVmOwnerThreadExperimentIsOptInAndDispatchesMailboxTasks .............................   Passed    0.02 sec
+        Start 247: DriverTest.TestVmOwnerExecutorCommandConsumeEntryDispatchesWithoutLpc
+247/424 Test #247: DriverTest.TestVmOwnerExecutorCommandConsumeEntryDispatchesWithoutLpc ..............................   Passed    0.02 sec
+        Start 248: DriverTest.TestVmOwnerExecutorCommandFrameRestoreDispatchesWithoutLpc
+248/424 Test #248: DriverTest.TestVmOwnerExecutorCommandFrameRestoreDispatchesWithoutLpc ..............................   Passed    0.02 sec
+        Start 249: DriverTest.TestVmOwnerExecutorCallbackTaskBoundaryDispatchesAndDropsStaleTasks
+249/424 Test #249: DriverTest.TestVmOwnerExecutorCallbackTaskBoundaryDispatchesAndDropsStaleTasks .....................   Passed    0.01 sec
+        Start 250: DriverTest.TestVmOwnerThreadDrainsPendingOwnerMessages
+250/424 Test #250: DriverTest.TestVmOwnerThreadDrainsPendingOwnerMessages .............................................   Passed    0.02 sec
+        Start 251: DriverTest.TestVmOwnerObjectMessageUsesOwnerExecutorRoute
+251/424 Test #251: DriverTest.TestVmOwnerObjectMessageUsesOwnerExecutorRoute ..........................................   Passed    0.03 sec
+        Start 252: DriverTest.TestVmOwnerExecutorDrainsTargetMessagesWithoutMainFallback
+252/424 Test #252: DriverTest.TestVmOwnerExecutorDrainsTargetMessagesWithoutMainFallback ..............................   Passed    0.03 sec
+        Start 253: DriverTest.TestOwnerSchedulerBackpressureRejectsOverLimit
+253/424 Test #253: DriverTest.TestOwnerSchedulerBackpressureRejectsOverLimit ..........................................   Passed    0.05 sec
+        Start 254: DriverTest.TestOwnerSubmissionBackpressureClosesRegisteredFutures
+254/424 Test #254: DriverTest.TestOwnerSubmissionBackpressureClosesRegisteredFutures ..................................   Passed    0.03 sec
+        Start 255: DriverTest.TestVmOwnerRuntimeReportsExecutorTaskContract
+255/424 Test #255: DriverTest.TestVmOwnerRuntimeReportsExecutorTaskContract ...........................................   Passed    0.01 sec
+        Start 256: DriverTest.TestOwnerRuntimeLayeringGuardKeepsStoresOutOfOwnerCc
+256/424 Test #256: DriverTest.TestOwnerRuntimeLayeringGuardKeepsStoresOutOfOwnerCc ....................................   Passed    0.01 sec
+        Start 257: DriverTest.TestVmOwnerExecutorBudgetYieldsAndRequeuesSameOwnerBacklog
+257/424 Test #257: DriverTest.TestVmOwnerExecutorBudgetYieldsAndRequeuesSameOwnerBacklog ..............................   Passed    0.51 sec
+        Start 258: DriverTest.TestVmOwnerExecutorDoesNotYieldWhenExactBudgetDrainsBacklog
+258/424 Test #258: DriverTest.TestVmOwnerExecutorDoesNotYieldWhenExactBudgetDrainsBacklog .............................   Passed    0.02 sec
+        Start 259: DriverTest.TestVmOwnerExecutorExceptionTerminalizesPendingFuture
+259/424 Test #259: DriverTest.TestVmOwnerExecutorExceptionTerminalizesPendingFuture ...................................   Passed    0.02 sec
+        Start 260: DriverTest.TestVmOwnerExecutorRunsDifferentOwnersInParallel
+260/424 Test #260: DriverTest.TestVmOwnerExecutorRunsDifferentOwnersInParallel ........................................   Passed    0.10 sec
+        Start 261: DriverTest.TestVmOwnerStartCannotCrossAnInProgressStop
+261/424 Test #261: DriverTest.TestVmOwnerStartCannotCrossAnInProgressStop .............................................   Passed    6.02 sec
+        Start 262: DriverTest.TestVmOwnerRuntimePerformanceProbesRecordDiagnostics
+262/424 Test #262: DriverTest.TestVmOwnerRuntimePerformanceProbesRecordDiagnostics ....................................   Passed    0.27 sec
+        Start 263: DriverTest.TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs
+263/424 Test #263: DriverTest.TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs .........................................   Passed    0.02 sec
+        Start 264: DriverTest.TestVmOwnerThreadGuardsControlledLpcProbeOffMain
+264/424 Test #264: DriverTest.TestVmOwnerThreadGuardsControlledLpcProbeOffMain ........................................   Passed    0.02 sec
+        Start 265: DriverTest.TestVmOwnerThreadRunsRestrictedLpcCanaryOffMainDeferredRelease
+265/424 Test #265: DriverTest.TestVmOwnerThreadRunsRestrictedLpcCanaryOffMainDeferredRelease ..........................   Passed    0.02 sec
+        Start 266: DriverTest.TestVmOwnerThreadRunsRegisteredReadonlyLpcTaskWithMultipleWorkers
+266/424 Test #266: DriverTest.TestVmOwnerThreadRunsRegisteredReadonlyLpcTaskWithMultipleWorkers .......................   Passed    0.03 sec
+        Start 267: DriverTest.TestVmOwnerLpcTaskRejectsTargetOwnerMismatchAtSubmit
+267/424 Test #267: DriverTest.TestVmOwnerLpcTaskRejectsTargetOwnerMismatchAtSubmit ....................................   Passed    0.01 sec
+        Start 268: DriverTest.TestOwnerSubmissionRejectsAtomicallyWhenFutureStoreFull
+268/424 Test #268: DriverTest.TestOwnerSubmissionRejectsAtomicallyWhenFutureStoreFull .................................   Passed    0.02 sec
+        Start 269: DriverTest.TestVmOwnerOrdinaryLpcRequiresExplicitOpen
+269/424 Test #269: DriverTest.TestVmOwnerOrdinaryLpcRequiresExplicitOpen ..............................................   Passed    0.01 sec
+        Start 270: DriverTest.TestVmOwnerThreadRunsExplicitOpenOrdinaryLpcTask
+270/424 Test #270: DriverTest.TestVmOwnerThreadRunsExplicitOpenOrdinaryLpcTask ........................................   Passed    0.03 sec
+        Start 271: DriverTest.TestVmOwnerThreadRejectsUnregisteredLpcTask
+271/424 Test #271: DriverTest.TestVmOwnerThreadRejectsUnregisteredLpcTask .............................................   Passed    0.03 sec
+        Start 272: DriverTest.TestVmOwnerThreadRunsRegisteredDomainLpcTasks
+272/424 Test #272: DriverTest.TestVmOwnerThreadRunsRegisteredDomainLpcTasks ...........................................   Passed    0.03 sec
+        Start 273: DriverTest.TestVmOwnerLpcTaskMainDrainAndScheduleFailPendingFuture
+273/424 Test #273: DriverTest.TestVmOwnerLpcTaskMainDrainAndScheduleFailPendingFuture .................................   Passed    0.01 sec
+        Start 274: DriverTest.TestVmOwnerThreadRejectsUnsafeLpcCanaryRequestsDeltas
+274/424 Test #274: DriverTest.TestVmOwnerThreadRejectsUnsafeLpcCanaryRequestsDeltas ...................................   Passed    0.02 sec
+        Start 275: DriverTest.TestVmOwnerMessageAndCommitTracesAreSpecOnly
+275/424 Test #275: DriverTest.TestVmOwnerMessageAndCommitTracesAreSpecOnly ............................................   Passed    0.01 sec
+        Start 276: DriverTest.TestVmOwnerFuturePollTracksMessageCompletion
+276/424 Test #276: DriverTest.TestVmOwnerFuturePollTracksMessageCompletion ............................................   Passed    0.01 sec
+        Start 277: DriverTest.TestVmOwnerFutureTakeConsumesOnlyCompletedFuture
+277/424 Test #277: DriverTest.TestVmOwnerFutureTakeConsumesOnlyCompletedFuture ........................................   Passed    0.01 sec
+        Start 278: DriverTest.TestVmOwnerFutureTakeConsumesFailedFutureOnce
+278/424 Test #278: DriverTest.TestVmOwnerFutureTakeConsumesFailedFutureOnce ...........................................   Passed    0.01 sec
+        Start 279: DriverTest.TestVmOwnerPurgeFailsPendingFuture
+279/424 Test #279: DriverTest.TestVmOwnerPurgeFailsPendingFuture ......................................................   Passed    0.01 sec
+        Start 280: DriverTest.TestVmOwnerObjectMessageFailsStaleTargetHandle
+280/424 Test #280: DriverTest.TestVmOwnerObjectMessageFailsStaleTargetHandle ..........................................   Passed    0.02 sec
+        Start 281: DriverTest.TestVmOwnerObjectMessageRejectsStaleTargetHandleAtSubmit
+281/424 Test #281: DriverTest.TestVmOwnerObjectMessageRejectsStaleTargetHandleAtSubmit ................................   Passed    0.01 sec
+        Start 282: DriverTest.TestVmOwnerObjectMessageReportsDestructedTargetHandle
+282/424 Test #282: DriverTest.TestVmOwnerObjectMessageReportsDestructedTargetHandle ...................................   Passed    0.02 sec
+        Start 283: DriverTest.TestVmOwnerFuturePollReportsUnknownFuture
+283/424 Test #283: DriverTest.TestVmOwnerFuturePollReportsUnknownFuture ...............................................   Passed    0.01 sec
+        Start 284: DriverTest.TestVmObjectHandleRejectsStaleOwnerEpoch
+284/424 Test #284: DriverTest.TestVmObjectHandleRejectsStaleOwnerEpoch ................................................   Passed    0.01 sec
+        Start 285: DriverTest.TestVmObjectHandleReportsCapabilityMetadata
+285/424 Test #285: DriverTest.TestVmObjectHandleReportsCapabilityMetadata .............................................   Passed    0.01 sec
+        Start 286: DriverTest.TestVmOwnerWorkerNeverMutatesObjectRefcounts
+286/424 Test #286: DriverTest.TestVmOwnerWorkerNeverMutatesObjectRefcounts ............................................   Passed    0.02 sec
+        Start 287: DriverTest.TestSysReloadTlsPermissionAndThreadMatrix
+287/424 Test #287: DriverTest.TestSysReloadTlsPermissionAndThreadMatrix ...............................................   Passed    0.03 sec
+        Start 288: DriverTest.TestVmOwnerWorkerNestedObjectTargetSubmissionRejected
+288/424 Test #288: DriverTest.TestVmOwnerWorkerNestedObjectTargetSubmissionRejected ...................................   Passed    0.02 sec
+        Start 289: DriverTest.TestVmObjectHandleReportsBasicResolveFailures
+289/424 Test #289: DriverTest.TestVmObjectHandleReportsBasicResolveFailures ...........................................   Passed    0.01 sec
+        Start 290: DriverTest.TestVmObjectStoreReportsPointerBridgeSkippedWhenRecordBridgeRetired
+290/424 Test #290: DriverTest.TestVmObjectStoreReportsPointerBridgeSkippedWhenRecordBridgeRetired .....................   Passed    0.01 sec
+        Start 291: DriverTest.TestVmObjectStoreRecordsOwnerMigrationTrace
+291/424 Test #291: DriverTest.TestVmObjectStoreRecordsOwnerMigrationTrace .............................................   Passed    0.01 sec
+        Start 292: DriverTest.TestVmObjectStoreShardRemovesDestructedObject
+292/424 Test #292: DriverTest.TestVmObjectStoreShardRemovesDestructedObject ...........................................   Passed    0.01 sec
+        Start 293: DriverTest.TestVmOwnerGuardFailsFastOnMismatch
+293/424 Test #293: DriverTest.TestVmOwnerGuardFailsFastOnMismatch .....................................................   Passed    0.01 sec
+        Start 294: DriverTest.TestVmWorkerRunsTasksInParallel
+294/424 Test #294: DriverTest.TestVmWorkerRunsTasksInParallel .........................................................   Passed    0.10 sec
+        Start 295: DriverTest.TestVmWorkerAsyncBenchmarkPollsResult
+295/424 Test #295: DriverTest.TestVmWorkerAsyncBenchmarkPollsResult ...................................................   Passed    0.10 sec
+        Start 296: DriverTest.TestVmWorkerActorKeysSerializePerOwner
+296/424 Test #296: DriverTest.TestVmWorkerActorKeysSerializePerOwner ..................................................   Passed    0.18 sec
+        Start 297: DriverTest.TestVmWorkerSnapshotDigestUsesOwnerKey
+297/424 Test #297: DriverTest.TestVmWorkerSnapshotDigestUsesOwnerKey ..................................................   Passed    0.02 sec
+        Start 298: DriverTest.TestVmWorkerAsyncSnapshotDigestPollsResult
+298/424 Test #298: DriverTest.TestVmWorkerAsyncSnapshotDigestPollsResult ..............................................   Passed    0.03 sec
+        Start 299: DriverTest.TestVmWorkerActorScoreUsesSnapshotValues
+299/424 Test #299: DriverTest.TestVmWorkerActorScoreUsesSnapshotValues ................................................   Passed    0.02 sec
+        Start 300: DriverTest.TestVmWorkerAsyncActorScorePollsResult
+300/424 Test #300: DriverTest.TestVmWorkerAsyncActorScorePollsResult ..................................................   Passed    0.03 sec
+        Start 301: DriverTest.TestVmWorkerCombatDamageBindsHashToSnapshotAndFields
+301/424 Test #301: DriverTest.TestVmWorkerCombatDamageBindsHashToSnapshotAndFields ....................................   Passed    0.02 sec
+        Start 302: DriverTest.TestVmWorkerCombatDamageNormalizesExtremeInput
+302/424 Test #302: DriverTest.TestVmWorkerCombatDamageNormalizesExtremeInput ..........................................   Passed    0.02 sec
+        Start 303: DriverTest.TestVmWorkerAsyncCombatDamagePollsResult
+303/424 Test #303: DriverTest.TestVmWorkerAsyncCombatDamagePollsResult ................................................   Passed    0.03 sec
+        Start 304: DriverTest.TestVmWorkerComputeResultCompletesOwnerFutureThroughQueue
+304/424 Test #304: DriverTest.TestVmWorkerComputeResultCompletesOwnerFutureThroughQueue ...............................   Passed    0.03 sec
+        Start 305: DriverTest.TestVmWorkerComputeResultCompletesOwnerFutureThroughOwnerExecutor
+305/424 Test #305: DriverTest.TestVmWorkerComputeResultCompletesOwnerFutureThroughOwnerExecutor .......................   Passed    0.03 sec
+        Start 306: DriverTest.TestVmWorkerComputeResultRejectsCompletedWithoutFrozenFields
+306/424 Test #306: DriverTest.TestVmWorkerComputeResultRejectsCompletedWithoutFrozenFields ............................   Passed    0.01 sec
+        Start 307: DriverTest.TestVmWorkerV2EnvelopeKeepsResultUntilTtl
+307/424 Test #307: DriverTest.TestVmWorkerV2EnvelopeKeepsResultUntilTtl ...............................................   Passed    0.03 sec
+        Start 308: DriverTest.TestVmWorkerComputeResultFutureCarriesBenchmarkResult
+308/424 Test #308: DriverTest.TestVmWorkerComputeResultFutureCarriesBenchmarkResult ...................................   Passed    0.03 sec
+        Start 309: DriverTest.TestVmWorkerV2TimeoutFailsPendingTask
+309/424 Test #309: DriverTest.TestVmWorkerV2TimeoutFailsPendingTask ...................................................   Passed    0.82 sec
+        Start 310: DriverTest.TestVmWorkerComputeResultFutureCarriesSnapshotDigestResult
+310/424 Test #310: DriverTest.TestVmWorkerComputeResultFutureCarriesSnapshotDigestResult ..............................   Passed    0.03 sec
+        Start 311: DriverTest.TestVmWorkerComputeResultFutureCarriesCombatDamageResult
+311/424 Test #311: DriverTest.TestVmWorkerComputeResultFutureCarriesCombatDamageResult ................................   Passed    0.03 sec
+        Start 312: DriverTest.TestVmWorkerPollTasksReturnsBatchResults
+312/424 Test #312: DriverTest.TestVmWorkerPollTasksReturnsBatchResults ................................................   Passed    0.03 sec
+        Start 313: DriverTest.TestInMemoryCompileFile
+313/424 Test #313: DriverTest.TestInMemoryCompileFile .................................................................   Passed    0.01 sec
+        Start 314: DriverTest.TestLpcVmRepresentativeWorkloadProbe
+314/424 Test #314: DriverTest.TestLpcVmRepresentativeWorkloadProbe ....................................................   Passed    0.01 sec
+        Start 315: DriverTest.TestInMemoryCompileFileFail
+315/424 Test #315: DriverTest.TestInMemoryCompileFileFail .............................................................   Passed    0.01 sec
+        Start 316: DriverTest.TestValidLPC_FunctionDeafultArgument
+316/424 Test #316: DriverTest.TestValidLPC_FunctionDeafultArgument ....................................................   Passed    0.01 sec
+        Start 317: DriverTest.TestLPC_FunctionInherit
+317/424 Test #317: DriverTest.TestLPC_FunctionInherit .................................................................   Passed    0.01 sec
+        Start 318: DriverTest.TestGatewayQueryIpNumberUsesForwardedClientAddress
+318/424 Test #318: DriverTest.TestGatewayQueryIpNumberUsesForwardedClientAddress ......................................   Passed    0.01 sec
+        Start 319: DriverTest.TestGatewayMasterSessionFifoBytesAreAggregatelyBounded
+319/424 Test #319: DriverTest.TestGatewayMasterSessionFifoBytesAreAggregatelyBounded ..................................   Passed    0.01 sec
+        Start 320: DriverTest.TestGatewayDetachedSessionFifoBytesRemainAggregatelyBounded
+320/424 Test #320: DriverTest.TestGatewayDetachedSessionFifoBytesRemainAggregatelyBounded .............................   Passed    0.01 sec
+        Start 321: DriverTest.TestGatewayProjectedWireBatchRejectsAggregateBudgetAtomically
+321/424 Test #321: DriverTest.TestGatewayProjectedWireBatchRejectsAggregateBudgetAtomically ...........................   Passed    0.01 sec
+        Start 322: DriverTest.TestGatewayMasterWriteCallbackRetriesBackpressuredSessionFifo
+322/424 Test #322: DriverTest.TestGatewayMasterWriteCallbackRetriesBackpressuredSessionFifo ...........................   Passed    0.01 sec
+        Start 323: DriverTest.TestGatewayMasterWriteCallbackDoesNotRescheduleWithoutProgress
+323/424 Test #323: DriverTest.TestGatewayMasterWriteCallbackDoesNotRescheduleWithoutProgress ..........................   Passed    0.01 sec
+        Start 324: DriverTest.TestGatewayMasterOutputContinuationCountsOverBudget
+324/424 Test #324: DriverTest.TestGatewayMasterOutputContinuationCountsOverBudget .....................................   Passed    0.01 sec
+        Start 325: DriverTest.TestGatewayMasterOutputContinuationScheduleSemantics
+325/424 Test #325: DriverTest.TestGatewayMasterOutputContinuationScheduleSemantics ....................................   Passed    0.02 sec
+        Start 326: DriverTest.TestGatewayProbeSuppressionIsSessionScopedAndOneShot
+326/424 Test #326: DriverTest.TestGatewayProbeSuppressionIsSessionScopedAndOneShot ....................................   Passed    0.01 sec
+        Start 327: DriverTest.TestGatewayInjectInputEfunPreservesArgumentLifetimeAndStack
+327/424 Test #327: DriverTest.TestGatewayInjectInputEfunPreservesArgumentLifetimeAndStack .............................   Passed    0.01 sec
+        Start 328: DriverTest.TestGatewayCoreEfunsPreserveReturnStackContracts
+328/424 Test #328: DriverTest.TestGatewayCoreEfunsPreserveReturnStackContracts ........................................   Passed    0.01 sec
+        Start 329: DriverTest.TestGatewayOutputReservationPublicWrappersAreMainOnly
+329/424 Test #329: DriverTest.TestGatewayOutputReservationPublicWrappersAreMainOnly ...................................   Passed    0.01 sec
+        Start 330: DriverTest.TestGatewayOutputReservationRejectsStaleTokenAfterSessionDestroy
+330/424 Test #330: DriverTest.TestGatewayOutputReservationRejectsStaleTokenAfterSessionDestroy ........................   Passed    0.01 sec
+        Start 331: DriverTest.TestGatewayFutureWatchKeepsPendingFutureAndReservation
+331/424 Test #331: DriverTest.TestGatewayFutureWatchKeepsPendingFutureAndReservation ..................................   Passed    0.01 sec
+        Start 332: DriverTest.TestGatewayFutureWatchDispatchesCompletedFutureOnMain
+332/424 Test #332: DriverTest.TestGatewayFutureWatchDispatchesCompletedFutureOnMain ...................................   Passed    0.02 sec
+        Start 333: DriverTest.TestGatewayEncodedOutputFutureFillsReservationWithoutLpcCallback
+333/424 Test #333: DriverTest.TestGatewayEncodedOutputFutureFillsReservationWithoutLpcCallback ........................   Passed    0.02 sec
+        Start 334: DriverTest.TestGatewayEncodedOutputFutureReleasesNonStringResult
+334/424 Test #334: DriverTest.TestGatewayEncodedOutputFutureReleasesNonStringResult ...................................   Passed    0.01 sec
+        Start 335: DriverTest.TestGatewayEncodedOutputFutureTimeoutReleasesReservation
+335/424 Test #335: DriverTest.TestGatewayEncodedOutputFutureTimeoutReleasesReservation ................................   Passed    0.01 sec
+        Start 336: DriverTest.TestVmOwnerNativeStringFuturePollReportsFrozenResult
+336/424 Test #336: DriverTest.TestVmOwnerNativeStringFuturePollReportsFrozenResult ....................................   Passed    0.01 sec
+        Start 337: DriverTest.TestVmOwnerRepeatedTimeoutReportsTerminalChangeOnce
+337/424 Test #337: DriverTest.TestVmOwnerRepeatedTimeoutReportsTerminalChangeOnce .....................................   Passed    0.01 sec
+        Start 338: DriverTest.TestVmOwnerQueuedFrozenStringCancellationRemovesTaskBeforeProjection
+338/424 Test #338: DriverTest.TestVmOwnerQueuedFrozenStringCancellationRemovesTaskBeforeProjection ....................   Passed    0.02 sec
+        Start 339: DriverTest.TestVmOwnerQueuedMessageCancellationDoesNotCountAsCallbackDrop
+339/424 Test #339: DriverTest.TestVmOwnerQueuedMessageCancellationDoesNotCountAsCallbackDrop ..........................   Passed    0.02 sec
+        Start 340: DriverTest.TestGatewayOwnerOutputQuiesceClosesAllSessionWatchesButKeepsGeneric
+340/424 Test #340: DriverTest.TestGatewayOwnerOutputQuiesceClosesAllSessionWatchesButKeepsGeneric .....................   Passed    0.02 sec
+        Start 341: DriverTest.TestGatewayMappingFutureStaleOwnerNotifiesCancellationAndClosesReservation
+341/424 Test #341: DriverTest.TestGatewayMappingFutureStaleOwnerNotifiesCancellationAndClosesReservation ..............   Passed    0.01 sec
+        Start 342: DriverTest.TestGatewayMappingFutureCancellationCallbackMayReenterSessionDestroy
+342/424 Test #342: DriverTest.TestGatewayMappingFutureCancellationCallbackMayReenterSessionDestroy ....................   Passed    0.01 sec
+        Start 343: DriverTest.TestGatewayMappingFutureReservationStaleStillNotifiesCancellation
+343/424 Test #343: DriverTest.TestGatewayMappingFutureReservationStaleStillNotifiesCancellation .......................   Passed    0.01 sec
+        Start 344: DriverTest.TestGatewayMappingFutureCompletionCallbackFailureRunsCancellationCleanup
+344/424 Test #344: DriverTest.TestGatewayMappingFutureCompletionCallbackFailureRunsCancellationCleanup ................   Passed    0.01 sec
+        Start 345: DriverTest.TestGatewayOwnerOutputQuiesceClosesStoppedWorkerWave
+345/424 Test #345: DriverTest.TestGatewayOwnerOutputQuiesceClosesStoppedWorkerWave ....................................   Passed    0.02 sec
+        Start 346: DriverTest.TestGatewayOwnerOutputQuiesceCountsDetachedWaveReservation
+346/424 Test #346: DriverTest.TestGatewayOwnerOutputQuiesceCountsDetachedWaveReservation ..............................   Passed    0.02 sec
+        Start 347: DriverTest.TestGatewayOwnerRoomOutputProjectionUsesSameWireAndFifoSlot
+347/424 Test #347: DriverTest.TestGatewayOwnerRoomOutputProjectionUsesSameWireAndFifoSlot .............................   Passed    0.02 sec
+        Start 348: DriverTest.TestGatewayOwnerRoomOutputMissingWaveReleasesExactlyOnce
+348/424 Test #348: DriverTest.TestGatewayOwnerRoomOutputMissingWaveReleasesExactlyOnce ................................   Passed    0.01 sec
+        Start 349: DriverTest.TestGatewayOwnerRoomOutputRejectsInvalidUtf8BeforeOwnerSubmit
+349/424 Test #349: DriverTest.TestGatewayOwnerRoomOutputRejectsInvalidUtf8BeforeOwnerSubmit ...........................   Passed    0.01 sec
+        Start 350: DriverTest.TestGatewayOwnerRoomOutputRejectsOversizedWireBeforeOwnerSubmit
+350/424 Test #350: DriverTest.TestGatewayOwnerRoomOutputRejectsOversizedWireBeforeOwnerSubmit .........................   Passed    0.03 sec
+        Start 351: DriverTest.TestGatewayOwnerRoomOutputWaitsForWholeWaveBeforePublish
+351/424 Test #351: DriverTest.TestGatewayOwnerRoomOutputWaitsForWholeWaveBeforePublish ................................   Passed    0.02 sec
+        Start 352: DriverTest.TestGatewayOwnerRoomOutputSupportsSameSessionMultipleReservations
+352/424 Test #352: DriverTest.TestGatewayOwnerRoomOutputSupportsSameSessionMultipleReservations .......................   Passed    0.02 sec
+        Start 353: DriverTest.TestGatewayOwnerRoomOutputPublishRetryIsBoundedAndPreservesFifo
+353/424 Test #353: DriverTest.TestGatewayOwnerRoomOutputPublishRetryIsBoundedAndPreservesFifo .........................   Passed    0.02 sec
+        Start 354: DriverTest.TestGatewayRoomOutputRetrySchedulerHasHardBudgets
+354/424 Test #354: DriverTest.TestGatewayRoomOutputRetrySchedulerHasHardBudgets .......................................   Passed    0.01 sec
+        Start 355: DriverTest.TestGatewayRoomOutputPreparesFlushSessionsBeforeFifoStage
+355/424 Test #355: DriverTest.TestGatewayRoomOutputPreparesFlushSessionsBeforeFifoStage ...............................   Passed    0.01 sec
+        Start 356: DriverTest.TestGatewayRoomOutputPartialWatchRollbackCountsCancellation
+356/424 Test #356: DriverTest.TestGatewayRoomOutputPartialWatchRollbackCountsCancellation .............................   Passed    0.01 sec
+        Start 357: DriverTest.TestGatewayFutureWatchQueueMutationIsTransactional
+357/424 Test #357: DriverTest.TestGatewayFutureWatchQueueMutationIsTransactional ......................................   Passed    0.01 sec
+        Start 358: DriverTest.TestGatewayFutureWatchLimitIsSharedAcrossWatchKinds
+358/424 Test #358: DriverTest.TestGatewayFutureWatchLimitIsSharedAcrossWatchKinds .....................................   Passed    0.01 sec
+        Start 359: DriverTest.TestGatewayOwnerStaleNotificationDoesNotReuseWaveAfterCallback
+359/424 Test #359: DriverTest.TestGatewayOwnerStaleNotificationDoesNotReuseWaveAfterCallback ..........................   Passed    0.01 sec
+        Start 360: DriverTest.TestGatewayOwnerRoomOutputReservationMismatchIsolatesRecipient
+360/424 Test #360: DriverTest.TestGatewayOwnerRoomOutputReservationMismatchIsolatesRecipient ..........................   Passed    0.02 sec
+        Start 361: DriverTest.TestGatewayOwnerRoomOutputStaleRecipientFallsBackWithSlowPeer
+361/424 Test #361: DriverTest.TestGatewayOwnerRoomOutputStaleRecipientFallsBackWithSlowPeer ...........................   Passed    0.02 sec
+        Start 362: DriverTest.TestGatewayOwnerRoomOutputFailedRecipientFallsBackWithSlowPeer
+362/424 Test #362: DriverTest.TestGatewayOwnerRoomOutputFailedRecipientFallsBackWithSlowPeer ..........................   Passed    0.02 sec
+        Start 363: DriverTest.TestGatewayOwnerRoomOutputWaveTimeoutPreservesCompletedRecipient
+363/424 Test #363: DriverTest.TestGatewayOwnerRoomOutputWaveTimeoutPreservesCompletedRecipient ........................   Passed    0.02 sec
+        Start 364: DriverTest.TestGatewayOwnerRoomOutputWaveDisconnectReleasesOtherRecipient
+364/424 Test #364: DriverTest.TestGatewayOwnerRoomOutputWaveDisconnectReleasesOtherRecipient ..........................   Passed    0.02 sec
+        Start 365: DriverTest.TestGatewayOwnerRoomOutputRejectsLiveSessionIdMismatch
+365/424 Test #365: DriverTest.TestGatewayOwnerRoomOutputRejectsLiveSessionIdMismatch ..................................   Passed    0.01 sec
+        Start 366: DriverTest.TestGatewayOwnerRoomOutputFallsBackInlineByteEquivalent
+366/424 Test #366: DriverTest.TestGatewayOwnerRoomOutputFallsBackInlineByteEquivalent .................................   Passed    0.01 sec
+        Start 367: DriverTest.TestGatewayOwnerRoomOutputStagesInlineFallbackBatchBeforeFill
+367/424 Test #367: DriverTest.TestGatewayOwnerRoomOutputStagesInlineFallbackBatchBeforeFill ...........................   Passed    0.01 sec
+        Start 368: DriverTest.TestGatewayOwnerRoomOutputInvalidInlineInputWritesNoRecipient
+368/424 Test #368: DriverTest.TestGatewayOwnerRoomOutputInvalidInlineInputWritesNoRecipient ...........................   Passed    0.01 sec
+        Start 369: DriverTest.TestGatewayOwnerRoomOutputTimeoutFallsBackInline
+369/424 Test #369: DriverTest.TestGatewayOwnerRoomOutputTimeoutFallsBackInline ........................................   Passed    0.06 sec
+        Start 370: DriverTest.TestGatewayOwnerRoomOutputDisconnectConsumesFuture
+370/424 Test #370: DriverTest.TestGatewayOwnerRoomOutputDisconnectConsumesFuture ......................................   Passed    0.07 sec
+        Start 371: DriverTest.TestGatewayOwnerRoomOutputStaleOwnerEpochFallsBackInline
+371/424 Test #371: DriverTest.TestGatewayOwnerRoomOutputStaleOwnerEpochFallsBackInline ................................   Passed    0.07 sec
+        Start 372: DriverTest.TestGatewayFutureWatchTimesOutAndReleasesReservation
+372/424 Test #372: DriverTest.TestGatewayFutureWatchTimesOutAndReleasesReservation ....................................   Passed    0.01 sec
+        Start 373: DriverTest.TestGatewayFutureWatchRejectsAnotherSessionFuture
+373/424 Test #373: DriverTest.TestGatewayFutureWatchRejectsAnotherSessionFuture .......................................   Passed    0.01 sec
+        Start 374: DriverTest.TestGatewayGenericFutureWatchDispatchesNonSessionObjectOnMain
+374/424 Test #374: DriverTest.TestGatewayGenericFutureWatchDispatchesNonSessionObjectOnMain ...........................   Passed    0.02 sec
+        Start 375: DriverTest.TestGatewayGenericFutureWatchPollCountersReportBudgetedWork
+375/424 Test #375: DriverTest.TestGatewayGenericFutureWatchPollCountersReportBudgetedWork .............................   Passed    0.01 sec
+        Start 376: DriverTest.TestGatewaySessionWatchCancellationKeepsGenericWatchWakeups
+376/424 Test #376: DriverTest.TestGatewaySessionWatchCancellationKeepsGenericWatchWakeups .............................   Passed    0.01 sec
+        Start 377: DriverTest.TestGatewayGenericFutureWatchRejectsAnotherObjectFuture
+377/424 Test #377: DriverTest.TestGatewayGenericFutureWatchRejectsAnotherObjectFuture .................................   Passed    0.01 sec
+        Start 378: DriverTest.TestGatewayGenericFutureWatchTimesOutAndConsumesFuture
+378/424 Test #378: DriverTest.TestGatewayGenericFutureWatchTimesOutAndConsumesFuture ..................................   Passed    0.01 sec
+        Start 379: DriverTest.TestGatewayGenericFutureWatchTargetDestructCancelsAndConsumesFuture
+379/424 Test #379: DriverTest.TestGatewayGenericFutureWatchTargetDestructCancelsAndConsumesFuture .....................   Passed    0.01 sec
+        Start 380: DriverTest.TestGatewayGenericAndSessionWatchCannotConsumeSameFuture
+380/424 Test #380: DriverTest.TestGatewayGenericAndSessionWatchCannotConsumeSameFuture ................................   Passed    0.01 sec
+        Start 381: DriverTest.TestOwnerFutureCancelEfunSupportsSubmitRollback
+381/424 Test #381: DriverTest.TestOwnerFutureCancelEfunSupportsSubmitRollback .........................................   Passed    0.01 sec
+        Start 382: DriverTest.TestGatewayDaemonUsesDefaultOwnerForSystemMessages
+382/424 Test #382: DriverTest.TestGatewayDaemonUsesDefaultOwnerForSystemMessages ......................................   Passed    0.01 sec
+        Start 383: DriverTest.TestGatewaySessionDestroyCallsGatewayDisconnected
+383/424 Test #383: DriverTest.TestGatewaySessionDestroyCallsGatewayDisconnected .......................................   Passed    0.01 sec
+        Start 384: DriverTest.TestGatewaySessionDestroyAccountsReadyAndPendingFifoEntries
+384/424 Test #384: DriverTest.TestGatewaySessionDestroyAccountsReadyAndPendingFifoEntries .............................   Passed    0.01 sec
+        Start 385: DriverTest.TestGatewaySessionDestroyAllowsNetDeadSelfDestruct
+385/424 Test #385: DriverTest.TestGatewaySessionDestroyAllowsNetDeadSelfDestruct ......................................   Passed    0.01 sec
+        Start 386: DriverTest.TestGatewayOutputEnvelopeFastPathIsByteEquivalent
+386/424 Test #386: DriverTest.TestGatewayOutputEnvelopeFastPathIsByteEquivalent .......................................   Passed    0.01 sec
+        Start 387: DriverTest.TestGatewayMasterReconnectRebindsExistingSessionWithoutLosingState
+387/424 Test #387: DriverTest.TestGatewayMasterReconnectRebindsExistingSessionWithoutLosingState ......................   Passed    0.01 sec
+        Start 388: DriverTest.TestGatewayInboundJsonRejectsExcessiveSvalueDepth
+388/424 Test #388: DriverTest.TestGatewayInboundJsonRejectsExcessiveSvalueDepth .......................................   Passed    0.01 sec
+        Start 389: DriverTest.TestGatewayInboundJsonRejectsUnsignedIntegerOutsideLpcRange
+389/424 Test #389: DriverTest.TestGatewayInboundJsonRejectsUnsignedIntegerOutsideLpcRange .............................   Passed    0.01 sec
+        Start 390: DriverTest.TestGatewayInboundJsonRejectsStringsLpcCannotRepresent
+390/424 Test #390: DriverTest.TestGatewayInboundJsonRejectsStringsLpcCannotRepresent ..................................   Passed    0.01 sec
+        Start 391: DriverTest.TestGatewayInboundJsonShapeFailureDoesNotLeakPartialArrays
+391/424 Test #391: DriverTest.TestGatewayInboundJsonShapeFailureDoesNotLeakPartialArrays ..............................   Passed    0.01 sec
+        Start 392: DriverTest.TestGatewaySessionIdRejectsOverlongValue
+392/424 Test #392: DriverTest.TestGatewaySessionIdRejectsOverlongValue ................................................   Passed    0.01 sec
+        Start 393: DriverTest.TestGatewaySessionIdRejectsControlCharacters
+393/424 Test #393: DriverTest.TestGatewaySessionIdRejectsControlCharacters ............................................   Passed    0.01 sec
+        Start 394: DriverTest.TestGatewayWireCidRejectsEmbeddedNullAlias
+394/424 Test #394: DriverTest.TestGatewayWireCidRejectsEmbeddedNullAlias ..............................................   Passed    0.01 sec
+        Start 395: DriverTest.TestGatewayReliableIngressExecutesContinuousSequenceExactlyOnce
+395/424 Test #395: DriverTest.TestGatewayReliableIngressExecutesContinuousSequenceExactlyOnce .........................   Passed    0.01 sec
+        Start 396: DriverTest.TestGatewayReliableIngressResetsOnlyForNewStreamIdentity
+396/424 Test #396: DriverTest.TestGatewayReliableIngressResetsOnlyForNewStreamIdentity ................................   Passed    0.01 sec
+        Start 397: DriverTest.TestGatewayReliableIngressActiveOwnerRejectsCompetingStream
+397/424 Test #397: DriverTest.TestGatewayReliableIngressActiveOwnerRejectsCompetingStream .............................   Passed    0.01 sec
+        Start 398: DriverTest.TestGatewayReliableIngressReconnectPreservesAcceptedSequence
+398/424 Test #398: DriverTest.TestGatewayReliableIngressReconnectPreservesAcceptedSequence ............................   Passed    0.01 sec
+        Start 399: DriverTest.TestGatewayReliableIngressNacksExpectedSequenceUntilSessionExists
+399/424 Test #399: DriverTest.TestGatewayReliableIngressNacksExpectedSequenceUntilSessionExists .......................   Passed    0.01 sec
+        Start 400: DriverTest.TestGatewayReliableIngressBatchFlushesOneFramedCumulativeAck
+400/424 Test #400: DriverTest.TestGatewayReliableIngressBatchFlushesOneFramedCumulativeAck ............................   Passed    0.01 sec
+        Start 401: DriverTest.TestGatewayDetachedSessionExpiresAfterReconnectGrace
+401/424 Test #401: DriverTest.TestGatewayDetachedSessionExpiresAfterReconnectGrace ....................................   Passed    0.01 sec
+        Start 402: DriverTest.TestGatewayReceiveRunsThroughOwnerMainQueue
+402/424 Test #402: DriverTest.TestGatewayReceiveRunsThroughOwnerMainQueue .............................................   Passed    0.01 sec
+        Start 403: DriverTest.TestGatewayReceiveDefersMainDrainWhenEventBaseIsAvailable
+403/424 Test #403: DriverTest.TestGatewayReceiveDefersMainDrainWhenEventBaseIsAvailable ...............................   Passed    0.01 sec
+        Start 404: DriverTest.TestGatewayReadBatchDrainServicesAdmittedReceiveTask
+404/424 Test #404: DriverTest.TestGatewayReadBatchDrainServicesAdmittedReceiveTask ....................................   Passed    0.01 sec
+        Start 405: DriverTest.TestGatewayCommandTaskCarriesOwnerHandlePayload
+405/424 Test #405: DriverTest.TestGatewayCommandTaskCarriesOwnerHandlePayload .........................................   Passed    0.01 sec
+        Start 406: DriverTest.TestGatewayCommandMxpTagFilterFrame
+406/424 Test #406: DriverTest.TestGatewayCommandMxpTagFilterFrame .....................................................   Passed    0.01 sec
+        Start 407: DriverTest.TestGatewayCommandEdCommandFrame
+407/424 Test #407: DriverTest.TestGatewayCommandEdCommandFrame ........................................................   Passed    0.01 sec
+        Start 408: DriverTest.TestGatewayCommandPayloadSnapshotsActiveInputToState
+408/424 Test #408: DriverTest.TestGatewayCommandPayloadSnapshotsActiveInputToState ....................................   Passed    0.01 sec
+        Start 409: DriverTest.TestGatewayCommandPayloadSnapshotsActiveGetCharState
+409/424 Test #409: DriverTest.TestGatewayCommandPayloadSnapshotsActiveGetCharState ....................................   Passed    0.01 sec
+        Start 410: DriverTest.TestGatewayCommandExecutesThroughOwnerMainQueue
+410/424 Test #410: DriverTest.TestGatewayCommandExecutesThroughOwnerMainQueue .........................................   Passed    0.01 sec
+        Start 411: DriverTest.TestGatewayCommandMainQueueDropsStaleOwnerEpoch
+411/424 Test #411: DriverTest.TestGatewayCommandMainQueueDropsStaleOwnerEpoch .........................................   Passed    0.01 sec
+        Start 412: DriverTest.TestGatewayCommandMainQueueDropsDisconnectedSession
+412/424 Test #412: DriverTest.TestGatewayCommandMainQueueDropsDisconnectedSession .....................................   Passed    0.01 sec
+        Start 413: DriverTest.TestGatewayCommandMainQueueReschedulesBufferedCommands
+413/424 Test #413: DriverTest.TestGatewayCommandMainQueueReschedulesBufferedCommands ..................................   Passed    0.01 sec
+        Start 414: DriverTest.TestGatewayCommandMainQueueStaleTraceIncludesFrameMetadata
+414/424 Test #414: DriverTest.TestGatewayCommandMainQueueStaleTraceIncludesFrameMetadata ..............................   Passed    0.01 sec
+        Start 415: DriverTest.TestGatewaySessionExecLogonKeepsSessionLookupWorking
+415/424 Test #415: DriverTest.TestGatewaySessionExecLogonKeepsSessionLookupWorking ....................................   Passed    0.01 sec
+        Start 416: DriverTest.TestVmObjectHandleAcquireKeepsReferenceAcrossDestruct
+416/424 Test #416: DriverTest.TestVmObjectHandleAcquireKeepsReferenceAcrossDestruct ...................................   Passed    0.01 sec
+        Start 417: DriverTest.TestVmObjectHandleAcquireRejectsStaleHandle
+417/424 Test #417: DriverTest.TestVmObjectHandleAcquireRejectsStaleHandle .............................................   Passed    0.01 sec
+        Start 418: DriverTest.TestGatewaySessionIdBoundaryTableDriven
+418/424 Test #418: DriverTest.TestGatewaySessionIdBoundaryTableDriven .................................................   Passed    0.01 sec
+        Start 419: FilenameToObnameTest.RejectsTruncatedOutputWithoutCrossingDestination
+419/424 Test #419: FilenameToObnameTest.RejectsTruncatedOutputWithoutCrossingDestination ..............................   Passed    0.01 sec
+        Start 420: FilenameToObnameTest.RejectsInvalidArguments
+420/424 Test #420: FilenameToObnameTest.RejectsInvalidArguments .......................................................   Passed    0.01 sec
+        Start 421: FilenameToObnameTest.PreservesNormalizedObjectNameSemantics
+421/424 Test #421: FilenameToObnameTest.PreservesNormalizedObjectNameSemantics ........................................   Passed    0.01 sec
+        Start 422: FilenameToObnameTest.ReclaimsCapacityAfterRemovingCSourceSuffix
+422/424 Test #422: FilenameToObnameTest.ReclaimsCapacityAfterRemovingCSourceSuffix ....................................   Passed    0.01 sec
+        Start 423: OwnerExecutorTest.ReleasesOwnerClaimWhenTaskExecutionThrowsStdException
+423/424 Test #423: OwnerExecutorTest.ReleasesOwnerClaimWhenTaskExecutionThrowsStdException ............................   Passed    0.01 sec
+        Start 424: OwnerExecutorTest.ReleasesOwnerClaimWhenTaskExecutionThrowsUnknownException
+424/424 Test #424: OwnerExecutorTest.ReleasesOwnerClaimWhenTaskExecutionThrowsUnknownException ........................   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 424
+
+Total Test time (real) =  14.26 sec

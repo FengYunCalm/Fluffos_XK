@@ -9,6 +9,7 @@
 #include "mainlib.h"
 
 #include "vm/vm.h"
+#include "vm/internal/base/scoped_current_object_as_master.h"
 #include "symbol.h"
 
 int main(int argc, char** argv) {
@@ -25,7 +26,8 @@ int main(int argc, char** argv) {
 
   vm_start();
 
-  current_object = master_ob;
+    ScopedCurrentObjectAsMaster master_scope;
+
   auto file = get_argument(1, argc, argv);
   struct object_t* obj = nullptr;
 

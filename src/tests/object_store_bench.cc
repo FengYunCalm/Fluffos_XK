@@ -3,6 +3,7 @@
 #include "backend.h"
 #include "mainlib.h"
 #include "vm/internal/base/object.h"
+#include "vm/internal/base/scoped_current_object_as_master.h"
 #include "vm/internal/simulate.h"
 #include "vm/object_handle.h"
 #include "vm/owner.h"
@@ -66,18 +67,13 @@ void require(bool condition, const std::string &message) {
 object_t *clone_object_for_bench(const char *path) {
   error_context_t econ{};
   object_t *object = nullptr;
-  object_t *saved_current_object = current_object;
-  if (current_object == nullptr && master_ob != nullptr) {
-    current_object = master_ob;
-  }
+  ScopedCurrentObjectAsMaster master_scope(ScopedCurrentObjectAsMaster::conditional_t{});
   save_context(&econ);
   try {
     object = clone_object(path, 0);
     pop_context(&econ);
-    current_object = saved_current_object;
   } catch (...) {
     restore_context(&econ);
-    current_object = saved_current_object;
     throw std::runtime_error(std::string("clone_object failed for ") + path);
   }
   return object;
@@ -88,18 +84,13 @@ void destruct_object_for_bench(object_t *object) {
     return;
   }
   error_context_t econ{};
-  object_t *saved_current_object = current_object;
-  if (current_object == nullptr && master_ob != nullptr) {
-    current_object = master_ob;
-  }
+  ScopedCurrentObjectAsMaster master_scope(ScopedCurrentObjectAsMaster::conditional_t{});
   save_context(&econ);
   try {
     destruct_object(object);
     pop_context(&econ);
-    current_object = saved_current_object;
   } catch (...) {
     restore_context(&econ);
-    current_object = saved_current_object;
     throw std::runtime_error(std::string("destruct_object failed for ") + object->obname);
   }
 }

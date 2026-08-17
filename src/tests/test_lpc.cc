@@ -40,6 +40,7 @@
 #include "compiler/internal/compiler.h"
 #include "compiler/internal/lpc_modern_profile.h"
 #include "vm/internal/owner_executor.h"
+#include "vm/internal/base/scoped_current_object_as_master.h"
 #include "packages/core/call_out.h"
 #include "packages/core/dns.h"
 #include "packages/core/file.h"
@@ -74,6 +75,18 @@ extern int vm_call_out_test_support_priority(LPC_INT handle);
 extern bool vm_async_test_support_dispatch_read_callback(object_t* owner, const char* method, const char* payload);
 
 namespace {
+// 文件清理守卫：析构时删除测试文件（原 4 份逐字节相同局部 FixtureGuard
+// 收敛为单一定义）
+struct PathCleanupGuard {
+  const char* path;
+  ~PathCleanupGuard() { std::remove(path); }
+};
+// 外部命令恢复守卫：析构时恢复 external_cmd[0]（原 2 份逐字节相同局部
+// FixtureGuard 收敛为单一定义）
+struct ExternalCommandGuard {
+  char* saved_command;
+  ~ExternalCommandGuard() { external_cmd[0] = saved_command; }
+};
 object_t* clone_object_for_test(const char* path);
 void destruct_object_for_test(object_t* object);
 }
@@ -4422,15 +4435,8 @@ TEST_F(DriverTest, TestReadBytesPreservesLpc64BitOffsets) {
   constexpr LPC_INT kLargeOffset = static_cast<LPC_INT>(1) << 32;
   const char* relative_path = "log/read-bytes-large-offset.bin";
   const char* mudlib_path = "/log/read-bytes-large-offset.bin";
-  struct FixtureGuard {
-    const char* path;
-    object_t* saved_current_object;
-    ~FixtureGuard() {
-      std::remove(path);
-      current_object = saved_current_object;
-    }
-  } guard{relative_path, current_object};
-  current_object = master_ob;
+  PathCleanupGuard guard{relative_path};
+  ScopedCurrentObjectAsMaster master_scope;
 
   std::ofstream file(relative_path, std::ios::binary | std::ios::trunc);
   ASSERT_TRUE(file.is_open());
@@ -4451,15 +4457,8 @@ TEST_F(DriverTest, TestWriteBytesPreservesLpc64BitOffsets) {
   constexpr LPC_INT kLargeOffset = static_cast<LPC_INT>(1) << 32;
   const char* relative_path = "log/write-bytes-large-offset.bin";
   const char* mudlib_path = "/log/write-bytes-large-offset.bin";
-  struct FixtureGuard {
-    const char* path;
-    object_t* saved_current_object;
-    ~FixtureGuard() {
-      std::remove(path);
-      current_object = saved_current_object;
-    }
-  } guard{relative_path, current_object};
-  current_object = master_ob;
+  PathCleanupGuard guard{relative_path};
+  ScopedCurrentObjectAsMaster master_scope;
 
   std::ofstream file(relative_path, std::ios::binary | std::ios::trunc);
   ASSERT_TRUE(file.is_open());
@@ -4483,15 +4482,8 @@ TEST_F(DriverTest, TestFileSizePreservesLpc64BitSize) {
   constexpr LPC_INT kLargeSize = static_cast<LPC_INT>(1) << 32;
   const char* relative_path = "log/file-size-large.bin";
   const char* mudlib_path = "/log/file-size-large.bin";
-  struct FixtureGuard {
-    const char* path;
-    object_t* saved_current_object;
-    ~FixtureGuard() {
-      std::remove(path);
-      current_object = saved_current_object;
-    }
-  } guard{relative_path, current_object};
-  current_object = master_ob;
+  PathCleanupGuard guard{relative_path};
+  ScopedCurrentObjectAsMaster master_scope;
 
   std::ofstream file(relative_path, std::ios::binary | std::ios::trunc);
   ASSERT_TRUE(file.is_open());
@@ -4506,14 +4498,13 @@ TEST_F(DriverTest, TestFileSizePreservesLpc64BitSize) {
 #ifndef _WIN32
 TEST_F(DriverTest, TestSocketAcceptMarksAcceptedDescriptorCloseOnExec) {
   struct FixtureGuard {
-    object_t* saved_current_object;
     int listener = -1;
     int accepted = -1;
     evutil_socket_t client = -1;
     int accidental_fd = -1;
     int accidental_fd_flags = -1;
     ~FixtureGuard() {
-      current_object = master_ob;
+      ScopedCurrentObjectAsMaster inner;
       if (accepted >= 0 && lpc_socks_get(accepted)->state != STATE_CLOSED) {
         socket_close(accepted, 0);
       }
@@ -4526,10 +4517,9 @@ TEST_F(DriverTest, TestSocketAcceptMarksAcceptedDescriptorCloseOnExec) {
       if (accidental_fd_flags >= 0) {
         fcntl(accidental_fd, F_SETFD, accidental_fd_flags);
       }
-      current_object = saved_current_object;
     }
-  } guard{current_object};
-  current_object = master_ob;
+  } guard;
+  ScopedCurrentObjectAsMaster master_scope;
 
   guard.listener = socket_create(STREAM, nullptr, nullptr);
   ASSERT_GE(guard.listener, 0);
@@ -4569,15 +4559,8 @@ TEST_F(DriverTest, TestExternalSpawnFailureDoesNotPublishSocket) {
 #else
   char invalid_command[] = "/this/path/does/not/exist/fluffos-external-test";
 #endif
-  struct FixtureGuard {
-    char* saved_command;
-    object_t* saved_current_object;
-    ~FixtureGuard() {
-      external_cmd[0] = saved_command;
-      current_object = saved_current_object;
-    }
-  } guard{external_cmd[0], current_object};
-  current_object = master_ob;
+  ExternalCommandGuard guard{external_cmd[0]};
+  ScopedCurrentObjectAsMaster master_scope;
   external_cmd[0] = invalid_command;
 
   std::vector<bool> closed_before(lpc_socks_num(), false);
@@ -4611,15 +4594,8 @@ TEST_F(DriverTest, TestExternalSpawnFailureDoesNotPublishSocket) {
 }
 
 TEST_F(DriverTest, TestExternalEmptyCommandDoesNotPublishSocket) {
-  struct FixtureGuard {
-    char* saved_command;
-    object_t* saved_current_object;
-    ~FixtureGuard() {
-      external_cmd[0] = saved_command;
-      current_object = saved_current_object;
-    }
-  } guard{external_cmd[0], current_object};
-  current_object = master_ob;
+  ExternalCommandGuard guard{external_cmd[0]};
+  ScopedCurrentObjectAsMaster master_scope;
   external_cmd[0] = nullptr;
 
   std::vector<bool> closed_before(lpc_socks_num(), false);
@@ -4655,15 +4631,8 @@ TEST_F(DriverTest, TestExternalEmptyCommandDoesNotPublishSocket) {
 TEST_F(DriverTest, TestReadJsonRejectsUnsignedIntegerOutsideLpcRange) {
   const char* relative_path = "log/read-json-integer-boundary.json";
   const char* mudlib_path = "/log/read-json-integer-boundary.json";
-  struct FixtureGuard {
-    const char* path;
-    object_t* saved_current_object;
-    ~FixtureGuard() {
-      std::remove(path);
-      current_object = saved_current_object;
-    }
-  } guard{relative_path, current_object};
-  current_object = master_ob;
+  PathCleanupGuard guard{relative_path};
+  ScopedCurrentObjectAsMaster master_scope;
 
   auto write_fixture = [relative_path](const char* contents) {
     std::ofstream file(relative_path, std::ios::trunc);
@@ -4764,18 +4733,13 @@ std::string read_source_file_for_test(const char* path) {
 object_t* load_object_for_test(const char* path) {
   error_context_t econ{};
   object_t* object = nullptr;
-  object_t* saved_current_object = current_object;
-  if (current_object == nullptr && master_ob != nullptr) {
-    current_object = master_ob;
-  }
+  ScopedCurrentObjectAsMaster master_scope(ScopedCurrentObjectAsMaster::conditional_t{});
   save_context(&econ);
   try {
     object = load_object(path, 1);
     pop_context(&econ);
-    current_object = saved_current_object;
   } catch (...) {
     restore_context(&econ);
-    current_object = saved_current_object;
     ADD_FAILURE() << "load_object failed for " << path;
   }
   return object;
@@ -4784,18 +4748,13 @@ object_t* load_object_for_test(const char* path) {
 object_t* clone_object_for_test(const char* path) {
   error_context_t econ{};
   object_t* object = nullptr;
-  object_t* saved_current_object = current_object;
-  if (current_object == nullptr && master_ob != nullptr) {
-    current_object = master_ob;
-  }
+  ScopedCurrentObjectAsMaster master_scope(ScopedCurrentObjectAsMaster::conditional_t{});
   save_context(&econ);
   try {
     object = clone_object(path, 0);
     pop_context(&econ);
-    current_object = saved_current_object;
   } catch (...) {
     restore_context(&econ);
-    current_object = saved_current_object;
     ADD_FAILURE() << "clone_object failed for " << path;
   }
   return object;
@@ -4806,18 +4765,13 @@ void destruct_object_for_test(object_t* object) {
     return;
   }
   error_context_t econ{};
-  object_t* saved_current_object = current_object;
-  if (current_object == nullptr && master_ob != nullptr) {
-    current_object = master_ob;
-  }
+  ScopedCurrentObjectAsMaster master_scope(ScopedCurrentObjectAsMaster::conditional_t{});
   save_context(&econ);
   try {
     destruct_object(object);
     pop_context(&econ);
-    current_object = saved_current_object;
   } catch (...) {
     restore_context(&econ);
-    current_object = saved_current_object;
     ADD_FAILURE() << "destruct_object failed for " << object->obname;
   }
 }
@@ -6447,7 +6401,7 @@ TEST_F(DriverTest, TestMappingNodeFreelistIsOwnerThreadLocal) {
 }
 
 TEST_F(DriverTest, TestCompileDumpProgWorks) {
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   const char* file = "single/master.c";
   struct object_t* obj = nullptr;
 
@@ -6976,7 +6930,7 @@ TEST_F(DriverTest,
 }
 
 TEST_F(DriverTest, TestVmExecutionScopeRestoresGlobalState) {
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   command_giver = nullptr;
   current_interactive = nullptr;
   previous_ob = nullptr;
@@ -7087,7 +7041,7 @@ TEST_F(DriverTest, TestDetachedVmContextSettersDoNotClobberThreadState) {
   ASSERT_NE(first, nullptr);
   ASSERT_NE(second, nullptr);
 
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   command_giver = nullptr;
   current_interactive = nullptr;
   previous_ob = nullptr;
@@ -7529,7 +7483,7 @@ TEST_F(DriverTest, TestVmOwnerScopeBindsAndRestoresCurrentOwner) {
 }
 
 TEST_F(DriverTest, TestVmOwnerMetadataDefaultsAndChecks) {
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   object_t* obj = find_object("single/master.c");
   ASSERT_NE(obj, nullptr);
 
@@ -7601,7 +7555,7 @@ TEST_F(DriverTest, TestLoadedSingletonUsesDefaultOwnerInsideOwnerScope) {
   }
 
   VMOwnerScope scope(vm_context(), "owner/test/player", 1);
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   auto* obj = load_object_for_test("single/owner_singleton.c");
 
   ASSERT_NE(obj, nullptr);
@@ -7613,7 +7567,7 @@ TEST_F(DriverTest, TestCommandSingletonUsesDefaultOwnerInsidePlayerOwnerScope) {
   if (auto* existing = find_object2("command/refs.c")) {
     destruct_object_for_test(existing);
   }
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   auto* player = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(player, nullptr);
   vm_owner_set_id(player, "owner/test/command/player");
@@ -7634,7 +7588,7 @@ TEST_F(DriverTest, TestStdServiceUsesDefaultOwnerInsidePlayerOwnerScope) {
   if (auto* existing = find_object2("std/database.c")) {
     destruct_object_for_test(existing);
   }
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   auto* player = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(player, nullptr);
   vm_owner_set_id(player, "owner/test/std-service/player");
@@ -7659,7 +7613,7 @@ TEST_F(DriverTest, TestSharedStdServicesUseDefaultOwnerInsidePlayerOwnerScope) {
     }
   }
 
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   auto* player = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(player, nullptr);
   vm_owner_set_id(player, "owner/test/shared-service/player");
@@ -7692,7 +7646,7 @@ TEST_F(DriverTest, TestStdHelperServicesUseDefaultOwnerInsidePlayerOwnerScope) {
     }
   }
 
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   auto* player = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(player, nullptr);
   vm_owner_set_id(player, "owner/test/std-helper/player");
@@ -7726,7 +7680,7 @@ TEST_F(DriverTest, TestStdHelperServicesUseDefaultOwnerInsidePlayerOwnerScope) {
 }
 
 TEST_F(DriverTest, TestSimulEfunSingletonKeepsDefaultOwnerInsidePlayerOwnerScope) {
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   auto* player = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(player, nullptr);
   vm_owner_set_id(player, "owner/test/simul-efun/player");
@@ -7766,7 +7720,7 @@ TEST_F(DriverTest, TestVirtualObjectUsesDefaultOwnerAndUpdatesStorePath) {
     return value && value->type == T_STRING ? value->u.string : "";
   };
 
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   auto* player = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(player, nullptr);
   vm_owner_set_id(player, "owner/test/virtual/player");
@@ -7909,7 +7863,7 @@ TEST_F(DriverTest, TestCloneOwnerUsesCurrentObjectNotAmbientScope) {
   ASSERT_NE(prototype, nullptr);
 
   VMOwnerScope scope(vm_context(), "owner/test/player", 1);
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   auto* shared_clone = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(shared_clone, nullptr);
   ASSERT_STREQ(vm_owner_default_id(), vm_owner_id(shared_clone));
@@ -7928,7 +7882,7 @@ TEST_F(DriverTest, TestMoveObjectOwnerInheritanceRespectsExplicitOwner) {
   auto* dest = find_object("single/simul_efun.c");
   ASSERT_NE(dest, nullptr);
 
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   auto* inherited_item = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(inherited_item, nullptr);
   vm_owner_clear_id(inherited_item);
@@ -7957,7 +7911,7 @@ TEST_F(DriverTest, TestMoveObjectOwnerInheritanceRespectsExplicitOwner) {
 }
 
 TEST_F(DriverTest, TestInteractiveExecPreservesNewObjectOwner) {
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   auto* old_user = clone_object_for_test("single/owner_singleton");
   auto* new_user = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(old_user, nullptr);
@@ -8045,7 +7999,7 @@ TEST_F(DriverTest, TestVmOwnerMailboxDrainsOwnerFifo) {
 }
 
 TEST_F(DriverTest, TestVmOwnerEpochRejectsStaleTask) {
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   object_t* obj = find_object("single/master.c");
   ASSERT_NE(obj, nullptr);
 
@@ -8182,7 +8136,7 @@ TEST_F(DriverTest, TestVmOwnerTaskTraceRecordsObservedAndDispatchedEvents) {
 }
 
 TEST_F(DriverTest, TestVmOwnerMainQueueDispatchesWithOwnerScope) {
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   object_t* obj = clone_object_for_test("single/void");
   ASSERT_NE(obj, nullptr);
   vm_owner_set_id(obj, "owner/test/main-queue");
@@ -8251,7 +8205,7 @@ TEST_F(DriverTest, TestVmOwnerMainQueueDispatchesWithOwnerScope) {
 }
 
 TEST_F(DriverTest, TestVmOwnerMainDrainRecoversAfterCallbackException) {
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   ASSERT_EQ(vm_owner_drain_main_tasks(1024), 0);
   object_t* first = clone_object_for_test("single/void");
   object_t* second = clone_object_for_test("single/void");
@@ -8306,7 +8260,7 @@ TEST_F(DriverTest, TestVmOwnerMainDrainRecoversAfterCallbackException) {
 }
 
 TEST_F(DriverTest, TestVmOwnerMainDrainWallBudgetYieldsAfterFirstTask) {
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   ASSERT_EQ(vm_owner_drain_main_tasks(1024), 0);
   object_t* first = clone_object_for_test("single/void");
   object_t* second = clone_object_for_test("single/void");
@@ -8403,7 +8357,7 @@ TEST_F(DriverTest, TestVmOwnerMainQueueRunsDropCallbackForStaleTask) {
 }
 
 TEST_F(DriverTest, TestVmOwnerHeartbeatTraceRecordsScheduledEvent) {
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   object_t* obj = find_object("single/master.c");
   ASSERT_NE(obj, nullptr);
   vm_owner_set_id(obj, "owner/test/heartbeat");
@@ -9402,7 +9356,7 @@ TEST_F(DriverTest, TestVmOwnerSocketCallbackExecutorDropsStaleOwnerEpoch) {
 }
 
 TEST_F(DriverTest, TestVmOwnerAccessTraceRecordsCrossOwnerAccess) {
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   object_t* source = find_object("single/master.c");
   object_t* target = find_object("single/simul_efun.c");
   ASSERT_NE(source, nullptr);
@@ -9444,7 +9398,7 @@ TEST_F(DriverTest, TestVmOwnerAccessTraceRecordsCrossOwnerAccess) {
 }
 
 TEST_F(DriverTest, TestVmOwnerCrossOwnerAccessTraceSkipsSameOwner) {
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   object_t* source = find_object("single/master.c");
   object_t* target = find_object("single/simul_efun.c");
   ASSERT_NE(source, nullptr);
@@ -9495,7 +9449,7 @@ TEST_F(DriverTest, TestVmOwnerCrossOwnerAccessTraceSkipsSameOwner) {
 }
 
 TEST_F(DriverTest, TestVmOwnerCrossOwnerAccessTraceClassifiesPolicyModes) {
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   object_t* source = find_object("single/master.c");
   object_t* target = find_object("single/simul_efun.c");
   ASSERT_NE(source, nullptr);
@@ -16082,7 +16036,7 @@ TEST_F(DriverTest, TestVmObjectStoreRecordsOwnerMigrationTrace) {
                  "global_record_bridge_retirement_ready");
   };
 
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   object_t* obj = clone_object_for_test("single/void");
   ASSERT_NE(obj, nullptr);
   vm_owner_set_id(obj, "owner/test/migration/a");
@@ -16879,7 +16833,7 @@ TEST_F(DriverTest, TestVmObjectStoreShardRemovesDestructedObject) {
 }
 
 TEST_F(DriverTest, TestVmOwnerGuardFailsFastOnMismatch) {
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   object_t* obj = find_object("single/master.c");
   ASSERT_NE(obj, nullptr);
 
@@ -22327,7 +22281,7 @@ TEST_F(DriverTest, TestGatewayDaemonUsesDefaultOwnerForSystemMessages) {
   if (auto *existing = find_object2("adm/daemons/gateway_d.c")) {
     destruct_object_for_test(existing);
   }
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope;
   auto *player = clone_object_for_test("single/owner_singleton");
   ASSERT_NE(player, nullptr);
   vm_owner_set_id(player, "owner/test/gateway/daemon-player");

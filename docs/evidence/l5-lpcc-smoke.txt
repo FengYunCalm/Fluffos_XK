@@ -1,0 +1,5 @@
+Processing config file: /tmp/l2_lpcc_smoke.c
+Missing '"' or '<' around global include file name; adding quotes.
+*Error in config file.  Missing line:
+	name 
+Uncollected profiling events: 2.

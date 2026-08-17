@@ -20,6 +20,7 @@
 #include "base/internal/rc.h"
 #include "base/internal/tracing.h"
 #include "vm/vm.h"
+#include "vm/internal/base/scoped_current_object_as_master.h"
 
 namespace {
 void print_usage() {
@@ -117,7 +118,7 @@ static int lpcc_main(int argc, char** argv) {
     vm_start();
   }
 
-  current_object = master_ob;
+  ScopedCurrentObjectAsMaster master_scope_main;
   const char* file = nullptr;
   struct object_t* obj = nullptr;
 
@@ -144,7 +145,7 @@ static int lpcc_main(int argc, char** argv) {
       // do the same per batch file.
       set_eval(max_eval_cost);
 
-      current_object = master_ob;
+      ScopedCurrentObjectAsMaster master_scope_batch;
       struct object_t* bobj = nullptr;
       error_context_t econ{};
       save_context(&econ);
@@ -154,7 +155,7 @@ static int lpcc_main(int argc, char** argv) {
         restore_context(&econ);
       }
       pop_context(&econ);
-      current_object = master_ob;
+      ScopedCurrentObjectAsMaster master_scope_after;
 
       bool ok = bobj != nullptr && bobj->prog != nullptr;
       if (!ok) {
