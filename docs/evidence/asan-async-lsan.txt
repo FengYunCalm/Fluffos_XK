@@ -1,0 +1,429 @@
+========================================================================
+Full Command Line: ../build-recompile-asan/bin/driver etc/config.test -ftest:single/tests/efuns/async 
+Boot Time: Mon Aug 17 21:21:44 2026
+Version: fluffos 20240714-4a59909c-0ca1f840-uncommited (Linux/x86-64)
+Jemalloc is disabled, this is not suitable for production.
+ICU Version: 74.2
+libdw or libbfd is not found, you will only get very limited crash stacktrace.
+Core Dump: No, Max FD: 65535.
+========================================================================
+Final Debug Level: 0
+Processing config file: etc/config.test
+New Debug log location: "log/debug.log".
+Execution root: ./
+Initializing internal stuff ....
+Event backend in use: epoll
+==== Runtime Config Table ====
+enable recompile object : 0
+recompile object quiesce timeout ms : 2000
+time to clean up : 1200 # default: 600
+time to reset : 1800 # default: 900
+time to swap : 600 # default: 300
+evaluator stack size : 65536
+inherit chain size : 30
+maximum evaluation cost : 300000000 # default: 30000000
+maximum local variables : 64
+maximum call depth : 30 # default: 150
+maximum array size : 15000
+maximum buffer size : 400000 # default: 1048576
+maximum mapping size : 15000 # default: 150000
+maximum string length : 200000 # default: 1048576
+maximum bits in a bitfield : 1200 # default: 12000
+maximum byte transfer : 10000 # default: 262144
+maximum read file size : 200000 # default: 262144
+hash table size : 8192 # default: 65536
+object table size : 1501 # default: 4096
+living hash table size : 256
+gametick msec : 100 # default: 1000
+heartbeat interval msec : 1000
+sane explode string : 1
+reversible explode string : 0
+sane sorting : 1
+warn tab : 0
+wombles : 0
+call other type check : 0
+call other warn : 0
+mudlib error handler : 1
+no resets : 0
+lazy resets : 0
+randomized resets : 1
+no ansi : 1
+strip before process input : 1
+this_player in call_out : 1
+trace : 1
+trace code : 0
+interactive catch tell : 0
+receive snoop : 1
+snoop shadowed : 0
+reverse defer : 0
+has console : 1
+noninteractive stderr write : 1 # default: 0
+trap crashes : 1
+old type behavior : 0
+old range behavior : 0
+warn old range behavior : 1
+suppress argument warnings : 1
+enable_commands call init : 0 # default: 1
+sprintf add_justified ignore ANSI colors : 1
+call_out(0) nest level : 10 # default: 1000
+trace lpc execution context : 0
+trace lpc instructions : 0
+enable mxp : 1 # default: 0
+enable gmcp : 1 # default: 0
+enable zmp : 1 # default: 0
+enable mssp : 1
+enable msp : 1
+enable msdp : 1 # default: 0
+gateway port : 0
+gateway external : 0
+gateway debug : 0
+gateway packet size : 1048576
+multicore mode : 1
+==============================
+==== LPC Predefines ====
+#define FLUFFOS 
+#define HAS_DEBUG_LEVEL 
+#define HAS_ED 
+#define HAS_PRINTF 
+#define MAX_FLOAT 179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.000000
+#define MAX_INT 9223372036854775807
+#define MIN_FLOAT 0.000000
+#define MIN_INT -9223372036854775808
+#define MUDOS 
+#define MUD_NAME "Testsuite"
+#define SIZEOFINT 8
+#define __ARCH__ "Linux/x86-64"
+#define __ARGUMENTS_IN_TRACEBACK__ 
+#define __ARRAY_STATS__ 
+#define __AUTO_SETEUID__ 
+#define __CACHE_STATS__ 
+#define __CALLOUT_HANDLES__ 
+#define __CFG_COMPILER_STACK_SIZE__ 600
+#define __CFG_EVALUATOR_STACK_SIZE__ 65536
+#define __CFG_MAX_CALL_DEPTH__ 150
+#define __CFG_MAX_GLOBAL_VARIABLES__ 65536
+#define __CLASS_STATS__ 
+#define __COMMAND_BUF_SIZE__ 2000
+#define __COMPILER__ "/usr/bin/c++"
+#define __CXXFLAGS__ "Broken"
+#define __DEBUG_MACRO__ 
+#define __DEFAULT_DB__ 1
+#define __DEFAULT_PRAGMAS__ PRAGMA_WARNINGS + PRAGMA_SAVE_TYPES + PRAGMA_ERROR_CONTEXT + PRAGMA_OPTIMIZE
+#define __DSLIB__ 
+#define __ED_INDENT_SPACES__ 4
+#define __ED_TAB_WIDTH__ 8
+#define __GET_CHAR_IS_BUFFERED__ 
+#define __HAS_CONSOLE__ 
+#define __HAVE_DIRENT_H__ 1
+#define __HAVE_SIGNAL_H__ 1
+#define __HAVE_SYS_RESOURCE_H__ 1
+#define __HAVE_SYS_STAT_H__ 1
+#define __HAVE_SYS_TIME_H__ 1
+#define __HAVE_TIME_H__ 1
+#define __LARGEST_PRINTABLE_STRING__ 65535
+#define __LARGE_STRING_SIZE__ 1000
+#define __LOCALS_IN_TRACEBACK__ 
+#define __MAX_SAVE_SVALUE_DEPTH__ 100
+#define __MUDLIB_ERROR_HANDLER__ 
+#define __NONINTERACTIVE_STDERR_WRITE__ 
+#define __OLD_ED__ 
+#define __PACKAGES_PACKAGES_H__ 
+#define __PACKAGE_ASYNC__ 
+#define __PACKAGE_COMPRESS__ 
+#define __PACKAGE_CONTRIB__ 
+#define __PACKAGE_CORE__ 
+#define __PACKAGE_CRYPTO__ 
+#define __PACKAGE_DB__ 
+#define __PACKAGE_DEVELOP__ 
+#define __PACKAGE_EXTERNAL__ 
+#define __PACKAGE_GATEWAY__ 
+#define __PACKAGE_MATH__ 
+#define __PACKAGE_MATRIX__ 
+#define __PACKAGE_MUDLIB_STATS__ 
+#define __PACKAGE_OPS__ 
+#define __PACKAGE_PARSER__ 
+#define __PACKAGE_PCRE__ 
+#define __PACKAGE_SHA1__ 
+#define __PACKAGE_SOCKETS__ 
+#define __PACKAGE_TRIM__ 
+#define __PACKAGE_UIDS__ 
+#define __PARSE_DEBUG__ 
+#define __PORT__ 4000
+#define __PRIVS__ 
+#define __PROJECT_VERSION__ "fluffos 20240714-4a59909c-6099a817-uncommited"
+#define __RANDOMIZED_RESETS__ 
+#define __RECEIVE_SNOOP__ 
+#define __REF_RESERVED_WORD__ 
+#define __RESTRICTED_ED__ 
+#define __SANE_EXPLODE_STRING__ 
+#define __SANE_SORTING__ 
+#define __SAVE_EXTENSION__ ".o"
+#define __SAVE_GZ_EXTENSION__ ".o.gz"
+#define __SENSIBLE_MODIFIERS__ 
+#define __SMALL_STRING_SIZE__ 100
+#define __STRING_STATS__ 
+#define __STRUCT_CLASS__ 
+#define __STRUCT_STRUCT__ 
+#define __SUPPRESS_ARGUMENT_WARNINGS__ 
+#define __THIS_PLAYER_IN_CALL_OUT__ 
+#define __TIME_WITH_SYS_TIME__ 1
+#define __TRACE__ 
+#define __TRAP_CRASHES__ 
+#define __USE_32BIT_ADDRESSES__ 
+#define __USE_MYSQL__ 1
+#define __VERSION__ "fluffos 20240714-4a59909c-0ca1f840-uncommited"
+#define __WARN_OLD_RANGE_BEHAVIOR__ 
+========================
+Loading simul_efun file : /single/simul_efun
+/std/base64.c line 56: Warning: Unused local variable 'p'
+  }
+   ^
+/std/base64.c line 56: Warning: Unused local variable 'rlen'
+  }
+   ^
+/std/number_string.c line 54: Warning: Unused local variable 'parts'
+  }
+   ^
+/std/number_string.c line 54: Warning: Unused local variable 'part'
+  }
+   ^
+Loading master file: /single/master
+Calling master::flag("test:single/tests/efuns/async")...
+/command/tests.c line 50: Warning: Unused local variable 'leaks'
+  }
+int execute(string fun, int single_test: (: 0 :)
+   ^
+/command/tests.c line 51: Warning: Number of arguments disagrees with previous definition.
+  int execute(string fun, int single_test: (: 0 :))
+                                                   ^
+/command/tests.c line 93: Warning: Unused local variable 'leaks'
+  }
+   ^
+]WARNING: Possible RELEASE build, check_memory() is not being executed.
+]C> single/tests/efuns/async
+]Checks succeeded.
+]all tests finished, shutting down.
+]ASYNC: async_getdir callback
+]ASYNC: async_getdir callback
+]ASYNC: async_getdir callback
+]ASYNC: async_write callback
+]ASYNC: async_write callback
+]ASYNC: async_read callback
+closed external ports
+clear_call_outs: 2 leftover callouts cleared.
+clear_tick_events: 9 leftover events cleared.
+
+=================================================================
+==18785==ERROR: LeakSanitizer: detected memory leaks
+
+Direct leak of 144 byte(s) in 1 object(s) allocated from:
+    #0 0x7541970fe548 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #1 0x6441c52f7ef5 in add_read(char const*, function_to_call_t*) /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:380
+    #2 0x6441c52f86f0 in f_async_read() /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:663
+    #3 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #4 0x6441c51d9f5f in call_function_pointer(funptr_t*, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/function.cc:357
+    #5 0x6441c51db696 in safe_call_function_pointer(funptr_t*, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/function.cc:375
+    #6 0x6441c52f1577 in safe_call_async_callback /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:119
+    #7 0x6441c52f3b1f in operator() /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:570
+    #8 0x6441c52f3b1f in __invoke_impl<void, dispatch_finished_request((anonymous namespace)::Request*, (anonymous namespace)::atypes)::<lambda()>&> /usr/include/c++/13/bits/invoke.h:61
+    #9 0x6441c52f3b1f in __invoke_r<void, dispatch_finished_request((anonymous namespace)::Request*, (anonymous namespace)::atypes)::<lambda()>&> /usr/include/c++/13/bits/invoke.h:111
+    #10 0x6441c52f3b1f in _M_invoke /usr/include/c++/13/bits/std_function.h:290
+    #11 0x6441c4fb6c97 in std::function<void ()>::operator()() const /usr/include/c++/13/bits/std_function.h:591
+    #12 0x6441c4fb6c97 in vm_owner_drain_main_tasks_with_budget(int, unsigned long) /home/mechrevo/projects/fluffos-xk/src/vm/internal/owner.cc:4904
+    #13 0x6441c4fb94a4 in vm_owner_drain_main_tasks(int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/owner.cc:4947
+    #14 0x6441c52fede9 in check_reqs() /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:597
+    #15 0x6441c52ffacb in complete_all_asyncio() /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:608
+    #16 0x6441c5096e05 in shutdownMudOS(int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/simulate.cc:187
+    #17 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #18 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #19 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #20 0x6441c537d0ae in f__call_other() /home/mechrevo/projects/fluffos-xk/src/packages/core/efuns_main.cc:275
+    #21 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #22 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #23 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #24 0x6441c537d0ae in f__call_other() /home/mechrevo/projects/fluffos-xk/src/packages/core/efuns_main.cc:275
+    #25 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #26 0x6441c4ef7c70 in do_catch /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4350
+    #27 0x6441c4ed68a3 in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4159
+    #28 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #29 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #30 0x6441c4f69069 in apply(char const*, object_t*, int, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:497
+    #31 0x6441c4f69069 in safe_apply(char const*, object_t*, int, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:521
+    #32 0x6441c4e11b0a in driver_main /home/mechrevo/projects/fluffos-xk/src/mainlib.cc:435
+    #33 0x6441c4dddb6c in main /home/mechrevo/projects/fluffos-xk/src/main.cc:5
+    #34 0x75419302a1c9  (/lib/x86_64-linux-gnu/libc.so.6+0x2a1c9) (BuildId: 328820b908de8ea1ef79afa8995e302e819163d7)
+
+Direct leak of 48 byte(s) in 1 object(s) allocated from:
+    #0 0x7541970fd9c7 in malloc ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:69
+    #1 0x6441c4f181ab in allocate_mapping(int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/mapping.cc:282
+    #2 0x6441c4fa4e45 in vm_owner_runtime_status() /home/mechrevo/projects/fluffos-xk/src/vm/internal/owner.cc:6147
+    #3 0x6441c546469c in f_vm_owner_runtime_status() /home/mechrevo/projects/fluffos-xk/src/packages/core/vm_owner.cc:444
+    #4 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #5 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #6 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #7 0x6441c537d0ae in f__call_other() /home/mechrevo/projects/fluffos-xk/src/packages/core/efuns_main.cc:275
+    #8 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #9 0x6441c4ef7c70 in do_catch /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4350
+    #10 0x6441c4ed68a3 in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4159
+    #11 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #12 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #13 0x6441c537d0ae in f__call_other() /home/mechrevo/projects/fluffos-xk/src/packages/core/efuns_main.cc:275
+    #14 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #15 0x6441c4ef7c70 in do_catch /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4350
+    #16 0x6441c4ed68a3 in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4159
+    #17 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #18 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #19 0x6441c4f69069 in apply(char const*, object_t*, int, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:497
+    #20 0x6441c4f69069 in safe_apply(char const*, object_t*, int, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:521
+    #21 0x6441c4e11b0a in driver_main /home/mechrevo/projects/fluffos-xk/src/mainlib.cc:435
+    #22 0x6441c4dddb6c in main /home/mechrevo/projects/fluffos-xk/src/main.cc:5
+    #23 0x75419302a1c9  (/lib/x86_64-linux-gnu/libc.so.6+0x2a1c9) (BuildId: 328820b908de8ea1ef79afa8995e302e819163d7)
+    #24 0x75419302a28a in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x2a28a) (BuildId: 328820b908de8ea1ef79afa8995e302e819163d7)
+    #25 0x6441c4dec474 in _start (/home/mechrevo/projects/fluffos-xk/build-recompile-asan/bin/driver+0xf6a474) (BuildId: a08ab973c4f6ee15e0c42dd1deb44463ea5f7b46)
+
+Indirect leak of 200001 byte(s) in 1 object(s) allocated from:
+    #0 0x7541970fe548 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #1 0x6441c4dfef13 in std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_mutate(unsigned long, unsigned long, char const*, unsigned long) /usr/include/c++/13/bits/basic_string.tcc:332
+    #2 0x6441c4dff6d2 in std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_replace_aux(unsigned long, unsigned long, unsigned long, char) /usr/include/c++/13/bits/basic_string.tcc:468
+    #3 0x6441c4dff6d2 in std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::append(unsigned long, char) /usr/include/c++/13/bits/basic_string.h:1488
+    #4 0x6441c4dff6d2 in std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::resize(unsigned long, char) /usr/include/c++/13/bits/basic_string.tcc:405
+    #5 0x6441c52f816e in std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::resize(unsigned long) /usr/include/c++/13/bits/basic_string.h:1114
+    #6 0x6441c52f816e in add_read(char const*, function_to_call_t*) /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:382
+    #7 0x6441c52f86f0 in f_async_read() /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:663
+    #8 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #9 0x6441c51d9f5f in call_function_pointer(funptr_t*, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/function.cc:357
+    #10 0x6441c51db696 in safe_call_function_pointer(funptr_t*, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/function.cc:375
+    #11 0x6441c52f1577 in safe_call_async_callback /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:119
+    #12 0x6441c52f3b1f in operator() /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:570
+    #13 0x6441c52f3b1f in __invoke_impl<void, dispatch_finished_request((anonymous namespace)::Request*, (anonymous namespace)::atypes)::<lambda()>&> /usr/include/c++/13/bits/invoke.h:61
+    #14 0x6441c52f3b1f in __invoke_r<void, dispatch_finished_request((anonymous namespace)::Request*, (anonymous namespace)::atypes)::<lambda()>&> /usr/include/c++/13/bits/invoke.h:111
+    #15 0x6441c52f3b1f in _M_invoke /usr/include/c++/13/bits/std_function.h:290
+    #16 0x6441c4fb6c97 in std::function<void ()>::operator()() const /usr/include/c++/13/bits/std_function.h:591
+    #17 0x6441c4fb6c97 in vm_owner_drain_main_tasks_with_budget(int, unsigned long) /home/mechrevo/projects/fluffos-xk/src/vm/internal/owner.cc:4904
+    #18 0x6441c4fb94a4 in vm_owner_drain_main_tasks(int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/owner.cc:4947
+    #19 0x6441c52fede9 in check_reqs() /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:597
+    #20 0x6441c52ffacb in complete_all_asyncio() /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:608
+    #21 0x6441c5096e05 in shutdownMudOS(int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/simulate.cc:187
+    #22 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #23 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #24 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #25 0x6441c537d0ae in f__call_other() /home/mechrevo/projects/fluffos-xk/src/packages/core/efuns_main.cc:275
+    #26 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #27 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #28 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #29 0x6441c537d0ae in f__call_other() /home/mechrevo/projects/fluffos-xk/src/packages/core/efuns_main.cc:275
+    #30 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #31 0x6441c4ef7c70 in do_catch /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4350
+    #32 0x6441c4ed68a3 in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4159
+    #33 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #34 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #35 0x6441c4f69069 in apply(char const*, object_t*, int, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:497
+    #36 0x6441c4f69069 in safe_apply(char const*, object_t*, int, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:521
+    #37 0x6441c4e11b0a in driver_main /home/mechrevo/projects/fluffos-xk/src/mainlib.cc:435
+
+Indirect leak of 4096 byte(s) in 1 object(s) allocated from:
+    #0 0x7541970fc778 in realloc ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:85
+    #1 0x6441c4f1440d in growMap(mapping_t*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/mapping.cc:56
+    #2 0x6441c4f1bf6f in find_for_insert(mapping_t*, svalue_t*, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/mapping.cc:579
+    #3 0x6441c4f1d01b in insert_in_mapping /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/mapping.cc:1269
+    #4 0x6441c4f232b4 in add_mapping_pair(mapping_t*, char const*, long) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/mapping.cc:1276
+    #5 0x6441c4fa62c9 in vm_owner_runtime_status() /home/mechrevo/projects/fluffos-xk/src/vm/internal/owner.cc:6303
+    #6 0x6441c546469c in f_vm_owner_runtime_status() /home/mechrevo/projects/fluffos-xk/src/packages/core/vm_owner.cc:444
+    #7 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #8 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #9 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #10 0x6441c537d0ae in f__call_other() /home/mechrevo/projects/fluffos-xk/src/packages/core/efuns_main.cc:275
+    #11 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #12 0x6441c4ef7c70 in do_catch /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4350
+    #13 0x6441c4ed68a3 in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4159
+    #14 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #15 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #16 0x6441c537d0ae in f__call_other() /home/mechrevo/projects/fluffos-xk/src/packages/core/efuns_main.cc:275
+    #17 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #18 0x6441c4ef7c70 in do_catch /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4350
+    #19 0x6441c4ed68a3 in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4159
+    #20 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #21 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #22 0x6441c4f69069 in apply(char const*, object_t*, int, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:497
+    #23 0x6441c4f69069 in safe_apply(char const*, object_t*, int, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:521
+    #24 0x6441c4e11b0a in driver_main /home/mechrevo/projects/fluffos-xk/src/mainlib.cc:435
+    #25 0x6441c4dddb6c in main /home/mechrevo/projects/fluffos-xk/src/main.cc:5
+    #26 0x75419302a1c9  (/lib/x86_64-linux-gnu/libc.so.6+0x2a1c9) (BuildId: 328820b908de8ea1ef79afa8995e302e819163d7)
+    #27 0x75419302a28a in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x2a28a) (BuildId: 328820b908de8ea1ef79afa8995e302e819163d7)
+    #28 0x6441c4dec474 in _start (/home/mechrevo/projects/fluffos-xk/build-recompile-asan/bin/driver+0xf6a474) (BuildId: a08ab973c4f6ee15e0c42dd1deb44463ea5f7b46)
+
+Indirect leak of 56 byte(s) in 1 object(s) allocated from:
+    #0 0x7541970fd9c7 in malloc ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:69
+    #1 0x6441c51d66db in make_functional_funp(short, short, short, svalue_t*, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/function.cc:191
+    #2 0x6441c5635747 in f_function_constructor() /home/mechrevo/projects/fluffos-xk/src/packages/ops/ops.cc:1219
+    #3 0x6441c4eda8f3 in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:2988
+    #4 0x6441c51d9f5f in call_function_pointer(funptr_t*, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/function.cc:357
+    #5 0x6441c51db696 in safe_call_function_pointer(funptr_t*, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/function.cc:375
+    #6 0x6441c52f1577 in safe_call_async_callback /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:119
+    #7 0x6441c52f3b1f in operator() /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:570
+    #8 0x6441c52f3b1f in __invoke_impl<void, dispatch_finished_request((anonymous namespace)::Request*, (anonymous namespace)::atypes)::<lambda()>&> /usr/include/c++/13/bits/invoke.h:61
+    #9 0x6441c52f3b1f in __invoke_r<void, dispatch_finished_request((anonymous namespace)::Request*, (anonymous namespace)::atypes)::<lambda()>&> /usr/include/c++/13/bits/invoke.h:111
+    #10 0x6441c52f3b1f in _M_invoke /usr/include/c++/13/bits/std_function.h:290
+    #11 0x6441c4fb6c97 in std::function<void ()>::operator()() const /usr/include/c++/13/bits/std_function.h:591
+    #12 0x6441c4fb6c97 in vm_owner_drain_main_tasks_with_budget(int, unsigned long) /home/mechrevo/projects/fluffos-xk/src/vm/internal/owner.cc:4904
+    #13 0x6441c4fb94a4 in vm_owner_drain_main_tasks(int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/owner.cc:4947
+    #14 0x6441c52fede9 in check_reqs() /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:597
+    #15 0x6441c52ffacb in complete_all_asyncio() /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:608
+    #16 0x6441c5096e05 in shutdownMudOS(int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/simulate.cc:187
+    #17 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #18 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #19 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #20 0x6441c537d0ae in f__call_other() /home/mechrevo/projects/fluffos-xk/src/packages/core/efuns_main.cc:275
+    #21 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #22 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #23 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #24 0x6441c537d0ae in f__call_other() /home/mechrevo/projects/fluffos-xk/src/packages/core/efuns_main.cc:275
+    #25 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #26 0x6441c4ef7c70 in do_catch /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4350
+    #27 0x6441c4ed68a3 in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4159
+    #28 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #29 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #30 0x6441c4f69069 in apply(char const*, object_t*, int, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:497
+    #31 0x6441c4f69069 in safe_apply(char const*, object_t*, int, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:521
+    #32 0x6441c4e11b0a in driver_main /home/mechrevo/projects/fluffos-xk/src/mainlib.cc:435
+    #33 0x6441c4dddb6c in main /home/mechrevo/projects/fluffos-xk/src/main.cc:5
+    #34 0x75419302a1c9  (/lib/x86_64-linux-gnu/libc.so.6+0x2a1c9) (BuildId: 328820b908de8ea1ef79afa8995e302e819163d7)
+
+Indirect leak of 32 byte(s) in 1 object(s) allocated from:
+    #0 0x7541970fe548 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #1 0x6441c52f8566 in f_async_read() /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:658
+    #2 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #3 0x6441c51d9f5f in call_function_pointer(funptr_t*, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/function.cc:357
+    #4 0x6441c51db696 in safe_call_function_pointer(funptr_t*, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/function.cc:375
+    #5 0x6441c52f1577 in safe_call_async_callback /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:119
+    #6 0x6441c52f3b1f in operator() /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:570
+    #7 0x6441c52f3b1f in __invoke_impl<void, dispatch_finished_request((anonymous namespace)::Request*, (anonymous namespace)::atypes)::<lambda()>&> /usr/include/c++/13/bits/invoke.h:61
+    #8 0x6441c52f3b1f in __invoke_r<void, dispatch_finished_request((anonymous namespace)::Request*, (anonymous namespace)::atypes)::<lambda()>&> /usr/include/c++/13/bits/invoke.h:111
+    #9 0x6441c52f3b1f in _M_invoke /usr/include/c++/13/bits/std_function.h:290
+    #10 0x6441c4fb6c97 in std::function<void ()>::operator()() const /usr/include/c++/13/bits/std_function.h:591
+    #11 0x6441c4fb6c97 in vm_owner_drain_main_tasks_with_budget(int, unsigned long) /home/mechrevo/projects/fluffos-xk/src/vm/internal/owner.cc:4904
+    #12 0x6441c4fb94a4 in vm_owner_drain_main_tasks(int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/owner.cc:4947
+    #13 0x6441c52fede9 in check_reqs() /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:597
+    #14 0x6441c52ffacb in complete_all_asyncio() /home/mechrevo/projects/fluffos-xk/src/packages/async/async.cc:608
+    #15 0x6441c5096e05 in shutdownMudOS(int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/simulate.cc:187
+    #16 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #17 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #18 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #19 0x6441c537d0ae in f__call_other() /home/mechrevo/projects/fluffos-xk/src/packages/core/efuns_main.cc:275
+    #20 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #21 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #22 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #23 0x6441c537d0ae in f__call_other() /home/mechrevo/projects/fluffos-xk/src/packages/core/efuns_main.cc:275
+    #24 0x6441c4ed33ca in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4304
+    #25 0x6441c4ef7c70 in do_catch /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4350
+    #26 0x6441c4ed68a3 in eval_instruction(char*) /home/mechrevo/projects/fluffos-xk/src/vm/internal/base/interpret.cc:4159
+    #27 0x6441c4f67772 in apply_low_impl<true> /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:402
+    #28 0x6441c4f68ddd in apply_with_context_tracking(char const*, object_t*, int, int, bool) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:451
+    #29 0x6441c4f69069 in apply(char const*, object_t*, int, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:497
+    #30 0x6441c4f69069 in safe_apply(char const*, object_t*, int, int) /home/mechrevo/projects/fluffos-xk/src/vm/internal/apply.cc:521
+    #31 0x6441c4e11b0a in driver_main /home/mechrevo/projects/fluffos-xk/src/mainlib.cc:435
+    #32 0x6441c4dddb6c in main /home/mechrevo/projects/fluffos-xk/src/main.cc:5
+    #33 0x75419302a1c9  (/lib/x86_64-linux-gnu/libc.so.6+0x2a1c9) (BuildId: 328820b908de8ea1ef79afa8995e302e819163d7)
+    #34 0x75419302a28a in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x2a28a) (BuildId: 328820b908de8ea1ef79afa8995e302e819163d7)
+
+SUMMARY: AddressSanitizer: 204377 byte(s) leaked in 6 allocation(s).

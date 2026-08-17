@@ -107,7 +107,25 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL
     add_link_options("-fsanitize=address")
   endif ()
   if (ENABLE_UBSAN)
-    add_compile_options("-fsanitize=undefined" "-fno-sanitize-recover=all" "-fno-omit-frame-pointer")
+    # E3 followup (2026-08): disable UBSan's null check for sanitizer
+    # builds. Empirically confirmed (docs/evidence/, full matrix green):
+    # GCC 13.3's null check misfires on FLUFFOS_VM_THREAD_LOCAL
+    # (thread_local) accesses -- probes showed master_ob, &current_object
+    # and the TLS base are all non-null, yet "store/load of null pointer"
+    # was reported; the error site moved between translation units
+    # (test_lpc.cc:4433 <-> efuns_main.cc:231) with lpc_tests binary
+    # layout, while non-sanitizer builds run the same startup path green.
+    # With the check disabled, full lpc_tests (424/424) passes with zero
+    # UBSan reports, and the driver test suite runs clean under
+    # ASAN_OPTIONS=detect_leaks=0 (exit-time LSan reports pre-existing
+    # async-resource cleanup gaps -- async req / TLS ctx / socket events --
+    # unrelated to this change, see docs/evidence/asan-*lsan*.txt). ASan
+    # still catches genuine null dereferences (SEGV/addressability), so
+    # coverage loss is limited to this false-positive class. Re-evaluate
+    # if the toolchain changes (clang sanitizers are not affected by this
+    # GCC behavior).
+    add_compile_options("-fsanitize=undefined" "-fno-sanitize-recover=all" "-fno-omit-frame-pointer"
+                        "-fno-sanitize=null")
     add_link_options("-fsanitize=undefined")
   endif ()
   if (ENABLE_TSAN)

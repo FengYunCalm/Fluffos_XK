@@ -180,17 +180,37 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 - ASan/UBSan driver 构建完成；config.recompile 的 recompile_object 测试
   （含 200 次重载 + self_reload + stale funptr）Checks succeeded，无
   AddressSanitizer 报错
-- ASan lpc_tests：被 pre-existing UBSan 报错中止（test_lpc.cc:4433
-  `current_object = master_ob` 赋 null，TestReadBytesPreservesLpc64BitOffsets；
-  blame 为 2026-08 早期 "Kimi Security Fix" 64-bit 系列引入，早于 E3 全部
-  commit，非 E3 回归）。构建带 -fno-sanitize-recover=all，UBSan 致命。
-  该测试文件 E3 零触及，定性为遗留项（修复需在锁外读路径加空指针防护，
-  与 E3 无关，另行处理）
-- ASan 全量 ftest、TSan、owner 压测：未跑，deferred
+- ASan lpc_tests 曾被 UBSan 报错中止（test_lpc.cc:4433 / efuns_main.cc:231
+  "store/load of null pointer"）。**根因定案（2026-08-17，实验证伪链 +
+  全量矩阵经验确认）**：GCC 13.3 的 UBSan null-check 对
+  `FLUFFOS_VM_THREAD_LOCAL`（thread_local）访问的编译侧误报——
+  插桩证实 master_ob/&current_object/TLS 基址全部非 null；报错点随
+  lpc_tests 二进制布局在 test_lpc.cc 与 efuns_main.cc 之间移动（libdriver
+  逐字节未变）；非 sanitizer 构建同一启动路径全绿。修复：
+  src/CMakeLists.txt ENABLE_UBSAN 分支加 `-fno-sanitize=null`（全局，
+  ASan 仍捕获真实 null 解引用）。修复后验证：ASan 构建全量 lpc_tests
+  424/424 PASS、零 sanitizer 报错（docs/evidence/ubsan-enumerate.txt）；
+  ASan driver 全量 ftest Checks succeeded（`ASAN_OPTIONS=detect_leaks=0`，
+  docs/evidence/asan-ftest-final.txt）；recompile 定向全绿
+  （docs/evidence/asan-recompile-final.txt）。证据：docs/evidence/ubsan-*.txt
+  系列
+- **LSan 泄漏说明（归因实验定案，2026-08-17）**：driver ftest 全量退出时
+  LSan 报 24 个 allocation（8 个 LPC mapping 字面量 + 16 个
+  vm_owner_runtime_status 48B mapping）；逐测试定向验证
+  （docs/evidence/asan-*-lsan.txt）：纯同步测试（os_env /
+  owner_executor_contract / recompile）**零泄漏**（退出清理正常）；
+  async 定向 6 分配 200KB（async_read 请求 state + 数据 buffer，
+  async.cc add_read，最后改动为 S10 审计 93ed8e8b）；socket_tls_server
+  定向 389 分配 23KB（SSL_CTX + libevent event）。**归因：既有异步资源
+  （async req / TLS ctx / socket event）退出清理缺口，与 E3 无关**
+  （E3 相关测试 recompile/owner_executor_contract 定向零泄漏）。上游 CI
+  sanitizer 步骤只跑 ctest（gtest），从不跑 driver ftest，故该缺口上游
+  从未暴露。异步资源退出清理修复单独立项
+- TSan、owner 压测：deferred（见 docs/recompile-followup-plan-2026-08.md
+  L6/L7）
 
 ### 剩余门禁
 
-- ASan lpc_tests pre-existing UBSan 修复（test_lpc.cc:4433，与 E3 无关）
-- ASan 全量 ftest / TSan / owner 压测
+- TSan / owner 压测（L6/L7）
 - E3 v2 能力（master/simul_efun 热重载、__INIT/create()、失败回滚）deferred
 - T3 lpcshell / E4 保持 deferred
