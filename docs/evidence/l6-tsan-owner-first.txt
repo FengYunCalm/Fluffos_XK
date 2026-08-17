@@ -1,0 +1,512 @@
+Running main() from ./googletest/src/gtest_main.cc
+Note: Google Test filter = *Owner*:*Future*
+[==========] Running 209 tests from 5 test suites.
+[----------] Global test environment set-up.
+[----------] 15 tests from OwnerFutureStoreTest
+[ RUN      ] OwnerFutureStoreTest.TtlReapsPayloadFreeTerminalRecords
+[       OK ] OwnerFutureStoreTest.TtlReapsPayloadFreeTerminalRecords (0 ms)
+[ RUN      ] OwnerFutureStoreTest.TtlKeepsPayloadBearingTerminalRecords
+[       OK ] OwnerFutureStoreTest.TtlKeepsPayloadBearingTerminalRecords (0 ms)
+[ RUN      ] OwnerFutureStoreTest.CapacityRejectsNewPendingBeyondTerminalCap
+[       OK ] OwnerFutureStoreTest.CapacityRejectsNewPendingBeyondTerminalCap (25 ms)
+[ RUN      ] OwnerFutureStoreTest.KeepsTaskLookupUntilTerminalTake
+[       OK ] OwnerFutureStoreTest.KeepsTaskLookupUntilTerminalTake (0 ms)
+[ RUN      ] OwnerFutureStoreTest.ReindexesOverwriteAndDuplicateTaskIds
+[       OK ] OwnerFutureStoreTest.ReindexesOverwriteAndDuplicateTaskIds (0 ms)
+[ RUN      ] OwnerFutureStoreTest.PendingTaskLookupTracksTerminalTransition
+[       OK ] OwnerFutureStoreTest.PendingTaskLookupTracksTerminalTransition (0 ms)
+[ RUN      ] OwnerFutureStoreTest.PendingCountTracksRecordTransitions
+[       OK ] OwnerFutureStoreTest.PendingCountTracksRecordTransitions (0 ms)
+[ RUN      ] OwnerFutureStoreTest.RejectsNonTerminalCompletionStateWithoutCounterDrift
+[       OK ] OwnerFutureStoreTest.RejectsNonTerminalCompletionStateWithoutCounterDrift (0 ms)
+[ RUN      ] OwnerFutureStoreTest.TerminalCapHoldsAcrossPendingToTerminalTransitions
+[       OK ] OwnerFutureStoreTest.TerminalCapHoldsAcrossPendingToTerminalTransitions (48 ms)
+[ RUN      ] OwnerFutureStoreTest.PayloadByteCapsRejectDeterministically
+[       OK ] OwnerFutureStoreTest.PayloadByteCapsRejectDeterministically (316 ms)
+[ RUN      ] OwnerFutureStoreTest.TtlReapCountersSettleAfterMixedOperations
+[       OK ] OwnerFutureStoreTest.TtlReapCountersSettleAfterMixedOperations (0 ms)
+[ RUN      ] OwnerFutureStoreTest.QuotaRejectedTombstoneQueryableUntilTakeOrTtl
+[       OK ] OwnerFutureStoreTest.QuotaRejectedTombstoneQueryableUntilTakeOrTtl (26 ms)
+[ RUN      ] OwnerFutureStoreTest.AllCompletionEntriesShareAccounting
+[       OK ] OwnerFutureStoreTest.AllCompletionEntriesShareAccounting (0 ms)
+[ RUN      ] OwnerFutureStoreTest.ConcurrentCompletionTakeReapKeepsCountersConsistent
+[       OK ] OwnerFutureStoreTest.ConcurrentCompletionTakeReapKeepsCountersConsistent (77 ms)
+[ RUN      ] OwnerFutureStoreTest.PayloadBearingTerminalInOldestAgeButNotReapable
+[       OK ] OwnerFutureStoreTest.PayloadBearingTerminalInOldestAgeButNotReapable (0 ms)
+[----------] 15 tests from OwnerFutureStoreTest (495 ms total)
+
+[----------] 1 test from OwnerTraceStoreTest
+[ RUN      ] OwnerTraceStoreTest.AssignsTraceIdToUnsequencedTaskTrace
+[       OK ] OwnerTraceStoreTest.AssignsTraceIdToUnsequencedTaskTrace (0 ms)
+[----------] 1 test from OwnerTraceStoreTest (0 ms total)
+
+[----------] 2 tests from OwnerSchedulerStateTest
+[ RUN      ] OwnerSchedulerStateTest.RemovesOneQueuedTaskWithoutDroppingNeighbors
+[       OK ] OwnerSchedulerStateTest.RemovesOneQueuedTaskWithoutDroppingNeighbors (0 ms)
+[ RUN      ] OwnerSchedulerStateTest.ForcedReleaseClearsClaimsAndRestoresRunnableOwner
+[       OK ] OwnerSchedulerStateTest.ForcedReleaseClearsClaimsAndRestoresRunnableOwner (0 ms)
+[----------] 2 tests from OwnerSchedulerStateTest (0 ms total)
+
+[----------] 189 tests from DriverTest
+Processing config file: etc/config.test
+New Debug log location: "log/debug.log".
+Execution root: ./
+Initializing internal stuff ....
+Event backend in use: epoll
+Loading simul_efun file : /single/simul_efun
+/std/base64.c line 56: Warning: Unused local variable 'p'
+  }
+   ^
+/std/base64.c line 56: Warning: Unused local variable 'rlen'
+  }
+   ^
+/std/number_string.c line 54: Warning: Unused local variable 'parts'
+  }
+   ^
+/std/number_string.c line 54: Warning: Unused local variable 'part'
+  }
+   ^
+Loading master file: /single/master
+[ RUN      ] DriverTest.TestFutureFrozenMappingKeyAndValueBytesAreCounted
+[       OK ] DriverTest.TestFutureFrozenMappingKeyAndValueBytesAreCounted (0 ms)
+[ RUN      ] DriverTest.TestFutureFrozenMappingCountsEveryNodeAgainstSinglePayloadCap
+[       OK ] DriverTest.TestFutureFrozenMappingCountsEveryNodeAgainstSinglePayloadCap (16 ms)
+[ RUN      ] DriverTest.TestFutureFrozenWideArrayDoesNotConsumeDepthAcrossSiblings
+[       OK ] DriverTest.TestFutureFrozenWideArrayDoesNotConsumeDepthAcrossSiblings (17 ms)
+[ RUN      ] DriverTest.TestFutureFrozenWeightVisitorSaturatesOnDepthAndNodes
+[       OK ] DriverTest.TestFutureFrozenWeightVisitorSaturatesOnDepthAndNodes (367 ms)
+[ RUN      ] DriverTest.TestOwnerFuturePendingCountUsesTransitionCounter
+[       OK ] DriverTest.TestOwnerFuturePendingCountUsesTransitionCounter (0 ms)
+[ RUN      ] DriverTest.TestOwnerFutureCountChainUsesFixedWidthTypes
+[       OK ] DriverTest.TestOwnerFutureCountChainUsesFixedWidthTypes (5 ms)
+[ RUN      ] DriverTest.TestOwnerFutureStoreResolvesTargetsAfterTerminalLockScope
+[       OK ] DriverTest.TestOwnerFutureStoreResolvesTargetsAfterTerminalLockScope (0 ms)
+[ RUN      ] DriverTest.TestGatewayLoginRunsThroughOwnerMainQueue
+[       OK ] DriverTest.TestGatewayLoginRunsThroughOwnerMainQueue (6 ms)
+[ RUN      ] DriverTest.TestOwnerServiceRegistryUsesKeyedShardsForHotPaths
+[       OK ] DriverTest.TestOwnerServiceRegistryUsesKeyedShardsForHotPaths (0 ms)
+[ RUN      ] DriverTest.TestOwnerAsyncLpcAndCompletionExposeWorkerThreadCpuCounters
+[       OK ] DriverTest.TestOwnerAsyncLpcAndCompletionExposeWorkerThreadCpuCounters (4 ms)
+[ RUN      ] DriverTest.TestOwnerRuntimeMetricMappingsUseLpcIntegerWidth
+[       OK ] DriverTest.TestOwnerRuntimeMetricMappingsUseLpcIntegerWidth (4 ms)
+[ RUN      ] DriverTest.TestOwnerStatusMappingsUseLpcIntegerWidth
+[       OK ] DriverTest.TestOwnerStatusMappingsUseLpcIntegerWidth (5 ms)
+[ RUN      ] DriverTest.TestOwnerSchedulerCountsUseFixedIntegerWidth
+[       OK ] DriverTest.TestOwnerSchedulerCountsUseFixedIntegerWidth (11 ms)
+[ RUN      ] DriverTest.TestOwnerDiagnosticMappingsUseLpcIntegerWidth
+[       OK ] DriverTest.TestOwnerDiagnosticMappingsUseLpcIntegerWidth (8 ms)
+[ RUN      ] DriverTest.TestOwnerTraceAppendMetadataUsesStoreLockBoundary
+[       OK ] DriverTest.TestOwnerTraceAppendMetadataUsesStoreLockBoundary (4 ms)
+[ RUN      ] DriverTest.TestOwnerMessageSubmissionLimitsCoordinatorLockToRegistrationAndEnqueue
+[       OK ] DriverTest.TestOwnerMessageSubmissionLimitsCoordinatorLockToRegistrationAndEnqueue (4 ms)
+[ RUN      ] DriverTest.TestOwnerQueueTraceRecordsQueuedAfterSuccessfulAdmissionOnly
+[       OK ] DriverTest.TestOwnerQueueTraceRecordsQueuedAfterSuccessfulAdmissionOnly (7 ms)
+[ RUN      ] DriverTest.TestOwnerRejectedSubmissionsCompleteAfterCoordinatorUnlock
+[       OK ] DriverTest.TestOwnerRejectedSubmissionsCompleteAfterCoordinatorUnlock (5 ms)
+[ RUN      ] DriverTest.TestOwnerComputeResultBackpressureCompletesAfterCoordinatorUnlock
+[       OK ] DriverTest.TestOwnerComputeResultBackpressureCompletesAfterCoordinatorUnlock (4 ms)
+[ RUN      ] DriverTest.TestOwnerTerminalCompletionPathsAvoidCoordinatorLock
+[       OK ] DriverTest.TestOwnerTerminalCompletionPathsAvoidCoordinatorLock (7 ms)
+[ RUN      ] DriverTest.TestOwnerStatusMappingsBuildAfterRuntimeSnapshotLockScope
+[       OK ] DriverTest.TestOwnerStatusMappingsBuildAfterRuntimeSnapshotLockScope (7 ms)
+[ RUN      ] DriverTest.TestOwnerDebugReferenceMarkUsesCoordinatorLockBoundary
+[       OK ] DriverTest.TestOwnerDebugReferenceMarkUsesCoordinatorLockBoundary (4 ms)
+[ RUN      ] DriverTest.TestOwnerMainQueueDepthGetterUsesRuntimeLock
+[       OK ] DriverTest.TestOwnerMainQueueDepthGetterUsesRuntimeLock (4 ms)
+[ RUN      ] DriverTest.TestOwnerDrainMailboxSnapshotsRemainingDepthUnderRuntimeLock
+[       OK ] DriverTest.TestOwnerDrainMailboxSnapshotsRemainingDepthUnderRuntimeLock (4 ms)
+[ RUN      ] DriverTest.TestOwnerDrainProcessesDetachedTasksAfterRuntimeUnlock
+[       OK ] DriverTest.TestOwnerDrainProcessesDetachedTasksAfterRuntimeUnlock (4 ms)
+[ RUN      ] DriverTest.TestOwnerQueuedFutureCancellationProcessesRemovedTaskAfterRuntimeUnlock
+[       OK ] DriverTest.TestOwnerQueuedFutureCancellationProcessesRemovedTaskAfterRuntimeUnlock (4 ms)
+[ RUN      ] DriverTest.TestOwnerPurgeProcessesDetachedTasksAfterRuntimeUnlock
+[       OK ] DriverTest.TestOwnerPurgeProcessesDetachedTasksAfterRuntimeUnlock (4 ms)
+[ RUN      ] DriverTest.TestOwnerScheduleProcessesDetachedTasksAfterRuntimeUnlock
+[       OK ] DriverTest.TestOwnerScheduleProcessesDetachedTasksAfterRuntimeUnlock (4 ms)
+[ RUN      ] DriverTest.TestOwnerMainDrainAppendsDetachedTaskTracesAfterRuntimeUnlock
+[       OK ] DriverTest.TestOwnerMainDrainAppendsDetachedTaskTracesAfterRuntimeUnlock (9 ms)
+[ RUN      ] DriverTest.TestOwnerMailboxStatusBuildsMappingAfterRuntimeUnlock
+[       OK ] DriverTest.TestOwnerMailboxStatusBuildsMappingAfterRuntimeUnlock (6 ms)
+[ RUN      ] DriverTest.TestGatewayFutureCompletionExposesMainThreadCpuCounter
+[       OK ] DriverTest.TestGatewayFutureCompletionExposesMainThreadCpuCounter (8 ms)
+[ RUN      ] DriverTest.TestMappingNodeFreelistIsOwnerThreadLocal
+[       OK ] DriverTest.TestMappingNodeFreelistIsOwnerThreadLocal (5 ms)
+[ RUN      ] DriverTest.TestGameTickAndOwnerMainDrainsUseBoundedPositiveDelaySlices
+[       OK ] DriverTest.TestGameTickAndOwnerMainDrainsUseBoundedPositiveDelaySlices (0 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerOutputQuiescesBeforeOwnerStopAndCleanup
+[       OK ] DriverTest.TestGatewayOwnerOutputQuiescesBeforeOwnerStopAndCleanup (0 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerOutputQuiesceRejectsOffMainBeforeContainerAccess
+[       OK ] DriverTest.TestGatewayOwnerOutputQuiesceRejectsOffMainBeforeContainerAccess (4 ms)
+[ RUN      ] DriverTest.TestVmOwnerScopeBindsAndRestoresCurrentOwner
+[       OK ] DriverTest.TestVmOwnerScopeBindsAndRestoresCurrentOwner (0 ms)
+[ RUN      ] DriverTest.TestVmOwnerMetadataDefaultsAndChecks
+[       OK ] DriverTest.TestVmOwnerMetadataDefaultsAndChecks (0 ms)
+[ RUN      ] DriverTest.TestVmOwnerQueryObjectSnapshotOnlyForCrossOwnerTargets
+[       OK ] DriverTest.TestVmOwnerQueryObjectSnapshotOnlyForCrossOwnerTargets (0 ms)
+[ RUN      ] DriverTest.TestLoadedSingletonUsesDefaultOwnerInsideOwnerScope
+[       OK ] DriverTest.TestLoadedSingletonUsesDefaultOwnerInsideOwnerScope (1 ms)
+[ RUN      ] DriverTest.TestCommandSingletonUsesDefaultOwnerInsidePlayerOwnerScope
+[       OK ] DriverTest.TestCommandSingletonUsesDefaultOwnerInsidePlayerOwnerScope (1 ms)
+[ RUN      ] DriverTest.TestStdServiceUsesDefaultOwnerInsidePlayerOwnerScope
+[       OK ] DriverTest.TestStdServiceUsesDefaultOwnerInsidePlayerOwnerScope (4 ms)
+[ RUN      ] DriverTest.TestSharedStdServicesUseDefaultOwnerInsidePlayerOwnerScope
+/std/http.c line 126: Warning: Unused local variable 'ret'
+  }
+   ^
+[       OK ] DriverTest.TestSharedStdServicesUseDefaultOwnerInsidePlayerOwnerScope (7 ms)
+[ RUN      ] DriverTest.TestStdHelperServicesUseDefaultOwnerInsidePlayerOwnerScope
+/std/base64.c line 56: Warning: Unused local variable 'p'
+  }
+   ^
+/std/base64.c line 56: Warning: Unused local variable 'rlen'
+  }
+   ^
+/std/number_string.c line 54: Warning: Unused local variable 'parts'
+  }
+   ^
+/std/number_string.c line 54: Warning: Unused local variable 'part'
+  }
+   ^
+[       OK ] DriverTest.TestStdHelperServicesUseDefaultOwnerInsidePlayerOwnerScope (8 ms)
+[ RUN      ] DriverTest.TestSimulEfunSingletonKeepsDefaultOwnerInsidePlayerOwnerScope
+[       OK ] DriverTest.TestSimulEfunSingletonKeepsDefaultOwnerInsidePlayerOwnerScope (6 ms)
+[ RUN      ] DriverTest.TestVirtualObjectUsesDefaultOwnerAndUpdatesStorePath
+]MASTER: compile_object is called, file : /test/virtual
+[       OK ] DriverTest.TestVirtualObjectUsesDefaultOwnerAndUpdatesStorePath (7 ms)
+[ RUN      ] DriverTest.TestCloneOwnerUsesCurrentObjectNotAmbientScope
+[       OK ] DriverTest.TestCloneOwnerUsesCurrentObjectNotAmbientScope (1 ms)
+[ RUN      ] DriverTest.TestMoveObjectOwnerInheritanceRespectsExplicitOwner
+[       OK ] DriverTest.TestMoveObjectOwnerInheritanceRespectsExplicitOwner (1 ms)
+[ RUN      ] DriverTest.TestInteractiveExecPreservesNewObjectOwner
+[       OK ] DriverTest.TestInteractiveExecPreservesNewObjectOwner (1 ms)
+[ RUN      ] DriverTest.TestVmOwnerMailboxDrainsOwnerFifo
+[       OK ] DriverTest.TestVmOwnerMailboxDrainsOwnerFifo (0 ms)
+[ RUN      ] DriverTest.TestVmOwnerEpochRejectsStaleTask
+[       OK ] DriverTest.TestVmOwnerEpochRejectsStaleTask (2 ms)
+[ RUN      ] DriverTest.TestVmOwnerPurgeRemovesOwnerQueueBeforeSchedule
+[       OK ] DriverTest.TestVmOwnerPurgeRemovesOwnerQueueBeforeSchedule (0 ms)
+[ RUN      ] DriverTest.TestVmOwnerTaskTraceRecordsObservedAndDispatchedEvents
+[       OK ] DriverTest.TestVmOwnerTaskTraceRecordsObservedAndDispatchedEvents (2 ms)
+[ RUN      ] DriverTest.TestVmOwnerMainQueueDispatchesWithOwnerScope
+[       OK ] DriverTest.TestVmOwnerMainQueueDispatchesWithOwnerScope (47 ms)
+[ RUN      ] DriverTest.TestVmOwnerMainDrainRecoversAfterCallbackException
+[       OK ] DriverTest.TestVmOwnerMainDrainRecoversAfterCallbackException (18 ms)
+[ RUN      ] DriverTest.TestVmOwnerMainDrainWallBudgetYieldsAfterFirstTask
+[       OK ] DriverTest.TestVmOwnerMainDrainWallBudgetYieldsAfterFirstTask (3 ms)
+[ RUN      ] DriverTest.TestVmOwnerMainQueueDropsStaleOwnerEpoch
+[       OK ] DriverTest.TestVmOwnerMainQueueDropsStaleOwnerEpoch (3 ms)
+[ RUN      ] DriverTest.TestVmOwnerMainQueueRunsDropCallbackForStaleTask
+[       OK ] DriverTest.TestVmOwnerMainQueueRunsDropCallbackForStaleTask (2 ms)
+[ RUN      ] DriverTest.TestVmOwnerHeartbeatTraceRecordsScheduledEvent
+[       OK ] DriverTest.TestVmOwnerHeartbeatTraceRecordsScheduledEvent (2 ms)
+[ RUN      ] DriverTest.TestVmObjectStoreTracksPendingOwnerMessages
+[       OK ] DriverTest.TestVmObjectStoreTracksPendingOwnerMessages (5 ms)
+[ RUN      ] DriverTest.TestVmOwnerHeartbeatStaleOwnerSkipsExecution
+clear_tick_events: 1 leftover events cleared.
+[       OK ] DriverTest.TestVmOwnerHeartbeatStaleOwnerSkipsExecution (3 ms)
+[ RUN      ] DriverTest.TestVmOwnerHeartbeatDispatchesThroughOwnerExecutor
+clear_tick_events: 1 leftover events cleared.
+clear_tick_events: 0 leftover events cleared.
+[       OK ] DriverTest.TestVmOwnerHeartbeatDispatchesThroughOwnerExecutor (55 ms)
+[ RUN      ] DriverTest.TestVmOwnerHeartbeatExecutorDropsStaleOwnerEpoch
+clear_tick_events: 0 leftover events cleared.
+[       OK ] DriverTest.TestVmOwnerHeartbeatExecutorDropsStaleOwnerEpoch (52 ms)
+[ RUN      ] DriverTest.TestVmOwnerCalloutDispatchesThroughOwnerExecutor
+clear_call_outs: 0 leftover callouts cleared.
+clear_tick_events: 1 leftover events cleared.
+[       OK ] DriverTest.TestVmOwnerCalloutDispatchesThroughOwnerExecutor (127 ms)
+[ RUN      ] DriverTest.TestVmOwnerCalloutExecutorDropsStaleOwnerEpoch
+clear_call_outs: 0 leftover callouts cleared.
+clear_tick_events: 1 leftover events cleared.
+[       OK ] DriverTest.TestVmOwnerCalloutExecutorDropsStaleOwnerEpoch (77 ms)
+[ RUN      ] DriverTest.TestVmOwnerAsyncDnsCallbacksDispatchThroughOwnerExecutor
+[       OK ] DriverTest.TestVmOwnerAsyncDnsCallbacksDispatchThroughOwnerExecutor (325 ms)
+[ RUN      ] DriverTest.TestVmOwnerAsyncCallbackExecutorDropsStaleOwnerEpoch
+[       OK ] DriverTest.TestVmOwnerAsyncCallbackExecutorDropsStaleOwnerEpoch (104 ms)
+[ RUN      ] DriverTest.TestVmOwnerSocketCallbacksDispatchThroughOwnerExecutor
+[       OK ] DriverTest.TestVmOwnerSocketCallbacksDispatchThroughOwnerExecutor (251 ms)
+[ RUN      ] DriverTest.TestVmOwnerSocketCallbackExecutorDropsStaleOwnerEpoch
+[       OK ] DriverTest.TestVmOwnerSocketCallbackExecutorDropsStaleOwnerEpoch (146 ms)
+[ RUN      ] DriverTest.TestVmOwnerAccessTraceRecordsCrossOwnerAccess
+[       OK ] DriverTest.TestVmOwnerAccessTraceRecordsCrossOwnerAccess (0 ms)
+[ RUN      ] DriverTest.TestVmOwnerCrossOwnerAccessTraceSkipsSameOwner
+[       OK ] DriverTest.TestVmOwnerCrossOwnerAccessTraceSkipsSameOwner (3 ms)
+[ RUN      ] DriverTest.TestVmOwnerCrossOwnerAccessTraceClassifiesPolicyModes
+[       OK ] DriverTest.TestVmOwnerCrossOwnerAccessTraceClassifiesPolicyModes (0 ms)
+[ RUN      ] DriverTest.TestVmMulticoreModeControlsCrossOwnerBlocking
+[       OK ] DriverTest.TestVmMulticoreModeControlsCrossOwnerBlocking (0 ms)
+[ RUN      ] DriverTest.TestVmOwnerAccessFastBypassOnlySkipsDefaultModeDiagnostics
+[       OK ] DriverTest.TestVmOwnerAccessFastBypassOnlySkipsDefaultModeDiagnostics (138 ms)
+[ RUN      ] DriverTest.TestCurrentOwnerScopeControlsCrossOwnerBlocking
+[       OK ] DriverTest.TestCurrentOwnerScopeControlsCrossOwnerBlocking (0 ms)
+[ RUN      ] DriverTest.TestAllInventoryRecordsCrossOwnerAccessTrace
+[       OK ] DriverTest.TestAllInventoryRecordsCrossOwnerAccessTrace (4 ms)
+[ RUN      ] DriverTest.TestPresentRecordsCrossOwnerAccessTrace
+[       OK ] DriverTest.TestPresentRecordsCrossOwnerAccessTrace (4 ms)
+[ RUN      ] DriverTest.TestPresentEnforcedModeBlocksCrossOwnerIdSearch
+[       OK ] DriverTest.TestPresentEnforcedModeBlocksCrossOwnerIdSearch (0 ms)
+[ RUN      ] DriverTest.TestParserEnforcedModeBlocksCrossOwnerInterrogateApply
+]add_hash_entry: my]
+]Trying interpretation: look:in:bag:]
+]Rule: WRD OBJ]
+]Trying rule: WRD OBJ]
+]  parse_rule]
+]  Adding match: tok = 3 start = 1 end = 1]
+]  State is: ffffaf80, num_errors: 0
+]
+]  Trying WRD match]
+]    parse_rule]
+]      parse_obj:]
+]      Word is bag]
+]      exiting ...]
+]    Adding match: tok = 1 start = 2 end = 2]
+]    State is: ffffae40, num_errors: 1
+]
+]      parse_rule]
+]        we_are_finished]
+]        Trying can_look_wrd_obj ... (/single/tests/efuns/parser_owner_probe)]
+]        Return value was: 1]
+]      exiting parse_rule ...]
+]    Done trying to match OBJ]
+[       OK ] DriverTest.TestParserEnforcedModeBlocksCrossOwnerInterrogateApply (2 ms)
+[ RUN      ] DriverTest.TestMoveObjectRecordsCrossOwnerAccessTrace
+[       OK ] DriverTest.TestMoveObjectRecordsCrossOwnerAccessTrace (6 ms)
+[ RUN      ] DriverTest.TestMoveObjectEnforcedModeBlocksCrossOwnerMove
+[       OK ] DriverTest.TestMoveObjectEnforcedModeBlocksCrossOwnerMove (7 ms)
+[ RUN      ] DriverTest.TestDestructRecordsCrossOwnerAccessTrace
+on_destruct() called in /single/on_destruct_good.c
+[       OK ] DriverTest.TestDestructRecordsCrossOwnerAccessTrace (5 ms)
+[ RUN      ] DriverTest.TestDestructEnforcedModeBlocksCrossOwnerDestruct
+on_destruct() called in /single/on_destruct_good.c
+[       OK ] DriverTest.TestDestructEnforcedModeBlocksCrossOwnerDestruct (5 ms)
+[ RUN      ] DriverTest.TestCallOtherRecordsCrossOwnerAccessTrace
+on_destruct() called in /single/on_destruct_good.c
+[       OK ] DriverTest.TestCallOtherRecordsCrossOwnerAccessTrace (8 ms)
+[ RUN      ] DriverTest.TestCallOtherEnforcedModeBlocksCrossOwnerCall
+on_destruct() called in /single/on_destruct_good.c
+[       OK ] DriverTest.TestCallOtherEnforcedModeBlocksCrossOwnerCall (20 ms)
+[ RUN      ] DriverTest.TestVmOwnerObjectMessageRejectsNonFrozenResult
+on_destruct() called in /single/on_destruct_good.c
+[       OK ] DriverTest.TestVmOwnerObjectMessageRejectsNonFrozenResult (13 ms)
+[ RUN      ] DriverTest.TestVmOwnerScheduleRoundsOwnersAndKeepsOwnerFifo
+[       OK ] DriverTest.TestVmOwnerScheduleRoundsOwnersAndKeepsOwnerFifo (0 ms)
+[ RUN      ] DriverTest.TestVmOwnerThreadExperimentIsOptInAndDispatchesMailboxTasks
+[       OK ] DriverTest.TestVmOwnerThreadExperimentIsOptInAndDispatchesMailboxTasks (38 ms)
+[ RUN      ] DriverTest.TestVmOwnerExecutorCommandConsumeEntryDispatchesWithoutLpc
+[       OK ] DriverTest.TestVmOwnerExecutorCommandConsumeEntryDispatchesWithoutLpc (49 ms)
+[ RUN      ] DriverTest.TestVmOwnerExecutorCommandFrameRestoreDispatchesWithoutLpc
+[       OK ] DriverTest.TestVmOwnerExecutorCommandFrameRestoreDispatchesWithoutLpc (55 ms)
+[ RUN      ] DriverTest.TestVmOwnerExecutorCallbackTaskBoundaryDispatchesAndDropsStaleTasks
+[       OK ] DriverTest.TestVmOwnerExecutorCallbackTaskBoundaryDispatchesAndDropsStaleTasks (44 ms)
+[ RUN      ] DriverTest.TestVmOwnerThreadDrainsPendingOwnerMessages
+[       OK ] DriverTest.TestVmOwnerThreadDrainsPendingOwnerMessages (12 ms)
+[ RUN      ] DriverTest.TestVmOwnerObjectMessageUsesOwnerExecutorRoute
+[       OK ] DriverTest.TestVmOwnerObjectMessageUsesOwnerExecutorRoute (40 ms)
+[ RUN      ] DriverTest.TestVmOwnerExecutorDrainsTargetMessagesWithoutMainFallback
+[       OK ] DriverTest.TestVmOwnerExecutorDrainsTargetMessagesWithoutMainFallback (78 ms)
+[ RUN      ] DriverTest.TestOwnerSchedulerBackpressureRejectsOverLimit
+[       OK ] DriverTest.TestOwnerSchedulerBackpressureRejectsOverLimit (728 ms)
+[ RUN      ] DriverTest.TestOwnerSubmissionBackpressureClosesRegisteredFutures
+[       OK ] DriverTest.TestOwnerSubmissionBackpressureClosesRegisteredFutures (159 ms)
+[ RUN      ] DriverTest.TestVmOwnerRuntimeReportsExecutorTaskContract
+[       OK ] DriverTest.TestVmOwnerRuntimeReportsExecutorTaskContract (40 ms)
+[ RUN      ] DriverTest.TestOwnerRuntimeLayeringGuardKeepsStoresOutOfOwnerCc
+[       OK ] DriverTest.TestOwnerRuntimeLayeringGuardKeepsStoresOutOfOwnerCc (7 ms)
+[ RUN      ] DriverTest.TestVmOwnerExecutorBudgetYieldsAndRequeuesSameOwnerBacklog
+[       OK ] DriverTest.TestVmOwnerExecutorBudgetYieldsAndRequeuesSameOwnerBacklog (535 ms)
+[ RUN      ] DriverTest.TestVmOwnerExecutorDoesNotYieldWhenExactBudgetDrainsBacklog
+[       OK ] DriverTest.TestVmOwnerExecutorDoesNotYieldWhenExactBudgetDrainsBacklog (43 ms)
+[ RUN      ] DriverTest.TestVmOwnerExecutorExceptionTerminalizesPendingFuture
+OwnerExecutor: task 8371 (executor_callback) threw std::exception: injected executor failure
+[       OK ] DriverTest.TestVmOwnerExecutorExceptionTerminalizesPendingFuture (31 ms)
+[ RUN      ] DriverTest.TestVmOwnerExecutorRunsDifferentOwnersInParallel
+[       OK ] DriverTest.TestVmOwnerExecutorRunsDifferentOwnersInParallel (122 ms)
+[ RUN      ] DriverTest.TestVmOwnerStartCannotCrossAnInProgressStop
+[       OK ] DriverTest.TestVmOwnerStartCannotCrossAnInProgressStop (6038 ms)
+[ RUN      ] DriverTest.TestVmOwnerRuntimePerformanceProbesRecordDiagnostics
+[       OK ] DriverTest.TestVmOwnerRuntimePerformanceProbesRecordDiagnostics (359 ms)
+[ RUN      ] DriverTest.TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs
+[       OK ] DriverTest.TestVmOwnerThreadRejectsLpcAndKeepsMessageSpecs (41 ms)
+[ RUN      ] DriverTest.TestVmOwnerThreadGuardsControlledLpcProbeOffMain
+[       OK ] DriverTest.TestVmOwnerThreadGuardsControlledLpcProbeOffMain (25 ms)
+[ RUN      ] DriverTest.TestVmOwnerThreadRunsRestrictedLpcCanaryOffMainDeferredRelease
+[       OK ] DriverTest.TestVmOwnerThreadRunsRestrictedLpcCanaryOffMainDeferredRelease (43 ms)
+[ RUN      ] DriverTest.TestVmOwnerThreadRunsRegisteredReadonlyLpcTaskWithMultipleWorkers
+[       OK ] DriverTest.TestVmOwnerThreadRunsRegisteredReadonlyLpcTaskWithMultipleWorkers (75 ms)
+[ RUN      ] DriverTest.TestVmOwnerLpcTaskRejectsTargetOwnerMismatchAtSubmit
+[       OK ] DriverTest.TestVmOwnerLpcTaskRejectsTargetOwnerMismatchAtSubmit (21 ms)
+[ RUN      ] DriverTest.TestOwnerSubmissionRejectsAtomicallyWhenFutureStoreFull
+[       OK ] DriverTest.TestOwnerSubmissionRejectsAtomicallyWhenFutureStoreFull (43 ms)
+[ RUN      ] DriverTest.TestVmOwnerOrdinaryLpcRequiresExplicitOpen
+[       OK ] DriverTest.TestVmOwnerOrdinaryLpcRequiresExplicitOpen (21 ms)
+[ RUN      ] DriverTest.TestVmOwnerThreadRunsExplicitOpenOrdinaryLpcTask
+[       OK ] DriverTest.TestVmOwnerThreadRunsExplicitOpenOrdinaryLpcTask (72 ms)
+[ RUN      ] DriverTest.TestVmOwnerThreadRejectsUnregisteredLpcTask
+[       OK ] DriverTest.TestVmOwnerThreadRejectsUnregisteredLpcTask (59 ms)
+[ RUN      ] DriverTest.TestVmOwnerThreadRunsRegisteredDomainLpcTasks
+[       OK ] DriverTest.TestVmOwnerThreadRunsRegisteredDomainLpcTasks (83 ms)
+[ RUN      ] DriverTest.TestVmOwnerLpcTaskMainDrainAndScheduleFailPendingFuture
+[       OK ] DriverTest.TestVmOwnerLpcTaskMainDrainAndScheduleFailPendingFuture (43 ms)
+[ RUN      ] DriverTest.TestVmOwnerThreadRejectsUnsafeLpcCanaryRequestsDeltas
+[       OK ] DriverTest.TestVmOwnerThreadRejectsUnsafeLpcCanaryRequestsDeltas (48 ms)
+[ RUN      ] DriverTest.TestVmOwnerMessageAndCommitTracesAreSpecOnly
+[       OK ] DriverTest.TestVmOwnerMessageAndCommitTracesAreSpecOnly (1 ms)
+[ RUN      ] DriverTest.TestVmOwnerFuturePollTracksMessageCompletion
+[       OK ] DriverTest.TestVmOwnerFuturePollTracksMessageCompletion (0 ms)
+[ RUN      ] DriverTest.TestVmOwnerFutureTakeConsumesOnlyCompletedFuture
+[       OK ] DriverTest.TestVmOwnerFutureTakeConsumesOnlyCompletedFuture (0 ms)
+[ RUN      ] DriverTest.TestVmOwnerFutureTakeConsumesFailedFutureOnce
+[       OK ] DriverTest.TestVmOwnerFutureTakeConsumesFailedFutureOnce (0 ms)
+[ RUN      ] DriverTest.TestVmOwnerPurgeFailsPendingFuture
+[       OK ] DriverTest.TestVmOwnerPurgeFailsPendingFuture (0 ms)
+[ RUN      ] DriverTest.TestVmOwnerObjectMessageFailsStaleTargetHandle
+[       OK ] DriverTest.TestVmOwnerObjectMessageFailsStaleTargetHandle (19 ms)
+[ RUN      ] DriverTest.TestVmOwnerObjectMessageRejectsStaleTargetHandleAtSubmit
+[       OK ] DriverTest.TestVmOwnerObjectMessageRejectsStaleTargetHandleAtSubmit (11 ms)
+[ RUN      ] DriverTest.TestVmOwnerObjectMessageReportsDestructedTargetHandle
+on_destruct() called in /single/on_destruct_good.c
+[       OK ] DriverTest.TestVmOwnerObjectMessageReportsDestructedTargetHandle (18 ms)
+[ RUN      ] DriverTest.TestVmOwnerFuturePollReportsUnknownFuture
+[       OK ] DriverTest.TestVmOwnerFuturePollReportsUnknownFuture (0 ms)
+[ RUN      ] DriverTest.TestVmObjectHandleRejectsStaleOwnerEpoch
+[       OK ] DriverTest.TestVmObjectHandleRejectsStaleOwnerEpoch (5 ms)
+[ RUN      ] DriverTest.TestVmOwnerWorkerNeverMutatesObjectRefcounts
+[       OK ] DriverTest.TestVmOwnerWorkerNeverMutatesObjectRefcounts (14 ms)
+[ RUN      ] DriverTest.TestVmOwnerWorkerNestedObjectTargetSubmissionRejected
+[       OK ] DriverTest.TestVmOwnerWorkerNestedObjectTargetSubmissionRejected (23 ms)
+[ RUN      ] DriverTest.TestVmObjectStoreRecordsOwnerMigrationTrace
+[       OK ] DriverTest.TestVmObjectStoreRecordsOwnerMigrationTrace (106 ms)
+[ RUN      ] DriverTest.TestVmOwnerGuardFailsFastOnMismatch
+[       OK ] DriverTest.TestVmOwnerGuardFailsFastOnMismatch (0 ms)
+[ RUN      ] DriverTest.TestVmWorkerActorKeysSerializePerOwner
+[       OK ] DriverTest.TestVmWorkerActorKeysSerializePerOwner (164 ms)
+[ RUN      ] DriverTest.TestVmWorkerSnapshotDigestUsesOwnerKey
+[       OK ] DriverTest.TestVmWorkerSnapshotDigestUsesOwnerKey (0 ms)
+[ RUN      ] DriverTest.TestVmWorkerComputeResultCompletesOwnerFutureThroughQueue
+[       OK ] DriverTest.TestVmWorkerComputeResultCompletesOwnerFutureThroughQueue (0 ms)
+[ RUN      ] DriverTest.TestVmWorkerComputeResultCompletesOwnerFutureThroughOwnerExecutor
+[       OK ] DriverTest.TestVmWorkerComputeResultCompletesOwnerFutureThroughOwnerExecutor (90 ms)
+[ RUN      ] DriverTest.TestVmWorkerComputeResultFutureCarriesBenchmarkResult
+[       OK ] DriverTest.TestVmWorkerComputeResultFutureCarriesBenchmarkResult (10 ms)
+[ RUN      ] DriverTest.TestVmWorkerComputeResultFutureCarriesSnapshotDigestResult
+[       OK ] DriverTest.TestVmWorkerComputeResultFutureCarriesSnapshotDigestResult (10 ms)
+[ RUN      ] DriverTest.TestVmWorkerComputeResultFutureCarriesCombatDamageResult
+[       OK ] DriverTest.TestVmWorkerComputeResultFutureCarriesCombatDamageResult (10 ms)
+[ RUN      ] DriverTest.TestGatewayFutureWatchKeepsPendingFutureAndReservation
+[       OK ] DriverTest.TestGatewayFutureWatchKeepsPendingFutureAndReservation (2 ms)
+[ RUN      ] DriverTest.TestGatewayFutureWatchDispatchesCompletedFutureOnMain
+[       OK ] DriverTest.TestGatewayFutureWatchDispatchesCompletedFutureOnMain (32 ms)
+[ RUN      ] DriverTest.TestGatewayEncodedOutputFutureFillsReservationWithoutLpcCallback
+[       OK ] DriverTest.TestGatewayEncodedOutputFutureFillsReservationWithoutLpcCallback (3 ms)
+[ RUN      ] DriverTest.TestGatewayEncodedOutputFutureReleasesNonStringResult
+[       OK ] DriverTest.TestGatewayEncodedOutputFutureReleasesNonStringResult (3 ms)
+[ RUN      ] DriverTest.TestGatewayEncodedOutputFutureTimeoutReleasesReservation
+[       OK ] DriverTest.TestGatewayEncodedOutputFutureTimeoutReleasesReservation (2 ms)
+[ RUN      ] DriverTest.TestVmOwnerNativeStringFuturePollReportsFrozenResult
+[       OK ] DriverTest.TestVmOwnerNativeStringFuturePollReportsFrozenResult (3 ms)
+[ RUN      ] DriverTest.TestVmOwnerRepeatedTimeoutReportsTerminalChangeOnce
+[       OK ] DriverTest.TestVmOwnerRepeatedTimeoutReportsTerminalChangeOnce (0 ms)
+[ RUN      ] DriverTest.TestVmOwnerQueuedFrozenStringCancellationRemovesTaskBeforeProjection
+[       OK ] DriverTest.TestVmOwnerQueuedFrozenStringCancellationRemovesTaskBeforeProjection (21 ms)
+[ RUN      ] DriverTest.TestVmOwnerQueuedMessageCancellationDoesNotCountAsCallbackDrop
+[       OK ] DriverTest.TestVmOwnerQueuedMessageCancellationDoesNotCountAsCallbackDrop (32 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerOutputQuiesceClosesAllSessionWatchesButKeepsGeneric
+[       OK ] DriverTest.TestGatewayOwnerOutputQuiesceClosesAllSessionWatchesButKeepsGeneric (31 ms)
+[ RUN      ] DriverTest.TestGatewayMappingFutureStaleOwnerNotifiesCancellationAndClosesReservation
+[       OK ] DriverTest.TestGatewayMappingFutureStaleOwnerNotifiesCancellationAndClosesReservation (6 ms)
+[ RUN      ] DriverTest.TestGatewayMappingFutureCancellationCallbackMayReenterSessionDestroy
+[       OK ] DriverTest.TestGatewayMappingFutureCancellationCallbackMayReenterSessionDestroy (2 ms)
+[ RUN      ] DriverTest.TestGatewayMappingFutureReservationStaleStillNotifiesCancellation
+[       OK ] DriverTest.TestGatewayMappingFutureReservationStaleStillNotifiesCancellation (2 ms)
+[ RUN      ] DriverTest.TestGatewayMappingFutureCompletionCallbackFailureRunsCancellationCleanup
+[       OK ] DriverTest.TestGatewayMappingFutureCompletionCallbackFailureRunsCancellationCleanup (3 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerOutputQuiesceClosesStoppedWorkerWave
+[       OK ] DriverTest.TestGatewayOwnerOutputQuiesceClosesStoppedWorkerWave (28 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerOutputQuiesceCountsDetachedWaveReservation
+[       OK ] DriverTest.TestGatewayOwnerOutputQuiesceCountsDetachedWaveReservation (7 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputProjectionUsesSameWireAndFifoSlot
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputProjectionUsesSameWireAndFifoSlot (4 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputMissingWaveReleasesExactlyOnce
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputMissingWaveReleasesExactlyOnce (2 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputRejectsInvalidUtf8BeforeOwnerSubmit
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputRejectsInvalidUtf8BeforeOwnerSubmit (2 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputRejectsOversizedWireBeforeOwnerSubmit
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputRejectsOversizedWireBeforeOwnerSubmit (218 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputWaitsForWholeWaveBeforePublish
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputWaitsForWholeWaveBeforePublish (7 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputSupportsSameSessionMultipleReservations
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputSupportsSameSessionMultipleReservations (4 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputPublishRetryIsBoundedAndPreservesFifo
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputPublishRetryIsBoundedAndPreservesFifo (6 ms)
+[ RUN      ] DriverTest.TestGatewayFutureWatchQueueMutationIsTransactional
+[       OK ] DriverTest.TestGatewayFutureWatchQueueMutationIsTransactional (5 ms)
+[ RUN      ] DriverTest.TestGatewayFutureWatchLimitIsSharedAcrossWatchKinds
+[       OK ] DriverTest.TestGatewayFutureWatchLimitIsSharedAcrossWatchKinds (4 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerStaleNotificationDoesNotReuseWaveAfterCallback
+[       OK ] DriverTest.TestGatewayOwnerStaleNotificationDoesNotReuseWaveAfterCallback (4 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputReservationMismatchIsolatesRecipient
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputReservationMismatchIsolatesRecipient (7 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputStaleRecipientFallsBackWithSlowPeer
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputStaleRecipientFallsBackWithSlowPeer (14 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputFailedRecipientFallsBackWithSlowPeer
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputFailedRecipientFallsBackWithSlowPeer (9 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputWaveTimeoutPreservesCompletedRecipient
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputWaveTimeoutPreservesCompletedRecipient (7 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputWaveDisconnectReleasesOtherRecipient
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputWaveDisconnectReleasesOtherRecipient (7 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputRejectsLiveSessionIdMismatch
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputRejectsLiveSessionIdMismatch (3 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputFallsBackInlineByteEquivalent
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputFallsBackInlineByteEquivalent (1 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputStagesInlineFallbackBatchBeforeFill
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputStagesInlineFallbackBatchBeforeFill (3 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputInvalidInlineInputWritesNoRecipient
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputInvalidInlineInputWritesNoRecipient (3 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputTimeoutFallsBackInline
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputTimeoutFallsBackInline (53 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputDisconnectConsumesFuture
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputDisconnectConsumesFuture (53 ms)
+[ RUN      ] DriverTest.TestGatewayOwnerRoomOutputStaleOwnerEpochFallsBackInline
+[       OK ] DriverTest.TestGatewayOwnerRoomOutputStaleOwnerEpochFallsBackInline (53 ms)
+[ RUN      ] DriverTest.TestGatewayFutureWatchTimesOutAndReleasesReservation
+[       OK ] DriverTest.TestGatewayFutureWatchTimesOutAndReleasesReservation (2 ms)
+[ RUN      ] DriverTest.TestGatewayFutureWatchRejectsAnotherSessionFuture
+[       OK ] DriverTest.TestGatewayFutureWatchRejectsAnotherSessionFuture (3 ms)
+[ RUN      ] DriverTest.TestGatewayGenericFutureWatchDispatchesNonSessionObjectOnMain
+[       OK ] DriverTest.TestGatewayGenericFutureWatchDispatchesNonSessionObjectOnMain (6 ms)
+[ RUN      ] DriverTest.TestGatewayGenericFutureWatchPollCountersReportBudgetedWork
+[       OK ] DriverTest.TestGatewayGenericFutureWatchPollCountersReportBudgetedWork (494 ms)
+[ RUN      ] DriverTest.TestGatewayGenericFutureWatchRejectsAnotherObjectFuture
+[       OK ] DriverTest.TestGatewayGenericFutureWatchRejectsAnotherObjectFuture (1 ms)
+[ RUN      ] DriverTest.TestGatewayGenericFutureWatchTimesOutAndConsumesFuture
+[       OK ] DriverTest.TestGatewayGenericFutureWatchTimesOutAndConsumesFuture (1 ms)
+[ RUN      ] DriverTest.TestGatewayGenericFutureWatchTargetDestructCancelsAndConsumesFuture
+[       OK ] DriverTest.TestGatewayGenericFutureWatchTargetDestructCancelsAndConsumesFuture (8 ms)
+[ RUN      ] DriverTest.TestGatewayGenericAndSessionWatchCannotConsumeSameFuture
+[       OK ] DriverTest.TestGatewayGenericAndSessionWatchCannotConsumeSameFuture (2 ms)
+[ RUN      ] DriverTest.TestOwnerFutureCancelEfunSupportsSubmitRollback
+[       OK ] DriverTest.TestOwnerFutureCancelEfunSupportsSubmitRollback (2 ms)
+[ RUN      ] DriverTest.TestGatewayDaemonUsesDefaultOwnerForSystemMessages
+[       OK ] DriverTest.TestGatewayDaemonUsesDefaultOwnerForSystemMessages (19 ms)
+[ RUN      ] DriverTest.TestGatewayReliableIngressActiveOwnerRejectsCompetingStream
+[       OK ] DriverTest.TestGatewayReliableIngressActiveOwnerRejectsCompetingStream (3 ms)
+[ RUN      ] DriverTest.TestGatewayReceiveRunsThroughOwnerMainQueue
+[       OK ] DriverTest.TestGatewayReceiveRunsThroughOwnerMainQueue (21 ms)
+[ RUN      ] DriverTest.TestGatewayCommandTaskCarriesOwnerHandlePayload
+[       OK ] DriverTest.TestGatewayCommandTaskCarriesOwnerHandlePayload (26 ms)
+[ RUN      ] DriverTest.TestGatewayCommandExecutesThroughOwnerMainQueue
+[       OK ] DriverTest.TestGatewayCommandExecutesThroughOwnerMainQueue (547 ms)
+[ RUN      ] DriverTest.TestGatewayCommandMainQueueDropsStaleOwnerEpoch
+[       OK ] DriverTest.TestGatewayCommandMainQueueDropsStaleOwnerEpoch (1052 ms)
+[----------] 189 tests from DriverTest (14397 ms total)
+
+[----------] 2 tests from OwnerExecutorTest
+[ RUN      ] OwnerExecutorTest.ReleasesOwnerClaimWhenTaskExecutionThrowsStdException
+[       OK ] OwnerExecutorTest.ReleasesOwnerClaimWhenTaskExecutionThrowsStdException (0 ms)
+[ RUN      ] OwnerExecutorTest.ReleasesOwnerClaimWhenTaskExecutionThrowsUnknownException
+[       OK ] OwnerExecutorTest.ReleasesOwnerClaimWhenTaskExecutionThrowsUnknownException (0 ms)
+[----------] 2 tests from OwnerExecutorTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 209 tests from 5 test suites ran. (14935 ms total)
+[  PASSED  ] 209 tests.

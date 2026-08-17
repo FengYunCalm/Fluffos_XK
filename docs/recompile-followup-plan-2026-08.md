@@ -1,6 +1,6 @@
 # E3 收尾与遗留项专项方案（2026-08 批次二）
 
-> 状态：**DRAFT v0.5 —— L1/L4/L2 已完成（见 §6 实际 commit 历史）；L5 起按序执行**
+> 状态：**DRAFT v0.6 —— L1/L4/L2/L5/L6 已完成；L7 执行中；L8-L10 待文档产出**
 > 生成日期：2026-08-16（v0.5 同日修订）
 > 前置：E3 v1（P0-P7 主体）已完成并推送（`origin/main == 0ca1f840`，9 commit）
 > 范围：本方案覆盖全部遗留项（L1-L10），含 sanitizer 验证闭环、测试惯用法治理、
@@ -145,9 +145,9 @@ optimization-plan §6"可选增强默认不执行、缺单项授权"门禁，**�
   （docs/evidence/l2-ftest-buildsync.txt）
 
 ### P3 — ASan 全矩阵（L5，commit 4）
-> 状态：**L1 验证阶段已完成主体**（lpc_tests 全量 424/424 + ftest 全量 +
-> recompile 定向均在最终配置下跑完并落盘 docs/evidence/）；剩余
-> lpcc/ofile_tests/ctest 补跑
+> 状态：**已完成**（证据 docs/evidence/）：lpc_tests 424/424（ASan +
+> build-sync）+ ftest 全量（ASan detect_leaks=0 + build-sync）+ recompile
+> 定向 + ctest 424/424 + ofile_tests 2/2 + lpcc 冒烟（mudlib 内路径 exit 0）
 
 按 v0.4 §16.2 全量跑（L1 修复后）：
 ```bash
@@ -167,6 +167,10 @@ ctest --test-dir build-recompile-asan --output-on-failure
   消失导致复核困难，本批强制落盘）
 
 ### P4 — TSan 独立构建（L6，commit 6）
+> 状态：**已完成**（docs/evidence/l6-tsan-summary.md + l6-tsan-*.txt）：
+> 构建用 `setarch -R` 规避 GCC TSan × ASLR（mmap_rnd_bits=32）冲突；
+> owner 定向 209/209 + 全量 424/424 + driver owner/recompile 定向
+> 全部零 ThreadSanitizer 警告
 
 - TSan 与 ASan 互斥（src/CMakeLists.txt:103 `_SAN_COUNT > 1` FATAL）——必须
   独立 build 目录：
