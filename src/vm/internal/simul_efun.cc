@@ -116,6 +116,28 @@ void init_simul_efun(const char *file) {
   set_simul_efun(new_ob);
 }
 
+// Ident-hash activation primitives shared by every table rebuild path
+// (online builder, prepare/activate, rollback, and the test restore
+// helpers). The inactivate guard (simul_num != -1) makes the mirror exact
+// by construction: only an entry that was activated may be deactivated, so
+// a name dropped by an earlier reload (inert orphan, simul_num -1) is never
+// touched on either side.
+static void inactivate_ident(ident_hash_elem_t *ihe) {
+  if (ihe->dn.simul_num != -1) {
+    ihe->sem_value--;
+  }
+  ihe->dn.simul_num = -1;
+  ihe->token &= ~IHE_SIMUL;
+  ihe->token |= IHE_ORPHAN;
+}
+
+static void activate_ident(ident_hash_elem_t *ihe, int sim_idx) {
+  ihe->token |= IHE_SIMUL;
+  ihe->token &= ~IHE_ORPHAN;
+  ihe->sem_value++;
+  ihe->dn.simul_num = sim_idx;
+}
+
 static void remove_simuls() {
   int i;
   ident_hash_elem_t *ihe;
@@ -126,12 +148,7 @@ static void remove_simuls() {
   }
   for (i = 0; i < num_simul_efun; i++) {
     if ((ihe = lookup_ident(simul_names[i].name))) {
-      if (ihe->dn.simul_num != -1) {
-        ihe->sem_value--;
-      }
-      ihe->dn.simul_num = -1;
-      ihe->token &= ~IHE_SIMUL;
-      ihe->token |= IHE_ORPHAN;
+      inactivate_ident(ihe);
     }
   }
 }
@@ -189,10 +206,7 @@ static void find_or_add_simul_efun(function_t *funp, int runtime_index) {
     ref_string(funp->funcname);
   }
   ident_hash_elem_t *ihe = find_or_add_perm_ident(funp->funcname);
-  ihe->token |= IHE_SIMUL;
-  ihe->token &= ~IHE_ORPHAN;
-  ihe->sem_value++;
-  ihe->dn.simul_num = sim_idx;
+  activate_ident(ihe, sim_idx);
   if (r >= 0) {
     num_simul_efun++;
   }
@@ -284,20 +298,17 @@ void simul_efuns_activate(simul_efun_prepared_t *p) noexcept {
   for (int i = 0; i < num_simul_efun; i++) {
     ident_hash_elem_t *ihe = lookup_ident(simul_names[i].name);
     if (ihe) {
-      if (ihe->dn.simul_num != -1) {
-        ihe->sem_value--;
-      }
-      ihe->dn.simul_num = -1;
-      ihe->token &= ~IHE_SIMUL;
-      ihe->token |= IHE_ORPHAN;
+      inactivate_ident(ihe);
     }
   }
 
-  // 2. Swap in the shadow arrays (free() only -- no allocation).
-  if (num_simul_efun) {
-    FREE(simul_names);
-    FREE(simuls);
-  }
+  // 2. Swap in the shadow arrays. The OLD live tables stay alive: they are
+  //    handed to the prepared structure so the transaction's create phase
+  //    can roll back (swap them back) or finalize (free them here in
+  //    finish()). free() only -- no allocation.
+  p->old_names = simul_names;
+  p->old_funcs = simuls;
+  p->old_count = num_simul_efun;
   simul_names = static_cast<simul_entry *>(p->names);
   simuls = static_cast<function_lookup_info_t *>(p->funcs);
   num_simul_efun = p->count;
@@ -321,22 +332,98 @@ void simul_efuns_activate(simul_efun_prepared_t *p) noexcept {
     }
     ident_hash_elem_t *ihe = static_cast<ident_hash_elem_t *>(p->idents[i]);
     assert(ihe != nullptr);
-    ihe->token |= IHE_SIMUL;
-    ihe->token &= ~IHE_ORPHAN;
-    ihe->sem_value++;
-    ihe->dn.simul_num = sim_idx;
+    activate_ident(ihe, sim_idx);
   }
 
-  // Ownership moved into the live tables.
+  // Ownership moved into the live tables; the old tables are held by
+  // p->old_* until finish()/rollback() decides their fate.
   p->names = nullptr;
   p->funcs = nullptr;
   p->idents = nullptr;
   p->count = 0;
-  p->active = true;
+  p->state = simul_efun_prepared_t::State::Activated;
+}
+
+void simul_efuns_finish(simul_efun_prepared_t *p) noexcept {
+  // Create phase succeeded: the OLD tables are the loser, free them.
+  if (p->state != simul_efun_prepared_t::State::Activated) {
+    return;
+  }
+  if (p->old_names) {
+    FREE(p->old_names);
+  }
+  if (p->old_funcs) {
+    FREE(p->old_funcs);
+  }
+  p->old_names = nullptr;
+  p->old_funcs = nullptr;
+  p->old_count = 0;
+  p->state = simul_efun_prepared_t::State::Finalized;
+}
+
+void simul_efuns_rollback(simul_efun_prepared_t *p) noexcept {
+  if (p->state != simul_efun_prepared_t::State::Activated) {
+    return;
+  }
+  // 1. Deactivate every entry the new (currently live) table activated:
+  //    mirror of activate step 3, reversed. These entries have sem_value 1
+  //    (step 3 incremented them), so lookup_ident() still hits, but guard
+  //    with find_or_add_perm_ident anyway (dropped entries with func null
+  //    were never activated and may sit at sem_value 0).
+  for (int i = 0; i < num_simul_efun; i++) {
+    int sim_idx = simul_names[i].index;
+    if (!simuls[sim_idx].func) {
+      continue;
+    }
+    ident_hash_elem_t *ihe = lookup_ident(simul_names[i].name);
+    if (!ihe) {
+      ihe = find_or_add_perm_ident(simul_names[i].name);
+    }
+    if (ihe) {
+      inactivate_ident(ihe);
+    }
+  }
+  // 2. Restore the old table's entries (mirror of activate step 1,
+  //    reversed). Ident lookup MUST NOT use lookup_ident() here: after
+  //    step 1 the shared names have sem_value 0 (the CHECK_ELEM trap). The
+  //    perm-ident elements survive; find_or_add_perm_ident resolves them
+  //    with zero allocation. Mirror of activate step 3: only entries with a
+  //    live func slot are activated -- dropped names (func null) stay
+  //    inert orphans, exactly the state the previous transaction left them
+  //    in.
+  simul_entry *old = static_cast<simul_entry *>(p->old_names);
+  function_lookup_info_t *old_funcs = static_cast<function_lookup_info_t *>(p->old_funcs);
+  for (int i = 0; i < p->old_count; i++) {
+    if (!old_funcs[old[i].index].func) {
+      continue;
+    }
+    ident_hash_elem_t *ihe = find_or_add_perm_ident(old[i].name);
+    if (ihe) {
+      activate_ident(ihe, old[i].index);
+    }
+  }
+  // 3. Free the new tables, swap the old ones back. free() only -- still
+  //    within the no-fail segment.
+  if (num_simul_efun) {
+    FREE(simul_names);
+    FREE(simuls);
+  }
+  simul_names = static_cast<simul_entry *>(p->old_names);
+  simuls = static_cast<function_lookup_info_t *>(p->old_funcs);
+  num_simul_efun = p->old_count;
+  p->old_names = nullptr;
+  p->old_funcs = nullptr;
+  p->old_count = 0;
+  p->state = simul_efun_prepared_t::State::Finalized;
 }
 
 void simul_efuns_discard(simul_efun_prepared_t *p) noexcept {
-  if (!p->active) {
+  // Prepared: release the shadow arrays (nothing is live yet).
+  // Activated (defensive -- the transaction always calls finish()/rollback()
+  // before destruction): the new tables are live and must stay; release the
+  // held old tables only.
+  // Finalized: no-op.
+  if (p->state == simul_efun_prepared_t::State::Prepared) {
     if (p->names) {
       FREE(p->names);
     }
@@ -345,6 +432,13 @@ void simul_efuns_discard(simul_efun_prepared_t *p) noexcept {
     }
     if (p->idents) {
       FREE(p->idents);
+    }
+  } else if (p->state == simul_efun_prepared_t::State::Activated) {
+    if (p->old_names) {
+      FREE(p->old_names);
+    }
+    if (p->old_funcs) {
+      FREE(p->old_funcs);
     }
   }
   *p = {};

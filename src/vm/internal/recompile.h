@@ -58,36 +58,93 @@ struct StagedProgram {
 struct RecompileTarget {
   object_t *ob{nullptr};
   uint32_t precomputed_flags{0};
+  uint64_t old_generation{0};  // pre-swap prog_generation, restored by rollback()
+};
+
+// What kind of object family this transaction reloads. Decided once by the
+// caller (f_recompile_object) at prepare time; every Phase 2 extension
+// (create-phase execution, simul_efun dispatch rebuild) derives from it so
+// the transaction keeps a single discriminant instead of accumulating
+// booleans.
+enum class RecompileTargetKind {
+  BlueprintFamily,  // ordinary blueprint + clones: no create phase (v1)
+  Master,           // master_ob: create phase runs inside the transaction
+  SimulEfun         // simul_efun_ob: create phase + dispatch rebuild
 };
 
 // Fully prepared transaction: staging program, validated layouts, frozen
-// target set (each target holds an add_ref). commit() performs the no-fail
-// swap AND releases every resource the transaction owns; the destructor is a
-// pure failure-path cleanup. New callers must never hand-release targets or
-// the old-program pin outside this type.
+// target set (each target holds an add_ref). The commit is split into three
+// segments (v2 Phase 2): commit_swap() is the no-fail swap (program +
+// apply-cache epoch + simul_efun activation) while admission stays closed;
+// the caller then runs __INIT/create for special targets in an error
+// context; commit_finish() releases the old resources after success,
+// rollback() restores the old program and dispatch tables after a failed
+// create. The destructor is a pure failure-path cleanup. New callers must
+// never hand-release targets or the old-program pin outside this type.
 struct RecompilePrepared {
   StagedProgram staged;
   program_t *old_prog{nullptr};
   RecompileLayout old_layout;
   RecompileLayout new_layout;
   std::vector<RecompileTarget> targets;
+  RecompileTargetKind kind{RecompileTargetKind::BlueprintFamily};
 
-  // Optional simul_efun dispatch rebuild (v2 design Phase 1): prepared in
-  // the allocatable frozen segment, activated inside commit()'s no-fail
-  // segment, discarded by the destructor on failure paths.
+  // simul_efun dispatch rebuild (v2): prepared in the allocatable frozen
+  // segment when kind == SimulEfun, activated inside commit_swap()'s no-fail
+  // segment (old tables handed over alive), finished/rolled back after the
+  // create phase, discarded by the destructor on failure paths.
   simul_efun_prepared_t simuls;
-  bool simuls_prepared{false};
 
   RecompilePrepared() = default;
   ~RecompilePrepared();
   RecompilePrepared(const RecompilePrepared &) = delete;
   RecompilePrepared &operator=(const RecompilePrepared &) = delete;
 
-  // The no-fail commit: reserve new-program refs, swap program/generation/
-  // flags on every target, release the N old-program references, then drop
-  // the snapshot add_refs. Must only be called with the owner runtime FROZEN
-  // and after every allocatable step succeeded (v0.4 §9.2).
-  void commit() noexcept;
+  // Segment 1 (no-fail): reserve new-program refs (commit pin + one per
+  // target), swap program/generation/derived-flags on every target, bump
+  // the apply-cache epoch, activate the simul_efun rebuild (old dispatch
+  // tables handed to simuls, kept alive). Must only be called with the
+  // owner runtime FROZEN and after every allocatable step succeeded.
+  void commit_swap() noexcept;
+
+  // Segment 2 (fail-able, special targets only): run __INIT/create on every
+  // target while admission stays closed. BlueprintFamily is a no-op (v1
+  // semantics: ordinary blueprints and clones have no create phase) so any
+  // caller can invoke this uniformly. Errors from __INIT, create(), or the
+  // interpreter propagate as C++ exceptions (plain apply() does not
+  // swallow them; only safe_apply does) to the caller's error context, and
+  // a destructed target is a stable error too -- both must end in rollback().
+  void run_create();
+
+  // Segment 2 wrapper owning the error-context dance: save_context around
+  // run_create(); on a C++ error it restores the interpreter stack
+  // (restore_context -> pop_context, in that order), rolls the transaction
+  // back (noexcept, safe after restore per the safe_apply convention) and
+  // returns false. The caller then raises a fresh stable error. This is the
+  // ONLY supported way to run the create phase outside the package layer.
+  bool run_create_guarded();
+
+  // Segment 3 (no-fail, after a successful create phase): release the old
+  // simul_efun tables, the N old-program references, the commit pin, the
+  // old-program transaction pin, and the snapshot add_refs.
+  void commit_finish() noexcept;
+
+  // Failure path after commit_swap(): reverse the swap (targets point back
+  // at old_prog, generation and derived flags restored), restore the old
+  // simul_efun dispatch tables, bump the apply-cache epoch for the staged
+  // program, release the staged program's commit pin + N target
+  // reservations, then finalize like commit_finish(). noexcept: runs inside
+  // the no-fail segment (the create phase is the only fail-able part).
+  void rollback() noexcept;
+
+ private:
+  // Shared tail of commit_finish()/rollback(): drop the transaction pin on
+  // old_prog (the N object references stay or are already gone depending on
+  // the caller's segment) and release the snapshot add_refs. The ref
+  // accounting around this tail is the most fragile part of the
+  // transaction; it lives here so both success and failure paths cannot
+  // drift apart. tag distinguishes the two call sites in free_object().
+  void release_pin_and_snapshot_refs(const char *tag) noexcept;
 };
 
 // Compile the blueprint's source file into a staging program, WITHOUT
@@ -99,6 +156,15 @@ StagedProgram compile_program_for_recompile(object_t *blueprint);
 // Build a structured layout descriptor from a program (variables in actual
 // variable-block order, inherits depth-first).
 RecompileLayout describe_recompile_layout(program_t *prog);
+
+// Wire the transaction's entry segment exactly like f_recompile_object:
+// pin the old program (ref++ transaction pin), decide the kind, run the
+// simul_efun dispatch preparation when kind == SimulEfun, and freeze the
+// target set. The staging program must already be assigned to
+// prepared->staged. Callers must not hand-roll this wiring (pin accounting
+// and per-kind preparation live here only).
+void start_recompile_transaction(object_t *ob, RecompileTargetKind kind,
+                                 RecompilePrepared *prepared);
 
 // Compare two layouts field by field. Returns true when identical; otherwise
 // false and first_diff names the first mismatching field.

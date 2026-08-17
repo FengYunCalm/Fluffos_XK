@@ -3401,12 +3401,13 @@ void f_recompile_object() {
     error("recompile_object requires master authorization\n");
   }
 
-  // 6. Special targets (v2 Phase 1): master and simul_efun reloads are now
-  //    supported. Master needs no special handling -- applies resolve
-  //    through the per-program apply lookup table prepared below (step 8).
+  // 6. Special targets (v2): master and simul_efun reloads are supported.
+  //    Master applies resolve through the per-program apply lookup table
+  //    prepared below (step 8) -- no master-specific table work is needed.
   //    The simul_efun dispatch rebuild is hooked next to that table
   //    preparation: shadow tables in the frozen segment, activation inside
-  //    commit()'s no-fail segment.
+  //    commit_swap()'s no-fail segment. Both special targets get a create
+  //    phase (segment 2) inside the transaction, with rollback on failure.
 
   // 7. Owner quiescence: close admission and wait for active owner work.
   int64_t timeout_ms = CONFIG_INT(__RECOMPILE_OBJECT_QUIESCE_TIMEOUT_MS__);
@@ -3428,8 +3429,6 @@ void f_recompile_object() {
   // 8. Staging compile, layout check, frozen snapshot, no-fail commit.
   RecompilePrepared prepared;
   prepared.staged = compile_program_for_recompile(ob);
-  prepared.old_prog = ob->prog;
-  prepared.old_prog->ref++;  // transaction pin
   prepared.old_layout = describe_recompile_layout(ob->prog);
   prepared.new_layout = describe_recompile_layout(prepared.staged.prog);
 
@@ -3441,16 +3440,30 @@ void f_recompile_object() {
   // Apply lookup table must be fully built while still frozen (v0.4 §9.3).
   prepare_apply_lookup_table(prepared.staged.prog);
 
-  // v2 Phase 1: simul_efun dispatch rebuild -- frozen-segment preparation.
-  // Shadow arrays and identifier-hash pre-inserts happen here (allocation
-  // allowed); the no-fail activation runs inside commit().
-  if (ob == simul_efun_ob) {
-    simul_efuns_prepare(prepared.staged.prog, &prepared.simuls);
-    prepared.simuls_prepared = true;
+  // v2: target kind decides the per-kind transaction extensions (create
+  // phase, simul_efun dispatch rebuild) -- the single discriminant the
+  // transaction derives its behavior from. start_recompile_transaction owns
+  // the pin/kind/prepare/snapshot wiring.
+  RecompileTargetKind kind = RecompileTargetKind::BlueprintFamily;
+  if (ob == master_ob) {
+    kind = RecompileTargetKind::Master;
+  } else if (ob == simul_efun_ob) {
+    kind = RecompileTargetKind::SimulEfun;
+  }
+  start_recompile_transaction(ob, kind, &prepared);
+
+  // v2 Phase 2 three-segment commit: (1) no-fail swap, (2) create phase for
+  // special targets in an error context -- any __INIT/interpreter error or
+  // self-destruction rolls the transaction back to the old program and
+  // dispatch tables, (3) no-fail finalize. Admission stays closed across
+  // all three segments. run_create_guarded() owns the error-context dance
+  // (BlueprintFamily is a no-op inside).
+  prepared.commit_swap();
+  if (!prepared.run_create_guarded()) {
+    error("recompile_object: create() failed, transaction rolled back\n");
   }
 
-  snapshot_recompile_targets(ob, &prepared);
-  prepared.commit();
+  prepared.commit_finish();
 
   int count = static_cast<int>(prepared.targets.size());
   free_object(&ob, "f_recompile_object");

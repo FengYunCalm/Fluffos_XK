@@ -62,6 +62,7 @@
 #include "vm/internal/otable.h"
 #include "vm/internal/simulate.h"
 #include "vm/internal/simul_efun.h"
+#include "vm/internal/recompile.h"
 #include "vm/object_handle.h"
 #include "vm/owner.h"
 #include "vm/vm.h"
@@ -25016,6 +25017,17 @@ program_t *CompileSimulProg(const std::string &src) {
   std::istringstream stream(src);
   return compile_file(std::make_unique<IStreamLexStream>(stream), "simul_reload_test");
 }
+
+// Locate a program variable's block slot by name (own variables first,
+// inherited variables after). Returns -1 when absent.
+int FindVariableSlot(program_t *prog, const char *name) {
+  for (int i = 0; i < prog->num_variables_total; i++) {
+    if (strcmp(prog->variable_table[i], name) == 0) {
+      return i;
+    }
+  }
+  return -1;
+}
 }  // namespace
 
 TEST_F(DriverTest, TestSimulEfunReloadAddDropReadd) {
@@ -25131,4 +25143,270 @@ TEST_F(DriverTest, TestSimulEfunReloadAddDropReadd) {
   deallocate_program(prog_a);
   deallocate_program(prog_b);
   deallocate_program(prog_c);
+}
+
+TEST_F(DriverTest, TestSimulEfunReloadCreateFailureRollback) {
+  ASSERT_GT(num_simul_efun, 0) << "config.test must load a simul_efun file";
+  SimulTableSnapshot snap = SaveSimulTable();
+  const int old_count = num_simul_efun;
+  program_t *old_prog = simul_efun_ob->prog;
+  ASSERT_NE(old_prog, nullptr);
+  // The live tables themselves (snap holds deep copies; rollback must
+  // restore the ORIGINAL pointers, not copies).
+  simul_entry *orig_names = simul_names;
+  function_lookup_info_t *orig_funcs = simuls;
+
+  const char *kBad = "simul_efun_xyz_bad";
+  std::string survivor = simul_names[0].name;
+  ASSERT_NE(survivor, kBad);
+  int surv_sem_before = 0;
+  ident_hash_elem_t *pre = find_or_add_perm_ident(survivor.c_str());
+  if (pre) surv_sem_before = pre->sem_value;
+
+  // The file-level initializer calls boom() -> the implicit #global_init#
+  // runs during the create phase (call___INIT) and raises -> the whole
+  // transaction must roll back to the pre-swap state.
+  std::string src = std::string("string ") + kBad + "() { return \"bad\"; }\n"
+                    "string " + survivor + "() { return \"survivor2\"; }\n"
+                    "int boom() { error(\"boom\"); return 0; }\n"
+                    "int g = boom();\n";
+  program_t *prog = CompileSimulProg(src);
+  ASSERT_NE(prog, nullptr);
+
+  // Drive the transaction through the same entry point f_recompile_object
+  // uses (pin + kind + dispatch prepare + snapshot all live there).
+  RecompilePrepared prep;
+  prep.staged = StagedProgram(prog);
+  start_recompile_transaction(simul_efun_ob, RecompileTargetKind::SimulEfun, &prep);
+  ASSERT_EQ(prep.targets.size(), 1u) << "simul_efun_ob must be the only target";
+
+  // Segment 1: no-fail swap. New dispatch table live.
+  prep.commit_swap();
+  ASSERT_EQ(prep.simuls.state, simul_efun_prepared_t::State::Activated);
+  int bad_idx = FindDispatchIndex(kBad);
+  ASSERT_GE(bad_idx, old_count);
+  // lookup_ident() HIDES inert/orphan idents: CHECK_ELEM gates on
+  // sem_value != 0 (lex.cc), so an inactivated name returns nullptr no
+  // matter what string is passed. find_or_add_perm_ident() bypasses the
+  // gate (strcmp + no sem_value check) and is the only way to reach an
+  // inert entry.
+  ident_hash_elem_t *ihe = find_or_add_perm_ident(kBad);
+  ASSERT_NE(ihe, nullptr);
+  ASSERT_TRUE(ihe->token & IHE_SIMUL);
+  ASSERT_EQ(ihe->dn.simul_num, bad_idx);
+
+  // Segment 2: create phase fails (__INIT raises). run_create_guarded()
+  // owns the error-context dance (restore -> pop -> rollback) and must
+  // report the failure.
+  ASSERT_FALSE(prep.run_create_guarded())
+      << "file-level init error must surface as a failed guarded create";
+
+  // Old dispatch tables restored BY POINTER (the exact pre-swap arrays).
+  ASSERT_EQ(simul_names, orig_names);
+  ASSERT_EQ(simuls, orig_funcs);
+  ASSERT_EQ(num_simul_efun, old_count);
+  // Survivor ident restored to the active state with its original index
+  // and semantic counter.
+  ihe = find_or_add_perm_ident(survivor.c_str());
+  ASSERT_NE(ihe, nullptr);
+  ASSERT_TRUE(ihe->token & IHE_SIMUL);
+  ASSERT_FALSE(ihe->token & IHE_ORPHAN);
+  ASSERT_EQ(ihe->dn.simul_num, snap.names[0].index);
+  ASSERT_EQ(ihe->sem_value, surv_sem_before);
+  // The failed transaction's fresh name is inert residue (compile-time
+  // rejection state, matching dropped-name semantics).
+  ihe = find_or_add_perm_ident(kBad);
+  ASSERT_NE(ihe, nullptr);
+  ASSERT_FALSE(ihe->token & IHE_SIMUL);
+  ASSERT_TRUE(ihe->token & IHE_ORPHAN);
+  ASSERT_EQ(ihe->dn.simul_num, -1);
+  // Target object back on the old program; dispatch entries still point at
+  // old-program functions with consistent runtime indices.
+  ASSERT_EQ(simul_efun_ob->prog, old_prog);
+  int s_idx = snap.names[0].index;
+  ASSERT_NE(simuls[s_idx].func, nullptr);
+  int s_pidx = FindProgramIndex(old_prog, survivor.c_str());
+  ASSERT_GE(s_pidx, 0);
+  ASSERT_EQ(simuls[s_idx].func, find_func_entry(old_prog, s_pidx));
+  ASSERT_EQ(simuls[s_idx].index, s_pidx);
+
+  // Rollback ends in the Finalized state: the destructor cleanup is a
+  // no-op and the new tables were freed.
+  ASSERT_EQ(prep.simuls.state, simul_efun_prepared_t::State::Finalized);
+
+  RestoreSimulTable(snap);
+  // prep goes out of scope: staged.prog deallocates (its initial ref), all
+  // pins were released by rollback().
+}
+
+TEST_F(DriverTest, TestSimulEfunReloadRollbackKeepsDroppedInert) {
+  ASSERT_GT(num_simul_efun, 0);
+  SimulTableSnapshot snap = SaveSimulTable();
+  const char *kFoo = "simul_efun_xyz_foo2";  // unique vs other reload tests
+  std::string survivor = simul_names[0].name;
+  int surv_sem_before = 0;
+  ident_hash_elem_t *pre = find_or_add_perm_ident(survivor.c_str());
+  if (pre) surv_sem_before = pre->sem_value;
+
+  // Reload A: adds foo (live). Reload B: drops foo (inert in the dispatch
+  // table, ident in compile-time rejection state) -- the pre-transaction
+  // state a later rollback must restore exactly.
+  std::string src_a = std::string("string ") + kFoo + "() { return \"a\"; }\n"
+                      "string " + survivor + "() { return \"survivorA\"; }\n";
+  program_t *prog_a = CompileSimulProg(src_a);
+  ASSERT_NE(prog_a, nullptr);
+  simul_efun_prepared_t prep_a;
+  simul_efuns_prepare(prog_a, &prep_a);
+  simul_efuns_activate(&prep_a);
+  int foo_idx = FindDispatchIndex(kFoo);
+  ASSERT_GE(foo_idx, 0);
+
+  std::string src_b = "string simul_efun_xyz_only() { return \"b\"; }\n";
+  program_t *prog_b = CompileSimulProg(src_b);
+  ASSERT_NE(prog_b, nullptr);
+  simul_efun_prepared_t prep_b;
+  simul_efuns_prepare(prog_b, &prep_b);
+  simul_efuns_activate(&prep_b);
+  ASSERT_EQ(simuls[foo_idx].func, nullptr) << "foo dropped by reload B";
+  ident_hash_elem_t *ihe = find_or_add_perm_ident(kFoo);
+  ASSERT_NE(ihe, nullptr);
+  ASSERT_FALSE(ihe->token & IHE_SIMUL);
+  ASSERT_TRUE(ihe->token & IHE_ORPHAN);
+  ASSERT_EQ(ihe->dn.simul_num, -1);
+
+  // Transaction C: re-adds foo, then its create phase fails. Rollback must
+  // leave foo exactly as reload B left it -- NOT re-activated.
+  std::string src_c = std::string("string ") + kFoo + "() { return \"c\"; }\n"
+                      "int boom() { error(\"boom\"); return 0; }\n"
+                      "int g = boom();\n";
+  program_t *prog_c = CompileSimulProg(src_c);
+  ASSERT_NE(prog_c, nullptr);
+  RecompilePrepared prep_c;
+  prep_c.staged = StagedProgram(prog_c);
+  start_recompile_transaction(simul_efun_ob, RecompileTargetKind::SimulEfun, &prep_c);
+  prep_c.commit_swap();
+  // foo live again on the new table.
+  ihe = find_or_add_perm_ident(kFoo);
+  ASSERT_NE(ihe, nullptr);
+  ASSERT_TRUE(ihe->token & IHE_SIMUL);
+  ASSERT_EQ(ihe->dn.simul_num, foo_idx);
+
+  // create fails -> guarded wrapper rolls back and reports failure.
+  ASSERT_FALSE(prep_c.run_create_guarded());
+
+  // foo: back to inert orphan (the pre-transaction state). Regression
+  // target: the pre-fix rollback re-activated every old-table entry,
+  // including dropped names, making the compiler emit F_SIMUL_EFUN for a
+  // dispatch slot whose func was null.
+  ASSERT_EQ(simuls[foo_idx].func, nullptr) << "foo stays dropped after rollback";
+  ihe = find_or_add_perm_ident(kFoo);
+  ASSERT_NE(ihe, nullptr);
+  ASSERT_FALSE(ihe->token & IHE_SIMUL);
+  ASSERT_TRUE(ihe->token & IHE_ORPHAN);
+  ASSERT_EQ(ihe->dn.simul_num, -1);
+  // Reload B's live name re-activates (it was in the old table with a
+  // live func, so rollback step 2 restores it).
+  int only_idx = FindDispatchIndex("simul_efun_xyz_only");
+  ASSERT_GE(only_idx, 0);
+  ihe = find_or_add_perm_ident("simul_efun_xyz_only");
+  ASSERT_NE(ihe, nullptr);
+  ASSERT_TRUE(ihe->token & IHE_SIMUL);
+  ASSERT_EQ(ihe->dn.simul_num, only_idx);
+  // 'same' was already dropped by reload B (not in prog_b), so the
+  // rollback target state keeps it orphaned: B's post-activate table has
+  // a nil func for it and step 2's guard skips nil-func entries.
+  ihe = find_or_add_perm_ident(survivor.c_str());
+  ASSERT_NE(ihe, nullptr);
+  ASSERT_TRUE(ihe->token & IHE_ORPHAN);
+  ASSERT_EQ(ihe->dn.simul_num, -1);
+  ASSERT_NE(simuls[only_idx].func, nullptr);
+
+  // Release the shadow tables the intermediate activates left behind.
+  simul_efuns_finish(&prep_a);
+  simul_efuns_finish(&prep_b);
+  RestoreSimulTable(snap);
+  deallocate_program(prog_a);
+  deallocate_program(prog_b);
+  // prog_c deallocates via the prep_c destructor.
+}
+
+TEST_F(DriverTest, TestSimulEfunReloadInitCreateOrder) {
+  // The probe object's file-level initializer (compiled into #global_init#)
+  // sets probe_order to 1; create() promotes it to 2. call_create() -- the
+  // exact call run_create() issues per target -- must leave it at 2, i.e.
+  // __INIT strictly before create.
+  object_t *probe = load_object_for_test("single/recompile_probe");
+  ASSERT_NE(probe, nullptr);
+  int slot = FindVariableSlot(probe->prog, "probe_order");
+  ASSERT_GE(slot, 0);
+  // load_object ran the create phase already; reset and run it again.
+  probe->variables[slot].u.number = 0;
+  call_create(probe, 0);
+  ASSERT_EQ(probe->variables[slot].u.number, 2)
+      << "create phase must run __INIT (probe_mark) before create()";
+}
+
+TEST_F(DriverTest, TestMasterReloadSuccess) {
+  ASSERT_NE(master_ob, nullptr);
+  program_t *orig_prog = master_ob->prog;
+  ASSERT_NE(orig_prog, nullptr);
+  orig_prog->ref++;  // pin for the restore below
+
+  // First reload: full transaction, success path (master.c has no runtime
+  // initializers or create(): the create phase is a no-op).
+  RecompilePrepared prep;
+  prep.staged = compile_program_for_recompile(master_ob);
+  ASSERT_NE(prep.staged.prog, nullptr);
+  start_recompile_transaction(master_ob, RecompileTargetKind::Master, &prep);
+  ASSERT_EQ(prep.targets.size(), 1u) << "master_ob must be the only target";
+
+  prep.commit_swap();
+  ASSERT_TRUE(prep.run_create_guarded())
+      << "master.c has no runtime initializers: create phase must succeed";
+  prep.commit_finish();
+
+  ASSERT_EQ(master_ob->prog, prep.staged.prog)
+      << "master reload must swap in the new program";
+  // The apply lookup table for the new program must be ready (every master
+  // apply resolves through it).
+  lookup_entry_s e = apply_cache_lookup("valid_recompile_object", prep.staged.prog);
+  // progp points at the program DEFINING the apply (the inherited valid.c
+  // program here), not at the queried program.
+  ASSERT_NE(e.progp, nullptr);
+  ASSERT_NE(e.funp, nullptr);
+
+  // Authorization apply through the standard master path hits the NEW
+  // program (§1.3.2 verification point).
+  push_object(master_ob);
+  svalue_t *ret = safe_apply_master_ob(APPLY_VALID_RECOMPILE_OBJECT, 1);
+  ASSERT_NE(ret, nullptr);
+  ASSERT_TRUE(MASTER_APPROVED(ret));
+
+  // Immediate second reload: authorization apply must resolve through the
+  // program the first reload just published.
+  program_t *first_prog = prep.staged.prog;
+  {
+    RecompilePrepared prep2;
+    prep2.staged = compile_program_for_recompile(master_ob);
+    ASSERT_NE(prep2.staged.prog, nullptr);
+    start_recompile_transaction(master_ob, RecompileTargetKind::Master, &prep2);
+    prep2.commit_swap();
+    ASSERT_TRUE(prep2.run_create_guarded());
+    prep2.commit_finish();
+    ASSERT_EQ(master_ob->prog, prep2.staged.prog);
+    lookup_entry_s e2 = apply_cache_lookup("valid_recompile_object", prep2.staged.prog);
+    ASSERT_NE(e2.progp, nullptr);
+    ASSERT_NE(e2.funp, nullptr);
+    // prep2 destructor deallocates prep2.staged.prog (its initial ref; the
+    // master object's ref to it stays live until the restore below).
+  }
+
+  // Restore: point master back at the original program, transferring the
+  // master object's reference from the last reload to orig_prog, then drop
+  // our pin.
+  program_t *last_prog = master_ob->prog;
+  master_ob->prog = orig_prog;
+  orig_prog->ref++;   // the object's reference
+  free_prog(&last_prog);  // the object's reference to the last reload
+  free_prog(&orig_prog);  // our pin
 }

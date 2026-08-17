@@ -224,18 +224,20 @@ void snapshot_recompile_targets(object_t *blueprint, RecompilePrepared *prepared
 // ---------------------------------------------------------------------------
 
 RecompilePrepared::~RecompilePrepared() {
-  // Failure-path cleanup only: after commit(), targets have been cleared and
-  // the old-program pin released, so this is a no-op there.
+  // Failure-path cleanup only: after commit_finish()/rollback(), targets
+  // have been cleared and the old-program pin released, so this is a no-op
+  // there. The staged program's initial ref is released here too (rollback()
+  // already released the commit pin + N reservations).
   for (auto &t : targets) {
     if (t.ob) free_object(&t.ob, "recompile_prepared");
   }
   if (old_prog) free_prog(&old_prog);
-  if (simuls_prepared) {
+  if (kind == RecompileTargetKind::SimulEfun) {
     simul_efuns_discard(&simuls);
   }
 }
 
-void RecompilePrepared::commit() noexcept {
+void RecompilePrepared::commit_swap() noexcept {
   program_t *new_prog = staged.prog;
   if (!new_prog) return;
   new_prog->ref++;  // commit pin
@@ -248,6 +250,7 @@ void RecompilePrepared::commit() noexcept {
   }
   for (auto &t : targets) {
     if (!t.ob) continue;
+    t.old_generation = t.ob->prog_generation;  // rollback() restores this
     t.ob->prog = new_prog;
     t.ob->prog_generation++;
     t.ob->flags = (t.ob->flags & ~kProgramDerivedFlags) | t.precomputed_flags;
@@ -262,9 +265,73 @@ void RecompilePrepared::commit() noexcept {
   // v2 design Phase 1: simul_efun dispatch activation (no-fail: ident field
   // writes + pointer swap + free() only). Cumulative-table semantics keep
   // every already-compiled caller's sindex valid; dropped names stay in the
-  // table, inactive.
-  if (simuls_prepared) {
+  // table, inactive. The OLD live tables are handed to simuls alive (not
+  // freed): the create phase may still need to roll them back.
+  if (kind == RecompileTargetKind::SimulEfun) {
     simul_efuns_activate(&simuls);
+  }
+}
+
+void RecompilePrepared::run_create() {
+  // BlueprintFamily has no create phase (v1 semantics: ordinary blueprints
+  // and clones keep their old behavior). The kind discriminant lives inside
+  // the transaction so no caller can silently skip the create segment for
+  // a new kind -- a new kind must decide here explicitly.
+  if (kind == RecompileTargetKind::BlueprintFamily) {
+    return;
+  }
+  // v2 Phase 2: __INIT + create() on the special targets while admission
+  // stays closed. Any error -- from __INIT, create(), or the interpreter --
+  // propagates as a C++ exception (plain apply() does not swallow errors)
+  // and must end in rollback() at the caller; a target that destructs
+  // itself during create is a stable error too.
+  for (auto &t : targets) {
+    if (!t.ob) continue;
+    call_create(t.ob, 0);
+    if (t.ob->flags & O_DESTRUCTED) {
+      error("recompile_object: target destructed during create()\n");
+    }
+  }
+}
+
+bool RecompilePrepared::run_create_guarded() {
+  error_context_t econ{};
+  save_context(&econ);
+  try {
+    run_create();
+  } catch (const char *) {
+    restore_context(&econ);
+    pop_context(&econ);
+    // rollback() is noexcept (free()/field writes only) and does not
+    // depend on interpreter state -- safe after restore, per the
+    // safe_apply convention.
+    rollback();
+    return false;
+  }
+  pop_context(&econ);
+  return true;
+}
+
+void start_recompile_transaction(object_t *ob, RecompileTargetKind kind,
+                                 RecompilePrepared *prepared) {
+  prepared->kind = kind;
+  prepared->old_prog = ob->prog;
+  prepared->old_prog->ref++;  // transaction pin
+  if (kind == RecompileTargetKind::SimulEfun) {
+    // simul_efun dispatch rebuild -- frozen-segment preparation. Shadow
+    // arrays and identifier-hash pre-inserts happen here (allocation
+    // allowed); the no-fail activation runs inside commit_swap().
+    simul_efuns_prepare(prepared->staged.prog, &prepared->simuls);
+  }
+  snapshot_recompile_targets(ob, prepared);
+}
+
+void RecompilePrepared::commit_finish() noexcept {
+  // Create phase succeeded: the old simul_efun dispatch tables (handed over
+  // alive by activate so a failed create could restore them) are the loser
+  // -- free them.
+  if (kind == RecompileTargetKind::SimulEfun) {
+    simul_efuns_finish(&simuls);
   }
 
   // Release the N old-program references held by the targets. The
@@ -275,13 +342,17 @@ void RecompilePrepared::commit() noexcept {
   }
 
   // Drop the commit pin; the targets now hold the new program's refs.
-  program_t *staged_pin = new_prog;
+  program_t *staged_pin = staged.prog;
   free_prog(&staged_pin);
 
   // Release the transaction pin on old_prog: the N object references are
   // already gone above; this final free_prog may deallocate old_prog unless
   // a funptr/inheritor still pins it via func_ref. (No allocation, no error
   // -- still within the no-fail segment.)
+  release_pin_and_snapshot_refs("recompile_commit");
+}
+
+void RecompilePrepared::release_pin_and_snapshot_refs(const char *tag) noexcept {
   program_t *pin = old_prog;
   old_prog = nullptr;
   free_prog(&pin);
@@ -292,7 +363,47 @@ void RecompilePrepared::commit() noexcept {
     if (t.ob) {
       object_t *snap = t.ob;
       t.ob = nullptr;
-      free_object(&snap, "recompile_commit");
+      free_object(&snap, tag);
     }
   }
+}
+
+
+void RecompilePrepared::rollback() noexcept {
+  program_t *new_prog = staged.prog;
+  // Reverse swap: targets point back at old_prog (their references never
+  // left it -- the swap only redirected the pointer). Generation and
+  // derived flags are restored so the object is exactly in its pre-swap
+  // state; funptrs bound during the create phase carry the swap-era
+  // generation and stay rejected, like any reload.
+  constexpr uint32_t kProgramDerivedFlags = O_WILL_CLEAN_UP;
+  for (auto &t : targets) {
+    if (!t.ob) continue;
+    t.ob->prog = old_prog;
+    t.ob->prog_generation = t.old_generation;
+    t.ob->flags = (t.ob->flags & ~kProgramDerivedFlags) | t.precomputed_flags;
+  }
+
+  // Restore the old simul_efun dispatch tables: ident fields mirrored
+  // back, pointers swapped back in, new tables freed.
+  if (kind == RecompileTargetKind::SimulEfun) {
+    simul_efuns_rollback(&simuls);
+  }
+
+  // Cache epoch bump: the staged program's apply table must never be used
+  // again; the old program's table rebuilds on the next lookup.
+  apply_cache_invalidate_program(new_prog);
+
+  // Release the new program: the commit pin (1) plus the per-target
+  // reservations (N). staged.prog's own initial ref is released by the
+  // destructor, which then deallocates it.
+  for (size_t i = 0; i <= targets.size(); i++) {
+    program_t *p = new_prog;
+    free_prog(&p);
+  }
+
+  // Same finalization as commit_finish(): drop the transaction pin on
+  // old_prog (the N object references stay -- the objects point at it
+  // again) and release the snapshot add_refs.
+  release_pin_and_snapshot_refs("recompile_rollback");
 }
