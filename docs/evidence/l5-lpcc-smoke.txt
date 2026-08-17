@@ -1,5 +1,60 @@
-Processing config file: /tmp/l2_lpcc_smoke.c
-Missing '"' or '<' around global include file name; adding quotes.
-*Error in config file.  Missing line:
-	name 
-Uncollected profiling events: 2.
+Processing config file: etc/config.test
+New Debug log location: "log/debug.log".
+Execution root: ./
+Initializing internal stuff ....
+Event backend in use: epoll
+Loading simul_efun file : /single/simul_efun
+/std/base64.c line 56: Warning: Unused local variable 'p'
+  }
+   ^
+/std/base64.c line 56: Warning: Unused local variable 'rlen'
+  }
+   ^
+/std/number_string.c line 54: Warning: Unused local variable 'parts'
+  }
+   ^
+/std/number_string.c line 54: Warning: Unused local variable 'part'
+  }
+   ^
+Loading master file: /single/master
+NAME: /single/l2_lpcc_smoke.c
+INHERITS:
+      name                    fio    vio
+      ----------------        ---    ---
+FUNCTIONS:
+      name                      offset  mods   flags   fio  vio # locals  # args # def args
+      ------------------------- ------  ----  -------  ---  --- --------  ------ ----------
+   0: #global_init#                  0   h--  --s----                   0       0          0 
+
+;;; single/l2_lpcc_smoke.c
+
+Globals:
+   0: x
+VARIABLES defined:
+   0: public int x
+STRINGS:
+   0: single/l2_lpcc_smoke.c
+   1: include/globals.h
+   2: include/tests.h
+DISASSEMBLY:
+
+;; Function: hidden void #global_init#()
+0000:  0B 2A                     byte                               ; 42
+0002:  44 00 00                  global_lvalue                      ; x(0)
+0005:  61                        (void)assign                       ; 
+0006:  2F                        return_zero                        ; 
+; single/l2_lpcc_smoke.c:1
+
+;;;  *** Line Number Info ***
+
+absolute line -> (file, line) table:
+0 lines from 1 [single/l2_lpcc_smoke.c]
+11 lines from 2 [include/globals.h]
+27 lines from 3 [include/tests.h]
+25 lines from 2 [include/globals.h]
+2 lines from 1 [single/l2_lpcc_smoke.c]
+
+address -> absolute line table:
+0000-0006: 64
+Trace duration: 5533.456000 us, dumping 85 events to trace_lpcc.json in separate thread.
+[thread 125344308786880d]: Dump trace successfully to file trace_lpcc.json, cost 0 ms.
