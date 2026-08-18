@@ -167,6 +167,11 @@ using cst = struct ColumnSlashTable {
   unsigned int remainder; /* extra space needed to fill out to width */
   int pres;               /* precision */
   format_info info;       /* formatting data */
+  char *owned;            // #1247 SPRINTF-1: owned copy of the source string
+                          // (col/table data point into it); freed with the cst.
+                          // Columns/tables can outlive the transient
+                          // sprintf_state.clean they were rendered from, so
+                          // they must not borrow it.
   struct ColumnSlashTable *next;
 }; /* Columns Slash Tables */
 
@@ -201,6 +206,15 @@ static void pop_sprintf_state() {
     cst *next = state->csts->next;
     if (!(state->csts->info & INFO_COLS) && state->csts->d.tab) {
       FREE(state->csts->d.tab);
+    }
+    // #1247 SPRINTF-2: add_column/add_table free the pad when a column/table
+    // fully flushes; a cst still pending here (e.g. on error unwind) must
+    // free it too.
+    if (state->csts->pad) {
+      FREE(state->csts->pad);
+    }
+    if (state->csts->owned) {
+      FREE_MSTR(state->csts->owned);
     }
     FREE(state->csts);
     state->csts = next;
@@ -667,6 +681,10 @@ static int add_column(cst **column, int trailing) {
     if (col->pad) {
       FREE(col->pad);
     }
+    // #1247 SPRINTF-3
+    if (col->owned) {
+      FREE_MSTR(col->owned);
+    }
     FREE(col);
     *column = temp;
     return ret;
@@ -720,6 +738,10 @@ static int add_table(cst **table) {
     temp = tab->next;
     if (tab->pad) {
       FREE(tab->pad);
+    }
+    // #1247 SPRINTF-4
+    if (tab->owned) {
+      FREE_MSTR(tab->owned);
     }
     if (tab_d) {
       FREE(tab_d);
@@ -1090,7 +1112,11 @@ char *string_print_formatted(const char *format_str, int argc, svalue_t *argv) {
               *temp =
                   reinterpret_cast<cst *>(DMALLOC(sizeof(cst), TAG_TEMPORARY, "string_print: 3"));
               (*temp)->next = nullptr;
-              (*temp)->d.col = carg->u.string;
+              // #1247 SPRINTF-5: own a copy: a column can stay pending across
+              // iterations while the arg it came from (sprintf_state.clean for
+              // %O) is freed.
+              (*temp)->owned = string_copy(carg->u.string, "string_print: col");
+              (*temp)->d.col = (*temp)->owned;
               (*temp)->pad = make_pad(&pad);
               (*temp)->size = fs;
               (*temp)->pres = (pres) ? pres : fs;
@@ -1108,9 +1134,13 @@ char *string_print_formatted(const char *format_str, int argc, svalue_t *argv) {
               unsigned int n, items_per_column, max_width;
               const char *p1, *p2;
 
-#define TABLE carg->u.string
+#define TABLE ((*temp)->owned)
               (*temp) =
                   reinterpret_cast<cst *>(DMALLOC(sizeof(cst), TAG_TEMPORARY, "string_print: 4"));
+              // #1247 SPRINTF-6: own a copy: table entries point into this
+              // buffer, which must outlive the transient sprintf_state.clean
+              // (for %O) they were rendered from.
+              (*temp)->owned = string_copy(carg->u.string, "string_print: table");
               (*temp)->d.tab = nullptr;
               (*temp)->pad = make_pad(&pad);
               (*temp)->info = finfo;
@@ -1313,10 +1343,14 @@ char *string_print_formatted(const char *format_str, int argc, svalue_t *argv) {
           }
           cheat[i] = '\0';
 
+          // #1247 SPRINTF-7: the precision clamp above bounds only the
+          // fraction digits, not the integer part or sign, so a large-magnitude
+          // value with a big precision (e.g. sprintf("%.1077f", 1e300)) would
+          // overrun the fixed temp buffer. snprintf truncates instead.
           if (carg->type == T_REAL) {
-            sprintf(temp, cheat, carg->u.real);
+            snprintf(temp, sizeof(temp), cheat, carg->u.real);
           } else {
-            sprintf(temp, cheat, carg->u.number);
+            snprintf(temp, sizeof(temp), cheat, carg->u.number);
           }
           {
             int const tmpl = strlen(temp);

@@ -265,7 +265,7 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | ASYNC-2..4,9 | async.cc:76-130,589-623 | current_work(s) 多飞行记账 | async.cc（无） | 新增多 worker 测试 | A-S1-async-inflight |
 | ASYNC-5 | async.cc:273-283 | getdirthread dirent 大小 | async.cc（无） | ASan getdir 多条目测试 | A-S1-async-getdir |
 | ASYNC-6..8 | async.cc:306-355 | 拒绝路径 callback 泄漏 | async.cc（无） | 新增拒绝路径测试 | A-S1-async-leak |
-| PARSER-1..9 | parser.cc:78-88,626-638,713-716,738-748,2877-2890,3399,3450,3515 | verb node UAF + 深度防护 | parser.cc:84-92,619-626,644,707,733-740,2903-2909,3441,3492,3557 | parser_handler_destruct.lpc | batch5（待提交） |
+| PARSER-1..9 | parser.cc:78-88,626-638,713-716,738-748,2877-2890,3399,3450,3515 | verb node UAF + 深度防护 | parser.cc:84-92,619-626,644,707,733-740,2903-2909,3441,3492,3557 | parser_handler_destruct.lpc | 538e2531 |
 | OBJ-2..5 | object.cc:257-270 等 | restore 深度无上限（栈溢出 DoS） | object.cc:275 | restore_variable.lpc | 9565ccb4 |
 | ARRAY-1/2 | array.cc:125-144 | allocate_array2 T_FUNCTION 泄漏 | array.cc:128 | allocate.lpc | A-S1-array-leak |
 | BUFFER-1 | buffer.cc:44-67 | write_buffer 有符号溢出 | buffer.cc:46-64 | write_buffer_bounds.lpc、buffer_range_assign.lpc | 9565ccb4 |

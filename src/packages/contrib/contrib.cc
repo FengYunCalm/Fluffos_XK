@@ -707,7 +707,11 @@ void f_terminal_colour() {
     repused = 0;
     rep = nullptr;
     copy_and_push_string(parts[i]);
-    svalue_t *reptmp = apply(APPLY_TERMINAL_COLOUR_REPLACE, current_object, 1, ORIGIN_EFUN);
+    // #1247 CONTRIB-1: safe_apply -- a raw apply that error()s here would
+    // longjmp past the FREE(parts)/FREE(lens)/FREE_MSTR(savestr) at the end
+    // of this efun, leaking them. On error safe_apply returns null -> treated
+    // as no replacement, which is the desired robust behavior anyway.
+    svalue_t *reptmp = safe_apply(APPLY_TERMINAL_COLOUR_REPLACE, current_object, 1, ORIGIN_EFUN);
     if (reptmp && reptmp->type == T_STRING) {
       replacement_storage.emplace_back(reptmp->u.string, SVALUE_STRLEN(reptmp));
       rep = replacement_storage.back().c_str();
@@ -1630,12 +1634,11 @@ void f_replaceable() {
   } else {
     if (st_num_arg == 2) {
       numignore = sp->u.arr->size;
-      if (numignore) {
-        ignore = reinterpret_cast<const char **>(
-            DCALLOC(numignore + 2, sizeof(char *), TAG_TEMPORARY, "replaceable"));
-      } else {
-        ignore = nullptr;
-      }
+      // #1247 CONTRIB-2: always allocate the 2 built-in slots (create/__INIT)
+      // plus one per ignore entry -- an empty ignore array must not leave
+      // ignore == NULL before the unconditional ignore[0]/ignore[1] writes.
+      ignore = reinterpret_cast<const char **>(
+          DCALLOC(numignore + 2, sizeof(char *), TAG_TEMPORARY, "replaceable"));
       ignore[0] = findstring(APPLY_CREATE);
       ignore[1] = findstring(APPLY___INIT);
       for (i = 0; i < numignore; i++) {
@@ -1938,10 +1941,16 @@ void f_repeat_string() {
   if (repeat > 0) {
     str = sp->u.string;
     len = SVALUE_STRLEN(sp);
-    if ((newlen = len * repeat) > max_string_length) {
+    // #1247 CONTRIB-3: clamp repeat BEFORE multiplying: len * repeat in int
+    // can overflow and wrap to a small/zero newlen, driving an undersized
+    // allocation and a massive heap overflow in the copy loop. Also avoids
+    // div-by-zero on len==0.
+    if (len == 0) {
+      repeat = 0;
+    } else if (repeat > max_string_length / len) {
       repeat = max_string_length / len;
-      newlen = len * repeat;
     }
+    newlen = len * repeat;
   }
   if (repeat <= 0) {
     free_string_svalue(sp);
@@ -2120,7 +2129,9 @@ void f_query_replaced_program() {
     free_object(&sp->u.ob, "f_query_replaced_program");
   } else {
     if (current_object->replaced_program) {
-      res = add_slash(sp->u.ob->replaced_program);
+      // #1247 CONTRIB-4: query the current object's own replaced_program,
+      // not the stack argument (which is only the target when st_num_arg).
+      res = add_slash(current_object->replaced_program);
     }
     STACK_INC;
   }
