@@ -25410,3 +25410,26 @@ TEST_F(DriverTest, TestMasterReloadSuccess) {
   free_prog(&last_prog);  // the object's reference to the last reload
   free_prog(&orig_prog);  // our pin
 }
+
+// Quiescence accounting: a successful begin/end pair must increment
+// attempts and success (and never timeouts), proving the counters are
+// live on the success path (the pre-fix guard rejected before counting,
+// so attempts stayed 0 forever and quiescence failures were invisible).
+TEST_F(DriverTest, TestRecompileQuiesceCountsSuccess) {
+  auto &coordinator = owner_runtime_coordinator();
+  const uint64_t attempts_before = coordinator.quiesce_attempts();
+  const uint64_t success_before = coordinator.quiesce_success();
+  const uint64_t timeouts_before = coordinator.quiesce_timeouts();
+
+  auto quiesce = vm_owner_recompile_quiesce_begin(std::chrono::milliseconds(200));
+  ASSERT_TRUE(quiesce.ok) << "main-thread quiesce with zero claims must succeed";
+  ASSERT_EQ(quiesce.failure, OwnerRecompileQuiesceFailure::kNone);
+  vm_owner_recompile_quiesce_end(quiesce.epoch);
+  // begin() returns the CURRENT epoch as a handle; end() advances it, so the
+  // pair must leave the epoch exactly one ahead of the handle.
+  ASSERT_EQ(coordinator.recompile_epoch(), quiesce.epoch + 1);
+
+  ASSERT_GE(coordinator.quiesce_attempts(), attempts_before + 1);
+  ASSERT_GE(coordinator.quiesce_success(), success_before + 1);
+  ASSERT_EQ(coordinator.quiesce_timeouts(), timeouts_before);
+}

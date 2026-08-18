@@ -8,6 +8,7 @@
 
 #include "vm/internal/recompile.h"
 
+#include <cassert>
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>   // for O_RDONLY, open
@@ -239,7 +240,11 @@ RecompilePrepared::~RecompilePrepared() {
 
 void RecompilePrepared::commit_swap() noexcept {
   program_t *new_prog = staged.prog;
-  if (!new_prog) return;
+  // A transaction without a staged program is a caller bug: commit_swap()
+  // must never silently skip the swap (commit_finish() would then release
+  // N old_prog references while the targets still point at old_prog, orphaning
+  // live objects). assert, not error(): this is a noexcept segment.
+  assert(new_prog != nullptr);
   new_prog->ref++;  // commit pin
 
   constexpr uint32_t kProgramDerivedFlags = O_WILL_CLEAN_UP;
@@ -323,6 +328,11 @@ void start_recompile_transaction(object_t *ob, RecompileTargetKind kind,
     // allowed); the no-fail activation runs inside commit_swap().
     simul_efuns_prepare(prepared->staged.prog, &prepared->simuls);
   }
+  // Apply lookup table must be fully built while still frozen (v0.4
+  // §9.3): the commit segments are no-fail and must not allocate, and the
+  // no-fail swap relies on the staged program's table being ready.
+  // (Allocation allowed here, in the frozen-segment preparation.)
+  prepare_apply_lookup_table(prepared->staged.prog);
   snapshot_recompile_targets(ob, prepared);
 }
 

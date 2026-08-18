@@ -35,13 +35,7 @@ void OwnerRuntimeCoordinator::claim_end() {
 
 OwnerRecompileState &OwnerRuntimeCoordinator::recompile_state() { return recompile_state_; }
 
-uint64_t OwnerRuntimeCoordinator::active_worker_tasks() const { return active_worker_tasks_; }
-
 uint64_t OwnerRuntimeCoordinator::active_owner_claims() const { return active_owner_claims_; }
-
-uint64_t OwnerRuntimeCoordinator::active_worker_program_pins() const {
-  return active_worker_program_pins_;
-}
 
 uint64_t OwnerRuntimeCoordinator::quiesce_attempts() const { return quiesce_attempts_; }
 
@@ -102,8 +96,8 @@ bool &owner_main_draining_flag() { return owner_runtime_coordinator().main_drain
 std::vector<std::thread> &owner_threads_instance() { return owner_runtime_coordinator().threads(); }
 
 // E3 P1: owner-wide quiescence. begin() is main-thread-only; it closes
-// admission, waits for active worker tasks/claims/pins to drain, then
-// freezes. Any failure path restores OPEN. end() reopens with an epoch
+// admission, waits for active owner claims (worker-side, executor-local) to
+// drain, then freezes. Any failure path restores OPEN. end() reopens with an epoch
 // guard so a stale end() from a failed transaction cannot unlock a newer
 // one. (v0.4 §7.)
 OwnerRecompileQuiesceResult vm_owner_recompile_quiesce_begin(
@@ -113,31 +107,39 @@ OwnerRecompileQuiesceResult vm_owner_recompile_quiesce_begin(
   std::unique_lock<std::mutex> lock(coordinator.mutex());
 
   if (!vm_context_is_main_thread()) {
+    debug_message("recompile quiesce: not main thread\n");
+    result.failure = OwnerRecompileQuiesceFailure::kNotMainThread;
     return result;  // ok=false: main-thread-only
   }
   if (coordinator.recompile_state() != OwnerRecompileState::kOpen) {
+    debug_message("recompile quiesce: state != kOpen\n");
+    result.failure = OwnerRecompileQuiesceFailure::kNestedTransaction;
     return result;  // nested/active transaction
   }
-  if (coordinator.main_draining()) {
-    return result;  // would self-deadlock
-  }
+  // NOTE: there is deliberately no main_draining() guard here. Gateway and
+  // socket commands execute inside the main-thread drain slice, so a guard
+  // would reject every interactive recompile_object() call. The wait loop
+  // below only counts worker-side activity (claims), which drains
+  // independently of the main queue; tasks that reach the main queue after
+  // the swap are dispatched serially on this same thread against the new
+  // program, so no stale program can be executed across the swap.
 
   coordinator.note_quiesce_attempt_locked();
   coordinator.recompile_state() = OwnerRecompileState::kClosing;
 
   auto deadline = std::chrono::steady_clock::now() + timeout;
-  while (coordinator.active_worker_tasks() != 0 ||
-         coordinator.active_owner_claims() != 0 ||
-         coordinator.active_worker_program_pins() != 0) {
+  while (coordinator.active_owner_claims() != 0) {
     if (coordinator.thread_stopping()) {
       coordinator.recompile_state() = OwnerRecompileState::kOpen;
       coordinator.cv().notify_all();
+      result.failure = OwnerRecompileQuiesceFailure::kThreadStopping;
       return result;
     }
     if (coordinator.cv().wait_until(lock, deadline) == std::cv_status::timeout) {
       coordinator.note_quiesce_timeout_locked();
       coordinator.recompile_state() = OwnerRecompileState::kOpen;
       coordinator.cv().notify_all();
+      result.failure = OwnerRecompileQuiesceFailure::kTimeout;
       return result;
     }
   }

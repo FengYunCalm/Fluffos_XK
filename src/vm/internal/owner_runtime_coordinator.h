@@ -17,9 +17,20 @@
 // there is deliberately no second lock.
 enum class OwnerRecompileState { kOpen, kClosing, kFrozen };
 
+// Why quiescence failed (distinct failure modes were previously conflated
+// into one "timed out" text, which sent LPC-side debugging in circles).
+enum class OwnerRecompileQuiesceFailure {
+  kNone,
+  kNotMainThread,
+  kNestedTransaction,
+  kThreadStopping,
+  kTimeout,
+};
+
 struct OwnerRecompileQuiesceResult {
   bool ok{false};
   uint64_t epoch{0};
+  OwnerRecompileQuiesceFailure failure{OwnerRecompileQuiesceFailure::kNone};
 };
 
 class OwnerRuntimeCoordinator {
@@ -51,9 +62,7 @@ class OwnerRuntimeCoordinator {
 
   // Read-only counters (F1: observable in runtime status). Mutation happens
   // only inside the state machine; external code cannot write these.
-  uint64_t active_worker_tasks() const;
   uint64_t active_owner_claims() const;
-  uint64_t active_worker_program_pins() const;
   uint64_t quiesce_attempts() const;
   uint64_t quiesce_success() const;
   uint64_t quiesce_timeouts() const;
@@ -83,9 +92,7 @@ class OwnerRuntimeCoordinator {
 
   OwnerRecompileState recompile_state_{OwnerRecompileState::kOpen};
   uint64_t recompile_epoch_{0};
-  uint64_t active_worker_tasks_{0};
   uint64_t active_owner_claims_{0};
-  uint64_t active_worker_program_pins_{0};
   uint64_t quiesce_attempts_{0};
   uint64_t quiesce_success_{0};
   uint64_t quiesce_timeouts_{0};
@@ -104,8 +111,8 @@ bool &owner_main_draining_flag();
 std::vector<std::thread> &owner_threads_instance();
 
 // E3 P1 public API. begin() is main-thread-only, transitions OPEN->CLOSING,
-// waits (bounded by timeout) for active worker tasks/claims/pins to drain,
-// then FROZEN. Any failure restores OPEN and returns ok=false. end() must be
+// waits (bounded by timeout) for active owner claims (worker-side,
+// executor-local) to drain, then FROZEN. Any failure restores OPEN and returns ok=false. end() must be
 // called with the matching epoch; it reopens admission.
 OwnerRecompileQuiesceResult vm_owner_recompile_quiesce_begin(
     std::chrono::milliseconds timeout);

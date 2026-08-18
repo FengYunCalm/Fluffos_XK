@@ -3414,7 +3414,29 @@ void f_recompile_object() {
   if (timeout_ms <= 0) timeout_ms = 2000;
   auto quiesce = vm_owner_recompile_quiesce_begin(std::chrono::milliseconds(timeout_ms));
   if (!quiesce.ok) {
-    error("recompile_object owner quiescence timed out\n");
+    const char *reason = "unknown failure";
+    switch (quiesce.failure) {
+      case OwnerRecompileQuiesceFailure::kNotMainThread:
+        reason = "recompile_object requires the main thread";
+        break;
+      case OwnerRecompileQuiesceFailure::kNestedTransaction:
+        reason = "a recompile transaction is already active";
+        break;
+      case OwnerRecompileQuiesceFailure::kThreadStopping:
+        reason = "owner runtime is stopping";
+        break;
+      case OwnerRecompileQuiesceFailure::kTimeout:
+        reason = "owner threads still active";
+        break;
+      default:
+        break;
+    }
+    if (quiesce.failure == OwnerRecompileQuiesceFailure::kTimeout) {
+      error("recompile_object owner quiescence timed out (claims=%llu)\n",
+            static_cast<unsigned long long>(owner_runtime_coordinator().active_owner_claims()));
+    } else {
+      error("recompile_object owner quiescence failed: %s\n", reason);
+    }
   }
   struct QuiesceGuard {
     uint64_t epoch;
@@ -3437,13 +3459,11 @@ void f_recompile_object() {
     error("recompile_object layout mismatch: %s\n", first_diff.c_str());
   }
 
-  // Apply lookup table must be fully built while still frozen (v0.4 §9.3).
-  prepare_apply_lookup_table(prepared.staged.prog);
-
   // v2: target kind decides the per-kind transaction extensions (create
   // phase, simul_efun dispatch rebuild) -- the single discriminant the
   // transaction derives its behavior from. start_recompile_transaction owns
-  // the pin/kind/prepare/snapshot wiring.
+  // the pin/kind/prepare/snapshot wiring and the frozen-segment apply-table
+  // build (v0.4 §9.3).
   RecompileTargetKind kind = RecompileTargetKind::BlueprintFamily;
   if (ob == master_ob) {
     kind = RecompileTargetKind::Master;

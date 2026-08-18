@@ -159,8 +159,9 @@ RecompileLayout describe_recompile_layout(program_t *prog);
 
 // Wire the transaction's entry segment exactly like f_recompile_object:
 // pin the old program (ref++ transaction pin), decide the kind, run the
-// simul_efun dispatch preparation when kind == SimulEfun, and freeze the
-// target set. The staging program must already be assigned to
+// simul_efun dispatch preparation when kind == SimulEfun, pre-build the
+// staged program's apply lookup table while still frozen (v0.4 §9.3), and
+// freeze the target set. The staging program must already be assigned to
 // prepared->staged. Callers must not hand-roll this wiring (pin accounting
 // and per-kind preparation live here only).
 void start_recompile_transaction(object_t *ob, RecompileTargetKind kind,
