@@ -26,6 +26,11 @@ int64_t random_number(int64_t n) {
     called = true;
   }
 
+  // #1247 PORT-1: uniform_int_distribution(0, n-1) is UB when n <= 0
+  // (requires a <= b).
+  if (n <= 0) {
+    return 0;
+  }
   std::uniform_int_distribution<int64_t> dist(0, n - 1);
   return dist(engine);
 }
@@ -39,6 +44,11 @@ int64_t secure_random_number(int64_t n) {
   // On linux & osx we use urandom by default
   static std::random_device rd("/dev/urandom");
 #endif
+  // #1247 PORT-2: uniform_int_distribution(0, n-1) is UB when n <= 0
+  // (requires a <= b).
+  if (n <= 0) {
+    return 0;
+  }
   std::uniform_int_distribution<int64_t> dist(0, n - 1);
   return dist(rd);
 }

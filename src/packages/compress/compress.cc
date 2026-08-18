@@ -290,6 +290,11 @@ void f_uncompress() {
     push_refed_buffer(buffer);
     FREE(compressed);
   } else {
+    // #1247 COMPRESS-1: release the partial output on the error path --
+    // otherwise every failed inflate leaks the buffer.
+    if (output_data) {
+      FREE(output_data);
+    }
     FREE(compressed);
     error("inflate: no ZSTREAM_END\n");
   }
