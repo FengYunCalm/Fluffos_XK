@@ -715,6 +715,13 @@ static int prntln(char *str, char *outstr, int vflg, int lineno) {
     *line++ = '$';
   }
 #endif
+  // #1247 ED-1: a tab or control-code expansion in the final iteration can
+  // push `line` a few bytes past ED_MAXLINE within the slack of
+  // start[ED_MAXLINE + 100]; clamp before copying into the caller's
+  // ED_MAXLINE-sized outstr.
+  if (line - start > ED_MAXLINE - 1) {
+    line = start + ED_MAXLINE - 1;
+  }
   *line = EOS;
 
   strcpy(outstr, start);
@@ -927,13 +934,21 @@ static char *getfn(int writeflg) {
   if (*inptr == NL) {
     P_NOFNAME = TRUE;
     file[0] = '/';
-    strcpy(file + 1, P_FNAME);
+    // #1247 ED-2: bound the copy -- P_FNAME can exceed MAXFNAME-2.
+    size_t fn_len = strlen(P_FNAME);
+    if (fn_len > MAXFNAME - 2) {
+      fn_len = MAXFNAME - 2;
+    }
+    memcpy(file + 1, P_FNAME, fn_len);
+    file[1 + fn_len] = '\0';
   } else {
     P_NOFNAME = FALSE;
     Skip_White_Space;
 
     cp = file;
-    while (*inptr && *inptr != NL && *inptr != SP && *inptr != HT) {
+    // #1247 ED-2: bound the walk so a long name can't overflow file[MAXFNAME].
+    while (*inptr && *inptr != NL && *inptr != SP && *inptr != HT &&
+           cp < file + MAXFNAME - 1) {
       *cp++ = *inptr++;
     }
     *cp = '\0';
@@ -1109,7 +1124,9 @@ static int getrhs(char *sub) {
     return (EDERR);
   }
   while (*inptr != delim && *inptr != NL) {
-    if (sub > outmax) {
+    // #1247 ED-3: reserve room for the worst-case per-iteration write (the
+    // ESCAPE fall-through and octal cases write two bytes) and the trailing NUL.
+    if (sub >= outmax - 2) {
       return EDERR;
     }
     if (*inptr == ESCAPE) {
@@ -1317,7 +1334,9 @@ static regexp *optpat() {
     return P_OLDPAT;
   }
   cp = str;
-  while (*inptr != delim && *inptr != NL && *inptr != EOS && cp < str + MAXPAT - 1) {
+  // #1247 ED-4: -2 (not -1): the escape branch below writes two bytes per
+  // iteration, and room must remain for the trailing EOS.
+  while (*inptr != delim && *inptr != NL && *inptr != EOS && cp < str + MAXPAT - 2) {
     if (*inptr == ESCAPE && inptr[1] != NL) {
       *cp++ = *inptr++;
     }

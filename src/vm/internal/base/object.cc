@@ -67,7 +67,7 @@ FLUFFOS_VM_THREAD_LOCAL int save_svalue_depth = 0;
 FLUFFOS_VM_THREAD_LOCAL int max_depth = 0;
 FLUFFOS_VM_THREAD_LOCAL int *sizes = nullptr;
 
-static void reset_restore_scratch() {
+static void reset_restore_scratch() {  // #1247-equivalent OBJ-1 (upstream reset_restore_scratch)
   save_svalue_depth = max_depth = 0;
   if (sizes) {
     FREE((char *)sizes);
@@ -276,6 +276,15 @@ static int restore_internal_size(const char **str, int is_mapping, int depth) {
   const char *cp = *str;
   int size = 0;
   char c, delim, toggle = 0;
+
+  // #1247 OBJ-2: bound recursion the same way the save path does
+  // (too_deep_save_error). Without this, a maliciously deep-nested save
+  // string (e.g. "({({({...") recurses until the C stack overflows.
+  // Returning 0 fails the size pre-pass so restore_size() reports an error
+  // before the actual restore recurses.
+  if (depth > MAX_SAVE_SVALUE_DEPTH) {
+    return 0;
+  }
 
   delim = is_mapping ? ':' : ',';
   while ((c = *cp++)) {
@@ -697,7 +706,10 @@ static int restore_mapping(char **str, svalue_t *sv) {
       return 0;
     }
   } else if ((size = restore_size((const char **)str, 1)) < 0) {
-    return 0;
+    // #1247 OBJ-3: a malformed / too-deeply-nested mapping must be reported as
+    // an error like restore_array/restore_class do; returning 0 here signalled
+    // "success" yet left the caller's svalue uninitialized.
+    return ROB_MAPPING_ERROR;
   }
 
   if (!size) {
@@ -877,6 +889,7 @@ static int restore_mapping(char **str, svalue_t *sv) {
         free_mapping(m);
         free_svalue(&key, "restore_mapping: out of memory");
         free_svalue(&value, "restore_mapping: out of memory");
+        reset_restore_scratch();  // #1247 OBJ-4: error() below skips restore_svalue's cleanup
         error("Out of memory\n");
       }
     }
@@ -886,6 +899,7 @@ static int restore_mapping(char **str, svalue_t *sv) {
       free_mapping(m);
       free_svalue(&key, "restore_mapping: mapping too large");
       free_svalue(&value, "restore_mapping: mapping too large");
+      reset_restore_scratch();  // #1247 OBJ-4: mapping_too_large() error()s past the cleanup
       mapping_too_large();
     }
 

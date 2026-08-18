@@ -334,7 +334,13 @@ array_t *get_dir(const char *path, int flags) {
   rewinddir(dirp);
   endtemp = temppath + strlen(temppath);
 
-  strcat(endtemp++, "/");
+  // #1247 FILE-1: append '/' only if it fits (leaving room for the
+  // terminator); the directory path can be up to MAX_FNAME_SIZE+MAX_PATH_LEN
+  // long.
+  if ((size_t)(endtemp - temppath) + 2 <= sizeof(temppath)) {
+    *endtemp++ = '/';
+    *endtemp = '\0';
+  }
 
   for (i = 0, de = readdir(dirp); i < count; de = readdir(dirp)) {
     namelen = strlen(de->d_name);
@@ -350,8 +356,15 @@ array_t *get_dir(const char *path, int flags) {
        * We'll have to .... sigh.... stat() the file to get some add'tl
        * info.
        */
-      strcpy(endtemp, de->d_name);
-      large_file_stat(temppath, &st); /* We assume it works. */
+      // #1247 FILE-2: bound the combined path; if it can't fit, report
+      // zeroed stat info instead of overflowing temppath.
+      size_t const avail = sizeof(temppath) - (size_t)(endtemp - temppath);
+      if (namelen < avail) {
+        memcpy(endtemp, de->d_name, namelen + 1);
+        large_file_stat(temppath, &st); /* We assume it works. */
+      } else {
+        memset(&st, 0, sizeof(st));
+      }
     }
     encode_stat(&v->item[i], flags, de->d_name, &st);
     i++;
@@ -536,6 +549,15 @@ char *read_file(const char *file, int start, int lines) {
   // Truncate result to read_file_max_size
   if (ptr_end > ptr_start + read_file_max_size) {
     ptr_end = (char *)ptr_start + read_file_max_size;
+  }
+
+  // #1247 FILE-3: the forward line search can post-increment ptr_end one past
+  // the last byte read (to the_buff + total_bytes_read + 1) when it runs off
+  // the end without finding enough newlines. Clamp to the terminator slot so
+  // the '\0' below stays inside the 2*max+1 byte buffer instead of writing
+  // one past it.
+  if (ptr_end > the_buff + total_bytes_read) {
+    ptr_end = (char *)the_buff + total_bytes_read;
   }
 
   *ptr_end = '\0';
