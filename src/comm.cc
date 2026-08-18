@@ -2021,7 +2021,16 @@ static int call_function_interactive(interactive_t *i, char *str) {
    */
   auto mode_delta = detach_user_input_callback_mode_delta(i, noescape_cleared);
   bool const ob_destructed = (ob->flags & O_DESTRUCTED) != 0;
-  if (ob->flags & O_DESTRUCTED) {
+  // #1247 COMM-1: guard against input_to() aimed at a '#'-prefixed
+  // __INIT-style apply, which we must never call -- and must not leave a
+  // leaked sentence. Handled with the same teardown as a self-destructed
+  // target (the detach-path check below also returns 0 without freeing).
+  bool bad_init_call = false;
+  if (!(sent->flags & V_FUNCTION) && sent->function.s &&
+      sent->function.s[0] == APPLY___INIT_SPECIAL_CHAR) {
+    bad_init_call = true;
+  }
+  if ((ob->flags & O_DESTRUCTED) || bad_init_call) {
     /* Sorry, the object has selfdestructed ! */
     free_object(&sent->ob, "call_function_interactive");
     free_sentence(sent);
