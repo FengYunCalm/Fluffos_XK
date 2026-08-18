@@ -3425,9 +3425,6 @@ void f_recompile_object() {
       case OwnerRecompileQuiesceFailure::kThreadStopping:
         reason = "owner runtime is stopping";
         break;
-      case OwnerRecompileQuiesceFailure::kTimeout:
-        reason = "owner threads still active";
-        break;
       default:
         break;
     }
