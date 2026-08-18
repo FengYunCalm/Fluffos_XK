@@ -1,0 +1,12 @@
+
+    // Nested capture groups: the size pass and copy pass used divergent group
+    // selection, overrunning the output buffer. Only the non-nested (outer)
+    // group is selected, matching the allocation.
+    ASSERT_EQ("X", pcre_replace("a", "((a))", ({ "X", "YYYY" })));
+    ASSERT_EQ("Xc", pcre_replace("abc", "((ab))", ({ "X", "Y" })));
+
+    // A replacement much longer than its match must not overflow.
+    ASSERT_EQ("[LONGREPLACEMENT]", pcre_replace("[x]", "(x)", ({ "LONGREPLACEMENT" })));
+
+    // Text outside groups is preserved around a single group.
+    ASSERT_EQ("aXc", pcre_replace("abc", "(b)", ({ "X" })));
