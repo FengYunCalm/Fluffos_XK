@@ -7,6 +7,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <set>  // #1247 ASYNC-1
 #include <string>
 #include <thread>
 
@@ -71,6 +72,18 @@ struct Work {
 
 std::deque<struct Work *> reqs;
 std::mutex reqs_lock;
+
+// #1247 ASYNC-2..4: works a worker thread is CURRENTLY processing: popped from
+// reqs but not yet moved to finished_reqs. Guarded by reqs_lock so
+// async_mark_request() (main thread, via check_memory) can account for their
+// callback funptr during that window -- otherwise a DEBUGMALLOC
+// sweep that lands mid-processing false-flags the ref. This is a SET, not a
+// single pointer: do_stuff() spawns a fresh worker thread whenever reqs is
+// momentarily empty, which happens while an earlier worker is still inside a
+// slow w->func() -- two or more workers can run at once; a single pointer only
+// tracked the last one and left the others' refs unaccounted (flaky "Bad ref
+// count" in Debug builds).
+std::set<struct Work *> current_works;
 
 std::deque<struct Request *> finished_reqs;
 std::mutex finished_reqs_lock;
@@ -178,6 +191,7 @@ void thread_func() {
       }
       w = reqs.front();
       reqs.pop_front();
+      current_works.insert(w);  // #1247 ASYNC-3: in-flight: keep it accountable
     }
 
     if (w) {
@@ -190,12 +204,15 @@ void thread_func() {
       }
       if (w->data->status == DONE) {
         {
-          std::lock_guard<std::mutex> const lock(finished_reqs_lock);
+          std::lock_guard<std::mutex> const lock(reqs_lock);
+          std::lock_guard<std::mutex> const flock(finished_reqs_lock);
+          current_works.erase(w);  // #1247 ASYNC-4
           finished_reqs.push_back(w->data);
+          delete w;
         }
-        delete w;
       } else {
         std::lock_guard<std::mutex> const lock(reqs_lock);
+        current_works.erase(w);  // #1247 ASYNC-4
         reqs.push_back(w);
       }
 
@@ -353,7 +370,12 @@ void *getdirthread(struct Request *req) {
   int i = 0;
   for (auto *de = readdir(dirp); de; de = readdir(dirp)) {
     if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
-    req->data.resize(req->data.size() + sizeof(dirent *));
+    // #1247 ASYNC-5: the buffer is used as an array of `struct dirent`, indexed
+    // by i, so it must grow by sizeof(dirent) per entry -- growing by
+    // sizeof(dirent*) (a pointer, ~8 bytes) undersized it and memcpy of the
+    // ~280-byte dirent overflowed the heap once a directory held enough
+    // entries.
+    req->data.resize(static_cast<size_t>(i + 1) * sizeof(struct dirent));
     memcpy(&((dirent *)(req->data.data()))[i], de, sizeof(*de));
     i++;
   }
@@ -386,6 +408,11 @@ int add_read(const char *fname, function_to_call_t *fun) {
     bind_request_owner(req);
     return aio_gzread(req);
   }
+  // #1247 ASYNC-6: denied path: no request will ever be created to free the
+  // callback the efun already ref-bumped and handed us, so release it before
+  // unwinding.
+  free_funp(fun->f.fp);
+  delete fun;
   error("permission denied\n");
 
   return 1;
@@ -405,6 +432,10 @@ int add_getdir(const char *fname, function_to_call_t *fun) {
     bind_request_owner(req);
     return aio_getdir(req);
   }
+  // #1247 ASYNC-7: denied path: free the callback the efun already ref-bumped
+  // and handed us.
+  free_funp(fun->f.fp);
+  delete fun;
   error("permission denied\n");
 
   return 1;
@@ -413,6 +444,10 @@ int add_getdir(const char *fname, function_to_call_t *fun) {
 
 int add_write(const char *fname, const char *buf, int size, char flags, function_to_call_t *fun) {
   if (!fname) {
+    // #1247 ASYNC-8: denied path: free the callback the efun already
+    // ref-bumped and handed us.
+    free_funp(fun->f.fp);
+    delete fun;
     error("permission denied\n");
   }
 
@@ -738,6 +773,15 @@ void async_mark_request() {
   for (auto &req : finished_reqs) {
     if (req->fun != nullptr) {
       req->fun->f.fp->hdr.extra_ref++;
+    }
+  }
+
+  // #1247 ASYNC-9: requests a worker is mid-processing (popped from reqs, not
+  // yet in finished_reqs); guarded by reqs_lock, held above. There may be
+  // several concurrent workers, so mark every in-flight work, not just one.
+  for (auto *work : current_works) {
+    if (work->data->fun != nullptr) {
+      work->data->fun->f.fp->hdr.extra_ref++;
     }
   }
 #endif

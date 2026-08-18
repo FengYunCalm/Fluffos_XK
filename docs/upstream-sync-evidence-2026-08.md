@@ -262,9 +262,9 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | TREES-1 | trees.cc:184-194 | INT_MIN % -1 SIGFPE | trees.cc（无） | 新增编译期取模测试 | 0d3f8ed8 |
 | TELNET-1/2 | telnet.cc:360-381 | LINEMODE buf[1] 越界读 | telnet.cc:324-331 | 新增 0/1/2 字节输入测试 | 0d3f8ed8 |
 | TELNET-3 | telnet.cc:712-735 | ZMP off-by-one 越界写 | telnet.cc:668-673 | 新增 ZMP 空/单/多参数测试 | 0d3f8ed8 |
-| ASYNC-2..4,9 | async.cc:76-130,589-623 | current_work(s) 多飞行记账 | async.cc（无） | 新增多 worker 测试 | A-S1-async-inflight |
-| ASYNC-5 | async.cc:273-283 | getdirthread dirent 大小 | async.cc（无） | ASan getdir 多条目测试 | A-S1-async-getdir |
-| ASYNC-6..8 | async.cc:306-355 | 拒绝路径 callback 泄漏 | async.cc（无） | 新增拒绝路径测试 | A-S1-async-leak |
+| ASYNC-2..4,9 | async.cc:76-130,589-623 | current_work(s) 多飞行记账 | async.cc:81-86,104-110,124-138,776-789 | 新增多 worker 测试 | batch7（待提交） |
+| ASYNC-5 | async.cc:273-283 | getdirthread dirent 大小 | async.cc:356-363 | ASan getdir 多条目测试 | batch7（待提交） |
+| ASYNC-6..8 | async.cc:306-355 | 拒绝路径 callback 泄漏 | async.cc:388-391,403-406,415-420 | 新增拒绝路径测试 | batch7（待提交） |
 | PARSER-1..9 | parser.cc:78-88,626-638,713-716,738-748,2877-2890,3399,3450,3515 | verb node UAF + 深度防护 | parser.cc:84-92,619-626,644,707,733-740,2903-2909,3441,3492,3557 | parser_handler_destruct.lpc | 538e2531 |
 | OBJ-2..5 | object.cc:257-270 等 | restore 深度无上限（栈溢出 DoS） | object.cc:275 | restore_variable.lpc | 9565ccb4 |
 | ARRAY-1/2 | array.cc:125-144 | allocate_array2 T_FUNCTION 泄漏 | array.cc:128 | allocate.lpc | A-S1-array-leak |
@@ -300,7 +300,7 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 
 | hunk_id | 上游 hunk | 缺陷 | 本地落点 | 回归测试 | 目标提交 |
 |---|---|---|---|---|---|
-| MUDLIB-5..8 | mudlib_stats.cc:restore | fscanf 越界 | mudlib_stats.cc（待定位） | 新增测试 | A-S2-mudlib-fscanf |
+| MUDLIB-5..8 | mudlib_stats.cc:restore | fscanf 越界 | mudlib_stats.cc:566-570 | std::ifstream + f.width 流读取，无固定缓冲 | 已覆盖（等价保护，锚点已补） |
 | SPRINTF-8..12 | sprintf.cc:cst/owned | cst 泄漏/owned 复制 | sprintf.cc（待定位） | sprintf.lpc | A-S2-sprintf-cst |
 | ASYNC-1 | async.cc:6 | include <set> | async.cc（无） | 编译测试 | A-S2-async-include |
 | TIME-2 | time.cc:4 | include <vector> | time.cc（无） | 编译测试 | 9565ccb4 |

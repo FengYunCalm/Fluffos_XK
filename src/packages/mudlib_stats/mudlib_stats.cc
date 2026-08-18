@@ -574,6 +574,10 @@ static void restore_stat_list(const char *file, mudlib_stats_t **list) {
   }
   const auto name_read_width = static_cast<std::streamsize>(max_name_length + 2);
 
+  // #1247-equivalent MUDLIB-5..8 (upstream restore_stat_list sprintf/fscanf
+  // bounds): local implementation uses std::ifstream + f.width(name_read_width)
+  // + std::string -- no fixed buffer, names are width-bounded at read time.
+
   while (f) {
     f.width(name_read_width);
     if (!(f >> name)) {
