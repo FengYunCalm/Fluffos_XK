@@ -1907,10 +1907,10 @@ static int detach_user_input_callback_frame(interactive_t *i, sentence_t *sent,
   }
 
   frame->ob = sent->ob;
-  if (!(sent->flags & V_FUNCTION) && sent->function.s &&
-      sent->function.s[0] == APPLY___INIT_SPECIAL_CHAR) {  // #1247-equivalent COMM-2 (upstream bad_init_call guard)
-    return 0;
-  }
+  // NOTE: the '#'-prefixed __INIT-style apply guard (upstream COMM-2) is
+  // handled earlier in call_function_interactive()'s teardown branch (#1247
+  // COMM-1), which also frees the sentence; this detach path is unreachable
+  // for bad-init calls.
 
   STACK_INC;
   if (sent->flags & V_FUNCTION) {
@@ -2024,7 +2024,8 @@ static int call_function_interactive(interactive_t *i, char *str) {
   // #1247 COMM-1: guard against input_to() aimed at a '#'-prefixed
   // __INIT-style apply, which we must never call -- and must not leave a
   // leaked sentence. Handled with the same teardown as a self-destructed
-  // target (the detach-path check below also returns 0 without freeing).
+  // target. (Upstream COMM-2's detach-path check is absorbed here: it would
+  // return 0 without freeing the sentence.)
   bool bad_init_call = false;
   if (!(sent->flags & V_FUNCTION) && sent->function.s &&
       sent->function.s[0] == APPLY___INIT_SPECIAL_CHAR) {
