@@ -125,7 +125,7 @@ static size_t pcre_advance_after_empty_match(const char *subject, size_t subject
   return next;
 }
 
-static std::vector<pcre_replace_segment_t> pcre_build_replace_segments(const pcre_t *run,
+static std::vector<pcre_replace_segment_t> pcre_build_replace_segments(const pcre_t *run,  // #1247-equivalent PCRE-1/2 (non-overlapping segments)
                                                                          array_t *replacements,
                                                                          size_t *result_size) {
   std::vector<pcre_replace_segment_t> segments;

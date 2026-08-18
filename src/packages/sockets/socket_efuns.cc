@@ -721,7 +721,7 @@ int socket_accept(int fd, svalue_t *read_callback, svalue_t *write_callback) {
     return EENONBLOCK;
   }
 
-  if (evutil_make_socket_closeonexec(accept_fd) == -1) {
+  if (evutil_make_socket_closeonexec(accept_fd) == -1) {  // #1247-equivalent SOCK-1 (accept_fd closeonexec)
     debug(sockets, "socket_accept: make_socket_closeonexec error: %s.\n",
           evutil_socket_error_to_string(evutil_socket_geterror(accept_fd)));
     evutil_closesocket(accept_fd);

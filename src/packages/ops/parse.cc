@@ -988,7 +988,7 @@ static svalue_t *item_parse(array_t *obarr, array_t *warr, int *cix_in, int *fai
   for (max_cix = *cix_in, tix = 1, obix = 0; obix < obarr->size; obix++) {
     *fail = 0;
     cix = *cix_in;
-    if (obarr->item[obix].type != T_OBJECT) {
+    if (obarr->item[obix].type != T_OBJECT) {  // #1247-equivalent PARSE-1 (skip non-objects)
       continue;
     }
     if (cix == warr->size && match_all) {

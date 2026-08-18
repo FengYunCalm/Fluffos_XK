@@ -48,7 +48,7 @@ static void check_svalue(svalue_t *v) {
       svalue_t tmp;
       program_t *prog;
 
-      if (v->u.fp->hdr.owner && (v->u.fp->hdr.owner->flags & O_DESTRUCTED)) {
+      if (v->u.fp->hdr.owner && (v->u.fp->hdr.owner->flags & O_DESTRUCTED)) {  // #1247-equivalent RECLAIM-2 (funptr double-decrement)
         /* E3 P2: detach the owner only. The funptr keeps pinning its
          * creation-time program via local.prog's func_ref; dealloc_funp()
          * performs the single symmetric decrement. The old manual

@@ -209,7 +209,7 @@ void f_norm() {
 #if defined(F_DOTPROD) | defined(F_DISTANCE) | defined(F_ANGLE)
 static LPC_FLOAT vector_op(array_t *a, array_t *b,
                            LPC_FLOAT (*func)(const LPC_FLOAT, const LPC_FLOAT)) {
-  LPC_INT len = a->size;
+  LPC_INT len = a->size;  // #1247-equivalent MATH-1 (upstream: sp->u.arr->size -> a->size)
   LPC_FLOAT total = 0.0;
 
   if (b->size != len) {

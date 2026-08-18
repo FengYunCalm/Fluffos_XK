@@ -364,7 +364,7 @@ mudlib_stats_t *set_master_author(const char *str) {
   return author;
 }
 
-static bool author_for_file(const char *file, std::string *name) {
+static bool author_for_file(const char *file, std::string *name) {  // #1247-equivalent MUDLIB-1..4 (std::string, no strcpy buffer)
   svalue_t *ret;
 
   if (!file || !name) {

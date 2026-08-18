@@ -76,7 +76,7 @@ void f_sys_reload_tls() {
   // array index: subtracting 1 from INT64_MIN would be signed overflow, and
   // comparing against sizeof() (bytes, not elements) allowed out-of-bounds
   // indexes such as 6 to reach external_port[5].
-  if (port_index_display < 1 || port_index_display > static_cast<LPC_INT>(std::size(external_port))) {
+  if (port_index_display < 1 || port_index_display > static_cast<LPC_INT>(std::size(external_port))) {  // #1247-equivalent SYS-1 (upstream: sizeof-based bound)
     error("Invalid port index: %" LPC_INT_FMTSTR_P "\n", port_index_display);
   }
   auto port_index = static_cast<size_t>(port_index_display - 1);

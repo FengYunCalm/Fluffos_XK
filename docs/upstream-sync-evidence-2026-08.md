@@ -214,3 +214,96 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 - TSan / owner 压测（L6/L7）
 - E3 v2 能力（master/simul_efun 热重载、__INIT/create()、失败回滚）deferred
 - T3 lpcshell / E4 保持 deferred
+
+---
+
+## #1247 同步矩阵（A-S0，2026-08-18）
+
+> 上游输入：PR #1247（四轮审计 61 修复）。补丁 `/tmp/pr1247.diff` SHA-256 `79d4648dec2b4b83173d2d2ee9336469e4d94ad5829b138b11a109ccaad2d2d9`；`git apply --numstat` 实测 47 src 路径 + 19 testsuite 路径（2 clone fixture + 17 runnable），130 hunk。本地基线 HEAD `2785c8a6165eab7d32842306468cd0b48eab17aa`。
+> 状态取值：`未移植` / `已覆盖` / `等价保护` / `不适用`。标记约定：移植点落 `// #1247 <hunk_id>`，等价保护点落 `// #1247-equivalent`。
+
+### 已覆盖 / 等价保护（12 hunk，无需移植）
+
+| hunk_id | 上游 hunk | 缺陷 | 本地落点 | 状态 | 证据 |
+|---|---|---|---|---|---|
+| SYS-1 | sys.cc:54-64 | external_port 按 sizeof 越界索引 | sys.cc:76-80 | 已覆盖 | std::size + INT64_MIN-1 保护（更强） |
+| MATH-1 | math.cc:176-186 | norm 用 sp->u.arr->size 而非 a->size | math.cc:212 | 已覆盖 | `LPC_INT len = a->size` |
+| OBJ-1 | object.cc:66-84 | restore 错误路径泄漏 sizes/脏 depth | object.cc:70-74,939,1050 | 已覆盖 | reset_restore_scratch 已移植 |
+| RECLAIM-2 | reclaim.cc:52-56 | funptr owner 双重递减 | reclaim.cc:52-56 | 已覆盖 | E3 P2 已修（v0.4 §10.3） |
+| PARSE-1 | ops/parse.cc:1060-1072 | living_parse 非对象解引用 | ops/parse.cc:991 | 已覆盖 | `type != T_OBJECT → continue` |
+| CALLOUT-1 | call_out.cc:557-558 | reclaim owner NULL 解引用 | call_out.cc:693 | 已覆盖 | `!hdr.owner \|\|` 检查 |
+| SOCK-1 | socket_efuns.cc:accept | accept_fd 未设 closeonexec | socket_efuns.cc:720 | 已覆盖 | `evutil_make_socket_closeonexec(accept_fd)` |
+| PCRE-1/2 | pcre.cc:921-1010 | pcre_get_replace 长度发散 | pcre.cc:128-143 | 等价保护 | pcre_build_replace_segments 非重叠构建 |
+| MUDLIB-1..4 | mudlib_stats.cc | strcpy 越界 | mudlib_stats.cc:367,465 | 等价保护 | std::string 返回值，无固定缓冲 |
+| COMM-2 | comm.cc:902-912 | bad_init_call 检查 | comm.cc:1911 | 等价保护 | detach 路径有检查；call_function_interactive 路径待 A-S1 复核（COMM-1） |
+
+### 不适用（8 hunk，6 文件本库不存在）
+
+| hunk_id | 上游 hunk | 理由 |
+|---|---|---|
+| GRAMMAR-EXPRS-1 | grammar_rules_exprs.cc:1886 | 上游 #1210 Flex 重构产物，本库无此文件（旧 lexer 保留） |
+| GRAMMAR-TYPES-1 | grammar_rules_types.cc:121 | 同上 |
+| LEXER-PP-1/2 | lexer_rules_pp.cc:985,993 | 同上 |
+| LEXER-UTIL-1/2 | lexer_utils.cc:1412,1424 | 同上 |
+| TRANSPORT-1/2 | transport_libevent.cc:374,410 | 本库无此文件；clamp 等价物在 comm.cc:88,98（kMudPortMaxPayload） |
+| FFI-1/2 | ffi.cc:632 | 本库无 FFI package（上游 #1235 未移植） |
+
+### 未移植（A-S1：安全/UB，约 60 hunk）
+
+| hunk_id | 上游 hunk | 缺陷 | 本地落点 | 回归测试 | 目标提交 |
+|---|---|---|---|---|---|
+| PORT-1/2 | port.cc:20-40 | random_number n≤0 UB | port.cc:29,42 | 新增极值测试 | A-S1-port-ub |
+| STRALLOC-1 | stralloc.cc:97-104 | htable 无 2^30 cap | stralloc.cc:102 | 新增配置测试 | A-S1-stralloc-cap |
+| STRUTILS-1 | strutils.cc:111-122 | rfind pos==0 死循环 | strutils.cc:91-94 | strsrch_reverse_egc.lpc | A-S1-strutils-loop |
+| COMPILER-1 | compiler.cc:821-829 | yywarn 格式串注入 | compiler.cc:580 | 新增 % 文件名测试 | A-S1-compiler-yywarn |
+| DISASM-1 | disassembler.cc:678-692 | etable-4 短偏移越界 | disassembler.cc:669 | 新增反汇编测试 | A-S1-disasm-etable |
+| TREES-1 | trees.cc:184-194 | INT_MIN % -1 SIGFPE | trees.cc（无） | 新增编译期取模测试 | A-S1-trees-intmin |
+| TELNET-1/2 | telnet.cc:360-381 | LINEMODE buf[1] 越界读 | telnet.cc:324-331 | 新增 0/1/2 字节输入测试 | A-S1-telnet-linemode |
+| TELNET-3 | telnet.cc:712-735 | ZMP off-by-one 越界写 | telnet.cc:668-673 | 新增 ZMP 空/单/多参数测试 | A-S1-telnet-zmp |
+| ASYNC-2..4,9 | async.cc:76-130,589-623 | current_work(s) 多飞行记账 | async.cc（无） | 新增多 worker 测试 | A-S1-async-inflight |
+| ASYNC-5 | async.cc:273-283 | getdirthread dirent 大小 | async.cc（无） | ASan getdir 多条目测试 | A-S1-async-getdir |
+| ASYNC-6..8 | async.cc:306-355 | 拒绝路径 callback 泄漏 | async.cc（无） | 新增拒绝路径测试 | A-S1-async-leak |
+| PARSER-1..9 | parser.cc:78-88,626-638,713-716,738-748,2877-2890,3399,3450,3515 | verb node UAF + 深度防护 | parser.cc:621,3511 | parser_handler_destruct.lpc | A-S1-parser-uaf |
+| OBJ-2..5 | object.cc:257-270 等 | restore 深度无上限（栈溢出 DoS） | object.cc:275 | restore_variable.lpc | A-S1-object-depth |
+| ARRAY-1/2 | array.cc:125-144 | allocate_array2 T_FUNCTION 泄漏 | array.cc:128 | allocate.lpc | A-S1-array-leak |
+| BUFFER-1 | buffer.cc:44-67 | write_buffer 有符号溢出 | buffer.cc:46-64 | write_buffer_bounds.lpc、buffer_range_assign.lpc | A-S1-buffer-bounds |
+| INTERP-1 | interpret.cc:976 | memcpy from->u.buf 头部垃圾 | interpret.cc:1081,1244 | 新增 buffer 复制测试 | A-S1-interp-memcpy |
+| INTERP-2..4 | interpret.cc:3314-3324,3700-3707 | INT_MIN 除法/取模 SIGFPE | interpret.cc:3511,3837 | 新增极值测试 | A-S1-interp-intmin |
+| OPS-1/2 | ops.cc:48-58,387-397 | f_div_eq/f_mod_eq INT_MIN | ops.cc（无） | 新增极值测试 | A-S1-ops-intmin |
+| CONTRIB-1 | contrib.cc:743-753 | terminal_colour raw apply 泄漏 | contrib.cc:710 | terminal_colour_error_replace.lpc | A-S1-contrib-colour |
+| CONTRIB-2 | contrib.cc:replaceable | 空 ignore 数组 NULL 写 | contrib.cc:1615-1680 | replaceable_empty.lpc | A-S1-contrib-replaceable |
+| CONTRIB-3 | contrib.cc:repeat_string | 乘法溢出 | contrib.cc:1942 | 新增长度极值测试 | A-S1-contrib-repeat |
+| CONTRIB-4 | contrib.cc:query_replaced_program | current_object 误用 | contrib.cc（待定位） | 新增测试 | A-S1-contrib-qrp |
+| ED-1..4 | ed.cc:658-669,869-885,1057-1069,1267+ | prntln/getfn/getrhs/optpat 越界 | ed.cc:713-717,922-953 | 新增 ed 测试 | A-S1-ed-bounds |
+| FILE-1..3 | file.cc:242-253 等 | get_dir strcat 无边界 | file.cc:337 | 新增长路径测试 | A-S1-file-bounds |
+| CALLOUT-2 | call_out.cc:606-632 | 秒×1000 溢出 | call_out.cc:777-782 | 新增极值测试 | A-S1-callout-saturate |
+| TIME-1/2 | time.cc:136-148 | strftime 栈 VLA | time.cc:146 | 新增长格式测试 | A-S1-time-vla |
+| DB-1/2 | db.cc:664-733 | BLOB 按列宽读行 | db.cc:772-773 | 新增短 BLOB 测试 | A-S1-db-rowlen |
+| SPRINTF-1..7 | sprintf.cc:1093 等 | 精度/列/边界 | sprintf.cc（多处） | sprintf.lpc、sprintf_column_object.lpc | A-S1-sprintf-bounds |
+| MATRIX-1..7 | matrix.cc:47 等 | 6 个 transform 缺 16 元素 | matrix.cc（无） | 新增 16 元素测试 | A-S1-matrix-16 |
+| SOCK-2/3 | socket_efuns.cc:host | lpcaddr_to_sockaddr host 长度 | socket_efuns.cc（待定位） | socket_long_host.lpc | A-S1-sock-host |
+| APPLY-1/2 | apply.cc:89-132 | error(buf) 格式串 + 边界 | apply.cc:75-145 | 新增 % 路径测试 | A-S1-apply-format |
+| MAPPING-1 | mapping.cc:1154-1164 | compose_mapping key 泄漏 | mapping.cc:1200-1203 | 新增 compose 测试 | A-S1-mapping-key |
+| SIMULATE-1 | simulate.cc:880-894 | recompile fd 泄漏 | simulate.cc（无 DEFER） | 新增 recompile 失败测试 | A-S1-simulate-fd |
+| TRACE-1 | trace.cc:43-51 | debug_message 格式串 | trace.cc:46 | 新增 % 路径测试 | A-S1-trace-format |
+| COMPRESS-1 | compress.cc:309-315 | uncompress 错误路径泄漏 | compress.cc:292-294 | 新增错误路径测试 | A-S1-compress-leak |
+| ADDACTION-1 | add_action.cc:435-447 | sprintf 越界 | add_action.cc（无 snprintf） | 新增长 verb 测试 | A-S1-addaction-snprintf |
+| EFUNS-1 | efuns_main.cc:2069-2079 | f_replace_string 快速路径越界 | efuns_main.cc:2063 | 新增长替换测试 | A-S1-efuns-replace |
+| CHECKMEM-1 | checkmemory.cc:680-688 | dfm strcpy 越界 | checkmemory.cc:684 | 新增长 dfm 测试 | A-S1-checkmem-dfm |
+| DWLIB-1 | dwlib.cc:832-841 | 用 one 长度检查 two 写入 | dwlib.cc（无） | 新增替换测试 | A-S1-dwlib-replace |
+| EXTERNAL-1 | external.cc:124-136 | posix_spawn 失败槽位泄漏 | external.cc:100-110 | 新增失败路径测试 | A-S1-external-leak |
+| RECLAIM-1 | reclaim.cc:26-29 | nested 提前 return 不平衡 | reclaim.cc:26-29 | reclaim_funptr_owner.lpc | A-S1-reclaim-nested |
+| COMM-1 | comm.cc:875-895 | bad_init_call STACK_INC 前保护 | comm.cc:1908-1913 | input_to 清理测试 | A-S1-comm-init |
+
+### 未移植（A-S2：正确性/资源清理，约 40 hunk）
+
+| hunk_id | 上游 hunk | 缺陷 | 本地落点 | 回归测试 | 目标提交 |
+|---|---|---|---|---|---|
+| MUDLIB-5..8 | mudlib_stats.cc:restore | fscanf 越界 | mudlib_stats.cc（待定位） | 新增测试 | A-S2-mudlib-fscanf |
+| SPRINTF-8..12 | sprintf.cc:cst/owned | cst 泄漏/owned 复制 | sprintf.cc（待定位） | sprintf.lpc | A-S2-sprintf-cst |
+| SOCK-4..6 | socket_efuns.cc:SC_* | SC_* 标志移头文件 | socket_efuns.h | 编译测试 | A-S2-sock-flags |
+| ASYNC-1 | async.cc:6 | include <set> | async.cc（无） | 编译测试 | A-S2-async-include |
+| TIME-2 | time.cc:4 | include <vector> | time.cc（无） | 编译测试 | A-S2-time-include |
+| 其余 | 各文件 | 见 A-S1 表同文件未列 hunk | — | — | — |
+
+> 注：A-S2 的精确 hunk 拆分在 A-S1 完成后按 evidence 逐行补齐；上表为 A-S0 已确认的最低集合。

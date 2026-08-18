@@ -85,7 +85,7 @@ struct UserEventData {
 bool decode_mud_port_payload_length(const char *header, size_t header_size,
                                     size_t *payload_length) {
   constexpr size_t kMudPortHeaderSize = sizeof(uint32_t);
-  constexpr size_t kMudPortMaxPayload = static_cast<size_t>(MAX_TEXT) -
+  constexpr size_t kMudPortMaxPayload = static_cast<size_t>(MAX_TEXT) -  // #1247-equivalent TRANSPORT-1/2 (upstream transport_libevent clamp)
                                         kMudPortHeaderSize - 1;
   if (!header || !payload_length || header_size < kMudPortHeaderSize) {
     return false;
