@@ -212,6 +212,12 @@ parse_node_t *binary_int_op(parse_node_t *l, parse_node_t *r, char op, const cha
             yyerror("Modulo by zero constant");
             break;
           }
+          // #1247 TREES-1: a % -1 == 0; computing it directly traps (SIGFPE)
+          // for INT_MIN.
+          if (r->v.number == -1) {
+            l->v.number = 0;
+            break;
+          }
           l->v.number %= r->v.number;
           break;
         default:

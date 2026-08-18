@@ -1078,7 +1078,9 @@ void copy_lvalue_range(svalue_t *from) {
           memcpy(b->item, old_item, ind1);
           new_item += ind1;
         }
-        memcpy(new_item, from->u.buf, fsize);
+        // #1247 INTERP-1: copy the buffer payload, not the buffer_t header
+        // (from->u.buf is a pointer to the struct; the payload starts at ->item).
+        memcpy(new_item, from->u.buf->item, fsize);
         new_item += fsize;
 
         if ((size -= ind2) >= 1) {
@@ -1241,7 +1243,9 @@ void assign_lvalue_range(svalue_t *from) {
           memcpy(b->item, old_item, ind1);
           new_item += ind1;
         }
-        memcpy(new_item, from->u.buf, fsize);
+        // #1247 INTERP-1: copy the buffer payload, not the buffer_t header
+        // (from->u.buf is a pointer to the struct; the payload starts at ->item).
+        memcpy(new_item, from->u.buf->item, fsize);
         new_item += fsize;
 
         if ((size -= ind2) >= 1) {
@@ -3508,7 +3512,13 @@ void eval_instruction(char *p) {
             if (!(sp--)->u.number) {
               error("Division by zero\n");
             }
-            sp->u.number /= (sp + 1)->u.number;
+            // #1247 INTERP-2: x / -1 == -x; direct division traps (SIGFPE)
+            // for INT_MIN.
+            if ((sp + 1)->u.number == -1) {
+              sp->u.number = (LPC_INT)(0ULL - (uint64_t)sp->u.number);
+            } else {
+              sp->u.number /= (sp + 1)->u.number;
+            }
             break;
           }
 
@@ -3834,7 +3844,12 @@ void eval_instruction(char *p) {
         if ((sp--)->u.number == 0) {
           error("Modulus by zero.\n");
         }
-        sp->u.number %= (sp + 1)->u.number;
+        // #1247 INTERP-3: x % -1 == 0; direct computation traps for INT_MIN.
+        if ((sp + 1)->u.number == -1) {
+          sp->u.number = 0;
+        } else {
+          sp->u.number %= (sp + 1)->u.number;
+        }
       } break;
       case F_MOD_EQ:
         f_mod_eq();
