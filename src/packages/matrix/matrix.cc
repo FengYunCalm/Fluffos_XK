@@ -48,7 +48,7 @@ void f_translate() {
    */
   matrix = (sp - 3)->u.arr;
 
-    // #1247 MATRIX-1: transform requires a 16-element array.
+  // #1247 MATRIX-1: transform requires a 16-element array.
   if (matrix->size < 16) {
     error("matrix transform requires a 16-element array.\n");
   }
@@ -98,7 +98,7 @@ void f_scale() {
    */
   matrix = (sp - 3)->u.arr;
 
-    // #1247 MATRIX-1: transform requires a 16-element array.
+  // #1247 MATRIX-1: transform requires a 16-element array.
   if (matrix->size < 16) {
     error("matrix transform requires a 16-element array.\n");
   }
@@ -141,7 +141,7 @@ void f_rotate_x() {
    */
   matrix = (sp - 1)->u.arr;
 
-    // #1247 MATRIX-1: transform requires a 16-element array.
+  // #1247 MATRIX-1: transform requires a 16-element array.
   if (matrix->size < 16) {
     error("matrix transform requires a 16-element array.\n");
   }
@@ -181,7 +181,7 @@ void f_rotate_y() {
    */
   matrix = (sp - 1)->u.arr;
 
-    // #1247 MATRIX-1: transform requires a 16-element array.
+  // #1247 MATRIX-1: transform requires a 16-element array.
   if (matrix->size < 16) {
     error("matrix transform requires a 16-element array.\n");
   }
@@ -221,7 +221,7 @@ void f_rotate_z() {
    */
   matrix = (sp - 1)->u.arr;
 
-    // #1247 MATRIX-1: transform requires a 16-element array.
+  // #1247 MATRIX-1: transform requires a 16-element array.
   if (matrix->size < 16) {
     error("matrix transform requires a 16-element array.\n");
   }
@@ -266,7 +266,7 @@ void f_lookat_rotate() {
    */
   matrix = (sp - 3)->u.arr;
 
-    // #1247 MATRIX-1: transform requires a 16-element array.
+  // #1247 MATRIX-1: transform requires a 16-element array.
   if (matrix->size < 16) {
     error("matrix transform requires a 16-element array.\n");
   }
@@ -310,7 +310,7 @@ void f_lookat_rotate2(void) {
    */
   matrix = (sp - 6)->u.arr;
 
-    // #1247 MATRIX-1: transform requires a 16-element array.
+  // #1247 MATRIX-1: transform requires a 16-element array.
   if (matrix->size < 16) {
     error("matrix transform requires a 16-element array.\n");
   }
