@@ -140,7 +140,11 @@ void check_co_args(int num_arg, const program_t *prog, function_t *fun, int find
     }
     int num_arg_check = std::min((unsigned char)num_arg, fun->num_arg);
     if (num_arg_check && prog->type_start && prog->type_start[findex] != INDEX_START_NONE)
-      check_co_args2(&prog->argument_types[prog->type_start[findex]], num_arg, fun->funcname,
+      // #1247 APPLY-2: pass num_arg_check as the loop bound: argument_types
+      // holds only fun->num_arg slots, so bounding the walk by the (possibly
+      // larger) passed num_arg would over-read the array. num_arg stays as
+      // sparg so stack indexing (sp - argc) still lines up.
+      check_co_args2(&prog->argument_types[prog->type_start[findex]], num_arg_check, fun->funcname,
                      prog->filename, num_arg);
   }
 }

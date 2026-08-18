@@ -25,6 +25,9 @@ static void check_svalue(svalue_t *v) {
 
   nested++;
   if (nested > MAX_RECURSION) {
+    // #1247 RECLAIM-1: keep nested balanced, or reclaim stays disabled for
+    // the rest of the pass after one deep recursion.
+    nested--;
     return;
   }
   switch (v->type) {

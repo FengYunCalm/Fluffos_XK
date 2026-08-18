@@ -49,6 +49,8 @@ StagedProgram compile_program_for_recompile(object_t *blueprint) {
   (void)strcat(obname, ".c");
 
   int f = open(real_name, O_RDONLY);
+  // #1247-equivalent SIMULATE-1 (upstream DEFER close in recompile_object):
+  // both error paths and the success path below close(f) explicitly.
   if (f == -1) {
     debug_perror("recompile_object compile", real_name);
     error("recompile_object: cannot read '/%s'\n", real_name);

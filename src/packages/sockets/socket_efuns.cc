@@ -47,10 +47,9 @@ static void call_callback(int fd, int what, int num_arg);
 
 namespace {
 
-/* flags for socket_close */
-#define SC_FORCE 1u
-#define SC_DO_CALLBACK 2u
-#define SC_FINAL_CLOSE 4u
+/* SC_FORCE / SC_DO_CALLBACK / SC_FINAL_CLOSE flags for socket_close() live in
+ * socket_efuns.h so other packages (e.g. external) can tear down sockets.
+ * (#1247 SOCK-4) */
 
 const char *error_strings[ERROR_STRINGS] = {"Problem creating socket",
                                             "Problem with setsockopt",
@@ -186,7 +185,14 @@ static bool lpcaddr_to_sockaddr(const char *name, struct sockaddr *addr, ev_sock
   memset(host, 0, sizeof(host));
   memset(service, 0, sizeof(service));
 
-  memcpy(host, name, cp - name);
+  // #1247 SOCK-2: host is zero-initialized above; bound the copy so an
+  // over-long host can't overflow the fixed array.
+  size_t const hlen = cp - name;
+  if (hlen >= sizeof(host)) {
+    debug(sockets, "lpcaddr_to_sockaddr: host too long: %s", name);
+    return false;
+  }
+  memcpy(host, name, hlen);
   strncpy(service, cp + 1, sizeof(service) - 1);
 
   struct addrinfo hints = {0}, *res;

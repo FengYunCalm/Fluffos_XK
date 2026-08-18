@@ -1193,6 +1193,9 @@ mapping_t *compose_mapping(mapping_t *m1, mapping_t *m2, unsigned short flag) {
             m1->unfilled++;
           }
           deleted++;
+          // #1247 MAPPING-1: free_node only releases the value (values+1);
+          // release the key (values[0]) as free_mapping does, or it leaks.
+          free_svalue(elt->values, "compose_mapping");
           free_node(m1, elt);
         } else {
           prev = &(elt->next);

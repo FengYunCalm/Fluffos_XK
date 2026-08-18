@@ -1908,7 +1908,7 @@ static int detach_user_input_callback_frame(interactive_t *i, sentence_t *sent,
 
   frame->ob = sent->ob;
   if (!(sent->flags & V_FUNCTION) && sent->function.s &&
-      sent->function.s[0] == APPLY___INIT_SPECIAL_CHAR) {
+      sent->function.s[0] == APPLY___INIT_SPECIAL_CHAR) {  // #1247-equivalent COMM-2 (upstream bad_init_call guard)
     return 0;
   }
 

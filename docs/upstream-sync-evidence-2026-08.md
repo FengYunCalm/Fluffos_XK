@@ -236,6 +236,7 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | PCRE-1/2 | pcre.cc:921-1010 | pcre_get_replace 长度发散 | pcre.cc:128-143 | 等价保护 | pcre_build_replace_segments 非重叠构建 |
 | MUDLIB-1..4 | mudlib_stats.cc | strcpy 越界 | mudlib_stats.cc:367,465 | 等价保护 | std::string 返回值，无固定缓冲 |
 | COMM-2 | comm.cc:902-912 | bad_init_call 检查 | comm.cc:1911 | 等价保护 | detach 路径有检查；call_function_interactive 路径待 A-S1 复核（COMM-1） |
+| SIMULATE-1 | simulate.cc:880-894 | recompile fd 泄漏 | recompile.cc:52 | 等价保护 | 本库 v2 事务架构：非法路径显式 close(f)，编译路径 FileLexStream RAII 持有 fd（成功与 throw 均释放）；上游 DEFER close 不需要 |
 
 ### 不适用（8 hunk，6 文件本库不存在）
 
@@ -284,7 +285,6 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | SOCK-2/3 | socket_efuns.cc:host | lpcaddr_to_sockaddr host 长度 | socket_efuns.cc（待定位） | socket_long_host.lpc | A-S1-sock-host |
 | APPLY-1/2 | apply.cc:89-132 | error(buf) 格式串 + 边界 | apply.cc:75-145 | 新增 % 路径测试 | A-S1-apply-format |
 | MAPPING-1 | mapping.cc:1154-1164 | compose_mapping key 泄漏 | mapping.cc:1200-1203 | 新增 compose 测试 | A-S1-mapping-key |
-| SIMULATE-1 | simulate.cc:880-894 | recompile fd 泄漏 | simulate.cc（无 DEFER） | 新增 recompile 失败测试 | A-S1-simulate-fd |
 | TRACE-1 | trace.cc:43-51 | debug_message 格式串 | trace.cc:46 | 新增 % 路径测试 | A-S1-trace-format |
 | COMPRESS-1 | compress.cc:309-315 | uncompress 错误路径泄漏 | compress.cc:292-294 | 新增错误路径测试 | A-S1-compress-leak |
 | ADDACTION-1 | add_action.cc:435-447 | sprintf 越界 | add_action.cc（无 snprintf） | 新增长 verb 测试 | A-S1-addaction-snprintf |
