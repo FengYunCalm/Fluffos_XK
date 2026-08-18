@@ -237,6 +237,7 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | MUDLIB-1..4 | mudlib_stats.cc | strcpy 越界 | mudlib_stats.cc:367,465 | 等价保护 | std::string 返回值，无固定缓冲 |
 | COMM-2 | comm.cc:902-912 | bad_init_call 检查 | comm.cc:2022-2033 | 已覆盖 | 由 COMM-1 吸收（严格更强：teardown 释放 sent）；detach 路径检查已删除（不可达） |
 | SIMULATE-1 | simulate.cc:880-894 | recompile fd 泄漏 | recompile.cc:52 | 等价保护 | 本库 v2 事务架构：非法路径显式 close(f)，编译路径 FileLexStream RAII 持有 fd（成功与 throw 均释放）；上游 DEFER close 不需要 |
+| SOCK-4 | socket_efuns.cc:SC_* | SC_* 标志移头文件（external 包依赖 sockets 导出标志，未来 socket 重构须保持标志稳定） | socket_efuns.h:111-113 | 编译测试 | 已覆盖（batch4 4056b8a2） |
 
 ### 不适用（8 hunk，6 文件本库不存在）
 
@@ -264,7 +265,7 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | ASYNC-2..4,9 | async.cc:76-130,589-623 | current_work(s) 多飞行记账 | async.cc（无） | 新增多 worker 测试 | A-S1-async-inflight |
 | ASYNC-5 | async.cc:273-283 | getdirthread dirent 大小 | async.cc（无） | ASan getdir 多条目测试 | A-S1-async-getdir |
 | ASYNC-6..8 | async.cc:306-355 | 拒绝路径 callback 泄漏 | async.cc（无） | 新增拒绝路径测试 | A-S1-async-leak |
-| PARSER-1..9 | parser.cc:78-88,626-638,713-716,738-748,2877-2890,3399,3450,3515 | verb node UAF + 深度防护 | parser.cc:621,3511 | parser_handler_destruct.lpc | A-S1-parser-uaf |
+| PARSER-1..9 | parser.cc:78-88,626-638,713-716,738-748,2877-2890,3399,3450,3515 | verb node UAF + 深度防护 | parser.cc:84-92,619-626,644,707,733-740,2903-2909,3441,3492,3557 | parser_handler_destruct.lpc | batch5（待提交） |
 | OBJ-2..5 | object.cc:257-270 等 | restore 深度无上限（栈溢出 DoS） | object.cc:275 | restore_variable.lpc | 9565ccb4 |
 | ARRAY-1/2 | array.cc:125-144 | allocate_array2 T_FUNCTION 泄漏 | array.cc:128 | allocate.lpc | A-S1-array-leak |
 | BUFFER-1 | buffer.cc:44-67 | write_buffer 有符号溢出 | buffer.cc:46-64 | write_buffer_bounds.lpc、buffer_range_assign.lpc | 9565ccb4 |
@@ -281,7 +282,7 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | TIME-1/2 | time.cc:136-148 | strftime 栈 VLA | time.cc:146 | 新增长格式测试 | 9565ccb4 |
 | DB-1/2 | db.cc:664-733 | BLOB 按列宽读行 | db.cc:772-773 | 新增短 BLOB 测试 | A-S1-db-rowlen |
 | SPRINTF-1..7 | sprintf.cc:1093 等 | 精度/列/边界 | sprintf.cc（多处） | sprintf.lpc、sprintf_column_object.lpc | A-S1-sprintf-bounds |
-| MATRIX-1..7 | matrix.cc:47 等 | 6 个 transform 缺 16 元素 | matrix.cc（无） | 新增 16 元素测试 | 4056b8a2 |
+| MATRIX-1..7 | matrix.cc:47 等 | 6 个 transform 缺 16 元素 | matrix.cc:52,102,145,185,225,270,314 | 新增 16 元素测试 | 4056b8a2 |
 | SOCK-2/3 | socket_efuns.cc:host | lpcaddr_to_sockaddr host 长度 | socket_efuns.cc:189-195 | socket_long_host.lpc | 4056b8a2 |
 | APPLY-1/2 | apply.cc:89-132 | error(buf) 格式串 + 边界 | apply.cc:75-145 | 新增 % 路径测试 | 4056b8a2 |
 | MAPPING-1 | mapping.cc:1154-1164 | compose_mapping key 泄漏 | mapping.cc:1200-1203 | 新增 compose 测试 | 4056b8a2 |
@@ -301,7 +302,6 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 |---|---|---|---|---|---|
 | MUDLIB-5..8 | mudlib_stats.cc:restore | fscanf 越界 | mudlib_stats.cc（待定位） | 新增测试 | A-S2-mudlib-fscanf |
 | SPRINTF-8..12 | sprintf.cc:cst/owned | cst 泄漏/owned 复制 | sprintf.cc（待定位） | sprintf.lpc | A-S2-sprintf-cst |
-| SOCK-4 | socket_efuns.cc:SC_* | SC_* 标志移头文件（external 包依赖 sockets 导出标志，未来 socket 重构须保持标志稳定） | socket_efuns.h:111-113 | 编译测试 | 4056b8a2（已实现，随 batch4） |
 | ASYNC-1 | async.cc:6 | include <set> | async.cc（无） | 编译测试 | A-S2-async-include |
 | TIME-2 | time.cc:4 | include <vector> | time.cc（无） | 编译测试 | 9565ccb4 |
 | 其余 | 各文件 | 见 A-S1 表同文件未列 hunk | — | — | — |
@@ -327,3 +327,10 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 ### 方案文档外部更新检查清单
 
 - 每次方案文档被外部更新后，grep 验证三项固定契约未被回退：C 阶段为显式 begin/end 而非 RAII scope（error() 是 longjmp，不是 C++ 异常）；不引入只拥有 arena 的半套 CompileSession；chunk 几何 1MB（对齐上游 9fba6cd3）。
+
+### PARSER-1..9 移植设计（2026-08-18 架构审阅实测确认）
+
+- 上游把 deferred drain 放在 `free_parse_globals()` 末尾（pr1247.diff:1335-1343）；本库 `free_parse_globals` 经 T_ERROR_HANDLER 机制注册（parser.cc:3395-3396, 3445-3446），error() longjmp 展开时该 handler 确实执行（svalue.cc:175-177，同 unique_array 模式）——**上游 drain 设计在本库天然覆盖 error() longjmp 路径**，可直接照抄。
+- 本地 `free_parse_globals`（parser.cc:687-708）无 early return，drain 追加在末尾；其 free_object(loaded_objects) 循环期间触发的 verb node 释放先入 deferred 列表、末尾统一 flush。
+- 本地恰好 2 处 verb node 释放点需改 `free_verb_node(old)`：`parse_free`（parser.cc:621）和 `f_parse_remove`（parser.cc:3511）。
+- 移植清单：2 个 static + free_verb_node helper + 两处替换 + clear_result 加 `num = 0`（parser.cc:683-685）+ we_are_finished 的 O_DESTRUCTED 分支（free_parse_result + best_result=nullptr + best_match=0）+ f_parse_sentence/f_parse_my_rules 各一处 parse_active_depth++。
