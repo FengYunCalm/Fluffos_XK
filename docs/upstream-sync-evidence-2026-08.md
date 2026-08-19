@@ -300,11 +300,19 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 
 | hunk_id | 上游 hunk | 缺陷 | 本地落点 | 回归测试 | 目标提交 |
 |---|---|---|---|---|---|
-| MUDLIB-5..8 | mudlib_stats.cc:restore | fscanf 越界 | mudlib_stats.cc:566-570 | std::ifstream + f.width 流读取，无固定缓冲 | 已覆盖（等价保护，锚点已补） |
+| MUDLIB-5..8 | mudlib_stats.cc:restore | fscanf 越界 | mudlib_stats.cc:566-570 | std::ifstream + f.width 流读取，无固定缓冲 | 等价保护（锚点已补） |
 | SPRINTF-8..12 | sprintf.cc:cst/owned | cst 泄漏/owned 复制 | sprintf.cc:1113,1139 | sprintf.lpc | 已覆盖（batch6 b121f6e0） |
-| ASYNC-1 | async.cc:6 | include <set> | async.cc（无） | 编译测试 | A-S2-async-include |
-| TIME-2 | time.cc:4 | include <vector> | time.cc（无） | 编译测试 | 9565ccb4 |
+| ASYNC-1 | async.cc:6 | include <set> | async.cc:79 | 编译测试 | 已覆盖（batch7 028955dd） |
+| TIME-2 | time.cc:4 | include <vector> | time.cc:6 | 编译测试 | 已覆盖（batch2 9565ccb4） |
+| grammar_rules_exprs | grammar.y expr0 '/' 常量折叠 | INT_MIN/-1 SIGFPE | grammar.y:1943-1953 | a2_grammar.lpc（switch case + expr0） | 本轮待提交 |
+| grammar_rules_types | grammar.y `foo(void ...)` | type_of_locals_ptr[-1] OOB | grammar.y:432-449 | a2_void_dots.lpc + a2_grammar.lpc | 本轮待提交 |
+| lexer_rules_pp | 宏参数表 stray 字符死循环 | #define 挂起 | 本 fork 无 dispatch_directive | handle_define 各分支消费或返回，无死循环路径（GETALPHA 消费≥1 否则 lexerror+return） | 等价保护（无锚点，属不同实现） |
+| lexer_utils | alloc_local_name >4096 | 堆块溢出 | 本 fork 无 lexer_utils | 手写 lexer SAVEC 4091 cap + 固定 4096 块（见 batch9 long_local_name 适配） | 等价保护（已知差异） |
+| transport_libevent | get_user_data 长度前缀 | text_space 负/溢出 | fork 无 transport_libevent | comm.cc decode_mud_port_payload_length kMudPortMaxPayload 钳制 + length==0 拒绝 | 已覆盖（TRANSPORT-1/2 锚点 comm.cc:88） |
+| ffi | ffi_address/read offset | int 截断溢出 | fork 无 ffi package | — | N/A（fork 未含该子系统） |
 | 其余 | 各文件 | 见 A-S1 表同文件未列 hunk | — | — | — |
+
+> 注：A-S2 的精确 hunk 拆分在 A-S1 完成后按 evidence 逐行补齐；上表为 A-S0 已确认的最低集合。grammar.autogen.cc（无 bison 时的回退源）不含新增防护属既定策略（CMakeLists 声明 generated files never copied back），无 bison 构建会静默丢失防护。
 
 > 注：A-S2 的精确 hunk 拆分在 A-S1 完成后按 evidence 逐行补齐；上表为 A-S0 已确认的最低集合。
 
@@ -341,7 +349,7 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 - recompile.cc 的 `compile_program_for_recompile` 从 `prog->filename` 推导 src_ext（access R_OK 回退探测，与 load_object 的 stat 探测语义略不同）；simul_efun.cc 不再硬编码 `.c`。
 - testsuite/command/tests.c 枚举 `*.lpc` + 跳过被 .lpc 孪生遮蔽的 .c 文件。
 - **拼写解析规则原四处内联（simulate.cc filename_to_obname / load_object、recompile.cc、replace_program.cc）+ tests.c LPC 层；已收敛为单一 owner `resolve_source_spelling()` + `source_name_matches()` + `source_spelling_strip_len()`（src/vm/internal/source_spelling.{h,cc}，幂等 strip 归一化同时供 filename_to_obname 与匹配使用），load_object / recompile_object / replace_program 三方共用（tests.c 为 LPC 层独立实现保留）。**
-- **replace_program 缺陷（batch9 遗留，随收敛修复）**：旧实现硬编码追加 `.c` + 精确 strcmp，.lpc 源编译出的 prog->filename 携带 ".lpc"，三种拼写（/foo、/foo.lpc、/foo.c）全部匹配失败；现由 source_name_matches 双侧剥后缀比较。testsuite 无真实 replace_program 测试，需补。
+- **replace_program 缺陷（batch9 遗留，随收敛修复）**：旧实现硬编码追加 `.c` + 精确 strcmp，.lpc 源编译出的 prog->filename 携带 ".lpc"，三种拼写（/foo、/foo.lpc、/foo.c）全部匹配失败；现由 source_name_matches 双侧剥后缀比较。已补测试：efuns/replace_program.lpc（三拼写断言 + 继承可达性断言；fixture 置于 crasher/rp_base.lpc，因无 do_tests 不可入常规目录）。
 - recompile 探测从 access(R_OK) 统一为 stat+S_ISDIR（目录不再算可回退，语义更严，有意为之）；load_object 显式 .lpc 不回退而 recompile 恒回退（recompile 无法得知请求显式性）为已知取舍。
 - PARSE-1 修正落点：living_parse（parse.cc:1064）而非 single_parse（991 锚点为等价保护）；CALLOUT-1 修正落点：reclaim_call_outs（call_out.cc:727-731）。
 - object.cc OBJ-2 升级为 nest 语义：restore_internal_size(str, is_mapping, depth, nest)，nest 为真实嵌套深度，grow_restore_sizes() 按需扩容（128 起，INT_MAX/2 兜底）——修复 restore_variable.lpc 深嵌套用例。

@@ -429,18 +429,27 @@ argument:
   |   argument_list
   |   argument_list L_DOT_DOT_DOT
     {
-      int x = type_of_locals_ptr[max_num_locals-1];
-      int lt = x & ~LOCAL_MODS;
+      // #1247 A-2 (upstream grammar_rules_types.cc): '...' needs a preceding
+      // named parameter; with none (e.g. `foo(void ...)`) max_num_locals is 0
+      // and the type lookup below would read type_of_locals_ptr[-1].
+      if (max_num_locals <= 0) {
+        yyerror("'...' requires a preceding parameter to hold the remaining arguments.");
+        $$ = $1;
+        $$.flags = 0;
+      } else {
+        int x = type_of_locals_ptr[max_num_locals-1];
+        int lt = x & ~LOCAL_MODS;
 
-      $$ = $1;
-      $$.flags |= ARG_IS_VARARGS;
+        $$ = $1;
+        $$.flags |= ARG_IS_VARARGS;
 
-      if (x & LOCAL_MOD_REF) {
-        yyerror("Variable to hold remainder of args may not be a reference");
-        x &= ~LOCAL_MOD_REF;
+        if (x & LOCAL_MOD_REF) {
+          yyerror("Variable to hold remainder of args may not be a reference");
+          x &= ~LOCAL_MOD_REF;
+        }
+        if (lt != TYPE_ANY && !(lt & TYPE_MOD_ARRAY))
+          yywarn("Variable to hold remainder of arguments should be an array.");
       }
-      if (lt != TYPE_ANY && !(lt & TYPE_MOD_ARRAY))
-        yywarn("Variable to hold remainder of arguments should be an array.");
     }
 ;
 
@@ -1197,11 +1206,18 @@ constant:
     }
   | constant '%' constant
     {
-      if ($3) $$ = $1 % $3; else yyerror("Modulo by zero");
+      if (!$3) { yyerror("Modulo by zero"); $$ = 0; }
+      else if ($3 == -1) { $$ = 0; }  // #1247 A-S2: INT_MIN % -1 == 0, direct compute traps
+      else $$ = $1 % $3;
     }
   | constant '/' constant
     {
-      if ($3) $$ = $1 / $3; else yyerror("Division by zero");
+      if (!$3) { yyerror("Division by zero"); $$ = 0; }
+      // #1247 A-S2 (upstream grammar_rules_exprs.cc): INT_MIN / -1 traps
+      // (SIGFPE) when computed directly; two's-complement negate gives the
+      // well-defined wrapped result.
+      else if ($3 == -1) $$ = (LPC_INT)(0ULL - (uint64_t)$1);
+      else $$ = $1 / $3;
     }
   | '(' constant ')'
     {
@@ -1933,6 +1949,13 @@ expr0:
               break;
             }
             $$ = $1;
+            // #1247 A-2 (upstream grammar_rules_exprs.cc): INT_MIN / -1
+            // traps (SIGFPE) when computed directly; two's-complement negate
+            // gives the well-defined wrapped result.
+            if ($3->v.number == -1) {
+              $1->v.number = (LPC_INT)(0ULL - (uint64_t)$1->v.number);
+              break;
+            }
             $1->v.number /= $3->v.number;
             break;
           }

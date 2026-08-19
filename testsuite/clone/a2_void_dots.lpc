@@ -1,0 +1,4 @@
+// #1247 A-S2 fixture: `foo(void ...)` has no preceding parameter to hold
+// the remainder, which used to read type_of_locals_ptr[-1] (OOB); it must
+// now be a compile error.
+void f(void ...) { }
