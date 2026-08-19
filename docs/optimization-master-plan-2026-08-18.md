@@ -437,7 +437,7 @@ C-S1 门禁：
 | B-S1 | 变量块生命周期/统计/replace_program 测试 + 性能/RSS 基线 |
 | B-S2 | identity/type_mod/class schema/diff bitmask + digest/descriptor 等价性；调用方仍拒绝布局差异 |
 | B-S3 | per-kind init/migrate 顺序、迁移、失败回滚、master/simul、ASan/UBSan/TSan |
-| C-S1 | RAII 覆盖 parse error/C++异常 + arena GTest + 3 轮 randomized 424/424 + ASan/UBSan + 全旧符号 grep 零命中（2026-08-19 注记：实际执行 lpc_tests 442/442 单轮 + 全量 -ftest；arena GTest 未建（compile_arena 由 bench 工具与 mud_status 消费）；ASan/UBSan 未在 C 阶段后复验——见 evidence 文档） |
+| C-S1 | RAII 覆盖 parse error/C++异常 + arena GTest + 3 轮 randomized 424/424 + ASan/UBSan + 全旧符号 grep 零命中（2026-08-19 注记：实际执行 lpc_tests 442/442 单轮 + 全量 -ftest；arena GTest 未建（compile_arena 由 bench 工具与 mud_status 消费）；ASan/UBSan 已在 C 阶段后复验（定向 Telnet 2/2 + 全量 lpc_tests 不绿：E3 既有 SimulEfunReload 失败 + 级联 segfault，无 arena 相关 UAF/double-free/orphan 证据——见 evidence 文档）） |
 | C-S2 | 同工具链本地 A/B 全部硬门禁通过（两处门禁已按实测修订，见 C.3），原始数据写入 evidence（tools/perf/results/） |
 
 提交原则：

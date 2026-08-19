@@ -397,3 +397,12 @@ pr1247.diff 共 66 文件 = 47 C++ + 19 测试。47 个 C++ 文件的覆盖明�
 - **corpus 层 chunk 门禁为空过（vacuous pass）**：600 次编译的 peak_cycle_bytes 仅 2016B，远低于 1MB BSS base chunk，chunk_mallocs delta=0 与 retained≤8 在 compile corpus 上不构成稳态证明；**chunk 行为由 bench_scratchpad 层判定**：5 轮 × ~7.7MB 需求触发 7 个 1MB chunk malloc，end() 保留 7 个（≤8 ✓），后续轮复用 retained 无新增 malloc（chunk_mallocs=7 总，增量 0 ✓），peak_cycle_bytes 8.2MB。
 - 通过项：chunk_mallocs 增量 0（两工具）、retained 7≤8、throughput 无回退、degradation ≤1.10、RSS ≤110%、bench_scratchpad 耗时降 79%。失败项：无。尚不能下的结论：throughput 提升（实测 0%，门禁已修订）。
 - 已知问题（预存，非 C-S1 引入）：error() 异常路径下 include 栈（lex.cc:118 incstate_t）永久泄漏 released stream + fd（有界自愈，修复位置在 compiler 内部，超出 C-S2 范围）。
+
+### C 阶段后 ASan 复验（2026-08-19，build-recompile-asan）
+
+- 构建：ENABLE_ASAN=ON + UBSan，RelWithDebInfo，USE_JEMALLOC=ON，ENABLE_LTO=OFF，-j2 构建零 error。
+- 定向：`--gtest_filter=*Telnet*` 2/2 通过（K4/K5 在 ASan 下才有检出价值：栈越界读/堆越界写）。
+- 全量 lpc_tests：**不绿**——`TestSimulEfunReloadAddDropReadd`/`TestSimulEfunReloadCreateFailureRollback` 断言失败（`foo_pos != foo_idx`，34 vs 34），随后级联 segfault（NULL 解引用，stdout 缓冲丢失无法定位具体测试；单独跑 RollbackKeepsDroppedInert/MasterReloadSuccess 均通过，确认是级联而非独立错误）。
+- 归因：SimulEfunReload 测试来自 E3 阶段（af24bf61，2026-08-16 的 transaction-based simul_efun reload），泄漏堆栈全在 simul_efun 模块（simul_efuns_prepare simul_efun.cc:276/277、get_simul_efuns :190、SaveSimulTable test_lpc.cc:24955），**与 C-S1 的 compile_arena 无直接关联**（C-S1 改动不触及 simul_efun 表；断言是逻辑值比较，非 arena 内存错误）。**C-S1 前 ASan 下 lpc_tests 状态未验证**（此前 ASan 只跑过 -ftest），不能排除既有失败。
+- 偶发：一次全量跑曾报 `alloc-dealloc-mismatch`（free 不匹配，未复现、未定位；USE_JEMALLOC=ON 下 ASan 与 jemalloc 共存，属可疑来源）。
+- 结论：**C-S1 的 arena 相关错误（UAF/double-free/orphan chunk）无直接证据**；但 ASan 全量 lpc_tests 不绿（E3 既有失败 + 级联 segfault），**ASan 门禁按"定向验证 + 无 arena 相关错误"记录，全量绿留待 E3 测试修复**。
