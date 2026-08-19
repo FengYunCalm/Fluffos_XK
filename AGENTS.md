@@ -11,7 +11,8 @@
 
 - **WSL2 总内存约 6GB，pi 环境（Java/next-server 等）常驻占用 ~2.5GB**，可用内存常不足 3.5GB；构建（尤其 LTO 链接）会瞬间吃满并触发 OOM/swap 颠簸。
 - 构建前检查内存（`free -h`）：可用 < 2GB 时先清理（删旧 build-* 目录、停无关进程）再构建；构建期间不并行跑 driver/-ftest/bench 等内存大户。
-- **LTO 链接是内存大户**：`lpc_tests` 的链接（`-flto=auto`，产出 ~98MB 二进制）在内存紧张时改用 `-flto=2` 手动链接（link.txt 命令加 `-flto=2` 覆盖 auto），或先删其他 build 目录腾出内存。
+- **LTO 是内存爆掉的根因**：`ENABLE_LTO` 默认 ON（src/CMakeLists.txt:10），非 Debug 构建 `-flto=auto` 的 LTO1 并行数 = nproc，链接时全程序 IR 同时驻留（数 GB 峰值）。**dev 构建一律 `-DENABLE_LTO=OFF`**（`cmake -S . -B build-xxx -DENABLE_LTO=OFF`），LTO 只留给 prod/CI 构建；已配置的构建目录可 `cmake -S . -B build-xxx -DENABLE_LTO=OFF` 重配。
+- **ASan 构建固定 `-j2`**（大 TU 如 grammar.autogen.cc 单文件编译 1-2GB，-j4 在 ~3GB 可用内存下仍会爆）；普通构建 -j4。
 - 构建失败/无输出时先查 `free -h` 与 `dmesg | grep -i oom`，确认不是内存打爆再排查编译错误。
 
 ## 验证粒度

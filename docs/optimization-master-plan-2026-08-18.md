@@ -399,7 +399,7 @@ C-S1 是一个实现提交序列中的原子合入单元：内部可拆小提交
 C-S1 门禁：
 
 - `src/compiler/`中 `scr_last|scr_tail|scratch_end|scratch_alloc|scratch_realloc|scratch_free`零生产调用；测试工具中的故障注入接口使用新命名。
-- GTest 覆盖 alignment、exact fit、spill、oversize、retained ceiling、bulk reset、错误 unwind 和统计。**错误 unwind 测试必须验证：模拟编译错误（error() longjmp 路径，经错误清理路径显式调用 end）后 arena cycle bytes 归零**、下一次 compile 可正常复用 retained chunks；普通 parse error（clean_parser() 路径）同样经显式 end 归零。
+- GTest 覆盖 alignment、exact fit、spill、oversize、retained ceiling、bulk reset、错误 unwind 和统计。**错误 unwind 测试必须验证：模拟编译错误（error() 异常路径，DEFER end() 单点收口）后 arena cycle bytes 归零**、下一次 compile 可正常复用 retained chunks；普通 parse error（clean_parser() 路径）同样经显式 end 归零。
 - lexer/parser randomized `lpc_tests`至少连续 3 轮通过。
 - Debug ASan/UBSan 构建无 UAF、double free、orphan chunk；生成 parser 与 grammar source 一致。
 
