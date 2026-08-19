@@ -409,6 +409,7 @@ pr1247.diff 共 66 文件 = 47 C++ + 19 测试。47 个 C++ 文件的覆盖明�
 - 结论：**C-S1 的 arena 相关错误（UAF/double-free/orphan chunk）无直接证据**；ASan 全量 lpc_tests 不绿仅因 E3 既有 SimulEfunReload 断言失败 + 级联 segfault，**ASan 门禁按"定向验证 + 无 arena 相关错误"记录，全量绿留待 E3 测试修复**。
 - TSan（2026-08-19）：build-tsan（ENABLE_TSAN=ON, -j2）编译被 OOM 杀死（dmesg 5 条 OOM，WSL2 可用内存 <1.5Gi），**TSan 门禁未跑**——WSL2 内存限制，留待有内存余量时执行；UBSan 随 build-recompile-asan 双开（-fsanitize=address + undefined），全量 -ftest 0 runtime error。
 - 全量 -ftest 最终留痕（2026-08-19，551a9518/64f1f396 后）：docs/evidence/ftest-final-2026-08-19.txt（52860 行，EXIT=0，`grep -icE "check failed"` = 0，`Checks succeeded.` 1 次）——13 个缺失测试全部落地后套件绿。
+- lpc_tests 最终留痕（2026-08-19）：docs/evidence/lpc-tests-final-2026-08-19.txt——**Running 444 tests from 8 test suites，[ PASSED ] 444 tests**（此前声称的 442 为未留痕的中间计数；424 为计划基线）。
 
 ### 2026-08-19 回归测试修正（551a9518/64f1f396）
 
