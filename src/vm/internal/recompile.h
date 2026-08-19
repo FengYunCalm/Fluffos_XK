@@ -10,28 +10,10 @@
 #include <vector>
 
 #include "vm/internal/base/program.h"  // free_prog, program_t
+#include "vm/internal/recompile_layout.h"  // RecompileLayout, RecompileLayoutDiff
 #include "vm/internal/simul_efun.h"     // simul_efun_prepared_t
 
 struct object_t;
-
-struct RecompileLayoutVariable {
-  int slot{0};
-  std::string name;
-  int full_decl_type{0};
-};
-
-struct RecompileLayoutInherit {
-  int slot{0};
-  std::string filename;
-  int type_mod{0};
-  std::string nested_digest;  // recursive digest of the inherited layout
-};
-
-struct RecompileLayout {
-  int num_variables_total{0};
-  std::vector<RecompileLayoutVariable> variables;
-  std::vector<RecompileLayoutInherit> inherits;
-};
 
 // RAII owner of a freshly compiled (staging) program: never published to any
 // live object until commit. free_prog() on destruction.
@@ -152,10 +134,6 @@ struct RecompilePrepared {
 // failure. Inherits not already loaded are a prepare error (v1 never loads
 // inherits inside the transaction).
 StagedProgram compile_program_for_recompile(object_t *blueprint);
-
-// Build a structured layout descriptor from a program (variables in actual
-// variable-block order, inherits depth-first).
-RecompileLayout describe_recompile_layout(program_t *prog);
 
 // Wire the transaction's entry segment exactly like f_recompile_object:
 // pin the old program (ref++ transaction pin), decide the kind, run the

@@ -135,46 +135,187 @@ function_t *find_func_entry(program_t *prog, int index) {
 // The digest is the layout_id producer for ObjectVariableBlock; it is
 // not a collision-free substitute for the full structural comparison
 // (B-S2), which remains the migration gate.
+//
+// B-S2: the byte format is intentionally identical to
+// canonical_layout_serialization() in recompile_layout.cc ("inh:" /
+// "var:" records with the same fields, plus class-schema digests) so
+// that digest(prog) == digest(canonical(describe(prog))) is testable and
+// a single process never holds two digest algorithms. The equivalence is
+// locked by GTest (TestProgramLayoutDigestMatchesDescriptor).
 namespace {
-void digest_walk(const program_t *prog, const std::string &path, uint64_t *h) {
-  // Mix helper: FNV-1a step over a byte range.
-  auto mix = [h](const char *p, size_t n) {
-    for (size_t i = 0; i < n; i++) {
-      *h ^= static_cast<unsigned char>(p[i]);
-      *h *= 1099511628211ULL;
-    }
-  };
+constexpr uint64_t kLayoutFnvOffset = 14695981039346656037ULL;
+constexpr uint64_t kLayoutFnvPrime = 1099511628211ULL;
+
+void layout_mix(uint64_t *h, const char *p, size_t n) {
+  for (size_t i = 0; i < n; i++) {
+    *h ^= static_cast<unsigned char>(p[i]);
+    *h *= kLayoutFnvPrime;
+  }
+}
+
+// Class schema digest of one class definition (path + name + member
+// (name,type) sequence). Mirrors recompile_layout.cc's
+// class_schema_digest.
+uint64_t layout_class_schema_digest(const program_t *prog, const class_def_t &cd,
+                                      const std::string &path) {
+  uint64_t h = kLayoutFnvOffset;
+  const char *cls_name =
+      prog->strings && cd.classname < prog->num_strings ? prog->strings[cd.classname] : "";
+  layout_mix(&h, path.data(), path.size());
+  layout_mix(&h, ":", 1);
+  layout_mix(&h, cls_name, strlen(cls_name));
+  for (int m = 0; m < cd.size; m++) {
+    const class_member_entry_t &cme = prog->class_members[cd.index + m];
+    const char *mname =
+        prog->strings && cme.membername < prog->num_strings ? prog->strings[cme.membername] : "";
+    layout_mix(&h, "|", 1);
+    layout_mix(&h, mname, strlen(mname));
+    layout_mix(&h, ":", 1);
+    int t = cme.type;
+    layout_mix(&h, reinterpret_cast<const char *>(&t), sizeof(t));
+  }
+  return h;
+}
+
+// Class schema digest of a class-typed variable at its defining program.
+// 0 when not class-typed or unresolvable (fail-closed: mismatch rejects).
+uint64_t layout_class_digest_for(const program_t *prog, int raw_type, const std::string &path) {
+  if (!(raw_type & TYPE_MOD_CLASS)) return 0;
+  int idx = raw_type & CLASS_NUM_MASK;
+  if (!prog->classes || idx >= prog->num_classes) return 0;
+  return layout_class_schema_digest(prog, prog->classes[idx], path);
+}
+
+// Collect the class definition set of prog and its inherit graph
+// (deduplicated by {defining path, class name}), mirroring
+// recompile_layout.cc's collect_classes.
+struct LayoutClassRecord {
+  std::string defining_path;
+  std::string class_name;
+  std::vector<std::pair<std::string, int>> members;  // (name, type)
+};
+
+void layout_collect_classes(const program_t *prog, const std::string &path,
+                            std::vector<LayoutClassRecord> *out) {
+  if (!prog) return;
   for (int i = 0; i < prog->num_inherited; i++) {
     const inherit_t &inh = prog->inherit[i];
-    const char *fname = inh.prog && inh.prog->filename ? inh.prog->filename : "";
-    mix(fname, strlen(fname));
-    mix(reinterpret_cast<const char *>(&inh.type_mod), sizeof(inh.type_mod));
-    mix("|", 1);
     if (inh.prog) {
       std::string child_path = path;
       child_path += "/";
-      child_path += fname;
-      digest_walk(inh.prog, child_path, h);
+      child_path += (inh.prog->filename ? inh.prog->filename : "");
+      layout_collect_classes(inh.prog, child_path, out);
     }
+  }
+  if (!prog->classes) return;
+  for (int i = 0; i < prog->num_classes; i++) {
+    const class_def_t &cd = prog->classes[i];
+    const char *cls_name =
+        prog->strings && cd.classname < prog->num_strings ? prog->strings[cd.classname] : nullptr;
+    if (!cls_name) continue;
+    LayoutClassRecord rec;
+    rec.defining_path = path;
+    rec.class_name = cls_name;
+    for (int m = 0; m < cd.size; m++) {
+      const class_member_entry_t &cme = prog->class_members[cd.index + m];
+      rec.members.emplace_back(
+          prog->strings && cme.membername < prog->num_strings ? prog->strings[cme.membername] : "",
+          cme.type);
+    }
+    bool dup = false;
+    for (const auto &existing : *out) {
+      if (existing.defining_path == rec.defining_path && existing.class_name == rec.class_name) {
+        dup = true;
+        break;
+      }
+    }
+    if (!dup) out->push_back(std::move(rec));
+  }
+}
+
+// Depth-first collection matching canonical_layout_serialization's byte
+// order: ALL inherit-edge records (DFS order) first, then ALL variable
+// records (slot order). Returns the subtree digest used as the parent
+// edge's nested_layout_digest -- the FNV over the subtree's own edge
+// records followed by its variable records (the same canonical order).
+uint64_t digest_walk(const program_t *prog, const std::string &path, uint64_t *h,
+                     const std::vector<const inherit_t *> &mod_chain,
+                     std::vector<std::string> *edge_recs, std::vector<std::string> *var_recs) {
+  uint64_t nested_h = kLayoutFnvOffset;
+  std::vector<std::string> sub_edges;
+  std::vector<std::string> sub_vars;
+  for (int i = 0; i < prog->num_inherited; i++) {
+    const inherit_t &inh = prog->inherit[i];
+    const char *fname = inh.prog && inh.prog->filename ? inh.prog->filename : "";
+    std::string child_path = path;
+    child_path += "/";
+    child_path += fname;
+    uint64_t nested = 0;
+    if (inh.prog) {
+      std::vector<const inherit_t *> chain = mod_chain;
+      chain.push_back(&inh);
+      nested = digest_walk(inh.prog, child_path, &nested_h, chain, &sub_edges, &sub_vars);
+    }
+    std::string edge = "inh:" + child_path + ":" + fname + ":" + std::to_string(inh.type_mod) +
+                       ":" + std::to_string(nested) + ";";
+    sub_edges.push_back(edge);
   }
   for (int i = 0; i < prog->num_variables_defined; i++) {
     const char *name = prog->variable_table ? prog->variable_table[i] : "";
-    int type = prog->variable_types ? prog->variable_types[i] : 0;
-    mix(path.data(), path.size());
-    mix(":", 1);
-    mix(name, strlen(name));
-    mix(":", 1);
-    mix(reinterpret_cast<const char *>(&type), sizeof(type));
-    mix("|", 1);
+    int raw = prog->variable_types ? prog->variable_types[i] : 0;
+    int t = raw;
+    for (auto it = mod_chain.rbegin(); it != mod_chain.rend(); ++it) {
+      t = DECL_MODIFY(t, (*it)->type_mod);
+    }
+    uint64_t cd = layout_class_digest_for(prog, raw, path);
+    std::string rec = "var:" + path + ":" + name + ":" + std::to_string(t) + ":" +
+                      std::to_string(cd) + ";";
+    sub_vars.push_back(rec);
   }
+  // Canonical order: edge records, then variable records.
+  for (const auto &e : sub_edges) {
+    layout_mix(&nested_h, e.data(), e.size());
+  }
+  for (const auto &v : sub_vars) {
+    layout_mix(&nested_h, v.data(), v.size());
+  }
+  // Publish this subtree's records into the caller's accumulators.
+  for (const auto &e : sub_edges) edge_recs->push_back(e);
+  for (const auto &v : sub_vars) var_recs->push_back(v);
+  return nested_h;
 }
 }  // namespace
 
 uint64_t program_layout_digest(const program_t *prog) noexcept {
-  uint64_t h = 14695981039346656037ULL;  // FNV-1a 64 offset basis
+  uint64_t h = kLayoutFnvOffset;  // FNV-1a 64 offset basis
   if (prog) {
     std::string path;
-    digest_walk(prog, path, &h);
+    std::vector<const inherit_t *> chain;
+    std::vector<std::string> edges;
+    std::vector<std::string> vars;
+    digest_walk(prog, path, &h, chain, &edges, &vars);
+    // Top-level canonical order: ALL edges (DFS), then ALL variables
+    // (slot order), then classes (sorted), matching
+    // canonical_layout_serialization.
+    for (const auto &e : edges) layout_mix(&h, e.data(), e.size());
+    for (const auto &v : vars) layout_mix(&h, v.data(), v.size());
+    // Classes mix AFTER variables, matching canonical_layout_serialization
+    // (inherits; variables; classes), sorted by {path, name}.
+    std::vector<LayoutClassRecord> classes;
+    layout_collect_classes(prog, path, &classes);
+    std::sort(classes.begin(), classes.end(),
+              [](const LayoutClassRecord &a, const LayoutClassRecord &b) {
+                if (a.defining_path != b.defining_path) return a.defining_path < b.defining_path;
+                return a.class_name < b.class_name;
+              });
+    for (const auto &c : classes) {
+      std::string rec = "class:" + c.defining_path + ":" + c.class_name + ":";
+      for (const auto &m : c.members) {
+        rec += m.first + ":" + std::to_string(m.second) + "|";
+      }
+      rec += ";";
+      layout_mix(&h, rec.data(), rec.size());
+    }
   }
   return h;
 }

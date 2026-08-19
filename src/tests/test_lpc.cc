@@ -64,6 +64,7 @@
 #include "vm/internal/simulate.h"
 #include "vm/internal/simul_efun.h"
 #include "vm/internal/recompile.h"
+#include "vm/internal/recompile_layout.h"
 #include "vm/object_handle.h"
 #include "vm/owner.h"
 #include "vm/vm.h"
@@ -25589,4 +25590,185 @@ TEST_F(DriverTest, TestReplaceProgramBlockMoveOffset) {
   destruct_object_for_test(mid);
   destruct_object_for_test(leaf);
   destruct_object_for_test(a);
+}
+
+// #1247 B-S2: digest/descriptor equivalence -- program_layout_digest must
+// equal the FNV of the canonical descriptor serialization for every
+// compiled program, and two programs with the same digest must have
+// identical serializations (the B-S2 bijection gate, no whitelist).
+TEST_F(DriverTest, TestProgramLayoutDigestMatchesDescriptor) {
+  const char *src =
+      "class Point { int x; int y; }\n"
+      "class Point p;\n"
+      "int q;\n"
+      "void do_tests() { q = 1; }\n";
+  program_t *prog = CompileSimulProg(src);
+  ASSERT_NE(prog, nullptr);
+
+  RecompileLayout layout = describe_recompile_layout(prog);
+  ASSERT_EQ(layout.num_variables_total, prog->num_variables_total);
+  std::string canonical = canonical_layout_serialization(layout);
+  ASSERT_EQ(program_layout_digest(prog), layout_serialization_digest(canonical))
+      << "digest(prog) must equal digest(canonical(describe(prog)))";
+
+  // Same program compiled again must give the same digest and serialization.
+  program_t *prog2 = CompileSimulProg(src);
+  ASSERT_NE(prog2, nullptr);
+  RecompileLayout layout2 = describe_recompile_layout(prog2);
+  ASSERT_EQ(program_layout_digest(prog2), program_layout_digest(prog));
+  ASSERT_EQ(canonical_layout_serialization(layout2), canonical);
+
+  // Distinct layouts must not share a digest or serialization.
+  const char *src3 =
+      "class Point { int x; }\n"
+      "class Point p;\n"
+      "int q;\n"
+      "void do_tests() { q = 1; }\n";
+  program_t *prog3 = CompileSimulProg(src3);
+  ASSERT_NE(prog3, nullptr);
+  ASSERT_NE(program_layout_digest(prog3), program_layout_digest(prog))
+      << "class schema change must change the digest";
+  ASSERT_NE(canonical_layout_serialization(describe_recompile_layout(prog3)), canonical);
+
+  free_prog(&prog3);
+  free_prog(&prog2);
+  free_prog(&prog);
+}
+
+// #1247 B-S2: every program the test driver has compiled so far must be
+// consistent under (digest, canonical serialization): same digest implies
+// same serialization. Exercises the full compiled corpus in one pass.
+TEST_F(DriverTest, TestLayoutDigestBijectionOverCorpus) {
+  std::map<uint64_t, std::string> digest_to_serial;
+  for (object_t *ob = obj_list; ob; ob = ob->next_all) {
+    if (!ob->prog) continue;
+    RecompileLayout layout = describe_recompile_layout(ob->prog);
+    std::string serial = canonical_layout_serialization(layout);
+    uint64_t digest = program_layout_digest(ob->prog);
+    if (digest != layout_serialization_digest(serial)) {
+      std::cerr << "DIGEST MISMATCH " << ob->prog->filename << "\n  digest=" << digest
+                << " canonical=" << layout_serialization_digest(serial) << "\n  serial=" << serial
+                << "\n";
+    }
+    ASSERT_EQ(digest, layout_serialization_digest(serial))
+        << "digest/canonical mismatch for " << ob->prog->filename;
+    auto it = digest_to_serial.find(digest);
+    if (it != digest_to_serial.end()) {
+      ASSERT_EQ(it->second, serial)
+          << "digest collision between different layouts: " << ob->prog->filename;
+    } else {
+      digest_to_serial[digest] = serial;
+    }
+  }
+  ASSERT_GT(digest_to_serial.size(), 0u) << "corpus must contain programs";
+}
+
+// #1247 B-S2: same-name variables on different inherit paths are distinct
+// identities; renaming is delete+add (no value preservation); reordering
+// keeps values and is migratable; type changes, inherit edge type_mod
+// changes and class schema changes are rejected.
+TEST_F(DriverTest, TestClassifyLayoutRules) {
+  // old: {v1, v2} in that order; new: reordered {v2, v1} plus one added
+  // variable. All identities on the same path.
+  RecompileLayout old_l;
+  old_l.num_variables_total = 2;
+  old_l.variables = {
+      {0, "/p", "v1", 0, 0},
+      {1, "/p", "v2", 0, 0},
+  };
+  RecompileLayout new_l;
+  new_l.num_variables_total = 3;
+  new_l.variables = {
+      {0, "/p", "v2", 0, 0},
+      {1, "/p", "v1", 0, 0},
+      {2, "/p", "v3", 0, 0},
+  };
+  RecompileLayoutDiff diff = classify_recompile_layout(old_l, new_l);
+  ASSERT_TRUE(diff.flags & kReordered);
+  ASSERT_TRUE(diff.flags & kAddedVariable);
+  ASSERT_EQ(diff.added.size(), 1u);
+  ASSERT_EQ(diff.added[0].name_text, "v3");
+  ASSERT_EQ(diff.removed.size(), 0u);
+  ASSERT_EQ(diff.matches.size(), 2u);
+  ASSERT_TRUE(diff.migratable()) << "reorder+add must be migratable";
+
+  // Type change on a matched variable must reject.
+  RecompileLayout type_new = new_l;
+  for (auto &v : type_new.variables) {
+    if (v.name_text == "v1") v.effective_decl_type = 1;
+  }
+  RecompileLayoutDiff type_diff = classify_recompile_layout(old_l, type_new);
+  ASSERT_TRUE(type_diff.flags & kTypeChanged);
+  ASSERT_FALSE(type_diff.migratable());
+
+  // Rename: old v1 disappears, new v4 appears.
+  RecompileLayout rename_new;
+  rename_new.num_variables_total = 2;
+  rename_new.variables = {
+      {0, "/p", "v4", 0, 0},
+      {1, "/p", "v2", 0, 0},
+  };
+  RecompileLayoutDiff rename_diff = classify_recompile_layout(old_l, rename_new);
+  ASSERT_TRUE(rename_diff.flags & kAddedVariable);
+  ASSERT_TRUE(rename_diff.flags & kRemovedVariable);
+  ASSERT_EQ(rename_diff.matches.size(), 1u);
+  ASSERT_EQ(rename_diff.matches[0].identity.name_text, "v2");
+  ASSERT_TRUE(rename_diff.migratable());
+
+  // Same name on different inherit paths must NOT match.
+  RecompileLayout path_new;
+  path_new.num_variables_total = 2;
+  path_new.variables = {
+      {0, "/other", "v1", 0, 0},
+      {1, "/p", "v2", 0, 0},
+  };
+  RecompileLayoutDiff path_diff = classify_recompile_layout(old_l, path_new);
+  ASSERT_TRUE(path_diff.flags & kAddedVariable);
+  ASSERT_TRUE(path_diff.flags & kRemovedVariable);
+  ASSERT_EQ(path_diff.matches.size(), 1u);
+
+  // Duplicate identity within one side must reject.
+  RecompileLayout dup_l = old_l;
+  dup_l.variables[1].inherit_path = "/p";
+  dup_l.variables[1].name_text = "v1";
+  RecompileLayoutDiff dup_diff = classify_recompile_layout(dup_l, new_l);
+  ASSERT_TRUE(dup_diff.flags & kDuplicateIdentity);
+  ASSERT_FALSE(dup_diff.migratable());
+
+  // Inherit edge type_mod change must reject.
+  RecompileLayout inherit_old;
+  inherit_old.num_variables_total = 1;
+  inherit_old.inherits = {{0, "/sub", "sub", 0, 123}};
+  inherit_old.variables = {{0, "/sub", "sv", 0, 0}};
+  RecompileLayout inherit_new = inherit_old;
+  inherit_new.inherits[0].type_mod = 1;
+  RecompileLayoutDiff inherit_diff = classify_recompile_layout(inherit_old, inherit_new);
+  ASSERT_TRUE(inherit_diff.flags & kInheritChanged);
+  ASSERT_FALSE(inherit_diff.migratable());
+
+  // Class schema change must reject (same variable, different schema).
+  RecompileLayout class_old;
+  class_old.num_variables_total = 1;
+  class_old.classes = {{"/p", "C", {{"m", 0}}, 111}};
+  class_old.variables = {{0, "/p", "c", 0, 111}};
+  RecompileLayout class_new = class_old;
+  class_new.classes[0].schema_digest = 222;
+  class_new.variables[0].class_schema_digest = 222;
+  RecompileLayoutDiff class_diff = classify_recompile_layout(class_old, class_new);
+  ASSERT_TRUE(class_diff.flags & kClassSchemaChanged);
+  ASSERT_FALSE(class_diff.migratable());
+
+  // Combined: add + remove + type change keeps ALL flags.
+  RecompileLayout comb_new;
+  comb_new.num_variables_total = 2;
+  comb_new.variables = {
+      {0, "/p", "v2", 5, 0},   // type changed
+      {1, "/p", "v9", 0, 0},   // added
+  };
+  RecompileLayoutDiff comb_diff = classify_recompile_layout(old_l, comb_new);
+  ASSERT_TRUE(comb_diff.flags & kAddedVariable);
+  ASSERT_TRUE(comb_diff.flags & kRemovedVariable);
+  ASSERT_TRUE(comb_diff.flags & kTypeChanged);
+  ASSERT_FALSE(comb_diff.migratable());
+  ASSERT_GE(comb_diff.reject_reasons.size(), 1u);
 }
