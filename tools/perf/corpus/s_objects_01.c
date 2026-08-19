@@ -1,0 +1,100 @@
+// representative: object creation, apply patterns
+object make_room_1(string name, string *exits) {
+  object room = new("/std/room");
+  room->set_name(name);
+  for (int i = 0; i < sizeof(exits); i++) {
+    room->add_exit(exits[i], "/world/void");
+  }
+  return room;
+}
+int has_exit_1(object room, string dir) {
+  return !undefinedp(room->query_exit(dir));
+}
+string describe_1(object ob) {
+  return ob->short() + " (" + ob->query_name() + ")";
+}
+int pad_1_0 = 142;
+int pad_1_1 = 541;
+int pad_1_2 = 153;
+int pad_1_3 = 12;
+int pad_1_4 = 372;
+int pad_1_5 = 142;
+int pad_1_6 = 70;
+int pad_1_7 = 184;
+int pad_1_8 = 499;
+int pad_1_9 = 673;
+int pad_1_10 = 339;
+int pad_1_11 = 14;
+int pad_1_12 = 354;
+int pad_1_13 = 51;
+int pad_1_14 = 998;
+int pad_1_15 = 569;
+int pad_1_16 = 917;
+int pad_1_17 = 333;
+int pad_1_18 = 250;
+int pad_1_19 = 432;
+int pad_1_20 = 301;
+int pad_1_21 = 884;
+int pad_1_22 = 237;
+int pad_1_23 = 2;
+int pad_1_24 = 236;
+int pad_1_25 = 467;
+int pad_1_26 = 670;
+int pad_1_27 = 909;
+int pad_1_28 = 591;
+int pad_1_29 = 214;
+int pad_1_30 = 89;
+int pad_1_31 = 621;
+int pad_1_32 = 113;
+int pad_1_33 = 385;
+int pad_1_34 = 949;
+int pad_1_35 = 373;
+int pad_1_36 = 415;
+int pad_1_37 = 605;
+int pad_1_38 = 895;
+int pad_1_39 = 410;
+int pad_1_40 = 417;
+int pad_1_41 = 140;
+int pad_1_42 = 432;
+int pad_1_43 = 253;
+int pad_1_44 = 820;
+int pad_1_45 = 392;
+int pad_1_46 = 93;
+int pad_1_47 = 827;
+int pad_1_48 = 832;
+int pad_1_49 = 863;
+int pad_1_50 = 255;
+int pad_1_51 = 96;
+int pad_1_52 = 234;
+int pad_1_53 = 761;
+int pad_1_54 = 601;
+int pad_1_55 = 95;
+int pad_1_56 = 578;
+int pad_1_57 = 677;
+int pad_1_58 = 225;
+int pad_1_59 = 736;
+int pad_1_60 = 832;
+int pad_1_61 = 301;
+int pad_1_62 = 168;
+int pad_1_63 = 369;
+int pad_1_64 = 489;
+int pad_1_65 = 103;
+int pad_1_66 = 250;
+int pad_1_67 = 410;
+int pad_1_68 = 257;
+int pad_1_69 = 580;
+int pad_1_70 = 438;
+int pad_1_71 = 6;
+int pad_1_72 = 848;
+int pad_1_73 = 429;
+int pad_1_74 = 511;
+int pad_1_75 = 972;
+int pad_1_76 = 935;
+int pad_1_77 = 419;
+int pad_1_78 = 239;
+int pad_1_79 = 305;
+int pad_1_80 = 263;
+int pad_1_81 = 368;
+int pad_1_82 = 971;
+int pad_1_83 = 928;
+int pad_1_84 = 912;

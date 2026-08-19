@@ -1,0 +1,100 @@
+// representative: switch dispatch
+string classify_3(int code) {
+  switch (code) {
+    case 0: return "zero";
+    case 1: case 2: case 3: return "small";
+    case 10..20: return "teens";
+    case 100: return "hundred";
+    case 1003: return "variant";
+    default: return "other";
+  }
+}
+int dispatch_3(int code) {
+  switch (code) {
+    case 0: return 0;
+    case 1: return 1;
+    case 2: return 4;
+    case 3: return 9;
+    case 4: return 16;
+    case 5: return 25;
+    default: return -1;
+  }
+}
+int pad_3_0 = 555;
+int pad_3_1 = 39;
+int pad_3_2 = 781;
+int pad_3_3 = 160;
+int pad_3_4 = 422;
+int pad_3_5 = 997;
+int pad_3_6 = 948;
+int pad_3_7 = 732;
+int pad_3_8 = 495;
+int pad_3_9 = 321;
+int pad_3_10 = 390;
+int pad_3_11 = 329;
+int pad_3_12 = 105;
+int pad_3_13 = 834;
+int pad_3_14 = 431;
+int pad_3_15 = 634;
+int pad_3_16 = 580;
+int pad_3_17 = 962;
+int pad_3_18 = 297;
+int pad_3_19 = 162;
+int pad_3_20 = 353;
+int pad_3_21 = 481;
+int pad_3_22 = 638;
+int pad_3_23 = 247;
+int pad_3_24 = 422;
+int pad_3_25 = 998;
+int pad_3_26 = 874;
+int pad_3_27 = 601;
+int pad_3_28 = 710;
+int pad_3_29 = 780;
+int pad_3_30 = 460;
+int pad_3_31 = 336;
+int pad_3_32 = 45;
+int pad_3_33 = 501;
+int pad_3_34 = 374;
+int pad_3_35 = 947;
+int pad_3_36 = 959;
+int pad_3_37 = 399;
+int pad_3_38 = 113;
+int pad_3_39 = 389;
+int pad_3_40 = 596;
+int pad_3_41 = 346;
+int pad_3_42 = 231;
+int pad_3_43 = 770;
+int pad_3_44 = 355;
+int pad_3_45 = 182;
+int pad_3_46 = 698;
+int pad_3_47 = 958;
+int pad_3_48 = 454;
+int pad_3_49 = 805;
+int pad_3_50 = 291;
+int pad_3_51 = 165;
+int pad_3_52 = 209;
+int pad_3_53 = 938;
+int pad_3_54 = 619;
+int pad_3_55 = 30;
+int pad_3_56 = 722;
+int pad_3_57 = 802;
+int pad_3_58 = 628;
+int pad_3_59 = 897;
+int pad_3_60 = 302;
+int pad_3_61 = 256;
+int pad_3_62 = 608;
+int pad_3_63 = 643;
+int pad_3_64 = 691;
+int pad_3_65 = 520;
+int pad_3_66 = 181;
+int pad_3_67 = 108;
+int pad_3_68 = 659;
+int pad_3_69 = 518;
+int pad_3_70 = 176;
+int pad_3_71 = 656;
+int pad_3_72 = 494;
+int pad_3_73 = 861;
+int pad_3_74 = 462;
+int pad_3_75 = 653;
+int pad_3_76 = 334;
+int pad_3_77 = 471;

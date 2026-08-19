@@ -17,7 +17,9 @@ if(${GTEST_FOUND})
 endif()
 
 add_executable(owner_runtime_bench owner_runtime_bench.cc)
+add_executable(bench_compile bench_compile.cc)
 target_link_libraries(owner_runtime_bench PRIVATE ${FLUFFOS_LINK})
+target_link_libraries(bench_compile PRIVATE ${FLUFFOS_LINK})
 
 # Gateway frame parser fuzz targets (T15/F08/R2-F02).
 #
@@ -49,6 +51,7 @@ if(GATEWAY_FUZZ_LIBFUZZER)
   target_link_options(gateway_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()
 target_compile_definitions(owner_runtime_bench PRIVATE -DTESTSUITE_DIR="${CMAKE_SOURCE_DIR}/testsuite")
+target_compile_definitions(bench_compile PRIVATE -DTESTSUITE_DIR="${CMAKE_SOURCE_DIR}/testsuite")
 
 add_executable(lpc_vm_bench lpc_vm_bench.cc)
 target_link_libraries(lpc_vm_bench PRIVATE ${FLUFFOS_LINK})
