@@ -198,6 +198,15 @@ void restore_variable(svalue_t *, char *);
 object_t *get_empty_object(const program_t *);
 void reset_object(object_t *);
 void call_create(object_t *, int);
+// #1247 B-S3: refresh an object's next_reset (call_create() runs it before
+// __INIT; the recompile transaction's split __INIT/create path calls it
+// explicitly so Master/SimulEfun targets keep normal reset scheduling).
+void set_nextreset(object_t *);
+// #1247 B-S3: create-only primitive -- runs APPLY_CREATE without __INIT.
+// call_create() is the __INIT + create composition; recompile uses
+// call_create_only() after the migration state is prepared so __INIT runs
+// exactly once inside the transaction.
+void call_create_only(object_t *, int);
 void reload_object(object_t *);
 void free_object(object_t **, const char *const);
 #ifdef F_SET_HIDE

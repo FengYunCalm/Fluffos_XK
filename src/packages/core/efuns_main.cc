@@ -3461,8 +3461,19 @@ void f_recompile_object() {
   prepared.new_layout = describe_recompile_layout(prepared.staged.prog);
 
   std::string first_diff;
+  // #1247 B-S3: exact layout keeps the strict gate; a migratable layout
+  // change proceeds and is applied by prepare_variable_migrations() + the
+  // transaction segments below. Non-migratable changes stay rejected.
   if (!recompile_layouts_match(prepared.old_layout, prepared.new_layout, &first_diff)) {
-    error("recompile_object layout mismatch: %s\n", first_diff.c_str());
+    prepared.admission_diff = classify_recompile_layout(prepared.old_layout, prepared.new_layout);
+    if (!prepared.admission_diff.migratable()) {
+      std::string reasons;
+      for (const auto &r : prepared.admission_diff.reject_reasons) {
+        if (!reasons.empty()) reasons += "; ";
+        reasons += r;
+      }
+      error("recompile_object layout not migratable: %s\n", reasons.c_str());
+    }
   }
 
   // v2: target kind decides the per-kind transaction extensions (create
@@ -3477,6 +3488,11 @@ void f_recompile_object() {
     kind = RecompileTargetKind::SimulEfun;
   }
   start_recompile_transaction(ob, kind, &prepared);
+
+  // #1247 B-S3: fallible frozen segment -- build the per-target variable
+  // migrations (new payloads) per the kind's lifecycle policy. Must happen
+  // after the snapshot and before the no-fail commit segments.
+  prepare_variable_migrations(&prepared);
 
   // v2 Phase 2 three-segment commit: (1) no-fail swap, (2) create phase for
   // special targets in an error context -- any __INIT/interpreter error or

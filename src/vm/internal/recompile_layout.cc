@@ -9,27 +9,17 @@
 #include "vm/internal/base/program.h"  // program_t, DECL_MODIFY, inherit_t
 #include "vm/internal/base/class.h"    // class_def_t, class_member_entry_t
 #include "vm/internal/base/svalue.h"   // TYPE_MOD_CLASS, CLASS_NUM_MASK
+#include "vm/internal/layout_digest.h"
 
 namespace {
 
-constexpr uint64_t kFnvOffset = 14695981039346656037ULL;
-constexpr uint64_t kFnvPrime = 1099511628211ULL;
-
-uint64_t fnv_mix(uint64_t h, const char *p, size_t n) {
-  for (size_t i = 0; i < n; i++) {
-    h ^= static_cast<unsigned char>(p[i]);
-    h *= kFnvPrime;
-  }
-  return h;
-}
-
-void fnv_mix_int(uint64_t *h, int v) { *h = fnv_mix(*h, reinterpret_cast<const char *>(&v), sizeof(v)); }
+using layout_digest::fnv_mix;
 
 // Class schema digest of one class definition (path + name + member
-// (name,type) sequence). Pure.
+// (name,type) sequence). Pure; shared with program.cc via layout_digest.h.
 uint64_t class_schema_digest(const std::string &path, const char *class_name,
                              const std::vector<RecompileLayoutClassMember> &members) {
-  uint64_t h = kFnvOffset;
+  uint64_t h = layout_digest::kFnvOffset;
   h = fnv_mix(h, path.data(), path.size());
   h = fnv_mix(h, ":", 1);
   h = fnv_mix(h, class_name, strlen(class_name));
@@ -37,7 +27,7 @@ uint64_t class_schema_digest(const std::string &path, const char *class_name,
     h = fnv_mix(h, "|", 1);
     h = fnv_mix(h, m.name.data(), m.name.size());
     h = fnv_mix(h, ":", 1);
-    fnv_mix_int(&h, m.type);
+    layout_digest::fnv_mix_int(&h, m.type);
   }
   return h;
 }
@@ -139,7 +129,7 @@ void collect_classes(const program_t *prog, const std::string &path, WalkState *
 // into *out_vars so the top level can emit them after the edge section.
 uint64_t walk_layout(const program_t *prog, const std::string &path, WalkState *st,
                      std::vector<std::string> *out_vars) {
-  uint64_t h = kFnvOffset;
+  uint64_t h = layout_digest::kFnvOffset;
   std::vector<std::string> sub_edges;
   std::vector<std::string> sub_vars;
 
@@ -162,8 +152,7 @@ uint64_t walk_layout(const program_t *prog, const std::string &path, WalkState *
     entry.type_mod = inh.type_mod;
     entry.nested_layout_digest = nested;
     st->out->inherits.push_back(std::move(entry));
-    sub_edges.push_back("inh:" + child_path + ":" + fname + ":" + std::to_string(inh.type_mod) +
-                        ":" + std::to_string(nested) + ";");
+    sub_edges.push_back(layout_digest::inherit_record(child_path, fname, inh.type_mod, nested));
   }
 
   collect_classes(prog, path, st);
@@ -178,9 +167,8 @@ uint64_t walk_layout(const program_t *prog, const std::string &path, WalkState *
     v.effective_decl_type = effective_type_for(prog, i, st->mod_chain);
     v.class_schema_digest = class_digest_for(prog, raw, path);
     st->out->variables.push_back(v);
-    sub_vars.push_back("var:" + path + ":" + v.name_text + ":" +
-                       std::to_string(v.effective_decl_type) + ":" +
-                       std::to_string(v.class_schema_digest) + ";");
+    sub_vars.push_back(layout_digest::variable_record(path, v.name_text, v.effective_decl_type,
+                                                     v.class_schema_digest));
   }
   // Canonical order: this subtree's edge records, then ALL its variable
   // records (recursively collected).
@@ -279,27 +267,25 @@ bool recompile_layouts_match(const RecompileLayout &a, const RecompileLayout &b,
 std::string canonical_layout_serialization(const RecompileLayout &layout) {
   std::string out;
   for (const auto &inh : layout.inherits) {
-    out += "inh:" + inh.inherit_path + ":" + inh.filename_text + ":";
-    out += std::to_string(inh.type_mod) + ":";
-    out += std::to_string(inh.nested_layout_digest) + ";";
+    out += layout_digest::inherit_record(inh.inherit_path, inh.filename_text, inh.type_mod,
+                                         inh.nested_layout_digest);
   }
   for (const auto &v : layout.variables) {
-    out += "var:" + v.inherit_path + ":" + v.name_text + ":";
-    out += std::to_string(v.effective_decl_type) + ":";
-    out += std::to_string(v.class_schema_digest) + ";";
+    out += layout_digest::variable_record(v.inherit_path, v.name_text, v.effective_decl_type,
+                                          v.class_schema_digest);
   }
   for (const auto &c : layout.classes) {
-    out += "class:" + c.defining_inherit_path + ":" + c.class_name + ":";
+    std::string members;
     for (const auto &m : c.members) {
-      out += m.name + ":" + std::to_string(m.type) + "|";
+      members += m.name + ":" + std::to_string(m.type) + "|";
     }
-    out += ";";
+    out += layout_digest::class_record(c.defining_inherit_path, c.class_name, members);
   }
   return out;
 }
 
 uint64_t layout_serialization_digest(const std::string &bytes) {
-  return fnv_mix(kFnvOffset, bytes.data(), bytes.size());
+  return fnv_mix(layout_digest::kFnvOffset, bytes.data(), bytes.size());
 }
 
 RecompileLayoutDiff classify_recompile_layout(const RecompileLayout &old_l,

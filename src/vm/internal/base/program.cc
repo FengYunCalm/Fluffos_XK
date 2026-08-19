@@ -2,6 +2,7 @@
 
 #include "vm/internal/base/machine.h"
 #include "vm/internal/base/apply_cache.h"
+#include "vm/internal/layout_digest.h"
 
 void reference_prog(program_t *progp, const char *from) {
   progp->ref++;
@@ -143,36 +144,28 @@ function_t *find_func_entry(program_t *prog, int index) {
 // a single process never holds two digest algorithms. The equivalence is
 // locked by GTest (TestProgramLayoutDigestMatchesDescriptor).
 namespace {
-constexpr uint64_t kLayoutFnvOffset = 14695981039346656037ULL;
-constexpr uint64_t kLayoutFnvPrime = 1099511628211ULL;
-
-void layout_mix(uint64_t *h, const char *p, size_t n) {
-  for (size_t i = 0; i < n; i++) {
-    *h ^= static_cast<unsigned char>(p[i]);
-    *h *= kLayoutFnvPrime;
-  }
-}
+using layout_digest::fnv_mix;
 
 // Class schema digest of one class definition (path + name + member
-// (name,type) sequence). Mirrors recompile_layout.cc's
-// class_schema_digest.
+// (name,type) sequence). Shared with recompile_layout.cc via
+// layout_digest.h primitives.
 uint64_t layout_class_schema_digest(const program_t *prog, const class_def_t &cd,
                                       const std::string &path) {
-  uint64_t h = kLayoutFnvOffset;
+  uint64_t h = layout_digest::kFnvOffset;
   const char *cls_name =
       prog->strings && cd.classname < prog->num_strings ? prog->strings[cd.classname] : "";
-  layout_mix(&h, path.data(), path.size());
-  layout_mix(&h, ":", 1);
-  layout_mix(&h, cls_name, strlen(cls_name));
+  h = fnv_mix(h, path.data(), path.size());
+  h = fnv_mix(h, ":", 1);
+  h = fnv_mix(h, cls_name, strlen(cls_name));
   for (int m = 0; m < cd.size; m++) {
     const class_member_entry_t &cme = prog->class_members[cd.index + m];
     const char *mname =
         prog->strings && cme.membername < prog->num_strings ? prog->strings[cme.membername] : "";
-    layout_mix(&h, "|", 1);
-    layout_mix(&h, mname, strlen(mname));
-    layout_mix(&h, ":", 1);
+    h = fnv_mix(h, "|", 1);
+    h = fnv_mix(h, mname, strlen(mname));
+    h = fnv_mix(h, ":", 1);
     int t = cme.type;
-    layout_mix(&h, reinterpret_cast<const char *>(&t), sizeof(t));
+    h = fnv_mix(h, reinterpret_cast<const char *>(&t), sizeof(t));
   }
   return h;
 }
@@ -241,7 +234,7 @@ void layout_collect_classes(const program_t *prog, const std::string &path,
 uint64_t digest_walk(const program_t *prog, const std::string &path, uint64_t *h,
                      const std::vector<const inherit_t *> &mod_chain,
                      std::vector<std::string> *edge_recs, std::vector<std::string> *var_recs) {
-  uint64_t nested_h = kLayoutFnvOffset;
+  uint64_t nested_h = layout_digest::kFnvOffset;
   std::vector<std::string> sub_edges;
   std::vector<std::string> sub_vars;
   for (int i = 0; i < prog->num_inherited; i++) {
@@ -256,9 +249,7 @@ uint64_t digest_walk(const program_t *prog, const std::string &path, uint64_t *h
       chain.push_back(&inh);
       nested = digest_walk(inh.prog, child_path, &nested_h, chain, &sub_edges, &sub_vars);
     }
-    std::string edge = "inh:" + child_path + ":" + fname + ":" + std::to_string(inh.type_mod) +
-                       ":" + std::to_string(nested) + ";";
-    sub_edges.push_back(edge);
+    sub_edges.push_back(layout_digest::inherit_record(child_path, fname, inh.type_mod, nested));
   }
   for (int i = 0; i < prog->num_variables_defined; i++) {
     const char *name = prog->variable_table ? prog->variable_table[i] : "";
@@ -268,16 +259,14 @@ uint64_t digest_walk(const program_t *prog, const std::string &path, uint64_t *h
       t = DECL_MODIFY(t, (*it)->type_mod);
     }
     uint64_t cd = layout_class_digest_for(prog, raw, path);
-    std::string rec = "var:" + path + ":" + name + ":" + std::to_string(t) + ":" +
-                      std::to_string(cd) + ";";
-    sub_vars.push_back(rec);
+    sub_vars.push_back(layout_digest::variable_record(path, name, t, cd));
   }
   // Canonical order: edge records, then variable records.
   for (const auto &e : sub_edges) {
-    layout_mix(&nested_h, e.data(), e.size());
+    nested_h = fnv_mix(nested_h, e.data(), e.size());
   }
   for (const auto &v : sub_vars) {
-    layout_mix(&nested_h, v.data(), v.size());
+    nested_h = fnv_mix(nested_h, v.data(), v.size());
   }
   // Publish this subtree's records into the caller's accumulators.
   for (const auto &e : sub_edges) edge_recs->push_back(e);
@@ -287,7 +276,10 @@ uint64_t digest_walk(const program_t *prog, const std::string &path, uint64_t *h
 }  // namespace
 
 uint64_t program_layout_digest(const program_t *prog) noexcept {
-  uint64_t h = kLayoutFnvOffset;  // FNV-1a 64 offset basis
+  if (prog && prog->layout_digest_cache != 0) {
+    return prog->layout_digest_cache;
+  }
+  uint64_t h = layout_digest::kFnvOffset;  // FNV-1a 64 offset basis
   if (prog) {
     std::string path;
     std::vector<const inherit_t *> chain;
@@ -297,8 +289,8 @@ uint64_t program_layout_digest(const program_t *prog) noexcept {
     // Top-level canonical order: ALL edges (DFS), then ALL variables
     // (slot order), then classes (sorted), matching
     // canonical_layout_serialization.
-    for (const auto &e : edges) layout_mix(&h, e.data(), e.size());
-    for (const auto &v : vars) layout_mix(&h, v.data(), v.size());
+    for (const auto &e : edges) h = fnv_mix(h, e.data(), e.size());
+    for (const auto &v : vars) h = fnv_mix(h, v.data(), v.size());
     // Classes mix AFTER variables, matching canonical_layout_serialization
     // (inherits; variables; classes), sorted by {path, name}.
     std::vector<LayoutClassRecord> classes;
@@ -309,13 +301,19 @@ uint64_t program_layout_digest(const program_t *prog) noexcept {
                 return a.class_name < b.class_name;
               });
     for (const auto &c : classes) {
-      std::string rec = "class:" + c.defining_path + ":" + c.class_name + ":";
+      std::string members;
       for (const auto &m : c.members) {
-        rec += m.first + ":" + std::to_string(m.second) + "|";
+        members += m.first + ":" + std::to_string(m.second) + "|";
       }
-      rec += ";";
-      layout_mix(&h, rec.data(), rec.size());
+      std::string rec = layout_digest::class_record(c.defining_path, c.class_name, members);
+      h = fnv_mix(h, rec.data(), rec.size());
     }
+  }
+  if (prog) {
+    // Cache for the hot path (object creation / replace / recompile all
+    // call this per object). 0 is the sentinel; a genuine FNV result of 0
+    // is recomputed every time, which is harmless.
+    const_cast<program_t *>(prog)->layout_digest_cache = h;
   }
   return h;
 }

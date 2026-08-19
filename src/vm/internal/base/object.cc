@@ -2160,7 +2160,9 @@ object_t *get_empty_object(const program_t *prog) {
   return ob;
 }
 
-namespace {
+// #1247 B-S3: exposed so the recompile transaction can refresh next_reset
+// on Master/SimulEfun targets (call_create() does this before __INIT; the
+// transaction's split __INIT/create path must keep the same behavior).
 void set_nextreset(object_t *ob) {
   auto time_to_reset_secs = CONFIG_INT(__TIME_TO_RESET__);
   if (CONFIG_INT(__RC_RANDOMIZED_RESETS__)) {
@@ -2169,7 +2171,6 @@ void set_nextreset(object_t *ob) {
   ob->next_reset =
       current_gametick() + time_to_next_gametick(std::chrono::seconds(time_to_reset_secs));
 }
-}  // namespace
 
 void reset_object(object_t *ob) {
   set_nextreset(ob);
@@ -2192,6 +2193,16 @@ void call_create(object_t *ob, int num_arg) {
   if (ob->flags & O_DESTRUCTED) {
     pop_n_elems(num_arg);
     return; /* sigh */
+  }
+
+  call_create_only(ob, num_arg);
+}
+
+// #1247 B-S3: create-only primitive (no __INIT).
+void call_create_only(object_t *ob, int num_arg) {
+  if (ob->flags & O_DESTRUCTED) {
+    pop_n_elems(num_arg);
+    return;
   }
 
   apply(APPLY_CREATE, ob, num_arg, ORIGIN_DRIVER);

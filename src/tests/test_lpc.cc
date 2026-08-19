@@ -25772,3 +25772,177 @@ TEST_F(DriverTest, TestClassifyLayoutRules) {
   ASSERT_FALSE(comb_diff.migratable());
   ASSERT_GE(comb_diff.reject_reasons.size(), 1u);
 }
+
+// #1247 B-S3: BlueprintFamily layout migration. The staged program drops x
+// and adds z; matched y keeps its old value, the new z keeps its
+// initializer (InitThenMigrate policy), the removed x is gone.
+TEST_F(DriverTest, TestRecompileMigrationAddRemovePreserves) {
+  object_t *bp = load_object_for_test("single/tests/efuns/b3_bp");
+  ASSERT_NE(bp, nullptr);
+  ASSERT_EQ(bp->variables.count, 2u);
+  ASSERT_EQ(bp->variables.data[0].u.number, 100);
+  ASSERT_EQ(bp->variables.data[1].u.number, 200);
+
+  const char *v2 = "int z = 300;\nint y;\n";
+  program_t *prog2 = CompileSimulProg(v2);
+  ASSERT_NE(prog2, nullptr);
+
+  RecompilePrepared prep;
+  prep.staged = StagedProgram(prog2);
+  prep.old_layout = describe_recompile_layout(bp->prog);
+  prep.new_layout = describe_recompile_layout(prog2);
+  ASSERT_FALSE(recompile_layouts_match(prep.old_layout, prep.new_layout, nullptr));
+
+  RecompileLayoutDiff diff = classify_recompile_layout(prep.old_layout, prep.new_layout);
+  ASSERT_TRUE(diff.migratable()) << "add+remove must migrate";
+  ASSERT_EQ(diff.added.size(), 1u);
+  ASSERT_EQ(diff.added[0].name_text, "z");
+  ASSERT_EQ(diff.removed.size(), 1u);
+  ASSERT_EQ(diff.removed[0].name_text, "x");
+  ASSERT_EQ(diff.matches.size(), 1u);
+  ASSERT_EQ(diff.matches[0].identity.name_text, "y");
+
+  start_recompile_transaction(bp, RecompileTargetKind::BlueprintFamily, &prep);
+  prepare_variable_migrations(&prep);
+  ASSERT_EQ(prep.migrations.size(), prep.targets.size())
+      << "layout change must build one migration per target";
+
+  prep.commit_swap();
+  ASSERT_TRUE(prep.run_create_guarded());
+  prep.commit_finish();
+
+  ASSERT_EQ(bp->prog, prog2);
+  ASSERT_EQ(bp->variables.count, 2u);
+  ASSERT_EQ(bp->variables.layout_id, program_layout_digest(prog2));
+  // z (slot 0) keeps the initializer; y (slot 1) recovered the old value.
+  ASSERT_EQ(bp->variables.data[0].u.number, 300);
+  ASSERT_EQ(bp->variables.data[1].u.number, 200);
+
+  destruct_object_for_test(bp);
+}
+
+// #1247 B-S3: reordering keeps values by stable identity.
+TEST_F(DriverTest, TestRecompileMigrationReorder) {
+  object_t *bp = load_object_for_test("single/tests/efuns/b3_bp");
+  ASSERT_NE(bp, nullptr);
+  const char *v2 = "int y;\nint x;\n";  // swapped slots
+  program_t *prog2 = CompileSimulProg(v2);
+  ASSERT_NE(prog2, nullptr);
+
+  RecompilePrepared prep;
+  prep.staged = StagedProgram(prog2);
+  prep.old_layout = describe_recompile_layout(bp->prog);
+  prep.new_layout = describe_recompile_layout(prog2);
+  RecompileLayoutDiff diff = classify_recompile_layout(prep.old_layout, prep.new_layout);
+  ASSERT_TRUE(diff.flags & kReordered);
+  ASSERT_TRUE(diff.migratable());
+
+  start_recompile_transaction(bp, RecompileTargetKind::BlueprintFamily, &prep);
+  prepare_variable_migrations(&prep);
+  prep.commit_swap();
+  ASSERT_TRUE(prep.run_create_guarded());
+  prep.commit_finish();
+
+  // New layout [y, x]: y recovered 200, x recovered 100.
+  ASSERT_EQ(bp->variables.count, 2u);
+  ASSERT_EQ(bp->variables.data[0].u.number, 200);
+  ASSERT_EQ(bp->variables.data[1].u.number, 100);
+  destruct_object_for_test(bp);
+}
+
+// #1247 B-S3: __INIT failure during migration rolls the whole transaction
+// back: program, variable payload and values are the pre-swap state.
+TEST_F(DriverTest, TestRecompileMigrationInitFailureRollsBack) {
+  object_t *bp = load_object_for_test("single/tests/efuns/b3_bp");
+  ASSERT_NE(bp, nullptr);
+  program_t *old_prog = bp->prog;
+  const char *v2 = "int z;\nint boom() { error(\"boom\"); return 0; }\nint g = boom();\n";
+  program_t *prog2 = CompileSimulProg(v2);
+  ASSERT_NE(prog2, nullptr);
+
+  RecompilePrepared prep;
+  prep.staged = StagedProgram(prog2);
+  prep.old_layout = describe_recompile_layout(bp->prog);
+  prep.new_layout = describe_recompile_layout(prog2);
+  ASSERT_TRUE(classify_recompile_layout(prep.old_layout, prep.new_layout).migratable());
+
+  start_recompile_transaction(bp, RecompileTargetKind::BlueprintFamily, &prep);
+  prepare_variable_migrations(&prep);
+  prep.commit_swap();
+  // __INIT raises during state preparation -> guarded create fails ->
+  // rollback.
+  ASSERT_FALSE(prep.run_create_guarded());
+
+  ASSERT_EQ(bp->prog, old_prog);
+  ASSERT_EQ(bp->variables.count, 2u);
+  ASSERT_EQ(bp->variables.data[0].u.number, 100);
+  ASSERT_EQ(bp->variables.data[1].u.number, 200);
+  ASSERT_EQ(bp->variables.layout_id, program_layout_digest(old_prog));
+  // No leaked migration state: rollback released both payloads.
+  ASSERT_TRUE(prep.migrations.empty());
+  destruct_object_for_test(bp);
+}
+
+// #1247 B-S3: exact-layout BlueprintFamily reload creates NO migration and
+// runs NO __INIT (v1 semantics preserved).
+TEST_F(DriverTest, TestRecompileExactNoMigrationForBlueprint) {
+  object_t *bp = load_object_for_test("single/tests/efuns/b3_bp");
+  ASSERT_NE(bp, nullptr);
+  const char *v2 = "int x = 100;\nint y = 200;\n";  // identical layout
+  program_t *prog2 = CompileSimulProg(v2);
+  ASSERT_NE(prog2, nullptr);
+
+  RecompilePrepared prep;
+  prep.staged = StagedProgram(prog2);
+  prep.old_layout = describe_recompile_layout(bp->prog);
+  prep.new_layout = describe_recompile_layout(prog2);
+  ASSERT_TRUE(recompile_layouts_match(prep.old_layout, prep.new_layout, nullptr));
+
+  start_recompile_transaction(bp, RecompileTargetKind::BlueprintFamily, &prep);
+  prepare_variable_migrations(&prep);
+  ASSERT_TRUE(prep.migrations.empty()) << "exact layout must not migrate";
+  prep.commit_swap();
+  ASSERT_TRUE(prep.run_create_guarded());
+  prep.commit_finish();
+
+  // Values untouched (no __INIT, no copy).
+  ASSERT_EQ(bp->variables.count, 2u);
+  ASSERT_EQ(bp->variables.data[0].u.number, 100);
+  ASSERT_EQ(bp->variables.data[1].u.number, 200);
+  destruct_object_for_test(bp);
+}
+
+// #1247 B-S3: Master/SimulEfun policy -- Always migration + MigrateThenInit
+// on an exact reload. master.c's nosave int has_error = 0 has a file-level
+// initializer, so __INIT always resets it to 0. The order proof: if the
+// migration copy ran AFTER __INIT (wrong order), the copied old value 7
+// would survive; with MigrateThenInit the copy runs first and __INIT's
+// reset wins, so the final value must be 0.
+TEST_F(DriverTest, TestMasterExactReloadMigrateThenInit) {
+  int slot = FindVariableSlot(master_ob->prog, "has_error");
+  ASSERT_GE(slot, 0);
+  master_ob->variables.data[slot].u.number = 7;
+
+  RecompilePrepared prep;
+  prep.staged = compile_program_for_recompile(master_ob);
+  ASSERT_NE(prep.staged.prog, nullptr);
+  prep.old_layout = describe_recompile_layout(master_ob->prog);
+  prep.new_layout = describe_recompile_layout(prep.staged.prog);
+  ASSERT_TRUE(recompile_layouts_match(prep.old_layout, prep.new_layout, nullptr))
+      << "master exact reload required";
+
+  start_recompile_transaction(master_ob, RecompileTargetKind::Master, &prep);
+  prepare_variable_migrations(&prep);
+  ASSERT_EQ(prep.migrations.size(), prep.targets.size())
+      << "Master policy migrates even on exact layout";
+  prep.commit_swap();
+  ASSERT_TRUE(prep.run_create_guarded());
+  prep.commit_finish();
+
+  // __INIT (file-level initializer) ran AFTER the migration copy and its
+  // reset won: final value is 0, proving MigrateThenInit ordering.
+  slot = FindVariableSlot(master_ob->prog, "has_error");
+  ASSERT_GE(slot, 0);
+  ASSERT_EQ(master_ob->variables.data[slot].u.number, 0)
+      << "MigrateThenInit: __INIT must run after the copy and its write must win";
+}

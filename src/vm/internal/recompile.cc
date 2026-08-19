@@ -25,6 +25,33 @@
 #include "vm/internal/source_spelling.h"
 #include "packages/core/replace_program.h"
 
+// #1247 B-S3: per-target prepared variable migration. Ownership states are
+// exactly three: (1) before publish and after finalize the OBJECT owns the
+// attached payload; (2) during publish the object owns new_block's payload
+// while this struct owns old_block's (detached); (3) after rollback the
+// object owns old_block's payload again and this struct owns/discards
+// new_block's. The destructor, commit_finish() and rollback() are the only
+// releasers of detached payloads -- no path may leave both object and
+// migration believing they own the same payload.
+struct PreparedVariableMigration {
+  ObjectVariableBlock old_block;  // detached old payload during publish
+  ObjectVariableBlock new_block;  // staged payload (init/migrate applied)
+  std::vector<VariableMatch> matches;
+  RecompileLayoutDiff diff;
+};
+
+// #1247 B-S3: internal migration helpers (defined below; forward-declared
+// so the transaction destructor/commit/rollback, which appear earlier in
+// this file, can call them).
+namespace {
+// #1247 B-S3: copy every matched old slot into the object's ATTACHED new
+// block (the migration's own new_block was moved into the object during
+// commit_swap publish and is empty here). Reference copy, old slots
+// untouched. noexcept: assign_svalue only bumps refcounts.
+void copy_matches(PreparedVariableMigration *m, svalue_t *attached_new_data) noexcept;
+void release_migration_payload(PreparedVariableMigration *m) noexcept;
+}  // namespace
+
 // ---------------------------------------------------------------------------
 // Staging compile (v0.4 §8.1)
 // ---------------------------------------------------------------------------
@@ -156,6 +183,8 @@ void snapshot_recompile_targets(object_t *blueprint, RecompilePrepared *prepared
 // No-fail commit + full resource release (v0.4 §9.1/§9.2)
 // ---------------------------------------------------------------------------
 
+RecompilePrepared::RecompilePrepared() = default;
+
 RecompilePrepared::~RecompilePrepared() {
   // Failure-path cleanup only: after commit_finish()/rollback(), targets
   // have been cleared and the old-program pin released, so this is a no-op
@@ -164,6 +193,12 @@ RecompilePrepared::~RecompilePrepared() {
   for (auto &t : targets) {
     if (t.ob) free_object(&t.ob, "recompile_prepared");
   }
+  // #1247 B-S3: a prepare-time failure (before commit_swap) leaves the
+  // migration blocks holding their fresh payloads; release them.
+  for (auto &m : migrations) {
+    release_migration_payload(m.get());
+  }
+  migrations.clear();
   if (old_prog) free_prog(&old_prog);
   if (kind == RecompileTargetKind::SimulEfun) {
     simul_efuns_discard(&simuls);
@@ -191,6 +226,15 @@ void RecompilePrepared::commit_swap() noexcept {
     t.ob->prog = new_prog;
     t.ob->prog_generation++;
     t.ob->flags = (t.ob->flags & ~kProgramDerivedFlags) | t.precomputed_flags;
+    // #1247 B-S3: publish the prepared migration for this target: detach
+    // the old payload into the migration (object temporarily owns the new
+    // payload), then attach the new payload. Two moves, no allocation, no
+    // fail-able code between them.
+    if (migrations.size() == targets.size()) {
+      size_t idx = static_cast<size_t>(&t - targets.data());
+      obj_vars_move(&migrations[idx]->old_block, &t.ob->variables);
+      obj_vars_move(&t.ob->variables, &migrations[idx]->new_block);
+    }
     // #1247 B-S1: exact-layout transactions only (B-S3 adds migration), so
     // the attached variable block must still match the new program's
     // layout. DEBUG assertion: any future layout-changing commit must
@@ -215,6 +259,43 @@ void RecompilePrepared::commit_swap() noexcept {
 }
 
 void RecompilePrepared::run_create() {
+  // #1247 B-S3: segment 2a -- prepare target state per the kind's policy:
+  // __INIT and migration copy run in the policy's order (BlueprintFamily
+  // InitThenMigrate, Master/SimulEfun MigrateThenInit). Any __INIT error
+  // propagates as a C++ exception and must end in rollback().
+  RecompileLifecycle lifecycle = recompile_lifecycle_for(kind);
+  bool has_migration = migrations.size() == targets.size();
+  for (size_t i = 0; i < targets.size(); i++) {
+    auto &t = targets[i];
+    if (!t.ob) continue;
+    // #1247 B-S3: keep call_create()'s reset scheduling on the special
+    // targets (call_create runs set_nextreset before __INIT; the split
+    // __INIT/create path must not silently drop it).
+    if (kind != RecompileTargetKind::BlueprintFamily) {
+      set_nextreset(t.ob);
+    }
+    PreparedVariableMigration *m = has_migration ? migrations[i].get() : nullptr;
+    bool run_init = false;
+    switch (lifecycle.init) {
+      case RecompileInitPolicy::Always:
+        run_init = true;
+        break;
+      case RecompileInitPolicy::OnMigratableLayoutChange:
+        run_init = m != nullptr;
+        break;
+      case RecompileInitPolicy::Never:
+        run_init = false;
+        break;
+    }
+    if (lifecycle.state_order == RecompileStateOrder::InitThenMigrate) {
+      if (run_init) call___INIT(t.ob);
+      if (m) copy_matches(m, obj_vars_data(&t.ob->variables));
+    } else {
+      if (m) copy_matches(m, obj_vars_data(&t.ob->variables));
+      if (run_init) call___INIT(t.ob);
+    }
+  }
+
   // BlueprintFamily has no create phase (v1 semantics: ordinary blueprints
   // and clones keep their old behavior). The kind discriminant lives inside
   // the transaction so no caller can silently skip the create segment for
@@ -222,14 +303,15 @@ void RecompilePrepared::run_create() {
   if (kind == RecompileTargetKind::BlueprintFamily) {
     return;
   }
-  // v2 Phase 2: __INIT + create() on the special targets while admission
-  // stays closed. Any error -- from __INIT, create(), or the interpreter --
-  // propagates as a C++ exception (plain apply() does not swallow errors)
-  // and must end in rollback() at the caller; a target that destructs
-  // itself during create is a stable error too.
+  // v2 Phase 2: create() on the special targets while admission stays
+  // closed. __INIT already ran in the state-preparation step above, so the
+  // create-only primitive is used -- never the __INIT+create combination.
+  // Any error -- from create(), or the interpreter -- propagates as a C++
+  // exception and must end in rollback(); a target that destructs itself
+  // during create is a stable error too.
   for (auto &t : targets) {
     if (!t.ob) continue;
-    call_create(t.ob, 0);
+    call_create_only(t.ob, 0);
     if (t.ob->flags & O_DESTRUCTED) {
       error("recompile_object: target destructed during create()\n");
     }
@@ -273,6 +355,95 @@ void start_recompile_transaction(object_t *ob, RecompileTargetKind kind,
   snapshot_recompile_targets(ob, prepared);
 }
 
+// #1247 B-S3: fixed per-kind lifecycle policy (the table in recompile.h).
+RecompileLifecycle recompile_lifecycle_for(RecompileTargetKind kind) {
+  switch (kind) {
+    case RecompileTargetKind::BlueprintFamily:
+      return {RecompileInitPolicy::OnMigratableLayoutChange,
+              RecompileMigrationPolicy::OnMigratableLayoutChange,
+              RecompileStateOrder::InitThenMigrate, RecompileCreatePolicy::Never};
+    case RecompileTargetKind::Master:
+    case RecompileTargetKind::SimulEfun:
+      return {RecompileInitPolicy::Always, RecompileMigrationPolicy::Always,
+              RecompileStateOrder::MigrateThenInit, RecompileCreatePolicy::AfterStateReady};
+  }
+  return {RecompileInitPolicy::Never, RecompileMigrationPolicy::None,
+          RecompileStateOrder::MigrateThenInit, RecompileCreatePolicy::Never};
+}
+
+// #1247 B-S3: build the per-target PreparedVariableMigration blocks in the
+// fallible frozen segment (allocation allowed). The policy decides whether
+// a migration exists at all; an exact layout never creates one for
+// BlueprintFamily but ALWAYS does for Master/SimulEfun (their __INIT must
+// read the old state, so the new block must carry the old values before
+// __INIT runs).
+void prepare_variable_migrations(RecompilePrepared *prepared) {
+  if (!prepared->migrations.empty()) return;  // already prepared
+  RecompileLifecycle lifecycle = recompile_lifecycle_for(prepared->kind);
+  if (lifecycle.migrate == RecompileMigrationPolicy::None) return;
+
+  // Reuse the admission-time classification (single source of truth).
+  // Defensive fallback: direct-driver paths (tests) that never ran the
+  // admission gate get a fresh classification -- for an exact layout this
+  // still yields the full identity matches the Always-migrate kinds need.
+  RecompileLayoutDiff diff = prepared->admission_diff;
+  if (diff.matches.empty() && diff.added.empty() && diff.removed.empty()) {
+    diff = classify_recompile_layout(prepared->old_layout, prepared->new_layout);
+    prepared->admission_diff = diff;
+  }
+  bool layout_changed =
+      !prepared->old_layout.variables.empty() || !prepared->new_layout.variables.empty()
+          ? !recompile_layouts_match(prepared->old_layout, prepared->new_layout, nullptr)
+          : false;
+  // No-op layouts (identical, no structural change) still migrate for
+  // Always kinds so __INIT sees old values on an exact reload.
+  if (lifecycle.migrate == RecompileMigrationPolicy::OnMigratableLayoutChange && !layout_changed) {
+    return;
+  }
+  // Fail-closed: a diff that is not migratable must have been rejected by
+  // the caller before reaching this point.
+  if (!diff.migratable()) {
+    error("recompile_object: layout diff is not migratable\n");
+  }
+  for (auto &t : prepared->targets) {
+    auto m = std::make_unique<PreparedVariableMigration>();
+    m->diff = diff;
+    m->matches = diff.matches;
+    obj_vars_init(&m->new_block, prepared->staged.prog);
+    prepared->migrations.push_back(std::move(m));
+    (void)t;
+  }
+}
+
+namespace {
+// #1247 B-S3: copy every matched old slot into the object's attached new
+// block (reference copy, old slots untouched). noexcept: assign_svalue
+// only bumps refcounts.
+void copy_matches(PreparedVariableMigration *m, svalue_t *attached_new_data) noexcept {
+  for (const auto &match : m->matches) {
+    assign_svalue(&attached_new_data[match.new_slot], &m->old_block.data[match.old_slot]);
+  }
+}
+
+// #1247 B-S3: release a detached migration payload's svalue contents and
+// the payload allocation. Safe on empty blocks (post-publish new_block,
+// post-rollback old_block).
+void release_migration_payload(PreparedVariableMigration *m) noexcept {
+  if (m->old_block.data) {
+    for (uint32_t i = 0; i < m->old_block.count; i++) {
+      free_svalue(&m->old_block.data[i], "recompile_migration");
+    }
+    obj_vars_destroy(&m->old_block);
+  }
+  if (m->new_block.data) {
+    for (uint32_t i = 0; i < m->new_block.count; i++) {
+      free_svalue(&m->new_block.data[i], "recompile_migration");
+    }
+    obj_vars_destroy(&m->new_block);
+  }
+}
+}  // namespace
+
 void RecompilePrepared::commit_finish() noexcept {
   // Create phase succeeded: the old simul_efun dispatch tables (handed over
   // alive by activate so a failed create could restore them) are the loser
@@ -280,6 +451,14 @@ void RecompilePrepared::commit_finish() noexcept {
   if (kind == RecompileTargetKind::SimulEfun) {
     simul_efuns_finish(&simuls);
   }
+
+  // #1247 B-S3: release the detached old migration payloads (their values
+  // were reference-copied into the new blocks during state preparation;
+  // the new payloads are attached to the objects and empty here).
+  for (auto &m : migrations) {
+    release_migration_payload(m.get());
+  }
+  migrations.clear();
 
   // Release the N old-program references held by the targets. The
   // transaction pin keeps old_prog alive until this loop.
@@ -329,6 +508,25 @@ void RecompilePrepared::rollback() noexcept {
     t.ob->prog = old_prog;
     t.ob->prog_generation = t.old_generation;
     t.ob->flags = (t.ob->flags & ~kProgramDerivedFlags) | t.precomputed_flags;
+  }
+
+  // #1247 B-S3: reverse the migration publish: detach the new payload from
+  // the object back into the migration (owned by us again) and re-attach
+  // the old payload. Then release both payloads' contents -- the new one
+  // may carry __INIT/migration writes that must be discarded, the old one
+  // is empty (it was moved back out).
+  if (migrations.size() == targets.size()) {
+    for (size_t i = 0; i < targets.size(); i++) {
+      auto &t = targets[i];
+      if (!t.ob) continue;
+      auto &m = migrations[i];
+      obj_vars_move(&m->new_block, &t.ob->variables);
+      obj_vars_move(&t.ob->variables, &m->old_block);
+    }
+    for (auto &m : migrations) {
+      release_migration_payload(m.get());
+    }
+    migrations.clear();
   }
 
   // Restore the old simul_efun dispatch tables: ident fields mirrored

@@ -258,6 +258,13 @@ struct program_t {
   //
   typedef std::unordered_map<intptr_t, lookup_entry_s> apply_lookup_table_type;
   std::unique_ptr<apply_lookup_table_type> apply_lookup_table;
+
+  // #1247 B-S2: cached program_layout_digest() result (0 = not yet
+  // computed). The digest is a pure function of the program; computing it
+  // on every object creation would turn clone/load from O(1) into a full
+  // inherit-tree walk. Written only by program_layout_digest() on the
+  // owner thread (object creation and recompile all run there).
+  uint64_t layout_digest_cache{0};
 };
 
 void reference_prog(program_t *, const char *);

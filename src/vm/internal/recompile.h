@@ -9,11 +9,15 @@
 #include <string>
 #include <vector>
 
+#include <memory>  // std::unique_ptr
 #include "vm/internal/base/program.h"  // free_prog, program_t
 #include "vm/internal/recompile_layout.h"  // RecompileLayout, RecompileLayoutDiff
 #include "vm/internal/simul_efun.h"     // simul_efun_prepared_t
 
 struct object_t;
+// Defined in recompile.cc: keeps ObjectVariableBlock (object.h) out of the
+// public header's include graph.
+struct PreparedVariableMigration;
 
 // RAII owner of a freshly compiled (staging) program: never published to any
 // live object until commit. free_prog() on destruction.
@@ -54,6 +58,46 @@ enum class RecompileTargetKind {
   SimulEfun         // simul_efun_ob: create phase + dispatch rebuild
 };
 
+// #1247 B-S3: per-kind lifecycle policy -- the single behavioral entry for
+// __INIT / variable migration ordering / create. Exact-layout and
+// layout-change behavior are decided HERE, never by scattered branches.
+//
+// | Target kind    | __INIT            | migrate           | order            | create          |
+// | BlueprintFamily| OnMigratableChange| OnMigratableChange| InitThenMigrate  | Never           |
+// | Master         | Always            | Always            | MigrateThenInit  | AfterStateReady |
+// | SimulEfun      | Always            | Always            | MigrateThenInit  | AfterStateReady |
+enum class RecompileInitPolicy {
+  Never,
+  OnMigratableLayoutChange,
+  Always,
+};
+
+enum class RecompileMigrationPolicy {
+  None,
+  OnMigratableLayoutChange,
+  Always,
+};
+
+enum class RecompileStateOrder {
+  InitThenMigrate,
+  MigrateThenInit,
+};
+
+enum class RecompileCreatePolicy {
+  Never,
+  AfterStateReady,
+};
+
+struct RecompileLifecycle {
+  RecompileInitPolicy init;
+  RecompileMigrationPolicy migrate;
+  RecompileStateOrder state_order;
+  RecompileCreatePolicy create;
+};
+
+// Fixed policy table (see the table above).
+RecompileLifecycle recompile_lifecycle_for(RecompileTargetKind kind);
+
 // Fully prepared transaction: staging program, validated layouts, frozen
 // target set (each target holds an add_ref). The commit is split into three
 // segments (v2 Phase 2): commit_swap() is the no-fail swap (program +
@@ -68,8 +112,18 @@ struct RecompilePrepared {
   program_t *old_prog{nullptr};
   RecompileLayout old_layout;
   RecompileLayout new_layout;
+  // #1247 B-S3: the admission-time classification (single source of truth
+  // for matches/added/removed; prepare_variable_migrations reuses it
+  // instead of re-classifying).
+  RecompileLayoutDiff admission_diff;
   std::vector<RecompileTarget> targets;
   RecompileTargetKind kind{RecompileTargetKind::BlueprintFamily};
+
+  // #1247 B-S3: per-target prepared migrations (parallel to targets, empty
+  // for exact-layout transactions and for kinds whose policy never
+  // migrates). Built in the fallible frozen segment, published inside
+  // commit_swap()'s no-fail segment, applied by prepare_target_state().
+  std::vector<std::unique_ptr<PreparedVariableMigration>> migrations;
 
   // simul_efun dispatch rebuild (v2): prepared in the allocatable frozen
   // segment when kind == SimulEfun, activated inside commit_swap()'s no-fail
@@ -77,7 +131,7 @@ struct RecompilePrepared {
   // create phase, discarded by the destructor on failure paths.
   simul_efun_prepared_t simuls;
 
-  RecompilePrepared() = default;
+  RecompilePrepared();
   ~RecompilePrepared();
   RecompilePrepared(const RecompilePrepared &) = delete;
   RecompilePrepared &operator=(const RecompilePrepared &) = delete;
@@ -144,6 +198,12 @@ StagedProgram compile_program_for_recompile(object_t *blueprint);
 // and per-kind preparation live here only).
 void start_recompile_transaction(object_t *ob, RecompileTargetKind kind,
                                  RecompilePrepared *prepared);
+
+// #1247 B-S3: build the per-target PreparedVariableMigration blocks in the
+// fallible frozen segment, per the kind's lifecycle policy (allocation
+// allowed). Must be called after start_recompile_transaction() and before
+// commit_swap(). No-op when the policy never migrates.
+void prepare_variable_migrations(RecompilePrepared *prepared);
 
 // Compare two layouts field by field. Returns true when identical; otherwise
 // false and first_diff names the first mismatching field.
