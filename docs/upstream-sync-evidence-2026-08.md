@@ -260,8 +260,8 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | COMPILER-1 | compiler.cc:821-829 | yywarn 格式串注入 | compiler.cc:580 | 新增 % 文件名测试 | c065ca74 |
 | DISASM-1 | disassembler.cc:678-692 | etable-4 短偏移越界 | disassembler.cc:669 | 新增反汇编测试 | c065ca74 |
 | TREES-1 | trees.cc:184-194 | INT_MIN % -1 SIGFPE | trees.cc:215-219 | a2_grammar.lpc（expr0 % -1 编译期） | 0d3f8ed8 |
-| TELNET-1/2 | telnet.cc:360-381 | LINEMODE buf[1] 越界读 | telnet.cc:324-331 | 未落地（需 telnet 会话字节注入）；std/telnet.c 已有常规覆盖 | 0d3f8ed8 |
-| TELNET-3 | telnet.cc:712-735 | ZMP off-by-one 越界写 | telnet.cc:668-673 | 未落地（需 telnet 会话字节注入）；std/telnet.c 已有常规覆盖 | 0d3f8ed8 |
+| TELNET-1/2 | telnet.cc:360-381 | LINEMODE buf[1] 越界读 | telnet.cc:324-331 | TestTelnetLinemodeShortSubnegotiation（C++ 层，2026-08-19） | 0d3f8ed8 |
+| TELNET-3 | telnet.cc:712-735 | ZMP off-by-one 越界写 | telnet.cc:668-673 | TestTelnetZmpArgcVariants（C++ 层，2026-08-19） | 0d3f8ed8 |
 | ASYNC-2..4,9 | async.cc:76-130,589-623 | current_work(s) 多飞行记账 | async.cc:81-86,104-110,124-138,776-789 | 未落地（需多 worker 并发环境）；run.py async 用例已有常规覆盖 | 028955dd |
 | ASYNC-5 | async.cc:273-283 | getdirthread dirent 大小 | async.cc:356-363 | 未落地（需多条目目录 + 并发）；以代码审阅为证据 | 028955dd |
 | ASYNC-6..8 | async.cc:306-355 | 拒绝路径 callback 泄漏 | async.cc:388-391,403-406,415-420 | 未落地（需 valid_read/write 拒绝配置） | 028955dd |
