@@ -296,9 +296,9 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | RECLAIM-1 | reclaim.cc:26-29 | nested 提前 return 不平衡 | reclaim.cc:26-29 | reclaim_funptr_owner.lpc | 4056b8a2 |
 | COMM-1 | comm.cc:875-895 | bad_init_call STACK_INC 前保护 | comm.cc:1908-1913 | input_to 清理测试 | 7a005dce |
 
-### A-S2（正确性/资源清理）——2026-08-19 闭合
+### A-S2（正确性/资源清理）——2026-08-19 核对说明
 
-全部 47 个 C++/头文件 hunk 已逐文件核对覆盖（A-S1 表 + 本表；19 个测试文件在 batch8）。pr1247.diff 66 文件 = 47 C++ + 19 测试，无遗漏。
+pr1247.diff 共 66 文件 = 47 C++ + 19 测试。47 个 C++ 文件的覆盖明细分布在 A-S1 表（batch1-9 各批）与本表（A-S2 特有项：grammar_rules_exprs/types 移植、lexer_rules_pp/lexer_utils/transport_libevent 等价保护、ffi N/A、SPRINTF-8..12/MUDLIB-5..8/TIME-2/ASYNC-1 已覆盖）；本表列出 A-S2 归属的 hunk（正确性/资源清理）。
 
 | hunk_id | 上游 hunk | 缺陷 | 本地落点 | 回归测试 | 目标提交 |
 |---|---|---|---|---|---|
@@ -314,7 +314,7 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | ffi | ffi_address/read offset | int 截断溢出 | fork 无 ffi package | — | N/A（fork 未含该子系统） |
 | 其余 | 各文件 | 见 A-S1 表同文件未列 hunk | — | — | — |
 
-> 注：grammar.autogen.cc（无 bison 时的回退源）不含新增防护属既定策略（CMakeLists 声明 generated files never copied back），无 bison 构建会静默丢失防护。（无 bison 时的回退源）不含新增防护属既定策略（CMakeLists 声明 generated files never copied back），无 bison 构建会静默丢失防护。
+> 注：grammar.autogen.cc（无 bison 时的回退源）不含新增防护属既定策略（CMakeLists 声明 generated files never copied back），无 bison 构建会静默丢失防护。
 
 
 
