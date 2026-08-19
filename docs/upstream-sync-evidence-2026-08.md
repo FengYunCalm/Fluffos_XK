@@ -274,7 +274,7 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | OPS-1/2 | ops.cc:48-58,387-397 | f_div_eq/f_mod_eq INT_MIN | ops.cc:74-82 | a2_runtime.lpc（运行时 / -1 与 % -1） | 0d3f8ed8 |
 | CONTRIB-1 | contrib.cc:743-753 | terminal_colour raw apply 泄漏 | contrib.cc:710 | terminal_colour_error_replace.lpc | A-S1-contrib-colour |
 | CONTRIB-2 | contrib.cc:replaceable | 空 ignore 数组 NULL 写 | contrib.cc:1615-1680 | replaceable_empty.lpc | A-S1-contrib-replaceable |
-| CONTRIB-3 | contrib.cc:repeat_string | 乘法溢出 | contrib.cc:1942 | efuns/repeat_string.lpc（2026-08-19） | A-S1-contrib-repeat |
+| CONTRIB-3 | contrib.cc:repeat_string | 乘法溢出 | contrib.cc:1944（#1247 注释行；钳制 :1950-1951） | efuns/repeat_string.lpc（2026-08-19） | A-S1-contrib-repeat |
 | CONTRIB-4 | contrib.cc:query_replaced_program | current_object 误用 | contrib.cc:2122 | efuns/query_replaced_program.lpc（2026-08-19） | b121f6e0 |
 | ED-1..4 | ed.cc:658-669,869-885,1057-1069,1267+ | prntln/getfn/getrhs/optpat 越界 | ed.cc:713-717,922-953 | 未落地（需 ed 会话驱动）；以代码审阅为证据 | 9565ccb4 |
 | FILE-1..3 | file.cc:242-253 等 | get_dir strcat 无边界 | file.cc:337 | a2_runtime.lpc（长路径不崩） | 9565ccb4 |
@@ -288,7 +288,7 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | MAPPING-1 | mapping.cc:1154-1164 | compose_mapping key 泄漏 | mapping.cc:1200-1203 | a2_runtime.lpc（mapping * join 语义） | 4056b8a2 |
 | TRACE-1 | trace.cc:43-51 | debug_message 格式串 | trace.cc:46 | 等价保护（本地已 debug_message("%s")）；无独立测试 | 4056b8a2 |
 | COMPRESS-1 | compress.cc:309-315 | uncompress 错误路径泄漏 | compress.cc:292-294 | a2_runtime.lpc（垃圾 buffer 错误路径） | c065ca74 |
-| ADDACTION-1 | add_action.cc:435-447 | sprintf 越界 | add_action.cc（无 snprintf） | efuns/add_action.c（2026-08-19 扩展） | c065ca74 |
+| ADDACTION-1 | add_action.cc:435-447 | sprintf 越界 | add_action.cc:446（snprintf 已修复） | efuns/add_action.c（2026-08-19 扩展） | c065ca74 |
 | EFUNS-1 | efuns_main.cc:2069-2079 | f_replace_string 快速路径越界 | efuns_main.cc:2063 | efuns/replace_string.c（2026-08-19 扩展） | c065ca74 |
 | CHECKMEM-1 | checkmemory.cc:680-688 | dfm strcpy 越界 | checkmemory.cc:684 | 不可单测（debug malloc 内部，LPC 不可达），以代码审阅为证据 | 4056b8a2 |
 | DWLIB-1 | dwlib.cc:832-841 | 用 one 长度检查 two 写入 | dwlib.cc（无） | 不可单测（replace_dollars 未导出，无 F_REPLACE_DOLLARS），以代码审阅为证据 | 4056b8a2 |
@@ -416,6 +416,6 @@ d41a8acc 的 3 个测试存在缺陷（1 个必失败、2 个空转），修正�
 
 1. **repeat_string.lpc（CONTRIB-3）**：旧断言 `<= 100000` 确定性失败——config.test `maximum string length : 200000`，f_repeat_string 钳制 `repeat = 200000/1 = 200000`。修正为 `ASSERT_EQ(200000, strlen(r))`。
 2. **add_action.c（ADDACTION-1）**：旧形态 `catch(add_action(...))` 空转——f_add_action 注册时不校验函数存在。修正为注册后 `catch(command(longverb))` 走派发 not-found 路径（add_action.cc:435-447 snprintf）。
-3. **COMPILER-1 三件套**：v1/v2（warn_%.lpc 带本地 foo 重定义）不触发 overload warning 是设计如此——本地定义路径 compiler.cc:1145 `remove_overload_warnings` 清空队列。v3 正确形态：`#pragma warnings` + inherit warn_%s_a/warn_b + **不重定义 foo**；overload 消息内嵌父文件名（`prog->filename`），%s 必须放父 fixture（warn_%s_a.lpc）。验证：警告文本实际含 `warn_%s_a.lpc` 并到达 `yywarn("%s", p->warn)`（compiler.cc:580 修复行）。
+3. **COMPILER-1 三件套**：v1/v2（warn_%.lpc 带本地 foo 重定义）不触发 overload warning 是设计如此——本地定义路径 compiler.cc:1145 `remove_overload_warnings` 清空队列。v3 正确形态：`#pragma warnings` + inherit warn_%s_a/warn_b + **不重定义 foo**；overload 消息内嵌父文件名（`defprog->filename` 第一父，:657；`prog->filename` 在 "using the definition in"，:667），%s 必须放父 fixture（warn_%s_a.lpc）。验证：警告文本实际含 `warn_%s_a.lpc` 并到达 `yywarn("%s", p->warn)`（compiler.cc:580 修复行）。
 
 修正后全量 -ftest：0 Check Failed（`grep -icE` 大小写不敏感，覆盖普通 ASSERT 小写 "Check failed" 与 ASSERT_EQ 大写 "Check Failed"），留痕见 docs/evidence/ftest-final-2026-08-19.txt。
