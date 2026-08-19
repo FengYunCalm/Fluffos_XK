@@ -163,7 +163,7 @@ void f_store_variable() {
   if (idx == -1 || (ob != current_object && (type & DECL_PRIVATE))) {
     error("Variable named '%s' does not exist or is not visible!\n", name);
   }
-  assign_svalue(&ob->variables[idx], sv);
+  assign_svalue(&ob->variables.data[idx], sv);
   pop_n_elems(st_num_arg);
 }
 #endif
@@ -190,7 +190,7 @@ void f_fetch_variable() {
     error("Variable named '%s' does not exist or is not visible!\n", name);
   }
   pop_n_elems(st_num_arg);
-  push_svalue(&ob->variables[idx]);
+  push_svalue(&ob->variables.data[idx]);
 }
 #endif
 
@@ -2082,7 +2082,7 @@ static void fms_recurse(mapping_t *map, object_t *ob, int *idx, program_t *prog)
   }
 
   for (i = 0; i < prog->num_variables_defined; i++) {
-    int const size = memory_share(ob->variables + *idx + i);
+    int const size = memory_share(ob->variables.data + *idx + i);
 
     sv.u.string = prog->variable_table[i];
     entry = find_for_insert(map, &sv, 0);

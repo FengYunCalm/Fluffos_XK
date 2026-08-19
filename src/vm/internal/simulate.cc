@@ -800,7 +800,7 @@ object_t *load_object(const char *lname, int callcreate) {
     vm_context_adjust_load_object_depth(vm_context(), -1);
     return ob;
   }
-  ob = get_empty_object(prog->num_variables_total);
+  ob = get_empty_object(prog);
   /* Shared string is no good here */
   SETOBNAME(ob, alloc_cstring(name, "load_object"));
   SET_TAG(ob->obname, TAG_OBJ_NAME);
@@ -902,7 +902,7 @@ object_t *clone_object(const char *str1, int num_arg) {
     (void)set_heart_beat(ob, 0);
   }
   stage_start = object_lifecycle_stage_start();
-  new_ob = get_empty_object(ob->prog->num_variables_total);
+  new_ob = get_empty_object(ob->prog);
   object_lifecycle_stage_record(ObjectLifecycleStage::kCloneAllocateObject, stage_start);
   SETOBNAME(new_ob, make_new_name(ob->obname));
   new_ob->flags |= (O_CLONE | (ob->flags & (O_WILL_CLEAN_UP | O_WILL_RESET)));
@@ -1429,9 +1429,9 @@ void destruct2(object_t *ob) {
      */
     int i;
 
-    for (i = 0; i < ob->prog->num_variables_total; i++) {
-      free_svalue(&ob->variables[i], "destruct2");
-      ob->variables[i] = const0u;
+    for (i = 0; i < static_cast<int>(ob->variables.count); i++) {
+      free_svalue(&ob->variables.data[i], "destruct2");
+      ob->variables.data[i] = const0u;
     }
   }
 

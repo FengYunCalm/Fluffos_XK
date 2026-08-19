@@ -4816,7 +4816,11 @@ TEST_F(DriverTest, TestSimulEfunReservesCapacityForCSourceSuffix) {
   const auto simulate_source = read_source_file_for_test("../src/vm/internal/simulate.cc");
 
   ASSERT_NE(source.find("filename_to_obname(file, buf, sizeof(buf) - 2)"), std::string::npos);
-  ASSERT_NE(source.find("file_length < 2"), std::string::npos);
+  // #1247 .lpc: buf is extension-stripped and passed straight to load_object,
+  // which probes .lpc then .c; the old file_length < 2 guard died with the
+  // strcat(".c") suffix logic.
+  ASSERT_NE(source.find("new_ob = load_object(buf, 1)"), std::string::npos);
+  ASSERT_EQ(source.find("file_length < 2"), std::string::npos);
   ASSERT_EQ(simulate_source.find("strcpy(inhbuf, inherit_file)"), std::string::npos);
 }
 
@@ -25340,9 +25344,9 @@ TEST_F(DriverTest, TestSimulEfunReloadInitCreateOrder) {
   int slot = FindVariableSlot(probe->prog, "probe_order");
   ASSERT_GE(slot, 0);
   // load_object ran the create phase already; reset and run it again.
-  probe->variables[slot].u.number = 0;
+  probe->variables.data[slot].u.number = 0;
   call_create(probe, 0);
-  ASSERT_EQ(probe->variables[slot].u.number, 2)
+  ASSERT_EQ(probe->variables.data[slot].u.number, 2)
       << "create phase must run __INIT (probe_mark) before create()";
 }
 
@@ -25432,4 +25436,84 @@ TEST_F(DriverTest, TestRecompileQuiesceCountsSuccess) {
   ASSERT_GE(coordinator.quiesce_attempts(), attempts_before + 1);
   ASSERT_GE(coordinator.quiesce_success(), success_before + 1);
   ASSERT_EQ(coordinator.quiesce_timeouts(), timeouts_before);
+}
+
+// #1247 B-S1: ObjectVariableBlock lifecycle and program_layout_digest.
+// The block's count is the sole payload-length source; layout_id comes
+// exclusively from program_layout_digest().
+TEST_F(DriverTest, TestObjectVariableBlockLifecycle) {
+  const char *src =
+      "int x;\n"
+      "string s = \"abc\";\n"
+      "void do_tests() { x = 1; }\n";
+  program_t *prog = CompileSimulProg(src);
+  ASSERT_NE(prog, nullptr);
+  ASSERT_GE(prog->num_variables_total, 2);
+
+  ObjectVariableBlock b;
+  obj_vars_init(&b, prog);
+  ASSERT_EQ(b.count, static_cast<uint32_t>(prog->num_variables_total));
+  ASSERT_NE(b.data, nullptr);
+  ASSERT_EQ(b.layout_id, program_layout_digest(prog));
+  // deterministic: same program, same digest
+  ASSERT_EQ(program_layout_digest(prog), b.layout_id);
+  for (uint32_t i = 0; i < b.count; i++) {
+    ASSERT_EQ(b.data[i].type, T_NUMBER);
+    ASSERT_EQ(b.data[i].u.number, 0) << "fresh block slots must be const0";
+  }
+  // layout_id differs for a genuinely different layout
+  const char *src2 = "int x;\nint y;\nstring s;\n";
+  program_t *prog2 = CompileSimulProg(src2);
+  ASSERT_NE(prog2, nullptr);
+  ASSERT_NE(program_layout_digest(prog2), program_layout_digest(prog))
+      << "different variable layouts must not share a digest";
+
+  // clear zeroes contents without releasing the payload
+  b.data[0].type = T_NUMBER;
+  b.data[0].u.number = 42;
+  obj_vars_clear(&b);
+  ASSERT_EQ(b.data[0].u.number, 0);
+  ASSERT_NE(b.data, nullptr);
+  ASSERT_EQ(b.count, static_cast<uint32_t>(prog->num_variables_total));
+
+  // move transfers the whole payload into an empty block
+  svalue_t *moved_data = b.data;
+  ObjectVariableBlock dst;
+  obj_vars_move(&dst, &b);
+  ASSERT_EQ(dst.count, static_cast<uint32_t>(prog->num_variables_total));
+  ASSERT_EQ(dst.data, moved_data);
+  ASSERT_EQ(b.data, nullptr);
+  ASSERT_EQ(b.count, 0u);
+
+  // swap exchanges payloads wholesale
+  ObjectVariableBlock other;
+  obj_vars_init(&other, prog2);
+  void *dst_data = dst.data;
+  void *other_data = other.data;
+  uint64_t dst_id = dst.layout_id, other_id = other.layout_id;
+  obj_vars_swap(&dst, &other);
+  ASSERT_EQ(dst.data, other_data);
+  ASSERT_EQ(other.data, dst_data);
+  ASSERT_EQ(dst.layout_id, other_id);
+  ASSERT_EQ(other.layout_id, dst_id);
+
+  obj_vars_destroy(&dst);
+  obj_vars_destroy(&other);
+  ASSERT_EQ(dst.data, nullptr);
+  ASSERT_EQ(dst.count, 0u);
+
+  free_prog(&prog2);
+  free_prog(&prog);
+}
+
+// #1247 B-S1: an object created through the loader carries a block whose
+// count matches the compiled program and whose layout_id equals the
+// program's digest; destructing the object releases the payload.
+TEST_F(DriverTest, TestObjectBlockMatchesLoadedProgram) {
+  object_t *ob = load_object_for_test("single/void");
+  ASSERT_NE(ob, nullptr);
+  ASSERT_EQ(ob->variables.count, static_cast<uint32_t>(ob->prog->num_variables_total));
+  ASSERT_EQ(ob->variables.layout_id, program_layout_digest(ob->prog));
+  ASSERT_NE(ob->variables.data, nullptr);
+  destruct_object_for_test(ob);
 }

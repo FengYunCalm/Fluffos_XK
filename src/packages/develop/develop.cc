@@ -100,10 +100,10 @@ void f_debug_info() {
     case 2: {
       int i;
       ob = arg[1].u.ob;
-      for (i = 0; i < ob->prog->num_variables_total; i++) {
+      for (i = 0; i < static_cast<int>(ob->variables.count); i++) {
         /* inefficient, but: */
         outbuf_addv(&out, "%s: ", variable_name(ob->prog, i));
-        svalue_to_string(&ob->variables[i], &out, 2, 0, 0);
+        svalue_to_string(&ob->variables.data[i], &out, 2, 0, 0);
         outbuf_add(&out, "\n");
       }
       break;

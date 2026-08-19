@@ -266,4 +266,16 @@ void deallocate_program(program_t *);
 char *variable_name(program_t *, int);
 function_t *find_func_entry(program_t *, int);
 
+// #1247 B-S1: normalized layout digest -- the SOLE producer of
+// ObjectVariableBlock::layout_id. Walks the variable layout in the same
+// depth-first/slot order the runtime uses, folding in the inherit path,
+// each inherit edge's type_mod and the effective (DECL_MODIFY-applied)
+// variable types. Deterministic for a given program; two programs with
+// different layouts differ with overwhelming probability. Pure function:
+// no live objects, no VM context, no allocations beyond a stack string.
+// One process must never contain two digest algorithms -- when the
+// descriptor is upgraded (B-S2), this function and the descriptor move
+// atomically.
+uint64_t program_layout_digest(const program_t *prog) noexcept;
+
 #endif

@@ -1,5 +1,7 @@
 #include "base/std.h"
 
+#include <assert.h>
+
 #include <chrono>
 #include <ctype.h>  // for isdigit
 #include <cstdio>   // for std::remove
@@ -22,6 +24,7 @@
 #include "vm/context.h"
 #include "vm/owner.h"
 #include "vm/internal/apply.h"
+#include "vm/internal/base/interpret.h"  // mark_svalue
 #include "vm/internal/base/machine.h"
 #include "vm/internal/eval_limit.h"
 #include "vm/internal/otable.h"  // FIXME:
@@ -1394,7 +1397,7 @@ void restore_object_from_line(object_t *ob, char *line, int noclear) {
   svalue_t *v;
   char var[100];
   int idx;
-  svalue_t *sv = ob->variables;
+  svalue_t *sv = obj_vars_data(&ob->variables);
   int rc;
   unsigned short t;
 
@@ -1701,7 +1704,7 @@ int save_object(object_t *ob, const char *file, int save_zeros) {
       error("Could not open /%s for a save.\n", tmp_name.c_str());
     }
   }
-  v = ob->variables;
+  v = obj_vars_data(&ob->variables);
 
   success = save_object_recurse(ob->prog, &v, 0, save_zeros, f, gzf);
 
@@ -1768,7 +1771,7 @@ int save_object_str(object_t *ob, int save_zeros, char *saved, int size) {
    * Write the save-files to different directories, just in case
    * they are on different file systems.
    */
-  v = ob->variables;
+  v = obj_vars_data(&ob->variables);
   success = save_object_recurse_str(ob->prog, &v, 0, save_zeros, body, left);
 
   if (!success) {
@@ -1798,8 +1801,8 @@ static void cns_recurse(object_t *ob, int *idx, program_t *prog) {
   }
   for (i = 0; i < prog->num_variables_defined; i++) {
     if (!(prog->variable_types[i] & DECL_NOSAVE)) {
-      free_svalue(&ob->variables[*idx + i], "cns_recurse");
-      ob->variables[*idx + i] = const0u;
+      free_svalue(&obj_vars_data(&ob->variables)[*idx + i], "cns_recurse");
+      obj_vars_data(&ob->variables)[*idx + i] = const0u;
     }
   }
   *idx += prog->num_variables_defined;
@@ -1975,19 +1978,20 @@ void dealloc_object(object_t *ob, const char *from) {
    * declarations.
    */
   if (ob->prog) {
-    /* Release the variable block's CONTENTS while prog (the count) is
-     * still around. On the normal teardown path destruct2() already
-     * zeroed them, but an object whose ref count drops to 0 while still
-     * on the destruct queue (before its remove_destructed_objects()
+    /* Release the variable block's CONTENTS using the block's own count
+     * (not the program's -- the program may already have been swapped by
+     * replace_program/recompile). On the normal teardown path destruct2()
+     * already zeroed them, but an object whose ref count drops to 0 while
+     * still on the destruct queue (before its remove_destructed_objects()
      * sweep) arrives here with the contents intact -- freeing just the
      * block leaked every reference the globals held. A variable
      * containing this very object is safe: its ref is already 0, so
      * int_free_svalue's underflow guard makes the nested free a no-op. */
-    for (int i = 0; i < ob->prog->num_variables_total; i++) {
-      free_svalue(&ob->variables[i], "dealloc_object");
+    for (uint32_t i = 0; i < ob->variables.count; i++) {
+      free_svalue(&ob->variables.data[i], "dealloc_object");
     }
-    tot_alloc_object_size -=
-        (ob->prog->num_variables_total - 1) * sizeof(svalue_t) + sizeof(object_t);
+    tot_alloc_object_size -= sizeof(object_t) + obj_vars_accounted_bytes(&ob->variables);
+    obj_vars_destroy(&ob->variables);
     free_prog(&ob->prog);
     ob->prog = nullptr;
   }
@@ -2073,33 +2077,86 @@ void free_object(object_t **ob, const char *const from) {
 }
 
 /*
- * Allocate an empty object, and set all variables to 0. Note that a
- * 'object_t' already has space for one variable. So, if no variables
- * are needed, we waste one svalue worth of memory (or we'd write too
- * much memory in copying the NULL_object over.
+ * #1247 B-S1: object variable storage is decoupled from program_t. The
+ * embedded handle owns a separately allocated payload of max(count, 1)
+ * slots; count is the sole source of the payload length everywhere
+ * (free, mark, statistics). layout_id comes exclusively from
+ * program_layout_digest().
  */
-object_t *get_empty_object(int num_var) {
-  // static object_t NULL_object;
+
+void obj_vars_init(ObjectVariableBlock *block, const program_t *prog) {
+  uint32_t count = prog ? prog->num_variables_total : 0;
+  size_t size = (count > 0 ? count : 1) * sizeof(svalue_t);
+  block->data = reinterpret_cast<svalue_t *>(DMALLOC(size, TAG_OBJECT, "obj_vars_init"));
+  block->count = count;
+  for (uint32_t i = 0; i < count; i++) {
+    block->data[i] = const0u;
+  }
+  block->layout_id = program_layout_digest(prog);
+}
+
+void obj_vars_destroy(ObjectVariableBlock *block) noexcept {
+  if (block->data) {
+    FREE(block->data);
+  }
+  block->data = nullptr;
+  block->count = 0;
+  block->layout_id = 0;
+}
+
+void obj_vars_clear(ObjectVariableBlock *block) noexcept {
+  for (uint32_t i = 0; i < block->count; i++) {
+    free_svalue(&block->data[i], "obj_vars_clear");
+    block->data[i] = const0u;
+  }
+}
+
+void obj_vars_move(ObjectVariableBlock *dst_empty, ObjectVariableBlock *src) noexcept {
+  assert(dst_empty->data == nullptr);
+  dst_empty->data = src->data;
+  dst_empty->count = src->count;
+  dst_empty->layout_id = src->layout_id;
+  src->data = nullptr;
+  src->count = 0;
+  src->layout_id = 0;
+}
+
+void obj_vars_swap(ObjectVariableBlock *a, ObjectVariableBlock *b) noexcept {
+  ObjectVariableBlock tmp = *a;
+  *a = *b;
+  *b = tmp;
+}
+
+svalue_t *obj_vars_data(ObjectVariableBlock *block) noexcept { return block->data; }
+
+void obj_vars_mark(const ObjectVariableBlock *block) {
+#ifdef DEBUGMALLOC_EXTENSIONS
+  for (uint32_t i = 0; i < block->count; i++) {
+    mark_svalue(&block->data[i]);
+  }
+#endif
+}
+
+size_t obj_vars_accounted_bytes(const ObjectVariableBlock *block) noexcept {
+  return (block->count > 0 ? block->count : 1) * sizeof(svalue_t);
+}
+
+/*
+ * Allocate an empty object, and set all variables to 0. The variable
+ * payload is a separate allocation owned by the embedded block; the
+ * object itself is a fixed-size struct.
+ */
+object_t *get_empty_object(const program_t *prog) {
   object_t *ob;
-  int size = sizeof(object_t) + (num_var - !!num_var) * sizeof(svalue_t);
-  int i;
+  size_t size = sizeof(object_t);
 
   tot_alloc_object++;
   tot_alloc_object_size += size;
   ob = reinterpret_cast<object_t *>(DMALLOC(size, TAG_OBJECT, "get_empty_object"));
-  /*
-   * marion Don't initialize via memset, this is incorrect. E.g. the bull
-   * machines have a (char *)0 which is not zero. We have structure
-   * assignment, so use it.
-   */
-  //*ob = NULL_object; gives a warning on const pointers
-  // memcpy(ob, &NULL_object, sizeof NULL_object);
-  // screw the "bull machines" we're in the 21st century now
   memset(ob, 0, sizeof(object_t));
   ob->ref = 1;
-  for (i = 0; i < num_var; i++) {
-    ob->variables[i] = const0u;
-  }
+  obj_vars_init(&ob->variables, prog);
+  tot_alloc_object_size += obj_vars_accounted_bytes(&ob->variables);
   return ob;
 }
 
@@ -2163,8 +2220,8 @@ void reload_object(object_t *obj) {
     return;
   }
   for (i = 0; i < obj->prog->num_variables_total; i++) {
-    free_svalue(&obj->variables[i], "reload_object");
-    obj->variables[i] = const0u;
+    free_svalue(&obj->variables.data[i], "reload_object");
+    obj->variables.data[i] = const0u;
   }
 #if defined(PACKAGE_SOCKETS) || defined(PACKAGE_EXTERNAL)
   if (obj->flags & O_EFUN_SOCKET) {

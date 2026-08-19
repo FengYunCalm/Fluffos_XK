@@ -122,3 +122,59 @@ function_t *find_func_entry(program_t *prog, int index) {
 
   return prog->function_table + index;
 }
+
+// #1247 B-S1: program_layout_digest implementation.
+//
+// FNV-1a 64 over the layout, walked in the runtime's depth-first slot
+// order (inherits first, then this program's defined variables). Each
+// inherited variable is hashed with the full inherit path from the root
+// program so two private variables with the same name on different
+// inherit paths cannot collide. Effective variable types use
+// DECL_MODIFY along the inherit chain (the same rule the compiler's
+// copy_variables uses), and every inherit edge folds in its type_mod.
+// The digest is the layout_id producer for ObjectVariableBlock; it is
+// not a collision-free substitute for the full structural comparison
+// (B-S2), which remains the migration gate.
+namespace {
+void digest_walk(const program_t *prog, const std::string &path, uint64_t *h) {
+  // Mix helper: FNV-1a step over a byte range.
+  auto mix = [h](const char *p, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+      *h ^= static_cast<unsigned char>(p[i]);
+      *h *= 1099511628211ULL;
+    }
+  };
+  for (int i = 0; i < prog->num_inherited; i++) {
+    const inherit_t &inh = prog->inherit[i];
+    const char *fname = inh.prog && inh.prog->filename ? inh.prog->filename : "";
+    mix(fname, strlen(fname));
+    mix(reinterpret_cast<const char *>(&inh.type_mod), sizeof(inh.type_mod));
+    mix("|", 1);
+    if (inh.prog) {
+      std::string child_path = path;
+      child_path += "/";
+      child_path += fname;
+      digest_walk(inh.prog, child_path, h);
+    }
+  }
+  for (int i = 0; i < prog->num_variables_defined; i++) {
+    const char *name = prog->variable_table ? prog->variable_table[i] : "";
+    int type = prog->variable_types ? prog->variable_types[i] : 0;
+    mix(path.data(), path.size());
+    mix(":", 1);
+    mix(name, strlen(name));
+    mix(":", 1);
+    mix(reinterpret_cast<const char *>(&type), sizeof(type));
+    mix("|", 1);
+  }
+}
+}  // namespace
+
+uint64_t program_layout_digest(const program_t *prog) noexcept {
+  uint64_t h = 14695981039346656037ULL;  // FNV-1a 64 offset basis
+  if (prog) {
+    std::string path;
+    digest_walk(prog, path, &h);
+  }
+  return h;
+}

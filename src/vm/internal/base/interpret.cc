@@ -487,12 +487,12 @@ void share_and_push_string(const char *p) {
  */
 #ifdef DEBUG
 static svalue_t *find_value(int num) {
-  DEBUG_CHECK2(num >= current_object->prog->num_variables_total,
-               "Illegal variable access %d(%d).\n", num, current_object->prog->num_variables_total);
-  return &current_object->variables[num];
+  DEBUG_CHECK2(num >= static_cast<int>(current_object->variables.count),
+               "Illegal variable access %d(%u).\n", num, current_object->variables.count);
+  return &current_object->variables.data[num];
 }
 #else
-#define find_value(num) (&current_object->variables[num])
+#define find_value(num) (&current_object->variables.data[num])
 #endif
 
 void free_string_svalue(svalue_t *v) {

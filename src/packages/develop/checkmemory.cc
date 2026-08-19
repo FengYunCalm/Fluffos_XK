@@ -198,8 +198,8 @@ static void mark_object(object_t *ob) {
 #endif
 
   if (ob->prog)
-    for (i = 0; i < ob->prog->num_variables_total; i++) {
-      mark_svalue(&ob->variables[i]);
+    for (i = 0; i < static_cast<int>(ob->variables.count); i++) {
+      mark_svalue(&ob->variables.data[i]);
     }
   else
     outbuf_addv(&out, "can't mark variables; %s is swapped.\n", ob->obname);

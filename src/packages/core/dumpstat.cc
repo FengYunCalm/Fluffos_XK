@@ -100,9 +100,9 @@ int data_size(object_t *ob) {
   int total = 0, i;
 
   if (ob->prog) {
-    for (i = 0; i < ob->prog->num_variables_total; i++) {
+    for (i = 0; i < static_cast<int>(ob->variables.count); i++) {
       depth = 0;
-      total += svalue_size(&ob->variables[i]) + sizeof(svalue_t);
+      total += svalue_size(&ob->variables.data[i]) + sizeof(svalue_t);
     }
   }
   return total;

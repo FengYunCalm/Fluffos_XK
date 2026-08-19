@@ -36,32 +36,53 @@ void replace_programs() {
 
   for (r_ob = obj_list_replace; r_ob; r_ob = r_next) {
     program_t *old_prog;
+    ObjectVariableBlock new_block;
 
-    num_fewer = r_ob->ob->prog->num_variables_total - r_ob->new_prog->num_variables_total;
+    // #1247 B-S1: the target program's variable layout gets a fresh,
+    // separately allocated payload (count = new layout size, layout_id =
+    // digest of the replacing program); matched slots are copied by
+    // stable offset rules below, then the old payload is swapped out and
+    // destroyed. The object's block count is always the payload length
+    // source -- never derived from ob->prog afterwards.
+    obj_vars_init(&new_block, r_ob->new_prog);
+
+    num_fewer = r_ob->ob->variables.count - r_ob->new_prog->num_variables_total;
+    tot_alloc_object_size -= num_fewer * sizeof(svalue_t);
 
     debug(d_flag, "%d less variables\n", num_fewer);
 
-    tot_alloc_object_size -= num_fewer * sizeof(svalue_t[1]);
     if ((offset = r_ob->var_offset)) {
-      svp = r_ob->ob->variables;
-      /* move our variables up to the top */
+      svp = obj_vars_data(&new_block);
+      /* move our variables up to the top: new slot i = old slot offset+i */
       for (i = 0; i < r_ob->new_prog->num_variables_total; i++) {
         free_svalue(svp, "replace_programs");
-        *svp = *(svp + offset);
-        *(svp + offset) = const0u;
+        *svp = *(obj_vars_data(&r_ob->ob->variables) + offset + i);
+        *(obj_vars_data(&r_ob->ob->variables) + offset + i) = const0u;
         svp++;
       }
-      /* free the rest */
-      for (i = 0; i < num_fewer; i++) {
-        free_svalue(svp, "replace_programs");
-        *svp++ = const0u;
+      /* The old payload is left with two live regions: the head [0, offset)
+       * that the moved slots replaced, and the tail beyond the moved
+       * range. Release both. */
+      for (i = 0; i < offset; i++) {
+        free_svalue(obj_vars_data(&r_ob->ob->variables) + i, "replace_programs");
+      }
+      for (i = offset + r_ob->new_prog->num_variables_total;
+           i < static_cast<int>(r_ob->ob->variables.count); i++) {
+        free_svalue(obj_vars_data(&r_ob->ob->variables) + i, "replace_programs");
       }
     } else {
-      /* We just need to remove the last num_fewer variables */
-      svp = &r_ob->ob->variables[r_ob->new_prog->num_variables_total];
-      for (i = 0; i < num_fewer; i++) {
+      /* The old layout is a prefix of the new one: copy the first
+       * new_prog->num_variables_total slots, free the tail. */
+      svp = obj_vars_data(&new_block);
+      for (i = 0; i < r_ob->new_prog->num_variables_total; i++) {
         free_svalue(svp, "replace_programs");
-        *svp++ = const0u;
+        *svp = *(obj_vars_data(&r_ob->ob->variables) + i);
+        obj_vars_data(&r_ob->ob->variables)[i] = const0u;
+        svp++;
+      }
+      for (i = r_ob->new_prog->num_variables_total; i < static_cast<int>(r_ob->ob->variables.count);
+           i++) {
+        free_svalue(obj_vars_data(&r_ob->ob->variables) + i, "replace_programs");
       }
     }
 
@@ -74,6 +95,10 @@ void replace_programs() {
     reference_prog(r_ob->new_prog, "replace_programs");
     old_prog = r_ob->ob->prog;
     r_ob->ob->prog = r_ob->new_prog;
+    // Swap the freshly built payload in and destroy the old one (now empty
+    // except for the freed tail slots; contents were moved above).
+    obj_vars_swap(&r_ob->ob->variables, &new_block);
+    obj_vars_destroy(&new_block);
     r_next = r_ob->next;
     free_prog(&old_prog);
 

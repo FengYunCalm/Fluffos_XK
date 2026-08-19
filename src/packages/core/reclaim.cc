@@ -121,8 +121,8 @@ int reclaim_objects(bool is_auto) {
   cleaned = nested = 0;
   for (ob = obj_list; ob; ob = ob->next_all) {
     if (ob->prog) {
-      for (i = 0; i < ob->prog->num_variables_total; i++) {
-        check_svalue(&ob->variables[i]);
+      for (i = 0; i < static_cast<int>(ob->variables.count); i++) {
+        check_svalue(&ob->variables.data[i]);
       }
     }
   }
