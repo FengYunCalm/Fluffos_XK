@@ -1,6 +1,7 @@
 #include "base/package_api.h"
 
 #include "packages/core/replace_program.h"
+#include "vm/internal/source_spelling.h"
 
 /*
  * replace_program.c
@@ -11,7 +12,7 @@
 
 replace_ob_t *obj_list_replace = nullptr;
 
-static program_t *search_inherited(char * /*str*/, program_t * /*prg*/, int * /*offpnt*/);
+static program_t *search_inherited_matching(char *str, program_t *prg, int *offpnt);
 static replace_ob_t *retrieve_replace_program_entry();
 
 int replace_program_pending(object_t *ob) {
@@ -106,7 +107,7 @@ void replace_programs() {
 }
 
 #ifdef F_REPLACE_PROGRAM
-static program_t *search_inherited(char *str, program_t *prg, int *offpnt) {
+static program_t *search_inherited_matching(char *str, program_t *prg, int *offpnt) {
   program_t *tmp;
   int i;
 
@@ -118,13 +119,16 @@ static program_t *search_inherited(char *str, program_t *prg, int *offpnt) {
     debug(d_flag, "index %d:", i);
     debug(d_flag, "checking PRG(/%s)", prg->inherit[i].prog->filename);
 
-    if (strcmp(str, prg->inherit[i].prog->filename) == 0) {
+    // #1247 .lpc: compare stripped names (source_name_matches), so
+    // replace_program("/foo") / "/foo.lpc" / "/foo.c" all match a
+    // compiled foo.lpc or foo.c inherited program.
+    if (source_name_matches(str, prg->inherit[i].prog->filename)) {
       debug(d_flag, "match found");
 
       *offpnt = prg->inherit[i].variable_index_offset;
       return prg->inherit[i].prog;
     }
-    if ((tmp = search_inherited(str, prg->inherit[i].prog, offpnt))) {
+    if ((tmp = search_inherited_matching(str, prg->inherit[i].prog, offpnt))) {
       debug(d_flag, "deferred match found");
 
       *offpnt += prg->inherit[i].variable_index_offset;
@@ -172,20 +176,19 @@ void f_replace_program() {
   }
 
   name_len = SVALUE_STRLEN(sp);
-  name = reinterpret_cast<char *>(DMALLOC(name_len + 3, TAG_TEMPORARY, "replace_program"));
+  // No ".c" append anymore (see search_inherited_matching / #1247 .lpc),
+  // so the buffer only needs room for the string + NUL.
+  name = reinterpret_cast<char *>(DMALLOC(name_len + 1, TAG_TEMPORARY, "replace_program"));
   xname = name;
   strcpy(name, sp->u.string);
-  if (name_len < 3) {
-    strcat(name, ".c");
-  } else {
-    if (name[name_len - 2] != '.' || name[name_len - 1] != 'c') {
-      strcat(name, ".c");
-    }
-  }
   if (*name == '/') {
     name++;
   }
-  new_prog = search_inherited(name, current_object->prog, &var_offset);
+  // #1247 .lpc: the compiled program's filename carries the loader-chosen
+  // extension ("foo.lpc" for a .lpc source, "foo.c" otherwise), so the
+  // old hardcoded ".c" append + exact strcmp could never match a .lpc
+  // source. source_name_matches strips the suffix on both sides.
+  new_prog = search_inherited_matching(name, current_object->prog, &var_offset);
   FREE(xname);
   if (!new_prog) {
     error("program to replace the current with has to be inherited\n");

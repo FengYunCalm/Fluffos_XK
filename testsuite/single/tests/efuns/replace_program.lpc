@@ -1,0 +1,19 @@
+// #1247 .lpc: replace_program must match an inherited .lpc-sourced program
+// under all three spellings. Before the source_name_matches fix, the old
+// hardcoded ".c" append + exact strcmp could never match a compiled
+// "rp_base.lpc" filename, so every spelling errored out.
+inherit "/single/tests/crasher/rp_base";
+
+void do_tests() {
+  // Sanity: the inherited .lpc program loaded and its code is reachable.
+  ASSERT_EQ(42, rp_f());
+  ASSERT_EQ(7, rp_val);
+
+  // All three spellings must match the same inherited program. Each call
+  // queues a replacement; failure would error() out of do_tests.
+  replace_program("/single/tests/crasher/rp_base");
+  replace_program("/single/tests/crasher/rp_base.lpc");
+  replace_program("/single/tests/crasher/rp_base.c");
+
+  ASSERT(1);
+}

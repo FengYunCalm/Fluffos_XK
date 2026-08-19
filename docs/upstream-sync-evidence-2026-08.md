@@ -262,9 +262,9 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | TREES-1 | trees.cc:184-194 | INT_MIN % -1 SIGFPE | trees.cc（无） | 新增编译期取模测试 | 0d3f8ed8 |
 | TELNET-1/2 | telnet.cc:360-381 | LINEMODE buf[1] 越界读 | telnet.cc:324-331 | 新增 0/1/2 字节输入测试 | 0d3f8ed8 |
 | TELNET-3 | telnet.cc:712-735 | ZMP off-by-one 越界写 | telnet.cc:668-673 | 新增 ZMP 空/单/多参数测试 | 0d3f8ed8 |
-| ASYNC-2..4,9 | async.cc:76-130,589-623 | current_work(s) 多飞行记账 | async.cc:81-86,104-110,124-138,776-789 | 新增多 worker 测试 | batch7（待提交） |
-| ASYNC-5 | async.cc:273-283 | getdirthread dirent 大小 | async.cc:356-363 | ASan getdir 多条目测试 | batch7（待提交） |
-| ASYNC-6..8 | async.cc:306-355 | 拒绝路径 callback 泄漏 | async.cc:388-391,403-406,415-420 | 新增拒绝路径测试 | batch7（待提交） |
+| ASYNC-2..4,9 | async.cc:76-130,589-623 | current_work(s) 多飞行记账 | async.cc:81-86,104-110,124-138,776-789 | 新增多 worker 测试 | 028955dd |
+| ASYNC-5 | async.cc:273-283 | getdirthread dirent 大小 | async.cc:356-363 | ASan getdir 多条目测试 | 028955dd |
+| ASYNC-6..8 | async.cc:306-355 | 拒绝路径 callback 泄漏 | async.cc:388-391,403-406,415-420 | 新增拒绝路径测试 | 028955dd |
 | PARSER-1..9 | parser.cc:78-88,626-638,713-716,738-748,2877-2890,3399,3450,3515 | verb node UAF + 深度防护 | parser.cc:84-92,619-626,644,707,733-740,2903-2909,3441,3492,3557 | parser_handler_destruct.lpc | 538e2531 |
 | OBJ-2..5 | object.cc:257-270 等 | restore 深度无上限（栈溢出 DoS） | object.cc:275 | restore_variable.lpc | 9565ccb4 |
 | ARRAY-1/2 | array.cc:125-144 | allocate_array2 T_FUNCTION 泄漏 | array.cc:128 | allocate.lpc | A-S1-array-leak |
@@ -275,7 +275,7 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | CONTRIB-1 | contrib.cc:743-753 | terminal_colour raw apply 泄漏 | contrib.cc:710 | terminal_colour_error_replace.lpc | A-S1-contrib-colour |
 | CONTRIB-2 | contrib.cc:replaceable | 空 ignore 数组 NULL 写 | contrib.cc:1615-1680 | replaceable_empty.lpc | A-S1-contrib-replaceable |
 | CONTRIB-3 | contrib.cc:repeat_string | 乘法溢出 | contrib.cc:1942 | 新增长度极值测试 | A-S1-contrib-repeat |
-| CONTRIB-4 | contrib.cc:query_replaced_program | current_object 误用 | contrib.cc（待定位） | 新增测试 | A-S1-contrib-qrp |
+| CONTRIB-4 | contrib.cc:query_replaced_program | current_object 误用 | contrib.cc:1960 | 新增测试 | b121f6e0 |
 | ED-1..4 | ed.cc:658-669,869-885,1057-1069,1267+ | prntln/getfn/getrhs/optpat 越界 | ed.cc:713-717,922-953 | 新增 ed 测试 | 9565ccb4 |
 | FILE-1..3 | file.cc:242-253 等 | get_dir strcat 无边界 | file.cc:337 | 新增长路径测试 | 9565ccb4 |
 | CALLOUT-2 | call_out.cc:606-632 | 秒×1000 溢出 | call_out.cc:777-782 | 新增极值测试 | c065ca74 |
@@ -301,7 +301,7 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | hunk_id | 上游 hunk | 缺陷 | 本地落点 | 回归测试 | 目标提交 |
 |---|---|---|---|---|---|
 | MUDLIB-5..8 | mudlib_stats.cc:restore | fscanf 越界 | mudlib_stats.cc:566-570 | std::ifstream + f.width 流读取，无固定缓冲 | 已覆盖（等价保护，锚点已补） |
-| SPRINTF-8..12 | sprintf.cc:cst/owned | cst 泄漏/owned 复制 | sprintf.cc（待定位） | sprintf.lpc | A-S2-sprintf-cst |
+| SPRINTF-8..12 | sprintf.cc:cst/owned | cst 泄漏/owned 复制 | sprintf.cc:1113,1139 | sprintf.lpc | 已覆盖（batch6 b121f6e0） |
 | ASYNC-1 | async.cc:6 | include <set> | async.cc（无） | 编译测试 | A-S2-async-include |
 | TIME-2 | time.cc:4 | include <vector> | time.cc（无） | 编译测试 | 9565ccb4 |
 | 其余 | 各文件 | 见 A-S1 表同文件未列 hunk | — | — | — |
@@ -334,3 +334,27 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 - 本地 `free_parse_globals`（parser.cc:687-708）无 early return，drain 追加在末尾；其 free_object(loaded_objects) 循环期间触发的 verb node 释放先入 deferred 列表、末尾统一 flush。
 - 本地恰好 2 处 verb node 释放点需改 `free_verb_node(old)`：`parse_free`（parser.cc:621）和 `f_parse_remove`（parser.cc:3511）。
 - 移植清单：2 个 static + free_verb_node helper + 两处替换 + clear_result 加 `num = 0`（parser.cc:683-685）+ we_are_finished 的 O_DESTRUCTED 分支（free_parse_result + best_result=nullptr + best_match=0）+ f_parse_sentence/f_parse_my_rules 各一处 parse_active_depth++。
+
+### batch9：.lpc 加载器与测试基础设施（2026-08-19，d8ef20b0）
+
+- simulate.cc `filename_to_obname` 幂等剥离 `.lpc`/`.c`；`load_object` 对原始 pname 做 explicit_ext 探测 + `.lpc` 优先、`.c` 回退（stat 探测，683-687 注释记录 actualname 遮蔽陷阱）；real_name 扩到 sizeof(name)+5 容纳 4 字符扩展名。
+- recompile.cc 的 `compile_program_for_recompile` 从 `prog->filename` 推导 src_ext（access R_OK 回退探测，与 load_object 的 stat 探测语义略不同）；simul_efun.cc 不再硬编码 `.c`。
+- testsuite/command/tests.c 枚举 `*.lpc` + 跳过被 .lpc 孪生遮蔽的 .c 文件。
+- **拼写解析规则原四处内联（simulate.cc filename_to_obname / load_object、recompile.cc、replace_program.cc）+ tests.c LPC 层；已收敛为单一 owner `resolve_source_spelling()` + `source_name_matches()` + `source_spelling_strip_len()`（src/vm/internal/source_spelling.{h,cc}，幂等 strip 归一化同时供 filename_to_obname 与匹配使用），load_object / recompile_object / replace_program 三方共用（tests.c 为 LPC 层独立实现保留）。**
+- **replace_program 缺陷（batch9 遗留，随收敛修复）**：旧实现硬编码追加 `.c` + 精确 strcmp，.lpc 源编译出的 prog->filename 携带 ".lpc"，三种拼写（/foo、/foo.lpc、/foo.c）全部匹配失败；现由 source_name_matches 双侧剥后缀比较。testsuite 无真实 replace_program 测试，需补。
+- recompile 探测从 access(R_OK) 统一为 stat+S_ISDIR（目录不再算可回退，语义更严，有意为之）；load_object 显式 .lpc 不回退而 recompile 恒回退（recompile 无法得知请求显式性）为已知取舍。
+- PARSE-1 修正落点：living_parse（parse.cc:1064）而非 single_parse（991 锚点为等价保护）；CALLOUT-1 修正落点：reclaim_call_outs（call_out.cc:727-731）。
+- object.cc OBJ-2 升级为 nest 语义：restore_internal_size(str, is_mapping, depth, nest)，nest 为真实嵌套深度，grow_restore_sizes() 按需扩容（128 起，INT_MAX/2 兜底）——修复 restore_variable.lpc 深嵌套用例。
+
+### 已知编译器差异：词法数字字面量不支持科学计数法（2026-08-19）
+
+- lex.cc 数字循环（2518-2548）只消费 `0-9 . _`，无 `e`/`E` 分支；`1.0e300` 被切为 `L_REAL("1.0")` + 标识符 `e300` → "syntax error, unexpected L_IDENTIFIER"（sprintf.lpc 曾因此消耗数十轮调试）。
+- 紧随其后的 `strtod(yytext,&endptr)` + `endptr != yyp` 检查证明作者本意支持指数（strtod 能解析 e300）——fork 重写 lexer 时的**意外能力回归**，非有意简化。
+- 现状：上游 sprintf.lpc 的 `1.0e300` 已改为长十进制字面量（断言只要求 >1000 字符，强度等价），测试注释记录缘由。
+- 若日后修复：只改共享 lexer 数字循环（消费 e/E + 可选 +/- + 至少一个数字；无数字则回退让 strtod 报 "Invalid float literal"，错误路径已存在），**禁止给 driver/lpcc 编译入口加条件分支**（compile_file compiler.cc:2018 仍是唯一共享入口）。
+- 移植任何含科学计数法字面量的上游测试前先确认本差异。
+
+### C-S1 清单补充：expand 状态每文件复位
+
+- lex.cc:108-109 全局 `expands[EXPANDMAX]`/`expand_depth`；`start_new_file()`（lex.cc:3328-3365）只复位 `nexpands = 0`，**不复位 expand_depth 与 expands[] 内容**（正常展开路径递减）。batch9 加载器每进程编译几十个文件且 crasher/fail 目录故意制造编译错误，属潜伏跨文件污染源。
+- C-S1 显式 begin/end 双清理点设计时必须把"每文件复位 expand 状态"显式列入清单（batch9 语法错误已实证与状态无关，不紧急但须覆盖）。

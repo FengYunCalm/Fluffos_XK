@@ -500,6 +500,7 @@ set(SRC
   "vm/internal/simul_efun.cc"
   "vm/internal/simulate.cc"
   "vm/internal/recompile.cc"
+  "vm/internal/source_spelling.cc"
   "vm/internal/trace.cc"
   "vm/internal/vm.cc"
   "vm/internal/worker.cc"

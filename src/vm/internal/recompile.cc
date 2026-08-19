@@ -22,6 +22,7 @@
 #include "vm/internal/base/object.h"
 #include "vm/internal/base/program.h"
 #include "vm/internal/simulate.h"  // obj_list, destruct_object, error machinery
+#include "vm/internal/source_spelling.h"
 #include "packages/core/replace_program.h"
 
 // ---------------------------------------------------------------------------
@@ -43,24 +44,23 @@ StagedProgram compile_program_for_recompile(object_t *blueprint) {
   // hot-reload of a .lpc-sourced blueprint would always fail to open.
   const char *compile_name = blueprint->prog->filename ? blueprint->prog->filename : "";
   size_t clen = strlen(compile_name);
-  const char *src_ext = ".c";
+  const char *requested_ext = nullptr;
   if (clen > 4 && strcmp(compile_name + clen - 4, ".lpc") == 0) {
-    src_ext = ".lpc";
+    requested_ext = ".lpc";
   } else if (clen > 2 && compile_name[clen - 1] == 'c' && compile_name[clen - 2] == '.') {
-    src_ext = ".c";
+    requested_ext = ".c";
   }
-  // Fall back to .c if the .lpc source is gone (loader's probe order mirrors
-  // this: .lpc preferred, .c fallback).
-  char probe_path[PATH_MAX];
-  (void)snprintf(probe_path, sizeof(probe_path), "%s%s", source_path.c_str(), src_ext);
-  if (strcmp(src_ext, ".lpc") == 0 && access(probe_path, R_OK) != 0) {
-    src_ext = ".c";
-  }
-
+  // #1247 .lpc: source spelling resolved by the shared owner
+  // (vm/internal/source_spelling.cc). Unlike load_object (explicit request
+  // is exact), recompile always allows the .lpc -> .c fallback: a deleted
+  // .lpc source must degrade to the .c twin, and recompile cannot know the
+  // original request was explicit -- the loader may already have fallen
+  // back, so prog->filename is authoritative only as a preference.
+  const char *src_ext;
   char real_name[PATH_MAX];
   char obname[PATH_MAX];
-  (void)strcpy(real_name, source_path.c_str());
-  (void)strcat(real_name, src_ext);
+  resolve_source_spelling(source_path.c_str(), requested_ext, true, &src_ext,
+                          real_name, sizeof real_name);
   (void)strcpy(obname, source_path.c_str());
   (void)strcat(obname, src_ext);
 

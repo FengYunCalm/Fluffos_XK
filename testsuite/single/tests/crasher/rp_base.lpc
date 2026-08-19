@@ -1,0 +1,5 @@
+// #1247 .lpc fixture for replace_program.lpc: a .lpc source that the test
+// program inherits, then replaces itself with via three spellings.
+int rp_val = 7;
+
+int rp_f() { return 42; }

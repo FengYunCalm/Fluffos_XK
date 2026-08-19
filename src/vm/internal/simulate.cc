@@ -1,6 +1,7 @@
 #include "base/std.h"
 
 #include "vm/internal/simulate.h"
+#include "vm/internal/source_spelling.h"
 
 #include <array>
 #include <atomic>
@@ -600,20 +601,9 @@ int filename_to_obname(const char *src, char *dest, int size) {
 
   // #1247 TESTS: both source spellings are first-class -- strip ".lpc" or
   // ".c", repeatedly (same duplicate-object rationale as the .c stripping
-  // above; copied via the loop so /foo.lpc.lpc -> /foo and /foo.c.c -> /foo).
-  {
-    char *p = dest + copied;
-    for (;;) {
-      if (p - dest > 4 && p[-1] == 'c' && p[-2] == 'p' && p[-3] == 'l' && p[-4] == '.') {
-        p -= 4;
-      } else if (p - dest > 2 && p[-1] == 'c' && p[-2] == '.') {
-        p -= 2;
-      } else {
-        break;
-      }
-    }
-    *p = 0;
-  }
+  // above; shared idempotent owner vm/internal/source_spelling.cc).
+  const size_t stripped = source_spelling_strip_len(dest, copied);
+  dest[stripped] = 0;
   return 1;
 }
 
@@ -685,20 +675,20 @@ object_t *load_object(const char *lname, int callcreate) {
   // their .lpc twin instead (silently shadowing legacy .c tests).
   size_t plen = strlen(pname);
   bool explicit_ext = false;
-  const char *src_ext = ".lpc";
+  const char *requested_ext = nullptr;
   if (plen > 4 && strcmp(pname + plen - 4, ".lpc") == 0) {
     explicit_ext = true;
+    requested_ext = ".lpc";
   } else if (plen > 2 && pname[plen - 1] == 'c' && pname[plen - 2] == '.') {
     explicit_ext = true;
-    src_ext = ".c";
+    requested_ext = ".c";
   }
-  (void)strcpy(real_name, actualname);
-  (void)strcat(real_name, src_ext);
-  if (!explicit_ext && (stat(real_name, &c_st) == -1 || S_ISDIR(c_st.st_mode))) {
-    src_ext = ".c";
-    (void)strcpy(real_name, actualname);
-    (void)strcat(real_name, src_ext);
-  }
+  const char *src_ext;
+  // #1247 TESTS: source spelling is resolved by the shared owner
+  // (vm/internal/source_spelling.cc); explicit requests are exact, only
+  // extension-less names probe .lpc with a .c fallback.
+  resolve_source_spelling(actualname, requested_ext, !explicit_ext, &src_ext,
+                          real_name, sizeof real_name);
 
   (void)strcpy(obname, name);
   (void)strcat(obname, src_ext);
