@@ -46,6 +46,7 @@
 #include "packages/core/dns.h"
 #include "packages/core/file.h"
 #include "packages/core/heartbeat.h"
+#include "packages/core/replace_program.h"
 #include "packages/gateway/gateway.h"
 #include "packages/sockets/socket_efuns.h"
 #include "vm/context.h"
@@ -25516,4 +25517,76 @@ TEST_F(DriverTest, TestObjectBlockMatchesLoadedProgram) {
   ASSERT_EQ(ob->variables.layout_id, program_layout_digest(ob->prog));
   ASSERT_NE(ob->variables.data, nullptr);
   destruct_object_for_test(ob);
+}
+
+// #1247 B-S1: replace_program() must build a fresh payload for the target
+// program and swap blocks (never move slots inside a fixed-size object).
+// Fixtures: rp_a (1 var), rp_mid (inherits rp_a + 1 var), rp_leaf
+// (inherits rp_mid + 1 var). Layouts: mid=[a,m], leaf=[a,m,l].
+TEST_F(DriverTest, TestReplaceProgramBlockMovePrefix) {
+  object_t *a = load_object_for_test("single/tests/efuns/rp_a");
+  object_t *mid = load_object_for_test("single/tests/efuns/rp_mid");
+  ASSERT_NE(a, nullptr);
+  ASSERT_NE(mid, nullptr);
+  ASSERT_EQ(mid->variables.count, 2u);
+  ASSERT_STREQ(variable_name(mid->prog, 0), "a");
+  ASSERT_STREQ(variable_name(mid->prog, 1), "m");
+
+  // mid's own variable carries a value; replace mid with rp_a (offset 0:
+  // the new layout is a prefix of the old).
+  mid->variables.data[1].u.number = 7;
+  auto *entry = new replace_ob_t;
+  entry->ob = mid;
+  entry->new_prog = a->prog;
+  entry->var_offset = 0;
+  entry->next = obj_list_replace;
+  obj_list_replace = entry;
+  replace_programs();
+
+  ASSERT_EQ(mid->prog, a->prog);
+  ASSERT_EQ(mid->variables.count, 1u);
+  ASSERT_EQ(mid->variables.layout_id, program_layout_digest(a->prog));
+  ASSERT_EQ(mid->variables.data[0].u.number, 0) << "a is a fresh slot (prefix)";
+  ASSERT_EQ(obj_list_replace, nullptr);
+
+  destruct_object_for_test(mid);
+  destruct_object_for_test(a);
+}
+
+TEST_F(DriverTest, TestReplaceProgramBlockMoveOffset) {
+  object_t *a = load_object_for_test("single/tests/efuns/rp_a");
+  object_t *leaf = load_object_for_test("single/tests/efuns/rp_leaf");
+  ASSERT_NE(a, nullptr);
+  ASSERT_NE(leaf, nullptr);
+  ASSERT_EQ(leaf->variables.count, 3u);
+  ASSERT_STREQ(variable_name(leaf->prog, 0), "a");
+  ASSERT_STREQ(variable_name(leaf->prog, 1), "m");
+  ASSERT_STREQ(variable_name(leaf->prog, 2), "l");
+
+  // leaf -> rp_mid: the target's variables start at offset 1 in the old
+  // block ([a, m, l] -> [m, l]); head slot a is dropped.
+  leaf->variables.data[1].u.number = 11;  // m
+  leaf->variables.data[2].u.number = 22;  // l
+  auto *entry = new replace_ob_t;
+  entry->ob = leaf;
+  entry->new_prog = a->prog;  // placeholder, replaced below via search
+  entry->var_offset = 1;
+  // Need the real mid program: load rp_mid object and use its prog.
+  object_t *mid = load_object_for_test("single/tests/efuns/rp_mid");
+  ASSERT_NE(mid, nullptr);
+  entry->new_prog = mid->prog;
+  entry->next = obj_list_replace;
+  obj_list_replace = entry;
+  replace_programs();
+
+  ASSERT_EQ(leaf->prog, mid->prog);
+  ASSERT_EQ(leaf->variables.count, 2u);
+  ASSERT_EQ(leaf->variables.layout_id, program_layout_digest(mid->prog));
+  ASSERT_EQ(leaf->variables.data[0].u.number, 11) << "m survived the move";
+  ASSERT_EQ(leaf->variables.data[1].u.number, 22) << "l survived the move";
+  ASSERT_EQ(obj_list_replace, nullptr);
+
+  destruct_object_for_test(mid);
+  destruct_object_for_test(leaf);
+  destruct_object_for_test(a);
 }

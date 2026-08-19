@@ -277,6 +277,11 @@ void RecompilePrepared::commit_swap() noexcept {
     t.ob->prog = new_prog;
     t.ob->prog_generation++;
     t.ob->flags = (t.ob->flags & ~kProgramDerivedFlags) | t.precomputed_flags;
+    // #1247 B-S1: exact-layout transactions only (B-S3 adds migration), so
+    // the attached variable block must still match the new program's
+    // layout. DEBUG assertion: any future layout-changing commit must
+    // migrate the block before this point, never swap prog first.
+    assert(t.ob->variables.layout_id == program_layout_digest(new_prog));
   }
 
   // v2 design Phase 1: the apply lookup cache is keyed per program; every
