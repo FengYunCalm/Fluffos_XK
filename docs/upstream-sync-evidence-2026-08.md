@@ -254,40 +254,40 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 
 | hunk_id | 上游 hunk | 缺陷 | 本地落点 | 回归测试 | 目标提交 |
 |---|---|---|---|---|---|
-| PORT-1/2 | port.cc:20-40 | random_number n≤0 UB | port.cc:29,42 | 新增极值测试 | c065ca74 |
-| STRALLOC-1 | stralloc.cc:97-104 | htable 无 2^30 cap | stralloc.cc:102 | 新增配置测试 | c065ca74 |
+| PORT-1/2 | port.cc:20-40 | random_number n≤0 UB | port.cc:29,42 | 不可单测（内部 uniform_int_distribution 调用点），以代码审阅 + 编译为证据 | c065ca74 |
+| STRALLOC-1 | stralloc.cc:97-104 | htable 无 2^30 cap | stralloc.cc:102 | 不可单测（配置级容量），以代码审阅为证据 | c065ca74 |
 | STRUTILS-1 | strutils.cc:111-122 | rfind pos==0 死循环 | strutils.cc:91-94 | strsrch_reverse_egc.lpc | c065ca74 |
 | COMPILER-1 | compiler.cc:821-829 | yywarn 格式串注入 | compiler.cc:580 | 新增 % 文件名测试 | c065ca74 |
 | DISASM-1 | disassembler.cc:678-692 | etable-4 短偏移越界 | disassembler.cc:669 | 新增反汇编测试 | c065ca74 |
-| TREES-1 | trees.cc:184-194 | INT_MIN % -1 SIGFPE | trees.cc（无） | 新增编译期取模测试 | 0d3f8ed8 |
-| TELNET-1/2 | telnet.cc:360-381 | LINEMODE buf[1] 越界读 | telnet.cc:324-331 | 新增 0/1/2 字节输入测试 | 0d3f8ed8 |
-| TELNET-3 | telnet.cc:712-735 | ZMP off-by-one 越界写 | telnet.cc:668-673 | 新增 ZMP 空/单/多参数测试 | 0d3f8ed8 |
-| ASYNC-2..4,9 | async.cc:76-130,589-623 | current_work(s) 多飞行记账 | async.cc:81-86,104-110,124-138,776-789 | 新增多 worker 测试 | 028955dd |
-| ASYNC-5 | async.cc:273-283 | getdirthread dirent 大小 | async.cc:356-363 | ASan getdir 多条目测试 | 028955dd |
-| ASYNC-6..8 | async.cc:306-355 | 拒绝路径 callback 泄漏 | async.cc:388-391,403-406,415-420 | 新增拒绝路径测试 | 028955dd |
+| TREES-1 | trees.cc:184-194 | INT_MIN % -1 SIGFPE | trees.cc:215-219 | a2_grammar.lpc（expr0 % -1 编译期） | 0d3f8ed8 |
+| TELNET-1/2 | telnet.cc:360-381 | LINEMODE buf[1] 越界读 | telnet.cc:324-331 | 未落地（需 telnet 会话字节注入）；std/telnet.c 已有常规覆盖 | 0d3f8ed8 |
+| TELNET-3 | telnet.cc:712-735 | ZMP off-by-one 越界写 | telnet.cc:668-673 | 未落地（需 telnet 会话字节注入）；std/telnet.c 已有常规覆盖 | 0d3f8ed8 |
+| ASYNC-2..4,9 | async.cc:76-130,589-623 | current_work(s) 多飞行记账 | async.cc:81-86,104-110,124-138,776-789 | 未落地（需多 worker 并发环境）；run.py async 用例已有常规覆盖 | 028955dd |
+| ASYNC-5 | async.cc:273-283 | getdirthread dirent 大小 | async.cc:356-363 | 未落地（需多条目目录 + 并发）；以代码审阅为证据 | 028955dd |
+| ASYNC-6..8 | async.cc:306-355 | 拒绝路径 callback 泄漏 | async.cc:388-391,403-406,415-420 | 未落地（需 valid_read/write 拒绝配置） | 028955dd |
 | PARSER-1..9 | parser.cc:78-88,626-638,713-716,738-748,2877-2890,3399,3450,3515 | verb node UAF + 深度防护 | parser.cc:84-92,619-626,644,707,733-740,2903-2909,3441,3492,3557 | parser_handler_destruct.lpc | 538e2531 |
 | OBJ-2..5 | object.cc:257-270 等 | restore 深度无上限（栈溢出 DoS） | object.cc:275 | restore_variable.lpc | 9565ccb4 |
 | ARRAY-1/2 | array.cc:125-144 | allocate_array2 T_FUNCTION 泄漏 | array.cc:128 | allocate.lpc | A-S1-array-leak |
 | BUFFER-1 | buffer.cc:44-67 | write_buffer 有符号溢出 | buffer.cc:46-64 | write_buffer_bounds.lpc、buffer_range_assign.lpc | 9565ccb4 |
 | INTERP-1 | interpret.cc:976 | memcpy from->u.buf 头部垃圾 | interpret.cc:1081,1244 | 新增 buffer 复制测试 | 0d3f8ed8 |
-| INTERP-2..4 | interpret.cc:3314-3324,3700-3707 | INT_MIN 除法/取模 SIGFPE | interpret.cc:3511,3837 | 新增极值测试 | 0d3f8ed8 |
-| OPS-1/2 | ops.cc:48-58,387-397 | f_div_eq/f_mod_eq INT_MIN | ops.cc（无） | 新增极值测试 | 0d3f8ed8 |
+| INTERP-2..4 | interpret.cc:3314-3324,3700-3707 | INT_MIN 除法/取模 SIGFPE | interpret.cc:3511,3837 | a2_runtime.lpc（INT64_MIN / -1 与 % -1 运行时） | 0d3f8ed8 |
+| OPS-1/2 | ops.cc:48-58,387-397 | f_div_eq/f_mod_eq INT_MIN | ops.cc:74-82 | a2_runtime.lpc（运行时 / -1 与 % -1） | 0d3f8ed8 |
 | CONTRIB-1 | contrib.cc:743-753 | terminal_colour raw apply 泄漏 | contrib.cc:710 | terminal_colour_error_replace.lpc | A-S1-contrib-colour |
 | CONTRIB-2 | contrib.cc:replaceable | 空 ignore 数组 NULL 写 | contrib.cc:1615-1680 | replaceable_empty.lpc | A-S1-contrib-replaceable |
 | CONTRIB-3 | contrib.cc:repeat_string | 乘法溢出 | contrib.cc:1942 | 新增长度极值测试 | A-S1-contrib-repeat |
 | CONTRIB-4 | contrib.cc:query_replaced_program | current_object 误用 | contrib.cc:1960 | 新增测试 | b121f6e0 |
-| ED-1..4 | ed.cc:658-669,869-885,1057-1069,1267+ | prntln/getfn/getrhs/optpat 越界 | ed.cc:713-717,922-953 | 新增 ed 测试 | 9565ccb4 |
-| FILE-1..3 | file.cc:242-253 等 | get_dir strcat 无边界 | file.cc:337 | 新增长路径测试 | 9565ccb4 |
-| CALLOUT-2 | call_out.cc:606-632 | 秒×1000 溢出 | call_out.cc:777-782 | 新增极值测试 | c065ca74 |
-| TIME-1/2 | time.cc:136-148 | strftime 栈 VLA | time.cc:146 | 新增长格式测试 | 9565ccb4 |
+| ED-1..4 | ed.cc:658-669,869-885,1057-1069,1267+ | prntln/getfn/getrhs/optpat 越界 | ed.cc:713-717,922-953 | 未落地（需 ed 会话驱动）；以代码审阅为证据 | 9565ccb4 |
+| FILE-1..3 | file.cc:242-253 等 | get_dir strcat 无边界 | file.cc:337 | a2_runtime.lpc（长路径不崩） | 9565ccb4 |
+| CALLOUT-2 | call_out.cc:606-632 | 秒×1000 溢出 | call_out.cc:777-782 | a2_runtime.lpc（巨/负延迟饱和） | c065ca74 |
+| TIME-1/2 | time.cc:136-148 | strftime 栈 VLA | time.cc:146 | a2_runtime.lpc（200×%Y 长格式） | 9565ccb4 |
 | DB-1/2 | db.cc:664-733 | BLOB 按列宽读行 | db.cc:772-773 | 新增短 BLOB 测试 | A-S1-db-rowlen |
 | SPRINTF-1..7 | sprintf.cc:1093 等 | 精度/列/边界 | sprintf.cc（多处） | sprintf.lpc、sprintf_column_object.lpc | A-S1-sprintf-bounds |
 | MATRIX-1..7 | matrix.cc:47 等 | 6 个 transform 缺 16 元素 | matrix.cc:52,102,145,185,225,270,314 | 新增 16 元素测试 | 4056b8a2 |
 | SOCK-2/3 | socket_efuns.cc:host | lpcaddr_to_sockaddr host 长度 | socket_efuns.cc:189-195 | socket_long_host.lpc | 4056b8a2 |
-| APPLY-1/2 | apply.cc:89-132 | error(buf) 格式串 + 边界 | apply.cc:75-145 | 新增 % 路径测试 | 4056b8a2 |
-| MAPPING-1 | mapping.cc:1154-1164 | compose_mapping key 泄漏 | mapping.cc:1200-1203 | 新增 compose 测试 | 4056b8a2 |
-| TRACE-1 | trace.cc:43-51 | debug_message 格式串 | trace.cc:46 | 新增 % 路径测试 | 4056b8a2 |
-| COMPRESS-1 | compress.cc:309-315 | uncompress 错误路径泄漏 | compress.cc:292-294 | 新增错误路径测试 | c065ca74 |
+| APPLY-1/2 | apply.cc:89-132 | error(buf) 格式串 + 边界 | apply.cc:75-145 | 等价保护（本地已 error("%s")）；无独立测试 | 4056b8a2 |
+| MAPPING-1 | mapping.cc:1154-1164 | compose_mapping key 泄漏 | mapping.cc:1200-1203 | a2_runtime.lpc（mapping * join 语义） | 4056b8a2 |
+| TRACE-1 | trace.cc:43-51 | debug_message 格式串 | trace.cc:46 | 等价保护（本地已 debug_message("%s")）；无独立测试 | 4056b8a2 |
+| COMPRESS-1 | compress.cc:309-315 | uncompress 错误路径泄漏 | compress.cc:292-294 | a2_runtime.lpc（垃圾 buffer 错误路径） | c065ca74 |
 | ADDACTION-1 | add_action.cc:435-447 | sprintf 越界 | add_action.cc（无 snprintf） | 新增长 verb 测试 | c065ca74 |
 | EFUNS-1 | efuns_main.cc:2069-2079 | f_replace_string 快速路径越界 | efuns_main.cc:2063 | 新增长替换测试 | c065ca74 |
 | CHECKMEM-1 | checkmemory.cc:680-688 | dfm strcpy 越界 | checkmemory.cc:684 | 新增长 dfm 测试 | 4056b8a2 |
