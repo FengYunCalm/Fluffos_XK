@@ -37,14 +37,17 @@ static void remove_simuls(void);
 
 // Sorted-name insertion shared by the online builder (find_or_add_simul_efun)
 // and the two-phase recompile path (simul_efuns_prepare): binary-search the
-// sorted name list (identity order), update an existing same-name entry, or
-// insert a new one.
+// name list ordered by interned string POINTER (const char* < / > below,
+// NOT strcmp -- allocator-layout dependent, NOT lexicographic; same-name
+// strings are interned so the == branch is correct), update an existing
+// same-name entry, or insert a new one.
 //
-// Key discipline: names/idents are position-keyed (the sorted table used for
-// binary search), funcs is DISPATCH-INDEX-keyed (simuls[sindex] at runtime)
-// and is NEVER shifted -- a new entry always lands at funcs[count], with the
-// dispatch index being the cumulative count. Only names/idents shift on a
-// middle insert.
+// Key discipline: names/idents are position-keyed (the pointer-ordered
+// table; the binary search below is self-consistent but the relative order
+// is NOT a contract), funcs is DISPATCH-INDEX-keyed (simuls[sindex] at
+// runtime) and is NEVER shifted -- a new entry always lands at funcs[count],
+// with the dispatch index being the cumulative count. Only names/idents
+// shift on a middle insert.
 //
 // Returns the new entry's sorted position (>= 0) on insert, or -1 - index on
 // a same-name update, where index is the entry's stable dispatch index.

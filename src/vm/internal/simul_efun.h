@@ -9,9 +9,14 @@ extern struct object_t *simul_efun_ob;
 extern struct function_lookup_info_t *simuls;
 
 // Live dispatch tables (extern for tests; owned by simul_efun.cc).
-// names is the sorted position-keyed table (binary search), funcs is the
-// DISPATCH-INDEX-keyed table (simuls[sindex] at runtime); a name's stable
-// dispatch index is simul_names[position].index and is never recycled.
+// names is the position-keyed table ordered by INTERNED STRING POINTER
+// (add_simul_entry compares const char* addresses, NOT strcmp -- the order
+// is allocator-layout dependent, NOT lexicographic; same-name strings are
+// interned so the == branch is correct). funcs is the DISPATCH-INDEX-keyed
+// table (simuls[sindex] at runtime); a name's stable dispatch index is
+// simul_names[position].index and is never recycled. Consumers must NOT
+// rely on the position ordering (position may coincide with dispatch
+// index); runtime dispatch goes through the dispatch index only.
 struct simul_entry {
   const char *name;
   short index;
@@ -47,14 +52,16 @@ void call_simul_efun(unsigned short, int);
  * safe in every state (no-op when nothing is owned).
  *
  * KEY DISCIPLINE (position key vs dispatch index key):
- * - names/idents are POSITION-keyed: simul_names is the sorted name table
- *   for binary search, and idents[i] aligns with names[i].
+ * - names/idents are POSITION-keyed: simul_names is ordered by interned
+ *   string POINTER (add_simul_entry: const char* < / >, NOT strcmp --
+ *   allocator-layout dependent, NOT lexicographic), and idents[i] aligns
+ *   with names[i]. The binary search in add_simul_entry is self-consistent
+ *   (same comparator), but the relative order is NOT a contract.
  * - funcs is DISPATCH-INDEX-keyed: runtime dispatch reads simuls[sindex],
  *   and funcs is never shifted -- a fresh entry always lands at
  *   funcs[count], its dispatch index being the cumulative count.
- * - position != dispatch index in general (the sorted table permutes the
- *   declaration order); every func access must go through
- *   simul_names[position].index.
+ * - position may coincide with dispatch index (no ordering contract);
+ *   every func access must go through simul_names[position].index.
  * Cumulative-table invariants: a name's dispatch index is assigned once and
  * never recycled (already-compiled callers embed it in F_SIMUL_EFUN); a
  * dropped name stays in the table with func null, inactive. prepare()
