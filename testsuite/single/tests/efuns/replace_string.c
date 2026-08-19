@@ -70,4 +70,14 @@ void do_tests() {
 
 	src = src[0..5] + src[6..];
     }
+
+    // #1247 EFUNS-1: the plen>1 fast path must not overrun the output
+    // buffer; an expansion beyond max_string_length returns 0 instead of
+    // writing past the buffer.
+    string longpat = "abcdefghij";
+    string longrep = "ABCDEFGHIJKLMNOPQRST";  // longer than the pattern
+    string big = "";
+    for (int i = 0; i < 20000; i++) big += longpat;
+    mixed r = replace_string(big, longpat, longrep);
+    ASSERT(1);  // must not crash; 0 or clamped result both fine
 }

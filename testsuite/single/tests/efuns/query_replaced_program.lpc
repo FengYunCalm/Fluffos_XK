@@ -1,0 +1,9 @@
+// #1247 CONTRIB-4: query_replaced_program() with no argument must read the
+// current object's own replaced_program, not the VM stack slot (sp->u.ob)
+// -- the pre-fix code dereferenced stack garbage when called with no args.
+void do_tests() {
+  // Before any replacement the current object has no replaced_program; the
+  // call must not crash and must return 0.
+  ASSERT_EQ(0, query_replaced_program());
+  ASSERT(1);
+}

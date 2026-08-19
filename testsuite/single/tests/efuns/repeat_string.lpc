@@ -1,0 +1,11 @@
+// #1247 CONTRIB-3: repeat_string must clamp repeat BEFORE multiplying -- a
+// huge repeat must not wrap len*repeat into an undersized allocation and
+// then overflow the copy loop.
+void do_tests() {
+  string r = repeat_string("x", 0x7fffffff);
+  ASSERT(strlen(r) > 0);
+  ASSERT(strlen(r) <= 100000);  // clamped to max_string_length/len
+  // len==0 must not divide by zero.
+  ASSERT_EQ("", repeat_string("", 5));
+  ASSERT(1);
+}
