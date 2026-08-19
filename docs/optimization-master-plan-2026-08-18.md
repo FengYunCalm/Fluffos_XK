@@ -464,4 +464,4 @@ C-S1 门禁：
 - 纯 `recompile_layout`模块独立完成 descriptor、class schema、diff 和 matches；事务模块只消费结果。
 - per-kind lifecycle policy 是唯一行为入口，普通 blueprint、Master、SimulEfun 的 init/migrate 顺序和 `create`语义均有回归测试，纯 create apply 由 base/object 的 `call_create_only()`提供。
 - compiler arena 不导出内部游标，旧 scratch API 无生产调用；`CompileArenaScope`在 parse error、`error()`的 C++异常和正常返回路径都恰好执行一次 bulk reset。
-- GTest、`lpc_tests 444/444`（2026-08-19 实测，留痕 docs/evidence/lpc-tests-final-2026-08-19.txt；424 为计划基线）和对应 sanitizer 门禁通过（2026-08-19 注记：TSan 因 WSL2 内存 OOM 未跑，deferred；ASan 全量 lpc_tests 不绿仅因 E3 既有 SimulEfunReload 失败，无 arena 相关错误——见 evidence 文档）；性能结论来自同工具链、本地 before/after 原始数据。
+- GTest、`lpc_tests 444/444`（2026-08-19 实测，留痕 docs/evidence/lpc-tests-final-2026-08-19.txt；424 为计划基线）和对应 sanitizer 门禁通过（2026-08-19 注记：**ASan 全量 lpc_tests 444/444 PASSED**（SimulEfunReload 指针序断言修复 6316f593 后，留痕 lpc-tests-asan-final-2026-08-19.txt；LeakSanitizer 8760B/19 为 E3 期 simul_efun 存量，非 C-S1 相关）；**TSan 444/444 PASSED**（setarch -R 禁用 ASLR 后，留痕 lpc-tests-tsan-final-2026-08-19.txt；L6 2026-08-17 曾跑 424/424 PASS 为基线）——见 evidence 文档）；性能结论来自同工具链、本地 before/after 原始数据。
