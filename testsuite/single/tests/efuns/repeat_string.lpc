@@ -2,9 +2,10 @@
 // huge repeat must not wrap len*repeat into an undersized allocation and
 // then overflow the copy loop.
 void do_tests() {
+  // config.test sets maximum string length 200000, so repeat is clamped to
+  // 200000/1 = 200000 (not the 0x7fffffff requested).
   string r = repeat_string("x", 0x7fffffff);
-  ASSERT(strlen(r) > 0);
-  ASSERT(strlen(r) <= 100000);  // clamped to max_string_length/len
+  ASSERT_EQ(200000, strlen(r));
   // len==0 must not divide by zero.
   ASSERT_EQ("", repeat_string("", 5));
   ASSERT(1);

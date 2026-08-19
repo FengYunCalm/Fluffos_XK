@@ -20,10 +20,12 @@ void do_tests() {
     ASSERT_EQ(1, utf8verb);
 
     // #1247 ADDACTION-1: a very long verb must not overrun the fixed
-    // snprintf buffer in the not-found error path.
+    // snprintf buffer in the not-found dispatch path. Registration does not
+    // validate the function; the dispatch (command) hits the error path.
     string longverb = "";
     for (int i = 0; i < 300; i++) longverb += "v";
-    mixed err = catch(add_action("nonexistent_func", longverb));
+    add_action("nonexistent_func", longverb);
+    mixed err = catch(command(longverb));
     ASSERT(1);  // must not crash; error or success both fine
 #endif
 }

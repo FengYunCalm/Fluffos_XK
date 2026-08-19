@@ -1,0 +1,8 @@
+// #1247 COMPILER-1: the overload warning message embeds program filenames
+// (compiler.cc:656-679); this file's name contains "%s", so the pre-fix
+// yywarn(p->warn) would treat it as a format specifier and read a missing
+// argument. yywarn("%s", p->warn) makes it safe.
+#pragma warnings
+inherit "/single/tests/compiler/warn_%s_a";
+inherit "/single/tests/compiler/warn_b";
+void do_tests() { ASSERT(1); }

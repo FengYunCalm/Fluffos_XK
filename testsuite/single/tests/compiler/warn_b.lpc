@@ -1,0 +1,4 @@
+// #1247 COMPILER-1 fixture: defines foo() so warn_%s.lpc can trigger the
+// overload warning whose message embeds this filename.
+int foo() { return 2; }
+void do_tests() { ASSERT(1); }

@@ -257,7 +257,7 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | PORT-1/2 | port.cc:20-40 | random_number n≤0 UB | port.cc:29,42 | 不可单测（内部 uniform_int_distribution 调用点），以代码审阅 + 编译为证据 | c065ca74 |
 | STRALLOC-1 | stralloc.cc:97-104 | htable 无 2^30 cap | stralloc.cc:102 | 不可单测（配置级容量），以代码审阅为证据 | c065ca74 |
 | STRUTILS-1 | strutils.cc:111-122 | rfind pos==0 死循环 | strutils.cc:91-94 | strsrch_reverse_egc.lpc | c065ca74 |
-| COMPILER-1 | compiler.cc:821-829 | yywarn 格式串注入 | compiler.cc:580 | compiler/warn_%.lpc（2026-08-19） | c065ca74 |
+| COMPILER-1 | compiler.cc:821-829 | yywarn 格式串注入 | compiler.cc:580 | compiler/warn_%s.lpc + warn_%s_a.lpc fixture（2026-08-19，overload warning 消息含 %s 父文件名） | c065ca74 |
 | DISASM-1 | disassembler.cc:678-692 | etable-4 短偏移越界 | disassembler.cc:669 | efuns/dump_prog.c（2026-08-19 增强断言） | c065ca74 |
 | TREES-1 | trees.cc:184-194 | INT_MIN % -1 SIGFPE | trees.cc:215-219 | a2_grammar.lpc（expr0 % -1 编译期） | 0d3f8ed8 |
 | TELNET-1/2 | telnet.cc:360-381 | LINEMODE buf[1] 越界读 | telnet.cc:324-331 | TestTelnetLinemodeShortSubnegotiation（C++ 层，2026-08-19） | 0d3f8ed8 |
@@ -275,7 +275,7 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | CONTRIB-1 | contrib.cc:743-753 | terminal_colour raw apply 泄漏 | contrib.cc:710 | terminal_colour_error_replace.lpc | A-S1-contrib-colour |
 | CONTRIB-2 | contrib.cc:replaceable | 空 ignore 数组 NULL 写 | contrib.cc:1615-1680 | replaceable_empty.lpc | A-S1-contrib-replaceable |
 | CONTRIB-3 | contrib.cc:repeat_string | 乘法溢出 | contrib.cc:1942 | efuns/repeat_string.lpc（2026-08-19） | A-S1-contrib-repeat |
-| CONTRIB-4 | contrib.cc:query_replaced_program | current_object 误用 | contrib.cc:1960 | efuns/query_replaced_program.lpc（2026-08-19） | b121f6e0 |
+| CONTRIB-4 | contrib.cc:query_replaced_program | current_object 误用 | contrib.cc:2122 | efuns/query_replaced_program.lpc（2026-08-19） | b121f6e0 |
 | ED-1..4 | ed.cc:658-669,869-885,1057-1069,1267+ | prntln/getfn/getrhs/optpat 越界 | ed.cc:713-717,922-953 | 未落地（需 ed 会话驱动）；以代码审阅为证据 | 9565ccb4 |
 | FILE-1..3 | file.cc:242-253 等 | get_dir strcat 无边界 | file.cc:337 | a2_runtime.lpc（长路径不崩） | 9565ccb4 |
 | CALLOUT-2 | call_out.cc:606-632 | 秒×1000 溢出 | call_out.cc:777-782 | a2_runtime.lpc（巨/负延迟饱和） | c065ca74 |
