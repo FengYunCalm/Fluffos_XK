@@ -1,6 +1,7 @@
 #include "base/std.h"
 
 #include "compiler.h"
+#include "compile_arena.h"
 
 #include <cstdlib>  // for qsort
 #include <cstdio>   // for sprintf
@@ -2030,6 +2031,11 @@ program_t *compile_file(std::unique_ptr<LexStream> stream, const char *name) {
   }
   guard = 1;
 
+  // #1247 C-S1: explicit compile-scope arena begin. end() runs on BOTH the
+  // success path (below) and the error-cleanup path (clean_parser); an
+  // error() longjmp leaves the live chain for the next begin() to drain.
+  compile_arena::begin();
+
   {
     // make sure we use the C locale during parsing
     auto *current_locale = setlocale(LC_ALL, "C");
@@ -2502,7 +2508,8 @@ static program_t *epilog(void) {
   }
   release_tree();
   uninitialize_parser();
-  scratch_destroy();
+  // #1247 C-S1: explicit arena end on the success path.
+  compile_arena::end();
   clean_up_locals();
   free_unused_identifiers();
   end_new_file();
@@ -2611,7 +2618,9 @@ static void clean_parser() {
   release_tree();
   uninitialize_parser();
   clean_up_locals();
-  scratch_destroy();
+  // #1247 C-S1: explicit arena end on the error-cleanup path (parse
+  // errors and error() longjmps that unwind through clean_parser).
+  compile_arena::end();
   free_unused_identifiers();
 }
 

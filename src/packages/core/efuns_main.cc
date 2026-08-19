@@ -24,6 +24,7 @@
 #include "packages/core/file.h"
 #include "packages/core/json.h"
 #include "packages/core/regexp.h"
+#include "compiler/internal/compile_arena.h"
 #include "packages/core/sprintf.h"  // string_print_formatted
 #include "packages/core/outbuf.h"
 #include "vm/internal/owner_runtime_coordinator.h"
@@ -1391,6 +1392,18 @@ void f_mud_status() {
     outbuf_add(&ob, "\n");
 
     stat_living_objects(&ob);
+    outbuf_add(&ob, "\n");
+  }
+
+  if (verbose) {
+    outbuf_add(&ob, "Compile arena\n");
+    outbuf_add(&ob, "------------------------------\n");
+    outbuf_addv(&ob, "Cycle bytes: %8zu\n", compile_arena::cycle_bytes());
+    outbuf_addv(&ob, "Peak cycle bytes: %8zu\n", compile_arena::peak_cycle_bytes());
+    outbuf_addv(&ob, "Chunk mallocs: %8zu\n", compile_arena::chunk_mallocs());
+    outbuf_addv(&ob, "Reset count: %8zu\n", compile_arena::reset_count());
+    outbuf_addv(&ob, "Retained chunks: %8zu\n", compile_arena::retained_chunks());
+    outbuf_addv(&ob, "Retained heap bytes: %8zu\n", compile_arena::retained_heap_bytes());
     outbuf_add(&ob, "\n");
   }
 

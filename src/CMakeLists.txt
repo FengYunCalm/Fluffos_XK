@@ -467,6 +467,7 @@ set(SRC
   "compiler/internal/lpc_modern_profile.cc"
   "compiler/internal/lpc_source_encoding.cc"
   "compiler/internal/scratchpad.cc"
+  "compiler/internal/compile_arena.cc"
   "compiler/internal/trees.cc"
   "vm/internal/base/apply_cache.cc"
   "vm/internal/base/array.cc"
@@ -508,7 +509,8 @@ set(SRC
   )
 
 if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
-  set_source_files_properties("compiler/internal/scratchpad.cc" PROPERTIES
+  set_source_files_properties("compiler/internal/scratchpad.cc"
+  "compiler/internal/compile_arena.cc" PROPERTIES
           COMPILE_OPTIONS "-Wno-stringop-overflow")
 endif ()
 

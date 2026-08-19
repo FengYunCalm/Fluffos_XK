@@ -374,3 +374,14 @@ pr1247.diff 共 66 文件 = 47 C++ + 19 测试。47 个 C++ 文件的覆盖明�
 - build-recompile-asan（ENABLE_ASAN=ON + UBSan）全量 -ftest：**0 Check Failed、0 runtime error（UBSan 零报）**；留存 docs/evidence/asan-ftest-a1-a2-2026-08-19.txt。
 - 泄漏：`SUMMARY: 17984 byte(s) leaked in 24 allocation(s)`——与基线 docs/evidence/asan-ftest-leaks-full.txt（2026-08-17，batch9 前）**同量同型**（mapping 小块 + owner runtime 大块；构成微差源于 .lpc 测试集差异）。按计划 A 门禁规则"基线已有报告必须单独列出"，**该泄漏集合为基线存量，非 #1247 新增**；本次运行无新增报告。
 - 单文件子集（如 sprintf.lpc 1056B/12）泄漏量随执行子集变化，属正常形态差异，非独立缺陷。
+
+### C-S1 实施记录：scratchpad → compile_arena 迁移（2026-08-19）
+
+- 新模块 `src/compiler/internal/compile_arena.{h,cc}`：编译作用域单调 bump 分配器。1MB 标准 chunk（BSS 静态 base + malloc 链），>1MB 请求走 oversize 独立 chunk；end() 释放 live 链、保留至多 8 个标准 chunk 进 retained 池（C-S2 稳态门禁的观测基础）；`begin()` 检测上次 error() longjmp 残留的 live 链并先 drain（error() 是 longjmp，跨帧析构不执行，无其他清理钩子——simulate.cc:2342 error → error_handler 无 compile 钩子）。
+- `scratchpad.{h,cc}` 降为兼容层：scratch_copy/scratch_alloc/scratch_free(no-op)/scratch_join/scratch_realloc 保留历史名字（grammar.y 十余处调用点不动）；**scratch_destroy/scratch_join2/scratch_large_alloc/scratch_copy_string 删除**（零调用点；scratch_copy_string 的 text-block 路径已并入 lex.cc 共享收集器）；旧导出游标 scr_last/scr_tail/scratch_end 与 scratch_free_last 宏**彻底移除**（直接游标操作是旧边界无法闭合的根因）。
+- `lex.cc`：parseStringLiteral 重写为 std::string 收集（无 255 字节窗口截断、无 MAXLINE 上限）+ arena 复制；转义集完整保留（\n\t\r\b\a\e\"\\ 八进制 \x \u 代理对 \U）；text-block 路径复用共享收集器 `collect_string_body(out, count_lines)`（text block 的换行已由 get_text_block 计数，传 false 防行号双计）。
+- `compiler.cc`：compile_file 入口 `compile_arena::begin()`（compiler.cc:2037），成功路径（:2512）与 clean_parser 错误清理路径（:2623）显式 `compile_arena::end()`；error() longjmp 路径由下一次 begin() 的 drain 兜底。**不使用 RAII**（error() 是 longjmp，跨帧析构不运行）。
+- `mud_status()`（efuns_main.cc:1401-1406，verbose 分支）接线 6 个观测 getter（cycle/peak/chunk_mallocs/reset_count/retained_chunks/retained_heap_bytes）；reset_count 语义为"end 调用次数"（含 begin 的 longjmp drain），非编译次数。
+- 修复记录：scratch_realloc 曾丢 NUL（grammar.y function_name 移位惯用法依赖 NUL 随 payload 搬移，`::do_tests` 变 `do_testst`，TestLPC_FunctionInherit 失败）——改 memcpy(len+1)；text-block 路径曾因 collect_string_body 在开引号处立即返回而恒得空串（@TEXT 测试全挂）——调用点 `outp++` 跳开引号；oversize chunk 曾使 retained_heap_bytes 下溢——oversize 不进 retained 统计。
+- 验证：build-sync 构建零 error；lpc_tests 442/442；testsuite 目录全量 -ftest 两次 0 Check Failed（log/compile 有新 run 痕迹；string_index.c 负索引警告为基线噪音）。
+- 已知行为变化：超长字符串字面量不再报 "String too long"（std::string 无上限）；text-block 内容换行不再双计行号。
