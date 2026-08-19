@@ -304,8 +304,8 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 | SPRINTF-8..12 | sprintf.cc:cst/owned | cst 泄漏/owned 复制 | sprintf.cc:1113,1139 | sprintf.lpc | 已覆盖（batch6 b121f6e0） |
 | ASYNC-1 | async.cc:6 | include <set> | async.cc:79 | 编译测试 | 已覆盖（batch7 028955dd） |
 | TIME-2 | time.cc:4 | include <vector> | time.cc:6 | 编译测试 | 已覆盖（batch2 9565ccb4） |
-| grammar_rules_exprs | grammar.y expr0 '/' 常量折叠 | INT_MIN/-1 SIGFPE | grammar.y:1943-1953 | a2_grammar.lpc（switch case + expr0） | 本轮待提交 |
-| grammar_rules_types | grammar.y `foo(void ...)` | type_of_locals_ptr[-1] OOB | grammar.y:432-449 | a2_void_dots.lpc + a2_grammar.lpc | 本轮待提交 |
+| grammar_rules_exprs | grammar.y expr0 '/' 常量折叠 | INT_MIN/-1 SIGFPE | grammar.y:1943-1953 | a2_grammar.lpc（switch case + expr0） | 682f7703 |
+| grammar_rules_types | grammar.y `foo(void ...)` | type_of_locals_ptr[-1] OOB | grammar.y:432-449 | a2_void_dots.lpc + a2_grammar.lpc | 682f7703 |
 | lexer_rules_pp | 宏参数表 stray 字符死循环 | #define 挂起 | 本 fork 无 dispatch_directive | handle_define 各分支消费或返回，无死循环路径（GETALPHA 消费≥1 否则 lexerror+return） | 等价保护（无锚点，属不同实现） |
 | lexer_utils | alloc_local_name >4096 | 堆块溢出 | 本 fork 无 lexer_utils | 手写 lexer SAVEC 4091 cap + 固定 4096 块（见 batch9 long_local_name 适配） | 等价保护（已知差异） |
 | transport_libevent | get_user_data 长度前缀 | text_space 负/溢出 | fork 无 transport_libevent | comm.cc decode_mud_port_payload_length kMudPortMaxPayload 钳制 + length==0 拒绝 | 已覆盖（TRANSPORT-1/2 锚点 comm.cc:88） |
@@ -366,3 +366,9 @@ blueprint fixture（/clone/recompile_blueprint.c）+ self_reload 探针。
 
 - lex.cc:108-109 全局 `expands[EXPANDMAX]`/`expand_depth`；`start_new_file()`（lex.cc:3328-3365）只复位 `nexpands = 0`，**不复位 expand_depth 与 expands[] 内容**（正常展开路径递减）。batch9 加载器每进程编译几十个文件且 crasher/fail 目录故意制造编译错误，属潜伏跨文件污染源。
 - C-S1 显式 begin/end 双清理点设计时必须把"每文件复位 expand 状态"显式列入清单（batch9 语法错误已实证与状态无关，不紧急但须覆盖）。
+
+### ASan 复验（2026-08-19，A-S1 + A-S2 首批后）
+
+- build-recompile-asan（ENABLE_ASAN=ON + UBSan）全量 -ftest：**0 Check Failed、0 runtime error（UBSan 零报）**；留存 docs/evidence/asan-ftest-a1-a2-2026-08-19.txt。
+- 泄漏：`SUMMARY: 17984 byte(s) leaked in 24 allocation(s)`——与基线 docs/evidence/asan-ftest-leaks-full.txt（2026-08-17，batch9 前）**同量同型**（mapping 小块 + owner runtime 大块；构成微差源于 .lpc 测试集差异）。按计划 A 门禁规则"基线已有报告必须单独列出"，**该泄漏集合为基线存量，非 #1247 新增**；本次运行无新增报告。
+- 单文件子集（如 sprintf.lpc 1056B/12）泄漏量随执行子集变化，属正常形态差异，非独立缺陷。
