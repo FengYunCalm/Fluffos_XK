@@ -409,3 +409,13 @@ pr1247.diff 共 66 文件 = 47 C++ + 19 测试。47 个 C++ 文件的覆盖明�
 - 结论：**C-S1 的 arena 相关错误（UAF/double-free/orphan chunk）无直接证据**；ASan 全量 lpc_tests 不绿仅因 E3 既有 SimulEfunReload 断言失败 + 级联 segfault，**ASan 门禁按"定向验证 + 无 arena 相关错误"记录，全量绿留待 E3 测试修复**。
 - TSan（2026-08-19）：build-tsan（ENABLE_TSAN=ON, -j2）编译被 OOM 杀死（dmesg 5 条 OOM，WSL2 可用内存 <1.5Gi），**TSan 门禁未跑**——WSL2 内存限制，留待有内存余量时执行；UBSan 随 build-recompile-asan 双开（-fsanitize=address + undefined），全量 -ftest 0 runtime error。
 - 全量 -ftest 最终留痕（2026-08-19，551a9518/64f1f396 后）：docs/evidence/ftest-final-2026-08-19.txt（52860 行，EXIT=0，`grep -icE "check failed"` = 0，`Checks succeeded.` 1 次）——13 个缺失测试全部落地后套件绿。
+
+### 2026-08-19 回归测试修正（551a9518/64f1f396）
+
+d41a8acc 的 3 个测试存在缺陷（1 个必失败、2 个空转），修正后真正触及修复路径：
+
+1. **repeat_string.lpc（CONTRIB-3）**：旧断言 `<= 100000` 确定性失败——config.test `maximum string length : 200000`，f_repeat_string 钳制 `repeat = 200000/1 = 200000`。修正为 `ASSERT_EQ(200000, strlen(r))`。
+2. **add_action.c（ADDACTION-1）**：旧形态 `catch(add_action(...))` 空转——f_add_action 注册时不校验函数存在。修正为注册后 `catch(command(longverb))` 走派发 not-found 路径（add_action.cc:435-447 snprintf）。
+3. **COMPILER-1 三件套**：v1/v2（warn_%.lpc 带本地 foo 重定义）不触发 overload warning 是设计如此——本地定义路径 compiler.cc:1145 `remove_overload_warnings` 清空队列。v3 正确形态：`#pragma warnings` + inherit warn_%s_a/warn_b + **不重定义 foo**；overload 消息内嵌父文件名（`prog->filename`），%s 必须放父 fixture（warn_%s_a.lpc）。验证：警告文本实际含 `warn_%s_a.lpc` 并到达 `yywarn("%s", p->warn)`（compiler.cc:580 修复行）。
+
+修正后全量 -ftest：0 Check Failed（`grep -icE` 大小写不敏感，覆盖普通 ASSERT 小写 "Check failed" 与 ASSERT_EQ 大写 "Check Failed"），留痕见 docs/evidence/ftest-final-2026-08-19.txt。

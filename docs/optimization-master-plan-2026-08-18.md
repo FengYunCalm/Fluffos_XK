@@ -432,11 +432,11 @@ C-S1 门禁：
 | 阶段 | 必须通过的证据 |
 |---|---|
 | A-S0 | 47 个源码路径的全量 hunk 集合闭合；19 个测试路径闭合；基线 green；evidence 落库 |
-| A-S1 | 每提交定向测试 + GTest + 424/424 + ASan/UBSan；阶段末 TSan |
-| A-S2 | 全矩阵状态闭合 + GTest + 424/424 + ASan/UBSan/TSan |
+| A-S1 | 每提交定向测试 + GTest + 424/424 + ASan/UBSan；阶段末 TSan（2026-08-19 注记：TSan 构建 OOM 未跑，WSL2 内存限制，deferred——见 evidence 文档） |
+| A-S2 | 全矩阵状态闭合 + GTest + 424/424 + ASan/UBSan/TSan（TSan deferred，同上） |
 | B-S1 | 变量块生命周期/统计/replace_program 测试 + 性能/RSS 基线 |
 | B-S2 | identity/type_mod/class schema/diff bitmask + digest/descriptor 等价性；调用方仍拒绝布局差异 |
-| B-S3 | per-kind init/migrate 顺序、迁移、失败回滚、master/simul、ASan/UBSan/TSan |
+| B-S3 | per-kind init/migrate 顺序、迁移、失败回滚、master/simul、ASan/UBSan/TSan（TSan deferred，同上） |
 | C-S1 | RAII 覆盖 parse error/C++异常 + arena GTest + 3 轮 randomized 424/424 + ASan/UBSan + 全旧符号 grep 零命中（2026-08-19 注记：实际执行 lpc_tests 442/442 单轮 + 全量 -ftest；arena GTest 未建（compile_arena 由 bench 工具与 mud_status 消费）；ASan/UBSan 已在 C 阶段后复验（定向 Telnet 2/2 + 全量 lpc_tests 不绿：E3 既有 SimulEfunReload 失败 + 级联 segfault，无 arena 相关 UAF/double-free/orphan 证据——见 evidence 文档）） |
 | C-S2 | 同工具链本地 A/B 全部硬门禁通过（两处门禁已按实测修订，见 C.3），原始数据写入 evidence（tools/perf/results/） |
 
@@ -464,4 +464,4 @@ C-S1 门禁：
 - 纯 `recompile_layout`模块独立完成 descriptor、class schema、diff 和 matches；事务模块只消费结果。
 - per-kind lifecycle policy 是唯一行为入口，普通 blueprint、Master、SimulEfun 的 init/migrate 顺序和 `create`语义均有回归测试，纯 create apply 由 base/object 的 `call_create_only()`提供。
 - compiler arena 不导出内部游标，旧 scratch API 无生产调用；`CompileArenaScope`在 parse error、`error()`的 C++异常和正常返回路径都恰好执行一次 bulk reset。
-- GTest、`lpc_tests 424/424`和对应 sanitizer 门禁通过；性能结论来自同工具链、本地 before/after 原始数据。
+- GTest、`lpc_tests 424/424`和对应 sanitizer 门禁通过（2026-08-19 注记：TSan 因 WSL2 内存 OOM 未跑，deferred；ASan 全量 lpc_tests 不绿仅因 E3 既有 SimulEfunReload 失败，无 arena 相关错误——见 evidence 文档）；性能结论来自同工具链、本地 before/after 原始数据。
