@@ -24,3 +24,10 @@ __pycache__/
 testsuite/.run-isolated.lock
 testsuite/.run-isolated-*/
 testsuite/.run-isolated.lockdir/
+# >>> Comet managed project state >>>
+/.comet/
+# <<< Comet managed project state <<<
+
+# Tool state (pi / Comet / CLAUDE.md) -- not tracked, not pushed
+/.pi/
+/CLAUDE.md
