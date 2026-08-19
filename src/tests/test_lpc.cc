@@ -25539,7 +25539,10 @@ TEST_F(DriverTest, TestReplaceProgramBlockMovePrefix) {
   // mid's own variable carries a value; replace mid with rp_a (offset 0:
   // the new layout is a prefix of the old).
   mid->variables.data[1].u.number = 7;
-  auto *entry = new replace_ob_t;
+  // #1247: mirror the production allocation (replace_program.cc:222
+    // DMALLOC) -- FREE() in replace_programs() would mismatch operator new.
+    auto *entry = static_cast<replace_ob_t *>(
+        DMALLOC(sizeof(replace_ob_t), TAG_TEMPORARY, "test_replace_program"));
   entry->ob = mid;
   entry->new_prog = a->prog;
   entry->var_offset = 0;
@@ -25571,7 +25574,10 @@ TEST_F(DriverTest, TestReplaceProgramBlockMoveOffset) {
   // block ([a, m, l] -> [m, l]); head slot a is dropped.
   leaf->variables.data[1].u.number = 11;  // m
   leaf->variables.data[2].u.number = 22;  // l
-  auto *entry = new replace_ob_t;
+  // #1247: mirror the production allocation (replace_program.cc:222
+    // DMALLOC) -- FREE() in replace_programs() would mismatch operator new.
+    auto *entry = static_cast<replace_ob_t *>(
+        DMALLOC(sizeof(replace_ob_t), TAG_TEMPORARY, "test_replace_program"));
   entry->ob = leaf;
   entry->new_prog = a->prog;  // placeholder, replaced below via search
   entry->var_offset = 1;
