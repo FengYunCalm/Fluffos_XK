@@ -318,7 +318,7 @@ void simul_efuns_activate(simul_efun_prepared_t *p) noexcept {
   // 3. Activate the entries the new program provides (dispatch-keyed func
   //    non-null), pure field writes mirroring the online builder. The loop
   //    iterates POSITION-keyed (names/idents) while funcs is DISPATCH-keyed:
-  //    position != dispatch index in general (sorted name table vs
+  //    position may coincide with dispatch index (pointer-ordered table vs
   //    cumulative index assignment), so every func access goes through
   //    simul_names[i].index. Entries with func null are dropped names: they
   //    stay inactive, and callers holding their old sindex get the stable

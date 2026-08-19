@@ -25051,7 +25051,7 @@ TEST_F(DriverTest, TestSimulEfunReloadAddDropReadd) {
 
   // Program A: provides foo (a fresh name) -> middle insert at a sorted
   // position that is not the cumulative tail, plus a live-table survivor.
-  std::string survivor = simul_names[0].name;  // sorted position 0, real name
+  std::string survivor = simul_names[0].name;  // position 0 (pointer-ordered table), real name
   std::string src_a = std::string("string ") + kFoo + "() { return \"a\"; }\n"
                       "string " + survivor + "() { return \"survivor\"; }\n";
   program_t *prog_a = CompileSimulProg(src_a);
