@@ -18,10 +18,7 @@
 #include "mainlib.h"
 #include "vm/internal/base/program.h"
 
-#if __has_include("compiler/internal/compile_arena.h")
 #include "compiler/internal/compile_arena.h"
-#define HAVE_COMPILE_ARENA 1
-#endif
 
 #include <fcntl.h>
 #include <sys/resource.h>
@@ -136,9 +133,7 @@ int main(int argc, char **argv) {
   for (auto &f : files) {
     compile_one(f);
   }
-#ifdef HAVE_COMPILE_ARENA
   size_t warmup_mallocs = compile_arena::chunk_mallocs();
-#endif
 
   std::vector<double> round_secs;
   std::vector<double> per_file_secs;  // ordered per-file latencies (last round)
@@ -185,7 +180,6 @@ int main(int argc, char **argv) {
   std::printf("per_file_last_round: head10_mean=%.6f tail10_mean=%.6f degradation=%.4f\n",
               head_mean, tail_mean, degradation);
   std::printf("peak_rss_kb: %ld\n", peak_rss_kb());
-#ifdef HAVE_COMPILE_ARENA
   size_t final_mallocs = compile_arena::chunk_mallocs();
   std::printf("arena: warmup_chunk_mallocs=%zu final_chunk_mallocs=%zu delta=%zu\n",
               warmup_mallocs, final_mallocs, final_mallocs - warmup_mallocs);
@@ -194,7 +188,6 @@ int main(int argc, char **argv) {
               compile_arena::retained_chunks(), compile_arena::retained_heap_bytes(),
               compile_arena::cycle_bytes(), compile_arena::peak_cycle_bytes(),
               compile_arena::reset_count());
-#endif
   if (!json_path.empty()) {
     std::ofstream out(json_path);
     if (out) {
@@ -219,7 +212,6 @@ int main(int argc, char **argv) {
       out << "  \"failures\": " << failures << ",\n";
       out << "  \"degradation\": " << degradation << ",\n";
       out << "  \"peak_rss_kb\": " << peak_rss_kb() << "\n";
-#ifdef HAVE_COMPILE_ARENA
       out << "  ,\"arena\": {\n";
       out << "    \"warmup_chunk_mallocs\": " << warmup_mallocs << ",\n";
       out << "    \"final_chunk_mallocs\": " << final_mallocs << ",\n";
@@ -230,7 +222,6 @@ int main(int argc, char **argv) {
       out << "    \"peak_cycle_bytes\": " << compile_arena::peak_cycle_bytes() << ",\n";
       out << "    \"resets\": " << compile_arena::reset_count() << "\n";
       out << "  }\n";
-#endif
       out << "}\n";
     }
   }

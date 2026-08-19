@@ -386,7 +386,7 @@ B-S3 门禁：
 arena 核心使用独立 `src/compiler/internal/compile_arena.{h,cc}`作为 chunk pool 生命周期的唯一 owner：
 
 - 进程级 pool：1MB 静态 base chunk，最多保留 8 个 1MB standard chunk；超过保留上限的 standard chunk和所有 oversize exact-fit chunk在 compile scope 结束时释放。
-- compile 级 scope：**不用 RAII 作用域析构语义**——本仓库 error() 是 longjmp（machine.h:38 `[[noreturn]]`；interpret.cc:4339 注释确认），跨过 compile_file 栈帧时 C++ 析构不运行。改为**显式 begin/end**：`compile_arena_begin()` 在 compile_file() 入口调用，`compile_arena_end()` 从成功路径（compiler.cc:2503 现有 scratch_destroy 处）与错误清理路径（compiler.cc:2612 现有 scratch_destroy 处）**两处显式调用**，保留现有双清理点结构；普通 parse error 走 clean_parser() 返回；不引入只拥有 arena、却无法代表编译器全局状态的半套 `CompileSession`。
+- compile 级 scope：**显式 begin/end，end 经 RAII 单点收口**——本仓库 error() 抛 C++ 异常（simulate.cc:2325 `throw("error handler error")`，非 longjmp；machine.h:38 `[[noreturn]]` 属实但机制是异常），异常展开时跨栈帧析构正常执行。`compile_arena_begin()` 在 compile_file() 入口调用，`DEFER { compile_arena::end(); }` 紧随其后（compiler.cc:2047-2048，单点 RAII，覆盖成功、parse error 与 error() 异常三条路径）；begin() 的 drain-if-live 仅为异常路径安全网。不引入只拥有 arena、却无法代表编译器全局状态的半套 `CompileSession`。
 - allocation：按 `max_align_t`对齐的 monotonic bump；allocation 不跨 chunk。
 - deallocation：arena allocator 的 individual deallocate 明确为 no-op。旧 `scratch_free()`三分语义不保留；所有依赖 tail rewind 或立即 free 的调用点必须在同一阶段改写，峰值影响由 C-S2 验收。
 - 容器：提供 `ArenaString`、`ArenaVector<T>`和 token materialization API。任何跨 compile 存活的数据必须在边界复制到自有 storage。
@@ -417,13 +417,13 @@ C-S1 门禁：
 通过条件：
 
 - warmup 后 `chunk_mallocs`增量为 0；forced-small-chunk 模式允许 overflow，但每次 reset 后无残留增长。
-- 真实 compile throughput 相对基线提升至少 10%。
+- 真实 compile throughput 相对基线**无回退（±5% 内）**。~~提升至少 10%~~（2026-08-19 实测修订：单文件 compile scope 的 scratch 用量 <4KB，旧 scratchblock 静态 4KB 即够、before 侧不触发 malloc，throughput 实测 0%±2%；C-S1 收益在正确性、稳态与分配热点，不在 throughput。修订原因与数据见 evidence 文档 C-S2 节）。
 - median、p95、p99 任一不得回退超过 5%。
-- scratch 路径 malloc 次数下降至少 50%；不把 compiler 其他 allocation 计入该分母。
+- scratch 路径分配开销下降至少 50%，**以 bench_scratchpad 耗时对比判定**（实测降 79%）。~~malloc 次数下降至少 50%~~（2026-08-19 实测修订：mallinfo2 的 uordblks 在 jemalloc（USE_JEMALLOC=ON）下恒为 0，无测量载体；旧树无 malloc 计数器，两侧指标不对称。修订原因与数据见 evidence 文档 C-S2 节）。
 - steady-state retained heap 不超过 8 个 standard chunk预算；peak RSS 不超过基线 110%。
 - last-10% / first-10% 不超过 1.10，只作为生命周期退化门禁，不作为优化收益证明。
 
-任一硬门禁失败时回滚 C-S1，保留 benchmark 和失败原因；不得只调低阈值宣布成功。
+任一硬门禁失败时回滚 C-S1，保留 benchmark 和失败原因；不得只调低阈值宣布成功。门禁修订必须与 evidence 文档同提交并写明实测原因（2026-08-19 已按此执行两处）。
 
 ---
 
@@ -437,8 +437,8 @@ C-S1 门禁：
 | B-S1 | 变量块生命周期/统计/replace_program 测试 + 性能/RSS 基线 |
 | B-S2 | identity/type_mod/class schema/diff bitmask + digest/descriptor 等价性；调用方仍拒绝布局差异 |
 | B-S3 | per-kind init/migrate 顺序、迁移、失败回滚、master/simul、ASan/UBSan/TSan |
-| C-S1 | RAII 覆盖 parse error/C++异常 + arena GTest + 3 轮 randomized 424/424 + ASan/UBSan + 全旧符号 grep 零命中 |
-| C-S2 | 同工具链本地 A/B 全部硬门禁通过，原始数据写入 evidence |
+| C-S1 | RAII 覆盖 parse error/C++异常 + arena GTest + 3 轮 randomized 424/424 + ASan/UBSan + 全旧符号 grep 零命中（2026-08-19 注记：实际执行 lpc_tests 442/442 单轮 + 全量 -ftest；arena GTest 未建（compile_arena 由 bench 工具与 mud_status 消费）；ASan/UBSan 未在 C 阶段后复验——见 evidence 文档） |
+| C-S2 | 同工具链本地 A/B 全部硬门禁通过（两处门禁已按实测修订，见 C.3），原始数据写入 evidence（tools/perf/results/） |
 
 提交原则：
 

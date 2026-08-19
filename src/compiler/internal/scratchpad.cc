@@ -1,12 +1,12 @@
-// #1247 C-S1: scratchpad compatibility layer over compile_arena.
+// #1247 C-S1: permanent scratchpad compatibility layer over compile_arena.
 //
 // The old scratchpad (static 4KB block + malloc'd overflow blocks with
 // tail-rewind frees) is replaced by the compile-scope monotonic arena.
 // These functions keep the historical names so the grammar/lexer call
-// sites compile unchanged during the migration; individual deallocation
-// is a no-op (the whole scope is reclaimed by compile_arena::end()).
-// scr_last/scr_tail/scratch_end are GONE -- direct cursor manipulation
-// was the reason the old boundary could not be closed.
+// sites compile unchanged; individual deallocation is a no-op (the whole
+// scope is reclaimed by compile_arena::end()). scr_last/scr_tail/
+// scratch_end are GONE -- direct cursor manipulation was the reason the
+// old boundary could not be closed.
 
 #include "base/std.h"
 

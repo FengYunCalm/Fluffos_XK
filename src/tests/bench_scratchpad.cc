@@ -12,12 +12,8 @@
 
 #include "base/package_api.h"
 
-#include "compiler/internal/scratchpad.h"
-
-#if __has_include("compiler/internal/compile_arena.h")
 #include "compiler/internal/compile_arena.h"
-#define HAVE_COMPILE_ARENA 1
-#endif
+#include "compiler/internal/scratchpad.h"
 
 #include <malloc.h>
 
@@ -31,6 +27,8 @@
 
 using Clock = std::chrono::steady_clock;
 
+// Only meaningful with glibc malloc (uordblks is 0 under jemalloc,
+// which this project links by default); kept for glibc-only builds.
 static size_t heap_used() {
   struct mallinfo2 mi = mallinfo2();
   return mi.uordblks;
@@ -67,9 +65,7 @@ int main(int argc, char **argv) {
   std::vector<double> round_secs;
   std::vector<size_t> round_heap;
   for (int r = 0; r < rounds; r++) {
-#ifdef HAVE_COMPILE_ARENA
     compile_arena::begin();
-#endif
     auto t0 = Clock::now();
     for (int i = 0; i < 20000; i++) {
       char *s = scratch_copy(tokens[i % 10]);
@@ -92,9 +88,7 @@ int main(int argc, char **argv) {
     auto t1 = Clock::now();
     round_secs.push_back(std::chrono::duration<double>(t1 - t0).count());
     round_heap.push_back(heap_used());
-#ifdef HAVE_COMPILE_ARENA
     compile_arena::end();
-#endif
   }
 
   double total_secs = std::accumulate(round_secs.begin(), round_secs.end(), 0.0);
@@ -107,7 +101,6 @@ int main(int argc, char **argv) {
     std::printf("heap_growth_after_first: %ld bytes\n",
                 static_cast<long>(round_heap.back()) - static_cast<long>(round_heap[0]));
   }
-#ifdef HAVE_COMPILE_ARENA
   // The compile corpus never crosses the 1MB base chunk (vacuous pass);
   // this layer is where chunk behavior is actually exercised.
   std::printf("arena: chunk_mallocs=%zu retained_chunks=%zu retained_heap_bytes=%zu "
@@ -115,6 +108,5 @@ int main(int argc, char **argv) {
               compile_arena::chunk_mallocs(), compile_arena::retained_chunks(),
               compile_arena::retained_heap_bytes(), compile_arena::peak_cycle_bytes(),
               compile_arena::reset_count());
-#endif
   return 0;
 }
