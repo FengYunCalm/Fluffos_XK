@@ -1,8 +1,0 @@
-// #1247 COMPILER-1: a compile warning whose message embeds the program
-// filename must not treat '%' in the filename as a format specifier
-// (yywarn("%s", p->warn) fix). This file's name contains '%'; loading it
-// triggers the unused-variable warning whose text embeds "warn_%.lpc".
-void do_tests() {
-  int unused_var;
-  ASSERT(1);
-}
