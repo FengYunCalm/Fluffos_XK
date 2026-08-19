@@ -33,6 +33,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <numeric>
 #include <string>
@@ -55,23 +56,42 @@ static int compile_one(const fs::path &f) {
     return -1;
   }
   auto stream = std::make_unique<FileLexStream>(fd);
-  program_t *prog = compile_file(std::move(stream), f.c_str());
-  if (prog) {
-    free_prog(&prog);
+  program_t *prog = nullptr;
+  error_context_t econ{};
+  save_context(&econ);
+  try {
+    prog = compile_file(std::move(stream), f.c_str());
+    pop_context(&econ);
+  } catch (...) {
+    // error() threw (simulate.cc:2325); restore the error context like
+    // test_lpc.cc does. The stream dtor ran during unwind (fd closed);
+    // compile_file's RAII DEFERs restored guard/current_file and ended
+    // the arena scope, so the next compile is unaffected.
+    restore_context(&econ);
+    return -1;
   }
+  if (!prog) {
+    // Parse error / inherit_file abandon path: epilog returns nullptr
+    // (compiler.cc:2251-2255) without throwing. Count it as a failure.
+    return -1;
+  }
+  free_prog(&prog);
   return 0;
 }
 
 int main(int argc, char **argv) {
   int rounds = 5;
   fs::path corpus_dir;
+  fs::path json_path;
   for (int i = 1; i < argc; i++) {
     if (std::string(argv[i]) == "--rounds" && i + 1 < argc) {
       rounds = atoi(argv[++i]);
     } else if (std::string(argv[i]) == "--corpus" && i + 1 < argc) {
       corpus_dir = argv[++i];
+    } else if (std::string(argv[i]) == "--json" && i + 1 < argc) {
+      json_path = argv[++i];
     } else if (std::string(argv[i]) == "--help") {
-      std::printf("usage: bench_compile [--rounds N] [--corpus DIR]\n");
+      std::printf("usage: bench_compile [--rounds N] [--corpus DIR] [--json PATH]\n");
       return 0;
     } else {
       std::fprintf(stderr, "unknown argument: %s\n", argv[i]);
@@ -121,10 +141,19 @@ int main(int argc, char **argv) {
 #endif
 
   std::vector<double> round_secs;
+  std::vector<double> per_file_secs;  // ordered per-file latencies (last round)
+  int failures = 0;
   for (int r = 0; r < rounds; r++) {
     auto t0 = Clock::now();
     for (auto &f : files) {
-      compile_one(f);
+      auto f0 = Clock::now();
+      if (compile_one(f) != 0) {
+        failures++;
+      }
+      auto f1 = Clock::now();
+      if (r == rounds - 1) {
+        per_file_secs.push_back(std::chrono::duration<double>(f1 - f0).count());
+      }
     }
     auto t1 = Clock::now();
     round_secs.push_back(std::chrono::duration<double>(t1 - t0).count());
@@ -136,12 +165,25 @@ int main(int argc, char **argv) {
   double p95 = round_secs[static_cast<size_t>(rounds * 0.95)];
   double p99 = round_secs[static_cast<size_t>(rounds * 0.99)];
 
+  // Lifecycle degradation gate: mean per-file latency of the LAST 10% of
+  // files (in time order) vs the FIRST 10% must stay <= 1.10 (plan C-S2).
+  // per_file_secs is already in time order (last round).
+  size_t tail_n = std::max<size_t>(1, per_file_secs.size() / 10);
+  double head_mean =
+      std::accumulate(per_file_secs.begin(), per_file_secs.begin() + tail_n, 0.0) / tail_n;
+  double tail_mean =
+      std::accumulate(per_file_secs.end() - tail_n, per_file_secs.end(), 0.0) / tail_n;
+  double degradation = head_mean > 0 ? tail_mean / head_mean : 0.0;
+
   std::printf("bench_compile: files=%zu rounds=%d corpus=%s\n", files.size(), rounds,
               corpus_dir.c_str());
   std::printf("throughput: %.2f files/s (%.2f s total)\n", files.size() * rounds / total_secs,
               total_secs);
   std::printf("round_secs: median=%.4f p95=%.4f p99=%.4f min=%.4f max=%.4f\n", median, p95, p99,
               round_secs.front(), round_secs.back());
+  std::printf("failures: %d\n", failures);
+  std::printf("per_file_last_round: head10_mean=%.6f tail10_mean=%.6f degradation=%.4f\n",
+              head_mean, tail_mean, degradation);
   std::printf("peak_rss_kb: %ld\n", peak_rss_kb());
 #ifdef HAVE_COMPILE_ARENA
   size_t final_mallocs = compile_arena::chunk_mallocs();
@@ -153,5 +195,44 @@ int main(int argc, char **argv) {
               compile_arena::cycle_bytes(), compile_arena::peak_cycle_bytes(),
               compile_arena::reset_count());
 #endif
-  return 0;
+  if (!json_path.empty()) {
+    std::ofstream out(json_path);
+    if (out) {
+      out << "{\n";
+      out << "  \"files\": " << files.size() << ",\n";
+      out << "  \"rounds\": " << rounds << ",\n";
+      out << "  \"corpus\": \"" << corpus_dir.string() << "\",\n";
+      out << "  \"throughput_files_per_s\": " << files.size() * rounds / total_secs << ",\n";
+      out << "  \"total_secs\": " << total_secs << ",\n";
+      out << "  \"round_secs\": [";
+      for (size_t i = 0; i < round_secs.size(); i++) {
+        if (i) out << ", ";
+        out << round_secs[i];
+      }
+      out << "],\n";
+      out << "  \"per_file_secs_last_round\": [";
+      for (size_t i = 0; i < per_file_secs.size(); i++) {
+        if (i) out << ", ";
+        out << per_file_secs[i];
+      }
+      out << "],\n";
+      out << "  \"failures\": " << failures << ",\n";
+      out << "  \"degradation\": " << degradation << ",\n";
+      out << "  \"peak_rss_kb\": " << peak_rss_kb() << "\n";
+#ifdef HAVE_COMPILE_ARENA
+      out << "  ,\"arena\": {\n";
+      out << "    \"warmup_chunk_mallocs\": " << warmup_mallocs << ",\n";
+      out << "    \"final_chunk_mallocs\": " << final_mallocs << ",\n";
+      out << "    \"delta\": " << final_mallocs - warmup_mallocs << ",\n";
+      out << "    \"retained_chunks\": " << compile_arena::retained_chunks() << ",\n";
+      out << "    \"retained_heap_bytes\": " << compile_arena::retained_heap_bytes() << ",\n";
+      out << "    \"cycle_bytes\": " << compile_arena::cycle_bytes() << ",\n";
+      out << "    \"peak_cycle_bytes\": " << compile_arena::peak_cycle_bytes() << ",\n";
+      out << "    \"resets\": " << compile_arena::reset_count() << "\n";
+      out << "  }\n";
+#endif
+      out << "}\n";
+    }
+  }
+  return failures > 0 ? 1 : 0;
 }

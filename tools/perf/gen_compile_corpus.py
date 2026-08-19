@@ -25,12 +25,25 @@ string make_greeting_{v}(string name) {{
   string c = "\\x41\\x42\\x43 octal \\101\\102\\103";
   string d = "line one\\nline two\\nline three\\n";
   string e = "unicode \\u4e2d\\u6587 and \\U0001F600 emoji";
-  return a + b + c + d + e;
+  string f = "the quick brown fox jumps over the lazy dog";
+  string g = "pack my box with five dozen liquor jugs";
+  string h = "how vexingly quick daft zebras jump";
+  string i = "sphinx of black quartz, judge my vow";
+  string j = "the five boxing wizards jump quickly";
+  return a + b + c + d + e + f + g + h + i + j;
 }}
 string repeat_{v}(string s, int n) {{
   string out = "";
   for (int i = 0; i < n; i++) out += s;
   return out;
+}}
+string concat_many_{v}(string *parts) {{
+  string out = "";
+  for (int i = 0; i < sizeof(parts); i++) out += parts[i] + "|";
+  return out;
+}}
+string format_row_{v}(string name, int score) {{
+  return sprintf("%-20s %8d", name, score);
 }}
 """,
     "s_arrays": """\
@@ -72,14 +85,23 @@ mapping merge_{v}(mapping a, mapping b) {{
     "s_macros": """\
 // representative: macro expansion
 #define MAX_{v}(a, b) ((a) > (b) ? (a) : (b))
+#define MIN_{v}(a, b) ((a) < (b) ? (a) : (b))
 #define SQUARE_{v}(x) ((x) * (x))
+#define CUBE_{v}(x) (SQUARE_{v}(x) * (x))
 #define LIMIT_{v} {limit}
 #define TWICE_{v}(x) (SQUARE_{v}(x) + SQUARE_{v}(x))
+#define THRICE_{v}(x) (CUBE_{v}(x) + SQUARE_{v}(x) + (x))
+#define CLAMP_{v}(x, lo, hi) ((x) < (lo) ? (lo) : ((x) > (hi) ? (hi) : (x)))
+#define SUM3_{v}(a, b, c) ((a) + (b) + (c))
+#define PROD3_{v}(a, b, c) ((a) * (b) * (c))
 
 int use_macros_{v}(int a, int b) {{
   int m = MAX_{v}(a, b);
   int s = SQUARE_{v}(m);
   s = TWICE_{v}(s);
+  s = THRICE_{v}(s);
+  s = CLAMP_{v}(s, 0, LIMIT_{v});
+  s = SUM3_{v}(s, MIN_{v}(a, b), PROD3_{v}(a, b, 2));
   if (s > LIMIT_{v}) s = LIMIT_{v};
   return s;
 }}

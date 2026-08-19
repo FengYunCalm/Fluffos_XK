@@ -1398,6 +1398,8 @@ void f_mud_status() {
   if (verbose) {
     outbuf_add(&ob, "Compile arena\n");
     outbuf_add(&ob, "------------------------------\n");
+    outbuf_add(&ob, "// cycle/peak_cycle_bytes: last compile scope; "
+                     "chunk_mallocs/reset_count: process lifetime\n");
     outbuf_addv(&ob, "Cycle bytes: %8zu\n", compile_arena::cycle_bytes());
     outbuf_addv(&ob, "Peak cycle bytes: %8zu\n", compile_arena::peak_cycle_bytes());
     outbuf_addv(&ob, "Chunk mallocs: %8zu\n", compile_arena::chunk_mallocs());

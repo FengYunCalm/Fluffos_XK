@@ -18,8 +18,10 @@ endif()
 
 add_executable(owner_runtime_bench owner_runtime_bench.cc)
 add_executable(bench_compile bench_compile.cc)
+add_executable(bench_scratchpad bench_scratchpad.cc)
 target_link_libraries(owner_runtime_bench PRIVATE ${FLUFFOS_LINK})
 target_link_libraries(bench_compile PRIVATE ${FLUFFOS_LINK})
+target_link_libraries(bench_scratchpad PRIVATE ${FLUFFOS_LINK})
 
 # Gateway frame parser fuzz targets (T15/F08/R2-F02).
 #

@@ -81,9 +81,9 @@ Chunk *acquire_standard() {
 }  // namespace
 
 void begin() noexcept {
-  // A previous error() longjmp may have left the live chain populated
-  // (cross-frame cleanup never runs); drain it first so the scope starts
-  // clean and the retained pool stays bounded.
+  // A previous error() exception (simulate.cc:2325) may have left the
+  // live chain populated (end() does not run on that path); drain it
+  // first so the scope starts clean and the retained pool stays bounded.
   if (g_live) {
     end();
   }

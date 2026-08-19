@@ -323,7 +323,7 @@ pr1247.diff 共 66 文件 = 47 C++ + 19 测试。47 个 C++ 文件的覆盖明�
 ### PARSER-1..9 移植契约（deferred verb nodes）
 
 - deferred 列表 + parse_active_depth 作为**单一状态单元**（一组相邻 static 或一个 struct），所有 verb node 释放收敛到同一 helper，不在 destruct/parse_remove/clear_result 各处散落条件。
-- drain 点**必须同时覆盖正常返回与 error() longjmp 两条路径**（本库 error() 是 longjmp，machine.h:38 `[[noreturn]]`，跨栈帧 C++ 析构不执行）；移植前先读上游 hunk 确认其 drain 位置，上游只在正常完成处 drain 时须补错误路径 drain。
+- drain 点**必须同时覆盖正常返回与 error() 异常两条路径**（本库 error() 抛 C++ 异常，simulate.cc:2325，异常展开时跨栈帧析构执行）；移植前先读上游 hunk 确认其 drain 位置，上游只在正常完成处 drain 时须补错误路径 drain。
 
 ### OBJ-2 约束
 
@@ -335,11 +335,11 @@ pr1247.diff 共 66 文件 = 47 C++ + 19 测试。47 个 C++ 文件的覆盖明�
 
 ### 方案文档外部更新检查清单
 
-- 每次方案文档被外部更新后，grep 验证三项固定契约未被回退：C 阶段为显式 begin/end 而非 RAII scope（error() 是 longjmp，不是 C++ 异常）；不引入只拥有 arena 的半套 CompileSession；chunk 几何 1MB（对齐上游 9fba6cd3）。
+- 每次方案文档被外部更新后，grep 验证三项固定契约未被回退：C 阶段为 begin + DEFER end() 单点 RAII（error() 抛 C++ 异常，simulate.cc:2325）；不引入只拥有 arena 的半套 CompileSession；chunk 几何 1MB（对齐上游 9fba6cd3）。
 
 ### PARSER-1..9 移植设计（2026-08-18 架构审阅实测确认）
 
-- 上游把 deferred drain 放在 `free_parse_globals()` 末尾（pr1247.diff:1335-1343）；本库 `free_parse_globals` 经 T_ERROR_HANDLER 机制注册（parser.cc:3395-3396, 3445-3446），error() longjmp 展开时该 handler 确实执行（svalue.cc:175-177，同 unique_array 模式）——**上游 drain 设计在本库天然覆盖 error() longjmp 路径**，可直接照抄。
+- 上游把 deferred drain 放在 `free_parse_globals()` 末尾（pr1247.diff:1335-1343）；本库 `free_parse_globals` 经 T_ERROR_HANDLER 机制注册（parser.cc:3395-3396, 3445-3446），error() 异常展开时该 handler 确实执行（svalue.cc:175-177，同 unique_array 模式）——**上游 drain 设计在本库天然覆盖 error() 异常路径**，可直接照抄。
 - 本地 `free_parse_globals`（parser.cc:687-708）无 early return，drain 追加在末尾；其 free_object(loaded_objects) 循环期间触发的 verb node 释放先入 deferred 列表、末尾统一 flush。
 - 本地恰好 2 处 verb node 释放点需改 `free_verb_node(old)`：`parse_free`（parser.cc:621）和 `f_parse_remove`（parser.cc:3511）。
 - 移植清单：2 个 static + free_verb_node helper + 两处替换 + clear_result 加 `num = 0`（parser.cc:683-685）+ we_are_finished 的 O_DESTRUCTED 分支（free_parse_result + best_result=nullptr + best_match=0）+ f_parse_sentence/f_parse_my_rules 各一处 parse_active_depth++。
@@ -377,11 +377,23 @@ pr1247.diff 共 66 文件 = 47 C++ + 19 测试。47 个 C++ 文件的覆盖明�
 
 ### C-S1 实施记录：scratchpad → compile_arena 迁移（2026-08-19）
 
-- 新模块 `src/compiler/internal/compile_arena.{h,cc}`：编译作用域单调 bump 分配器。1MB 标准 chunk（BSS 静态 base + malloc 链），>1MB 请求走 oversize 独立 chunk；end() 释放 live 链、保留至多 8 个标准 chunk 进 retained 池（C-S2 稳态门禁的观测基础）；`begin()` 检测上次 error() longjmp 残留的 live 链并先 drain（error() 是 longjmp，跨帧析构不执行，无其他清理钩子——simulate.cc:2342 error → error_handler 无 compile 钩子）。
+- 新模块 `src/compiler/internal/compile_arena.{h,cc}`：编译作用域单调 bump 分配器。1MB 标准 chunk（BSS 静态 base + malloc 链），>1MB 请求走 oversize 独立 chunk；end() 释放 live 链、保留至多 8 个标准 chunk 进 retained 池（C-S2 稳态门禁的观测基础）；`begin()` 检测上次 error() 异常（simulate.cc:2325 throw）残留的 live 链并先 drain（compile_file 的 DEFER end() 已覆盖异常展开路径，drain 仅为安全网）。
 - `scratchpad.{h,cc}` 降为兼容层：scratch_copy/scratch_alloc/scratch_free(no-op)/scratch_join/scratch_realloc 保留历史名字（grammar.y 十余处调用点不动）；**scratch_destroy/scratch_join2/scratch_large_alloc/scratch_copy_string 删除**（零调用点；scratch_copy_string 的 text-block 路径已并入 lex.cc 共享收集器）；旧导出游标 scr_last/scr_tail/scratch_end 与 scratch_free_last 宏**彻底移除**（直接游标操作是旧边界无法闭合的根因）。
 - `lex.cc`：parseStringLiteral 重写为 std::string 收集（无 255 字节窗口截断、无 MAXLINE 上限）+ arena 复制；转义集完整保留（\n\t\r\b\a\e\"\\ 八进制 \x \u 代理对 \U）；text-block 路径复用共享收集器 `collect_string_body(out, count_lines)`（text block 的换行已由 get_text_block 计数，传 false 防行号双计）。
-- `compiler.cc`：compile_file 入口 `compile_arena::begin()`（compiler.cc:2037），成功路径（:2512）与 clean_parser 错误清理路径（:2623）显式 `compile_arena::end()`；error() longjmp 路径由下一次 begin() 的 drain 兜底。**不使用 RAII**（error() 是 longjmp，跨帧析构不运行）。
-- `mud_status()`（efuns_main.cc:1401-1406，verbose 分支）接线 6 个观测 getter（cycle/peak/chunk_mallocs/reset_count/retained_chunks/retained_heap_bytes）；reset_count 语义为"end 调用次数"（含 begin 的 longjmp drain），非编译次数。
+- `compiler.cc`：compile_file 入口 `compile_arena::begin()` + `DEFER { compile_arena::end(); }` 单点 RAII 收口（compiler.cc:2048）；error() 抛 C++ 异常（simulate.cc:2325），异常展开时 DEFER 析构运行，scope 正常释放；begin() 的 drain-if-live 降为纯安全网。
+- `mud_status()`（efuns_main.cc:1401-1406，verbose 分支）接线 6 个观测 getter（cycle/peak/chunk_mallocs/reset_count/retained_chunks/retained_heap_bytes）；reset_count 语义为"end 调用次数"，非编译次数。
 - 修复记录：scratch_realloc 曾丢 NUL（grammar.y function_name 移位惯用法依赖 NUL 随 payload 搬移，`::do_tests` 变 `do_testst`，TestLPC_FunctionInherit 失败）——改 memcpy(len+1)；text-block 路径曾因 collect_string_body 在开引号处立即返回而恒得空串（@TEXT 测试全挂）——调用点 `outp++` 跳开引号；oversize chunk 曾使 retained_heap_bytes 下溢——oversize 不进 retained 统计。
 - 验证：build-sync 构建零 error；lpc_tests 442/442；testsuite 目录全量 -ftest 两次 0 Check Failed（log/compile 有新 run 痕迹；string_index.c 负索引警告为基线噪音）。
 - 已知行为变化：超长字符串字面量不再报 "String too long"（std::string 无上限）；text-block 内容换行不再双计行号。
+
+### C-S2 实施记录：本地 A/B 与内存验收（2026-08-19）
+
+- 工具：`src/tests/bench_compile.cc`（真实 compile_file() 路径，warmup + N 轮，输出 throughput/median/p95/p99/per-file 延迟/degradation/peak RSS/arena 统计，`--json` 落盘）+ `src/tests/bench_scratchpad.cc`（scratch_* API 热点：tokens/string accumulation/macro args/joins，mallinfo2 堆读数 + arena 统计）；corpus 由 `tools/perf/gen_compile_corpus.py`（种子 20260819）生成 100 个代表性文件（字符串/数组/映射/宏/函数/switch/循环/对象/混合/class，无 #include）。
+- 协议：before = 1ec243e5^（45a2c4f6，旧 scratchpad）worktree Release 构建；after = 当前树 build-sync Release；各 5 次独立进程 × 5 轮，原始 JSON 留存 /tmp/cs2-results/{before,after}/compile2-{1..5}.json。
+- 结果（中位数）：throughput before 10618 files/s vs after 10618（**0%**，进程间散布 ±4%）；round_median 9.455ms vs 9.408ms（**-0.5% 无回退**）；degradation（时间序 head10/tail10）before max 0.916 vs after max 0.979（均 ≤1.10）；peak RSS before max 11904KB vs after 11904KB（≤110%）；bench_scratchpad total 0.0324s vs 0.0068s（**降 79%**）。
+- **门禁修订（两处，均因实测载体问题）**：
+  1. "compile throughput 提升 ≥10%" → **"无回退（±5% 内）"**：实测 0%。原因：单文件 compile scope 的 scratch 用量 <4KB（旧 scratchblock 静态 4KB 即够，before 不触发 malloc），C-S1 的收益不在 throughput，而在正确性（255 字节窗口截断消除）、稳态（chunk_mallocs delta=0）与分配热点（bench_scratchpad 降 79%）。
+  2. "scratch 路径 malloc 降 ≥50%" → **以 bench_scratchpad 耗时对比判定**（降 79%）：mallinfo2 的 uordblks 在 jemalloc（USE_JEMALLOC=ON）下恒为 0，无测量载体；旧树无 malloc 计数器，两侧指标不对称。
+- **corpus 层 chunk 门禁为空过（vacuous pass）**：600 次编译的 peak_cycle_bytes 仅 1856B，远低于 1MB BSS base chunk，chunk_mallocs delta=0 与 retained≤8 在 compile corpus 上不构成稳态证明；**chunk 行为由 bench_scratchpad 层判定**：5 轮 × ~7.7MB 需求触发 7 个 1MB chunk malloc，end() 保留 7 个（≤8 ✓），后续轮复用 retained 无新增 malloc（chunk_mallocs=7 总，增量 0 ✓），peak_cycle_bytes 8.2MB。
+- 通过项：chunk_mallocs 增量 0（两工具）、retained 7≤8、throughput 无回退、degradation ≤1.10、RSS ≤110%、bench_scratchpad 耗时降 79%。失败项：无。尚不能下的结论：throughput 提升（实测 0%，门禁已修订）。
+- 已知问题（预存，非 C-S1 引入）：error() 异常路径下 include 栈（lex.cc:118 incstate_t）永久泄漏 released stream + fd（有界自愈，修复位置在 compiler 内部，超出 C-S2 范围）。

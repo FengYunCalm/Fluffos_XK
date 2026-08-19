@@ -1,13 +1,22 @@
 // representative: macro expansion
 #define MAX_0(a, b) ((a) > (b) ? (a) : (b))
+#define MIN_0(a, b) ((a) < (b) ? (a) : (b))
 #define SQUARE_0(x) ((x) * (x))
+#define CUBE_0(x) (SQUARE_0(x) * (x))
 #define LIMIT_0 439
 #define TWICE_0(x) (SQUARE_0(x) + SQUARE_0(x))
+#define THRICE_0(x) (CUBE_0(x) + SQUARE_0(x) + (x))
+#define CLAMP_0(x, lo, hi) ((x) < (lo) ? (lo) : ((x) > (hi) ? (hi) : (x)))
+#define SUM3_0(a, b, c) ((a) + (b) + (c))
+#define PROD3_0(a, b, c) ((a) * (b) * (c))
 
 int use_macros_0(int a, int b) {
   int m = MAX_0(a, b);
   int s = SQUARE_0(m);
   s = TWICE_0(s);
+  s = THRICE_0(s);
+  s = CLAMP_0(s, 0, LIMIT_0);
+  s = SUM3_0(s, MIN_0(a, b), PROD3_0(a, b, 2));
   if (s > LIMIT_0) s = LIMIT_0;
   return s;
 }
@@ -89,12 +98,3 @@ int pad_0_74 = 634;
 int pad_0_75 = 849;
 int pad_0_76 = 697;
 int pad_0_77 = 103;
-int pad_0_78 = 337;
-int pad_0_79 = 273;
-int pad_0_80 = 29;
-int pad_0_81 = 138;
-int pad_0_82 = 556;
-int pad_0_83 = 47;
-int pad_0_84 = 677;
-int pad_0_85 = 474;
-int pad_0_86 = 345;

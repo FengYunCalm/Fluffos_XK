@@ -2,10 +2,10 @@
 #define FLUFFOS_SRC_COMPILER_INTERNAL_COMPILE_ARENA_H_
 
 // #1247 C-S1: compile-scope monotonic arena -- the sole owner of the
-// compiler's scratch chunk pool. Explicit begin/end (NOT RAII: error() is
-// longjmp, machine.h:38 [[noreturn]], so cross-frame destructors never
-// run; compile_file() calls begin() at entry and end() on BOTH the success
-// and the error-cleanup paths).
+// compiler's scratch chunk pool. Explicit begin/end: error() throws a C++
+// exception (simulate.cc:2325), so compile_file() pairs begin() with a
+// DEFER end() (RAII, single point); begin() additionally drains any live
+// chain left by an exception that unwound past the scope (safety net).
 //
 // Pool: one static 1MB base chunk plus up to kMaxRetainedStandardChunks
 // retained 1MB standard chunks; oversize exact-fit chunks are always
