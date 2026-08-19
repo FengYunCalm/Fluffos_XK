@@ -34,6 +34,9 @@
 
 #include "backend.h"
 #include "interactive.h"
+#include "net/sys_telnet.h"
+#include "net/telnet.h"
+#include "thirdparty/libtelnet/libtelnet.h"
 #include "mainlib.h"
 #include "user.h"
 
@@ -25945,4 +25948,31 @@ TEST_F(DriverTest, TestMasterExactReloadMigrateThenInit) {
   ASSERT_GE(slot, 0);
   ASSERT_EQ(master_ob->variables.data[slot].u.number, 0)
       << "MigrateThenInit: __INIT must run after the copy and its write must win";
+}
+
+TEST_F(DriverTest, TestTelnetLinemodeShortSubnegotiation) {
+  // #1247 TELNET-1: a 1-byte LINEMODE sub-negotiation must not read buf[1]
+  // (upstream read buf[1] after only checking size == 0).
+  interactive_t ip{};
+  const char mode_byte[] = {static_cast<char>(LM_MODE)};
+  on_telnet_subnegotiation(TELNET_TELOPT_LINEMODE, mode_byte, 1, &ip);
+  const char do_byte[] = {static_cast<char>(TELNET_DO)};
+  on_telnet_subnegotiation(TELNET_TELOPT_LINEMODE, do_byte, 1, &ip);
+  const char will_byte[] = {static_cast<char>(TELNET_WILL)};
+  on_telnet_subnegotiation(TELNET_TELOPT_LINEMODE, will_byte, 1, &ip);
+  on_telnet_subnegotiation(TELNET_TELOPT_LINEMODE, nullptr, 0, &ip);
+}
+
+TEST_F(DriverTest, TestTelnetZmpArgcVariants) {
+  // #1247 TELNET-3: argc-1 element array filled at item[i-1] must not
+  // overrun for argc 1/2/3 (upstream wrote item[1..argc-1]).
+  interactive_t ip{};
+  ip.ob = load_object_for_test("/single/void");
+  ASSERT_NE(ip.ob, nullptr);
+  const char *argv1[] = {"cmd"};
+  on_telnet_do_zmp(argv1, 1, &ip);
+  const char *argv2[] = {"cmd", "a"};
+  on_telnet_do_zmp(argv2, 2, &ip);
+  const char *argv3[] = {"cmd", "a", "b"};
+  on_telnet_do_zmp(argv3, 3, &ip);
 }

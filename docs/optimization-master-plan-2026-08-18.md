@@ -97,8 +97,8 @@ A-S0 退出条件：
 | K1 | `src/packages/contrib/contrib.cc:f_replaceable` | 空 ignore 数组时 `ignore=nullptr` 后仍写 `[0]/[1]` | 未移植 | contrib | A-S1 | `crasher/replaceable_empty.lpc` | `A-S1-contrib-replaceable` |
 | K2 | `src/packages/db/db.cc:MySQL_fetch` | BINARY/BLOB 按 `field->max_length` 读取当前行，未使用实际 row length | 未移植 | DB | A-S1 | MySQL 短 BLOB 定向测试；无可用 DB fixture 时新增可单测的长度转换 helper | `A-S1-db-row-length` |
 | K3 | `src/packages/async/async.cc:getdir` | 按 `sizeof(dirent *)` 扩容后复制 `sizeof(*de)` | 未移植 | async | A-S1 | ASan getdir 多条目测试 | `A-S1-async-getdir` |
-| K4 | `src/net/telnet.cc` ZMP | `argc-1`数组与写入索引不一致；上游 hunk 约位于补丁 712-735 | 未移植 | net | A-S1 | ZMP 空/单/多参数测试 | `A-S1-net-zmp` |
-| K5 | `src/net/telnet.cc` LINEMODE | 读取 `buf[1]`前只检查 `size==0`；上游 hunk 位于补丁 360-381 | 未移植 | net | A-S1 | LINEMODE 0/1/2 字节输入测试 | `A-S1-net-linemode` |
+| K4 | `src/net/telnet.cc` ZMP | `argc-1`数组与写入索引不一致；上游 hunk 约位于补丁 712-735 | 已移植（TELNET-3，0d3f8ed8） | net | A-S1 | ZMP 空/单/多参数测试（TestTelnetZmpArgcVariants，C++ 层） | `A-S1-net-zmp` |
+| K5 | `src/net/telnet.cc` LINEMODE | 读取 `buf[1]`前只检查 `size==0`；上游 hunk 位于补丁 360-381 | 已移植（TELNET-1，0d3f8ed8） | net | A-S1 | LINEMODE 0/1/2 字节输入测试（TestTelnetLinemodeShortSubnegotiation，C++ 层） | `A-S1-net-linemode` |
 | K6 | `src/vm/internal/base/object.cc` | 对象/索引边界缺陷待按 hunk 固定具体符号 | 待 A-S0 定位 | VM/base | A-S1 | 上游对应 crasher | `A-S1-object-bounds` |
 | K7 | `src/vm/internal/base/array.cc` | 分配失败/长度运算路径待按 hunk 拆分 | 待 A-S0 定位 | VM/base | A-S1 | `efuns/allocate.lpc` | `A-S1-array-bounds` |
 | K8 | `src/packages/core/sprintf.cc` | 宽度/列处理的整数与输出边界修复 | 待 A-S0 定位 | core | A-S1 | 两个 sprintf 测试路径 | `A-S1-sprintf-bounds` |

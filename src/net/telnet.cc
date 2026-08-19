@@ -282,8 +282,8 @@ static inline void on_telnet_dont(unsigned char cmd, interactive_t *ip) {
   }
 }
 
-static inline void on_telnet_subnegotiation(unsigned char cmd, const char *buf, unsigned long size,
-                                            interactive_t *ip) {
+void on_telnet_subnegotiation(unsigned char cmd, const char *buf, unsigned long size,
+                                interactive_t *ip) {
   // NOTE: I received bug report that with following data sequences:
   // 000000 ff fc 22 ff fa 22 ff f0 ff ff fc 03 ff fc 18 ff
   // 000010 fc 1f ff fc 27 ff fe 56 ff fc 5b ff fe 46 ff fe

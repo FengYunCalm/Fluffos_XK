@@ -10,6 +10,7 @@
 ## 验证粒度
 
 - 验证手段与对象匹配：行为改动用针对性测试，文案/文档/注释改动用一致性检查（grep/读文件），**轻量改动不跑全量门禁**（lpc_tests 全量、-ftest 全量、ASan 只留给实质代码改动）；只有实质代码改动才跑全量构建 + 对应测试。
+- **默认不全测**：验证必须定量、针对性——只跑与改动相关的测试（`--gtest_filter` 定向、`-ftest:路径` 定向、单目标构建），用数字证据（通过/失败计数、耗时、diff 行数）报告；全量门禁只在用户明确要求或阶段验收需要时跑。
 - 全量 -ftest 必须从 `testsuite/` 目录跑（`cd testsuite && ../build-sync/bin/driver etc/config.test -ftest`）；从仓库根跑会因 mudlib 目录错误空转，`grep -c "Check Failed"` 得 0 不代表通过。
 
 <comet-ambient-resume>

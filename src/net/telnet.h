@@ -31,6 +31,7 @@ void telnet_send_ga(struct telnet_t *);
 bool on_receive_mxp_tag(struct interactive_t *, const char *);
 void on_telnet_will_mxp(struct interactive_t *);
 void on_telnet_do_zmp(const char **, unsigned long, interactive_t *);
+void on_telnet_subnegotiation(unsigned char, const char *, unsigned long, interactive_t *);
 void on_telnet_do_gmcp(struct interactive_t *);
 void on_telnet_do_charset(telnet_t *telnet);
 void on_telnet_do_msdp(struct interactive_t *);
