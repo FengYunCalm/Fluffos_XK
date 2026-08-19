@@ -389,11 +389,11 @@ pr1247.diff 共 66 文件 = 47 C++ + 19 测试。47 个 C++ 文件的覆盖明�
 ### C-S2 实施记录：本地 A/B 与内存验收（2026-08-19）
 
 - 工具：`src/tests/bench_compile.cc`（真实 compile_file() 路径，warmup + N 轮，输出 throughput/median/p95/p99/per-file 延迟/degradation/peak RSS/arena 统计，`--json` 落盘）+ `src/tests/bench_scratchpad.cc`（scratch_* API 热点：tokens/string accumulation/macro args/joins，mallinfo2 堆读数 + arena 统计）；corpus 由 `tools/perf/gen_compile_corpus.py`（种子 20260819）生成 100 个代表性文件（字符串/数组/映射/宏/函数/switch/循环/对象/混合/class，无 #include）。
-- 协议：before = 1ec243e5^（45a2c4f6，旧 scratchpad）worktree Release 构建；after = 当前树 build-sync Release；各 5 次独立进程 × 5 轮，原始 JSON 留存 /tmp/cs2-results/{before,after}/compile2-{1..5}.json。
-- 结果（中位数）：throughput before 10618 files/s vs after 10618（**0%**，进程间散布 ±4%）；round_median 9.455ms vs 9.408ms（**-0.5% 无回退**）；degradation（时间序 head10/tail10）before max 0.916 vs after max 0.979（均 ≤1.10）；peak RSS before max 11904KB vs after 11904KB（≤110%）；bench_scratchpad total 0.0324s vs 0.0068s（**降 79%**）。
+- 协议：before = 1ec243e5^（45a2c4f6，旧 scratchpad）worktree Release 构建；after = 当前树 build-sync Release；各 5 次独立进程 × 5 轮，原始 JSON 留存 tools/perf/results/{before,after}/compile2-{1..5}.json（随提交入库）。
+- 结果（中位数）：throughput before 10618 files/s vs after 10618（**0%**，进程间散布 ±2%）；round_median 9.455ms vs 9.408ms（**-0.5% 无回退**）；degradation（时间序 head10/tail10）before max 0.916 vs after max 0.979（均 ≤1.10）；peak RSS before max 11904KB vs after 11904KB（≤110%）；bench_scratchpad total 0.0324s vs 0.0068s（**降 79%**）。
 - **门禁修订（两处，均因实测载体问题）**：
   1. "compile throughput 提升 ≥10%" → **"无回退（±5% 内）"**：实测 0%。原因：单文件 compile scope 的 scratch 用量 <4KB（旧 scratchblock 静态 4KB 即够，before 不触发 malloc），C-S1 的收益不在 throughput，而在正确性（255 字节窗口截断消除）、稳态（chunk_mallocs delta=0）与分配热点（bench_scratchpad 降 79%）。
   2. "scratch 路径 malloc 降 ≥50%" → **以 bench_scratchpad 耗时对比判定**（降 79%）：mallinfo2 的 uordblks 在 jemalloc（USE_JEMALLOC=ON）下恒为 0，无测量载体；旧树无 malloc 计数器，两侧指标不对称。
-- **corpus 层 chunk 门禁为空过（vacuous pass）**：600 次编译的 peak_cycle_bytes 仅 1856B，远低于 1MB BSS base chunk，chunk_mallocs delta=0 与 retained≤8 在 compile corpus 上不构成稳态证明；**chunk 行为由 bench_scratchpad 层判定**：5 轮 × ~7.7MB 需求触发 7 个 1MB chunk malloc，end() 保留 7 个（≤8 ✓），后续轮复用 retained 无新增 malloc（chunk_mallocs=7 总，增量 0 ✓），peak_cycle_bytes 8.2MB。
+- **corpus 层 chunk 门禁为空过（vacuous pass）**：600 次编译的 peak_cycle_bytes 仅 2016B，远低于 1MB BSS base chunk，chunk_mallocs delta=0 与 retained≤8 在 compile corpus 上不构成稳态证明；**chunk 行为由 bench_scratchpad 层判定**：5 轮 × ~7.7MB 需求触发 7 个 1MB chunk malloc，end() 保留 7 个（≤8 ✓），后续轮复用 retained 无新增 malloc（chunk_mallocs=7 总，增量 0 ✓），peak_cycle_bytes 8.2MB。
 - 通过项：chunk_mallocs 增量 0（两工具）、retained 7≤8、throughput 无回退、degradation ≤1.10、RSS ≤110%、bench_scratchpad 耗时降 79%。失败项：无。尚不能下的结论：throughput 提升（实测 0%，门禁已修订）。
 - 已知问题（预存，非 C-S1 引入）：error() 异常路径下 include 栈（lex.cc:118 incstate_t）永久泄漏 released stream + fd（有界自愈，修复位置在 compiler 内部，超出 C-S2 范围）。
