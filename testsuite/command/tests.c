@@ -5,7 +5,17 @@ int execute(string fun);
 void recurse(string dir) {
   mixed leaks;
 
-  foreach (string file in sort_array(get_dir(dir + "*.c"), (: random(2) - random(2) :))) {
+  // #1247: tests come as both legacy .c and modern .lpc files; run both.
+  // A .c file whose .lpc twin exists is skipped (same stripped object name --
+  // the .lpc twin is the newer test; loading both would collide on the
+  // extension-less object key).
+  foreach (string file in sort_array(
+      get_dir(dir + "*.c") + get_dir(dir + "*.lpc"),
+      (: random(2) - random(2) :))) {
+    if (strlen(file) > 3 && file[<2..] == ".c" &&
+        file_size(dir + file[0..<3] + ".lpc") != -1) {
+      continue;
+    }
     execute(dir + file);
   }
   foreach (string subdir in map(filter(get_dir(dir + "*", -1),
@@ -30,13 +40,17 @@ void recurse(string dir) {
     }
     // only make sure crasher don't crash, errors are ignored.
     else if (subdir == "crasher") {
-      foreach (string fn in get_dir(dir + subdir + "/*.c")) {
+      foreach (string fn in get_dir(dir + subdir + "/*.c") + get_dir(dir + subdir + "/*.lpc")) {
+        if (strlen(fn) > 3 && fn[<2..] == ".c" &&
+            file_size(dir + subdir + "/" + fn[0..<3] + ".lpc") != -1) {
+          continue;  // .lpc twin wins
+        }
         write("B> " + dir + subdir + "/" + fn + "\n");
-        catch((dir + subdir + "/" + fn + ".c")->do_tests());
+        catch(load_object(dir + subdir + "/" + fn)->do_tests());
 #if defined(__DEBUGMALLOC__) && defined(__DEBUGMALLOC_EXTENSIONS__) && defined(__PACKAGE_DEVELOP__)
         leaks = check_memory();
         if (sizeof(filter(explode(leaks, "\n"), (: $1 && $1[0] :))) != 1) {
-          write("After trying to run: " + dir + subdir + "/" + fn + ".c\n");
+          write("After trying to run: " + dir + subdir + "/" + fn + "\n");
           write(leaks);
           error("LEAK\n");
         }

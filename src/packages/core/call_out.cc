@@ -724,8 +724,11 @@ void reclaim_call_outs() {
     auto iter = g_callout_handle_map.begin();
     while (iter != g_callout_handle_map.end()) {
       auto *cop = iter->second;
+      // #1247 CALLOUT-1: the funptr's owner may have been nulled by
+      // reclaim_objects() (destructed owning object); guard before deref.
       if ((cop->ob && (cop->ob->flags & O_DESTRUCTED)) ||
-          (!cop->ob && (cop->function.f->hdr.owner->flags & O_DESTRUCTED))) {
+          (!cop->ob && (!cop->function.f->hdr.owner ||
+                        (cop->function.f->hdr.owner->flags & O_DESTRUCTED)))) {
         free_call(cop);
         iter = g_callout_handle_map.erase(iter);
         i++;

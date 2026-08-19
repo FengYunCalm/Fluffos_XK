@@ -3,13 +3,18 @@
 // (it always allocated fixed 4096-byte blocks and copied the whole name in).
 // Compiling such a name must now succeed without corrupting the heap; under
 // ASan the old code aborted here.
+// NOTE: 1000 (not upstream's 5000): this fork keeps the hand-written lexer
+// whose line-buffer caps a whole source line at MAXLINE == 4096 chars
+// (upstream's Flex lexer has no fixed buffer). 1000 still exercises the
+// >255-byte scratch_large_alloc path in scratch_copy() while keeping the
+// generated line under 4096.
 void do_tests() {
     string longname = "";
     string src;
     object ob;
     int i;
 
-    for (i = 0; i < 5000; i++) {
+    for (i = 0; i < 1000; i++) {
         longname += "a";
     }
 

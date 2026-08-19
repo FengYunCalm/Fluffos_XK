@@ -103,10 +103,9 @@ void init_simul_efun(const char *file) {
     error("Illegal simul_efun file name '%s'\n", file);
   }
 
-  const size_t file_length = strlen(file);
-  if (file_length < 2 || file[file_length - 2] != '.' || file[file_length - 1] != 'c') {
-    strcat(buf, ".c");
-  }
+  // #1247 .lpc: buf is already extension-stripped by filename_to_obname;
+  // load_object probes .lpc then .c for extension-less names, so an explicit
+  // .c spelling needs no special handling here (pass-through is default).
 
   new_ob = load_object(buf, 1);
   if (new_ob == nullptr) {

@@ -37,16 +37,32 @@ StagedProgram compile_program_for_recompile(object_t *blueprint) {
     error("recompile_object: blueprint has no source path\n");
   }
   std::string source_path = load_name;
-  if (source_path.size() >= 2 && source_path.compare(source_path.size() - 2, 2, ".c") == 0) {
-    source_path.resize(source_path.size() - 2);
+  // #1247 .lpc: derive the source extension from the compiled program's own
+  // filename (prog->filename carries the extension the loader chose, e.g.
+  // "/foo.lpc" for a .lpc source), instead of assuming ".c" -- otherwise
+  // hot-reload of a .lpc-sourced blueprint would always fail to open.
+  const char *compile_name = blueprint->prog->filename ? blueprint->prog->filename : "";
+  size_t clen = strlen(compile_name);
+  const char *src_ext = ".c";
+  if (clen > 4 && strcmp(compile_name + clen - 4, ".lpc") == 0) {
+    src_ext = ".lpc";
+  } else if (clen > 2 && compile_name[clen - 1] == 'c' && compile_name[clen - 2] == '.') {
+    src_ext = ".c";
+  }
+  // Fall back to .c if the .lpc source is gone (loader's probe order mirrors
+  // this: .lpc preferred, .c fallback).
+  char probe_path[PATH_MAX];
+  (void)snprintf(probe_path, sizeof(probe_path), "%s%s", source_path.c_str(), src_ext);
+  if (strcmp(src_ext, ".lpc") == 0 && access(probe_path, R_OK) != 0) {
+    src_ext = ".c";
   }
 
   char real_name[PATH_MAX];
   char obname[PATH_MAX];
   (void)strcpy(real_name, source_path.c_str());
-  (void)strcat(real_name, ".c");
+  (void)strcat(real_name, src_ext);
   (void)strcpy(obname, source_path.c_str());
-  (void)strcat(obname, ".c");
+  (void)strcat(obname, src_ext);
 
   int f = open(real_name, O_RDONLY);
   // #1247-equivalent SIMULATE-1 (upstream DEFER close in recompile_object):

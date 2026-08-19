@@ -597,6 +597,23 @@ int filename_to_obname(const char *src, char *dest, int size) {
     dest[copied++] = current;
   }
   dest[copied] = 0;
+
+  // #1247 TESTS: both source spellings are first-class -- strip ".lpc" or
+  // ".c", repeatedly (same duplicate-object rationale as the .c stripping
+  // above; copied via the loop so /foo.lpc.lpc -> /foo and /foo.c.c -> /foo).
+  {
+    char *p = dest + copied;
+    for (;;) {
+      if (p - dest > 4 && p[-1] == 'c' && p[-2] == 'p' && p[-3] == 'l' && p[-4] == '.') {
+        p -= 4;
+      } else if (p - dest > 2 && p[-1] == 'c' && p[-2] == '.') {
+        p -= 2;
+      } else {
+        break;
+      }
+    }
+    *p = 0;
+  }
   return 1;
 }
 
@@ -630,7 +647,7 @@ object_t *load_object(const char *lname, int callcreate) {
   object_t *ob;
   svalue_t *mret;
   struct stat c_st;
-  char name[400], actualname[400], real_name[sizeof(name) + 2], obname[sizeof(real_name)];
+  char name[400], actualname[400], real_name[sizeof(name) + 5], obname[sizeof(real_name)];
 
   const char *pname = check_valid_path(lname, master_ob, "load_object", 0);
   if (!pname) {
@@ -656,13 +673,35 @@ object_t *load_object(const char *lname, int callcreate) {
   }
 
   /*
-   * First check that the c-file exists.
+   * Source-file resolution (#1247 TESTS): an explicitly requested extension
+   * is exact -- load_object("/foo.c") probes only foo.c (no .lpc lookup),
+   * and load_object("/foo.lpc") probes only foo.lpc. Extension-less names
+   * prefer ".lpc" with ".c" as the transparent fallback. The chosen
+   * spelling flows into the compile/diagnostic name.
    */
+  // #1247 TESTS: detect an explicitly requested extension on the RAW path
+  // (pname, before filename_to_obname stripped it) -- checking actualname
+  // here would always see a stripped name, making explicit .c probes load
+  // their .lpc twin instead (silently shadowing legacy .c tests).
+  size_t plen = strlen(pname);
+  bool explicit_ext = false;
+  const char *src_ext = ".lpc";
+  if (plen > 4 && strcmp(pname + plen - 4, ".lpc") == 0) {
+    explicit_ext = true;
+  } else if (plen > 2 && pname[plen - 1] == 'c' && pname[plen - 2] == '.') {
+    explicit_ext = true;
+    src_ext = ".c";
+  }
   (void)strcpy(real_name, actualname);
-  (void)strcat(real_name, ".c");
+  (void)strcat(real_name, src_ext);
+  if (!explicit_ext && (stat(real_name, &c_st) == -1 || S_ISDIR(c_st.st_mode))) {
+    src_ext = ".c";
+    (void)strcpy(real_name, actualname);
+    (void)strcat(real_name, src_ext);
+  }
 
   (void)strcpy(obname, name);
-  (void)strcat(obname, ".c");
+  (void)strcat(obname, src_ext);
 
   auto load_virtual = [&]() -> object_t * {
     save_command_giver(command_giver);
